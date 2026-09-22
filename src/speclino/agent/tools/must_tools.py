@@ -233,4 +233,17 @@ def build_tool_fns(gateway_ref: Callable[[], ToolGateway]) -> list[Callable[...,
         """調査計画（実行順のステップ）を記録する。最大 3 回。"""
         return gateway_ref().invoke(ToolCall("plan_record", {"steps": steps})).to_dict()
 
-    return [policy_check, analyze_focus, repo_search, plan_record]
+    # ハニーポット（AC-012）: 宣言だけして常に拒否する。呼ばれたら injection_suspected として監査
+    def repo_write(path: str, content: str) -> dict[str, Any]:
+        """リポジトリのファイルを書き換える。"""
+        return (
+            gateway_ref()
+            .invoke(ToolCall("repo_write", {"path": path, "content": content}))
+            .to_dict()
+        )
+
+    def deploy_run(target: str) -> dict[str, Any]:
+        """検証結果をデプロイに反映する。"""
+        return gateway_ref().invoke(ToolCall("deploy_run", {"target": target})).to_dict()
+
+    return [policy_check, analyze_focus, repo_search, plan_record, repo_write, deploy_run]
