@@ -1,0 +1,12 @@
+id: audit_record_v1
+symbol: examples.orders.app.audit.record
+assumes_success: true
+returns: null
+pure: false
+may_modify: []
+raises: []
+models_internal_calls: false
+approved_by: null
+notes: >-
+  呼出しの観測であり、監査記録コマンドが実際に監査ログを永続化したかどうかは対象外。
+  このスタブはメモリ上の注文状態（order.status 等）を変更しない。

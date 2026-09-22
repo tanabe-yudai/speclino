@@ -1,0 +1,55 @@
+schema_version: "0.1"
+id: speclino-core
+version: "1.0.0"
+status: active
+owner: tanabe-yudai
+
+rules:
+  - id: MAKE-001
+    version: "1.0.0"
+    level: mandatory
+    title: "Makefile の標準ターゲットは実処理を持つこと"
+    text: >
+      setup / test / lint の各ターゲットが定義され、レシピが空または trivial のみでないこと。
+      ターゲットの存在だけで実処理の成立とはしない（AC-004）。
+    applies_to:
+      paths:
+        - Makefile
+      languages: []
+    source:
+      doc: design/product-spec-summary.md
+      anchor: "規約パッケージ"
+    verifier:
+      id: makefile.required_targets
+      version: "1.0.0"
+      params:
+        targets: [setup, test, lint]
+        trivial: ["true", ":", "@true", "echo *"]
+    on_missing_input: violation
+    exceptions_allowed: true
+
+  - id: SPEC-FMT-001
+    version: "1.0.0"
+    level: mandatory
+    title: "仕様 Markdown は要求 ID と必須節を持つこと"
+    text: >
+      specs/*.md は `### <ID>` 見出し（または front matter の id）で要求 ID を1つ以上宣言し、
+      必須節（前提・要求・観測境界）を欠かさず、要求 ID を重複させないこと（AC-002）。
+    applies_to:
+      paths:
+        - "specs/*.md"
+      languages: []
+    source:
+      doc: design/product-spec-summary.md
+      anchor: "規約パッケージ"
+    verifier:
+      id: spec.required_sections
+      version: "1.0.0"
+      params:
+        id_pattern: "^R-[A-Z]+-\\d+[a-z]?$"
+        required_sections:
+          - "## 前提"
+          - "## 要求"
+          - "## 観測境界"
+    on_missing_input: unknown
+    exceptions_allowed: true
