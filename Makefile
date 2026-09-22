@@ -1,7 +1,10 @@
+# uv run の暗黙 sync を止める（macOS 26 で z3-solver が毎回再インストールされ、並列実行がロック待ちになる）
+export UV_NO_SYNC := 1
+
 .PHONY: setup test lint format dev db-up db-migrate eval openapi web-build schemas
 
 setup:
-	uv sync --all-groups
+	UV_NO_SYNC= uv sync --all-groups
 	cd web && npm ci
 
 test:

@@ -1,0 +1,17 @@
+# cp terraform.tfvars.example terraform.tfvars し、実際の値に置き換えて使う。
+# 値そのものに秘密は含めないが、環境固有値のため誤ってコミットしないよう注意する
+# （リポジトリ直下の .gitignore は現状 *.tfvars を除外していない）。
+
+project_id      = "example-project" # infra/bootstrap の terraform output project_id
+region          = "asia-northeast1"
+billing_account = "XXXXXX-XXXXXX-XXXXXX"
+
+# 初回 apply 時点ではまだ SpecLino イメージが Artifact Registry に無いため、
+# 既定値（Google 公開のサンプルイメージ）のままで問題ない。
+# image = "us-docker.pkg.dev/cloudrun/container/hello"
+
+github_repository = "tanabe-yudai/spec-lino"
+
+# 任意: 予算・監視アラートの通知先（google_monitoring_notification_channel の完全リソース名）
+# budget_notification_channels     = ["projects/example-project/notificationChannels/xxxx"]
+# monitoring_notification_channels = ["projects/example-project/notificationChannels/xxxx"]

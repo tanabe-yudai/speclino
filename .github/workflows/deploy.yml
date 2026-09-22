@@ -1,0 +1,65 @@
+name: Deploy
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "design/**"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  REGION: asia-northeast1
+  REPOSITORY: speclino
+  IMAGE_NAME: speclino
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # WIF: infra/envs/prod/wif.tf の workload identity pool / provider と
+      # deployer サービスアカウントを使う。長期キーは持たない。
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOYER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      - name: Build image
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          SHA: ${{ github.sha }}
+        run: |
+          IMAGE="${REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${REPOSITORY}/${IMAGE_NAME}:${SHA}"
+          echo "IMAGE=${IMAGE}" >> "$GITHUB_ENV"
+          docker build -t "${IMAGE}" .
+
+      - name: Push image
+        run: docker push "${IMAGE}"
+
+      # Terraform の `image` 変数は書き換えない運用にしている
+      # （infra/envs/prod/run.tf の lifecycle.ignore_changes 参照）。
+      # デプロイのたびに terraform apply を要求すると、
+      # plan/apply の承認フローを毎回挟む必要があり CI/CD の速度と
+      # 「apply はユーザー確認後」という運用ルールが両立しないため、
+      # イメージ更新だけは `gcloud run services update` で直接反映する。
+      - name: Deploy to Cloud Run (web / worker / sandbox)
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          for SERVICE in speclino-web speclino-worker speclino-sandbox; do
+            gcloud run services update "${SERVICE}" \
+              --project="${GCP_PROJECT_ID}" \
+              --region="${REGION}" \
+              --image="${IMAGE}"
+          done
