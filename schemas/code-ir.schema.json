@@ -927,6 +927,22 @@
           },
           "title": "Affects",
           "type": "array"
+        },
+        "may_affect": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "この要因が触れ得る観測（構造解析、S29）: call:<操作 ID> / write:<変数> / outcome。None は不明（全てに触れ得る）。列挙されていない観測に関する判定はこの要因の影響を受けない",
+          "title": "May Affect"
         }
       },
       "required": [

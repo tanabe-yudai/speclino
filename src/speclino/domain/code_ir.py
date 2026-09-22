@@ -32,6 +32,14 @@ class UnknownCause(IRModel):
     affects: list[str] = Field(
         default_factory=list, description="影響を受ける要求 ID（分かる場合）"
     )
+    may_affect: list[str] | None = Field(
+        default=None,
+        description=(
+            "この要因が触れ得る観測（構造解析、S29）: call:<操作 ID> / write:<変数> / outcome。"
+            "None は不明（全てに触れ得る）。列挙されていない観測に関する判定はこの要因の影響を"
+            "受けない"
+        ),
+    )
 
 
 class StateUpdate(IRModel):

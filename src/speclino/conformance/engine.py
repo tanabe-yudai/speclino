@@ -30,7 +30,7 @@ from speclino.conformance.typing import (
     infer_type,
     require_boolean,
 )
-from speclino.domain.code_ir import CodeIR, Event, Path
+from speclino.domain.code_ir import CodeIR, Event, Path, UnknownCause
 from speclino.domain.domain_spec import DomainSpec
 from speclino.domain.expr import BOOL_TYPE, Binary, Const, Expr, Ref, const, refs_in
 from speclino.domain.finding import (
@@ -94,6 +94,15 @@ def _check(s: Any) -> str:
     if r == z3.unsat:
         return "unsat"
     return "unknown"
+
+
+def _channel_of(req: EventRequirement) -> str:
+    """要求が観測するチャネル（analysis.structural と同じ語彙）。"""
+    if req.event_kind == "call":
+        return f"call:{req.operation_or_target}"
+    if req.event_kind == "write":
+        return f"write:{req.operation_or_target}"
+    return "outcome"
 
 
 def _count_ok(op: str, required: int, n: int) -> bool:
@@ -401,11 +410,11 @@ class ConformanceEngine:
         if r == "unknown":
             return self._solver_limit(f"経路 {path.path_id}")
         if r == "unsat":
-            return self._holds(path, expected)
+            return self._holds(path, expected, channel=None)
         model = s.model()
         category = self._expression_category(a.expr, path)
         actual = self._describe_outcome_or_state(a.expr, path)
-        return self._violation(rule, path, category, expected, actual, model)
+        return self._violation(rule, path, category, expected, actual, model, channel=None)
 
     def _expression_category(self, expr: Expr, path: Path) -> Category:
         refs = refs_in(expr)
@@ -451,6 +460,7 @@ class ConformanceEngine:
         self, rule: Rule, req: EventRequirement, path: Path, base: list[Any], post: list[Any]
     ) -> _PathResult:
         sel = self._select(req, path)
+        channel = _channel_of(req)
         op, required = req.count.operator, req.count.value
         expected = f"{req.operation_or_target} を {req.count.operator} {required} 回" + (
             f"（引数 {', '.join(req.arguments_equal)} が一致）" if req.arguments_equal else ""
@@ -465,9 +475,11 @@ class ConformanceEngine:
         if rule.modality == "must_not":
             # must_not: 保証全体が偽であることを要求する。回数条件が真になり得るなら違反候補
             if count_fails:
-                return self._holds(path, expected + " が成立しない")
+                return self._holds(path, expected + " が成立しない", channel=channel)
             if count_holds and not req.arguments_equal:
-                return self._violation(rule, path, "forbidden_effect", expected, actual, None)
+                return self._violation(
+                    rule, path, "forbidden_effect", expected, actual, None, channel=channel
+                )
             return _PathResult(
                 "REVIEW",
                 "potential_violation",
@@ -477,7 +489,7 @@ class ConformanceEngine:
         if count_fails:
             category = count_category(op, required, sel.min_count)
             # 不在（回数不足）の根拠は経路のイベント抽出が完了している場合に限る（PoC 6.7）
-            if sel.min_count < required and path.precision == "incomplete":
+            if sel.min_count < required and self._blocking_unknowns(path, channel):
                 return _PathResult(
                     "UNKNOWN",
                     "unsupported_analysis",
@@ -487,7 +499,7 @@ class ConformanceEngine:
                     actual,
                     next_steps=["未解決要因を解消して経路を完全にする"],
                 )
-            return self._violation(rule, path, category, expected, actual, None)
+            return self._violation(rule, path, category, expected, actual, None, channel=channel)
         if not count_holds:
             return _PathResult(
                 "REVIEW",
@@ -512,32 +524,57 @@ class ConformanceEngine:
                     )
                 conj.append(self.ctx.encode(e.arguments[name]) == self.ctx.encode(req_expr))
         if not conj:
-            return self._holds(path, expected, incomplete_is_unknown=True)
+            return self._holds(path, expected, channel=channel)
         s = _solver(self.ctx, self.config.solver_timeout_ms)
         s.add(*base, *post, z3.Not(z3.And(*conj)))
         r = _check(s)
         if r == "unknown":
             return self._solver_limit(f"経路 {path.path_id} の引数一致")
         if r == "unsat":
-            return self._holds(path, expected, incomplete_is_unknown=True)
+            return self._holds(path, expected, channel=channel)
         model = s.model()
         arg_actual = "; ".join(
             f"{name} = {self._describe_expr(e.arguments[name])}"
             for e in sel.must + sel.may
             for name in req.arguments_equal
         )
-        return self._violation(rule, path, "argument_mismatch", expected, arg_actual, model)
+        return self._violation(
+            rule, path, "argument_mismatch", expected, arg_actual, model, channel=channel
+        )
 
     # -- results ------------------------------------------------------------
-    def _holds(self, path: Path, expected: str, incomplete_is_unknown: bool = True) -> _PathResult:
-        if path.precision == "incomplete":
-            causes = "; ".join(u.detail for u in path.unknown_causes)
+    def _blocking_unknowns(self, path: Path, channel: str | None) -> list[UnknownCause]:
+        """この要求の判定を妨げる未解決要因（S29 構造解析）。
+
+        触れ得る観測（may_affect）が分かっている要因は、要求の観測（channel）に触れなければ
+        妨げにならない。式の検査（channel=None）は状態・応答に関わるので、呼出しにしか触れない
+        領域は妨げにならない（書込み・終了結果に触れる領域は解析器が経路を打ち切っている）。
+        """
+        blocking: list[UnknownCause] = []
+        for u in path.unknown_causes:
+            if u.affects == ["arguments_only"]:
+                continue
+            if u.may_affect is None or (channel is not None and channel in u.may_affect):
+                blocking.append(u)
+        return blocking
+
+    def _holds(self, path: Path, expected: str, channel: str | None = None) -> _PathResult:
+        blocking = self._blocking_unknowns(path, channel)
+        if blocking:
+            causes = "; ".join(u.detail for u in blocking)
             return _PathResult(
                 "UNKNOWN",
                 "unsupported_analysis",
                 f"経路 {path.path_id} は不完全なため成立を保証できない（{causes}）",
                 expected,
                 next_steps=["未解決要因を解消して経路を完全にする"],
+            )
+        if path.precision == "incomplete":
+            return _PathResult(
+                "VERIFIED_IN_SCOPE",
+                "conformant",
+                "成立（構造解析: 対応外の領域はこの要求の観測に触れない）",
+                expected,
             )
         return _PathResult("VERIFIED_IN_SCOPE", "conformant", "成立", expected)
 
@@ -549,6 +586,7 @@ class ConformanceEngine:
         expected: str,
         actual: str,
         model: Any,
+        channel: str | None = None,
     ) -> _PathResult:
         cex = self._counterexample(path, model, actual)
         if path.precision == "overapproximate":
@@ -563,7 +601,7 @@ class ConformanceEngine:
                 next_steps=["経路の近似要因を解消するか、テストで再現する"],
             )
         presence_based = category in ("forbidden_effect",)
-        if path.precision == "incomplete" and not presence_based:
+        if self._blocking_unknowns(path, channel) and not presence_based:
             return _PathResult(
                 "UNKNOWN",
                 "unsupported_analysis",

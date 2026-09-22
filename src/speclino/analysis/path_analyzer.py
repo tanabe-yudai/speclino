@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path as FsPath
 
 from speclino.analysis.limits import DEFAULT_LIMITS
+from speclino.analysis.structural import OPAQUE_STMTS, OUTCOME_CHANNEL, RegionScanner
 from speclino.analysis.symbolic_state import (
     ExprBuilder,
     Frame,
@@ -39,7 +40,7 @@ from speclino.frontend.python.adapters.fastapi_outcome import (
     outcome_of_return_call,
 )
 from speclino.frontend.python.index import FunctionInfo, RepoIndex, SymbolNotFound
-from speclino.frontend.python.subset import function_decorators, unsupported_stmt
+from speclino.frontend.python.subset import Unsupported, function_decorators, unsupported_stmt
 
 ANALYZER_VERSION = "0.1.0"
 
@@ -93,6 +94,14 @@ class PathAnalyzer:
         self._op_by_symbol = {ob.symbol: (op_id, ob) for op_id, ob in bindings.operations.items()}
         self._known_pure = set(bindings.known_pure)
         self._path_count = 0
+        self.scanner = RegionScanner(
+            self.builder,
+            index,
+            self._op_by_symbol,
+            self.contracts,
+            self._known_pure,
+            limits.depth,
+        )
 
     # ------------------------------------------------------------------ public
     def analyze(self, behavior_id: str) -> CodeIR:
@@ -149,6 +158,9 @@ class PathAnalyzer:
             rest = stmts[i + 1 :]
             d.lines.append(stmt.lineno)
             if (u := unsupported_stmt(stmt)) is not None:
+                if self._skip_opaque_region(stmt, u, fn, frame, d):
+                    i += 1
+                    continue
                 self._unknown(d, "unsupported_syntax", u.detail, fn, u.lineno)
                 d.ended, d.outcome = "unresolved", Outcome(kind="unresolved")
                 return [self._finish(d)]
@@ -186,6 +198,39 @@ class PathAnalyzer:
         d.ended = "fallthrough"
         d.outcome = Outcome(kind="return")
         return [self._finish(d)]
+
+    def _skip_opaque_region(
+        self, stmt: ast.stmt, u: Unsupported, fn: FunctionInfo, frame: Frame, d: Draft
+    ) -> bool:
+        """対応外の複合文を、触れ得る観測を記録した上で読み飛ばせるか（S29 構造解析）。
+
+        終了結果（return / raise）や束縛変数の書込みに触れ得る領域、効果を確定できない領域は
+        読み飛ばさず、従来どおり経路を打ち切る。読み飛ばすときは領域内で代入されたローカルを
+        未解決にし、以後の参照で経路が打ち切られるようにする。
+        """
+        if not isinstance(stmt, OPAQUE_STMTS):
+            return False
+        scope = self.scanner.scan(stmt, frame, d.state)
+        if scope is None or OUTCOME_CHANNEL in scope.channels:
+            return False
+        if any(c.startswith("write:") for c in scope.channels):
+            return False
+        touched = ", ".join(sorted(scope.channels)) or "なし"
+        self._unknown(
+            d,
+            "unsupported_syntax",
+            f"{u.detail}（構造解析: 領域が触れ得る観測は {touched}）",
+            fn,
+            u.lineno,
+            may_affect=sorted(scope.channels),
+        )
+        for name in scope.assigned_locals:
+            frame.locals[name] = Unresolved(
+                "unsupported_syntax",
+                f"{name} は対応外の領域（行 {u.lineno}）で代入される",
+                u.lineno,
+            )
+        return True
 
     def _finish(self, d: Draft) -> Draft:
         self._path_count += 1
@@ -472,9 +517,15 @@ class PathAnalyzer:
         fn: FunctionInfo,
         lineno: int,
         incomplete: bool = True,
+        may_affect: list[str] | None = None,
     ) -> None:
         d.unknowns.append(
-            UnknownCause(code=code, detail=detail, source_ref=self._src(fn, lineno))  # type: ignore[arg-type,unused-ignore]
+            UnknownCause(
+                code=code,  # type: ignore[arg-type,unused-ignore]
+                detail=detail,
+                source_ref=self._src(fn, lineno),
+                may_affect=may_affect,
+            )
         )
         if not incomplete:
             # 引数の一部が解決できないだけなら経路の完全性には影響しない
