@@ -22,7 +22,7 @@ PoC 15章 / design/2026-09-22-hackathon-plan.md「判定モデル」の手順を
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, cast
@@ -36,8 +36,10 @@ from speclino.analysis.limits import DEFAULT_LIMITS, clamp
 from speclino.analysis.path_analyzer import ANALYZER_VERSION, analyze_repo
 from speclino.conformance.engine import ENGINE_VERSION, EngineConfig, evaluate
 from speclino.conformance.gate import DEFAULT_FAIL_ON, GatePolicy, GateResult, aggregate_gate
+from speclino.domain.bindings import Bindings, OperationContract
 from speclino.domain.code_ir import AnalysisLimits, CodeIR
 from speclino.domain.common import SnapshotRef
+from speclino.domain.domain_spec import DomainSpec
 from speclino.domain.finding import CoverageCounts, Finding, Findings, Verdict, VerdictCounts
 from speclino.domain.policy import PolicyExceptions, PolicyPackage
 from speclino.domain.run import RunInputs, RunManifest, RunVersions
@@ -80,6 +82,11 @@ class CheckRequest:
     code_ir_override: Path | None = None
     run_id: str | None = None
     source_roots: tuple[str, ...] = (".", "src")
+    # S18/S20: base との差分照合で承認状態を付け替えた Spec IR（behavior_id → SpecIR）。
+    # 指定があれば specs/ir から読んだものの代わりに使う（読込みと検証はそのまま行う）
+    spec_overrides: dict[str, SpecIR] | None = None
+    # 削除された要求などパイプライン外で作った Finding（ゲートに含める）
+    extra_findings: tuple[Finding, ...] = ()
 
     @property
     def resolved_project_dir(self) -> Path:
@@ -97,6 +104,9 @@ class CheckResult:
     validation: list[ValidationReport]
     policy_findings: list[Finding]
     artifacts: dict[str, Path] | None = None
+    domain: DomainSpec | None = None
+    bindings: Bindings | None = None
+    contracts: dict[str, OperationContract] = field(default_factory=dict)
 
 
 def run_check(req: CheckRequest) -> CheckResult:
@@ -128,6 +138,8 @@ def run_check(req: CheckRequest) -> CheckResult:
         raw_text = path.read_text(encoding="utf-8")
         spec_ir_texts.append(raw_text)
         spec = load_spec_ir(path)
+        if req.spec_overrides and spec.behavior_id in req.spec_overrides:
+            spec = req.spec_overrides[spec.behavior_id]
         spec_irs.append(spec)
         markdown_text = _find_spec_markdown(project_dir, spec)
         if markdown_text is not None:
@@ -177,7 +189,7 @@ def run_check(req: CheckRequest) -> CheckResult:
     combined = _merge_findings(findings_parts, run_id)
 
     policy_findings, policy_levels, policy_texts = _run_policies(project_dir)
-    combined = _with_extra_findings(combined, policy_findings)
+    combined = _with_extra_findings(combined, [*policy_findings, *req.extra_findings])
 
     levels: dict[str, RuleLevel] = {rule.id: rule.level for spec in spec_irs for rule in spec.rules}
     levels.update(policy_levels)
@@ -219,6 +231,9 @@ def run_check(req: CheckRequest) -> CheckResult:
         gate=gate,
         validation=validations,
         policy_findings=policy_findings,
+        domain=domain,
+        bindings=bindings,
+        contracts=contracts,
     )
 
 

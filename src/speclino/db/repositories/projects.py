@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from sqlalchemy import func, select
@@ -16,6 +17,9 @@ class ProjectRepository:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def get(self, project_id: uuid.UUID) -> Project | None:
+        return await self._session.get(Project, project_id)
 
     async def get_by_repo(self, repo_full_name: str) -> Project | None:
         stmt = select(Project).where(Project.repo_full_name == repo_full_name)

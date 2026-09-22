@@ -53,6 +53,10 @@ extend-exclude = ["eval/golden"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI / typer の依存注入は引数既定値で呼ぶのが慣例
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Header", "typer.Option", "typer.Argument"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true

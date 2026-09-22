@@ -8,12 +8,28 @@ permissions:
 jobs:
   python:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: speclino
+          POSTGRES_PASSWORD: speclino
+          POSTGRES_DB: speclino
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U speclino" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      SPECLINO_DATABASE_URL: postgresql+asyncpg://speclino:speclino@localhost:5432/speclino
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
       - run: uv sync --all-groups
       - run: make lint
+      - run: uv run alembic upgrade head
       - run: make test
+      - run: make eval
+      # 自己検証: SpecLino 自身の仕様（SPEC-TOOL-001）と規約（MAKE-001 / SPEC-FMT-001）
+      - run: uv run speclino check --repo . --head WORKTREE --out build/self-check --fail-on VIOLATED --fail-on UNKNOWN --fail-on REVIEW --blocking
 
   web:
     runs-on: ubuntu-latest
