@@ -19,6 +19,9 @@ env:
 
 jobs:
   deploy:
+    # GCP 骨組み（S12）の apply 後に repository variable DEPLOY_ENABLED=true を設定するまで、
+    # push では走らせない（secrets が無い状態で失敗し続けるのを避ける）
+    if: github.event_name == 'workflow_dispatch' || vars.DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
