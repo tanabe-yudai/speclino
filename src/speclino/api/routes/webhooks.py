@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 
 from speclino.adapters.github.webhook import (
     extract_comment,
@@ -17,6 +17,7 @@ from speclino.adapters.github.webhook import (
     verify_signature,
 )
 from speclino.api.deps import AppState, get_state
+from speclino.api.errors import api_error, error_responses
 from speclino.db.repositories import (
     ApprovalRepository,
     AuditRepository,
@@ -30,7 +31,7 @@ from speclino.services.approvals import authorize_command, parse_commands
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 
-@router.post("/github")
+@router.post("/github", responses=error_responses(401))
 async def github_webhook(request: Request, state: AppState = Depends(get_state)) -> dict[str, Any]:
     body = await request.body()
     secret = state.settings.github_webhook_secret
@@ -38,7 +39,7 @@ async def github_webhook(request: Request, state: AppState = Depends(get_state))
     if must_verify and (
         not secret or not verify_signature(secret, body, request.headers.get("X-Hub-Signature-256"))
     ):
-        raise HTTPException(status_code=401, detail="署名が不正")
+        raise api_error(401, "invalid_signature", "署名が不正")
     event = parse_event(dict(request.headers), body)
     async with state.session_factory() as session, session.begin():
         if not await WebhookDeliveryRepository(session).mark_if_new(

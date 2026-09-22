@@ -93,3 +93,76 @@ def test_artifacts_are_deterministic_modulo_run_metadata(tmp_path: Path) -> None
     )
     ma.pop("created_at"), mb.pop("created_at")
     assert ma == mb
+
+
+# ---------------------------------------------------------------- S28 semantic diff
+
+
+def _orders_copy(dst: Path, *, mutate: bool) -> Path:
+    """examples/orders を dst/examples/orders に複製する（mutate: 在庫復元を管理者経路だけに）。"""
+    root = dst / "examples" / "orders"
+    for name in ("app", "specs", ".speclino"):
+        shutil.copytree(ORDERS / name, root / name)
+    (dst / "examples" / "__init__.py").write_text("")
+    (root / "__init__.py").write_text("")
+    if mutate:
+        svc = root / "app" / "service.py"
+        src = svc.read_text()
+        assert "    inventory.restore(order.items)\n" in src
+        svc.write_text(
+            src.replace(
+                "    inventory.restore(order.items)\n",
+                "    if user.is_admin:\n        inventory.restore(order.items)\n",
+            )
+        )
+    return root
+
+
+def test_base_root_yields_semantic_diff_and_annotates_findings(tmp_path: Path) -> None:
+    base = _orders_copy(tmp_path / "base", mutate=False)
+    head = _orders_copy(tmp_path / "head", mutate=True)
+    res = run_check(
+        CheckRequest(
+            repo_root=tmp_path / "head",
+            head_sha="head-sha",
+            base_sha="base-sha",
+            project_dir=head,
+            base_root=tmp_path / "base",
+            base_project_dir=base,
+            run_id="diff",
+        )
+    )
+    diff = res.semantic_diff
+    assert diff is not None and diff.base_available
+    assert (diff.base_commit, diff.head_commit) == ("base-sha", "head-sha")
+    assert diff.counts.new_violation == 1 and diff.counts.unchanged == 8
+    delta = next(d for d in diff.findings if d.requirement_id == "R-CANCEL-04")
+    assert (delta.base_verdict, delta.head_verdict) == ("VERIFIED_IN_SCOPE", "VIOLATED")
+    assert all(r.status == "unchanged" for r in diff.rules)
+    [beh] = diff.behaviors
+    assert beh.status == "changed" and len(beh.added_paths) == 2 and len(beh.removed_paths) == 1
+    by = {f.requirement_id: f.base_head_status for f in res.findings.findings}
+    assert by["R-CANCEL-04"] == "new" and by["R-CANCEL-01"] == "unchanged"
+    out = write_result(res, tmp_path / "out")
+    assert "semantic-diff.json" in out
+    assert "新規違反 | 1" in out["review.md"].read_text(encoding="utf-8")
+
+
+def test_base_without_spec_is_reported_not_fatal(tmp_path: Path) -> None:
+    head = _orders_copy(tmp_path / "head", mutate=False)
+    (tmp_path / "base").mkdir()  # 初回導入: base に .speclino も specs も無い
+    res = run_check(
+        CheckRequest(
+            repo_root=tmp_path / "head",
+            head_sha="h",
+            base_sha="b",
+            project_dir=head,
+            base_root=tmp_path / "base",
+            base_project_dir=tmp_path / "base",
+            run_id="first",
+        )
+    )
+    assert res.gate.status == "pass"
+    assert res.semantic_diff is not None and not res.semantic_diff.base_available
+    assert "domain.yaml が無い" in (res.semantic_diff.base_error or "")
+    assert {d.status for d in res.semantic_diff.findings} == {"added"}

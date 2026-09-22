@@ -13,6 +13,7 @@ from speclino.conformance.gate import GateResult
 from speclino.domain.code_ir import CodeIR
 from speclino.domain.finding import Findings
 from speclino.domain.run import RunManifest
+from speclino.domain.semantic_diff import SemanticDiff
 from speclino.domain.spec_ir import SpecIR
 from speclino.reporter.review_md import render_review
 
@@ -40,7 +41,7 @@ def write_artifacts(
     code: CodeIR | None,
     findings: Findings,
     gate: GateResult | None,
-    semantic_diff: dict[str, Any] | None = None,
+    semantic_diff: SemanticDiff | None = None,
 ) -> dict[str, Path]:
     """PoC 5.3 の出力ファイル一式を `out_dir` に書き、書いたパスの辞書を返す。
 
@@ -65,11 +66,11 @@ def write_artifacts(
     if gate is not None:
         emit("gate.json", _gate_dict(gate))
     if semantic_diff is not None:
-        emit("semantic-diff.json", semantic_diff)
+        emit("semantic-diff.json", semantic_diff.model_dump(mode="json"))
 
     review_path = out_dir / "review.md"
     review_path.write_text(
-        render_review(manifest, findings, gate, spec.behavior_id), encoding="utf-8"
+        render_review(manifest, findings, gate, spec.behavior_id, semantic_diff), encoding="utf-8"
     )
     written["review.md"] = review_path
     return written

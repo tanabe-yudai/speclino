@@ -1,6 +1,6 @@
 /** 判定・状態を日本語ラベルへ変換する定数群。コンポーネントには埋め込まない。 */
 
-import type { Category, Severity, TestObservation, Verdict } from '../types/finding'
+import type { BaseHeadStatus, Category, Severity, TestObservation, Verdict } from '../types/finding'
 import type { ExecState, GateStatus } from '../types/run'
 import type { BadgeTone } from '../types/components'
 
@@ -98,4 +98,18 @@ const EVENT_TYPE_META: Record<string, EventMeta> = {
 
 export function eventMeta(type: string): EventMeta {
   return EVENT_TYPE_META[type] ?? { label: type, group: 'other' }
+}
+
+export const BASE_HEAD_STATUS_LABELS: Record<BaseHeadStatus, string> = {
+  new: '新規',
+  existing: '既存',
+  resolved: '解消',
+  unchanged: '変化なし',
+}
+
+export const BASE_HEAD_STATUS_TONE: Record<BaseHeadStatus, BadgeTone> = {
+  new: 'danger',
+  existing: 'warning',
+  resolved: 'success',
+  unchanged: 'neutral',
 }

@@ -86,6 +86,37 @@ def refs_in(expr: Expr) -> list[Ref]:
     raise TypeError(f"unknown expr: {expr!r}")
 
 
+_BINARY_SYMBOLS = {
+    "eq": "==",
+    "ne": "!=",
+    "lt": "<",
+    "le": "<=",
+    "gt": ">",
+    "ge": ">=",
+    "add": "+",
+    "sub": "-",
+}
+
+
+def describe_expr(expr: Expr) -> str:
+    """人が読む 1 行表記（レポート・反例・差分用。評価には使わない）。"""
+    match expr:
+        case Ref():
+            return expr.path
+        case Const():
+            return str(expr.value)
+        case Not():
+            return f"not({describe_expr(expr.arg)})"
+        case Binary():
+            return (
+                f"{describe_expr(expr.left)} {_BINARY_SYMBOLS[expr.op]} {describe_expr(expr.right)}"
+            )
+        case Nary():
+            joiner = " and " if expr.op == "and" else " or "
+            return "(" + joiner.join(describe_expr(a) for a in expr.args) + ")"
+    raise TypeError(f"unknown expr: {expr!r}")
+
+
 def ref(path: str) -> Ref:
     return Ref(op="ref", path=path)
 

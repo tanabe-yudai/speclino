@@ -5,16 +5,19 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from speclino.api.auth import require_user
 from speclino.api.deps import AppState, get_state
+from speclino.api.errors import api_error, error_responses
 from speclino.db.models import Project, ReviewRun
 from speclino.db.repositories import FindingRepository, ReviewRunRepository, RunEventRepository
 
-router = APIRouter(prefix="/api/review-runs", tags=["review-runs"])
+router = APIRouter(
+    prefix="/api/review-runs", tags=["review-runs"], responses=error_responses(401, 403)
+)
 
 
 class StartRunRequest(BaseModel):
@@ -76,7 +79,7 @@ async def list_runs(
         return [_run_view(run, repo) for run, repo in rows]
 
 
-@router.get("/{run_id}")
+@router.get("/{run_id}", responses=error_responses(404))
 async def get_run(
     run_id: uuid.UUID,
     state: AppState = Depends(get_state),
@@ -85,7 +88,7 @@ async def get_run(
     async with state.session_factory() as session:
         run = await ReviewRunRepository(session).get(run_id)
         if run is None:
-            raise HTTPException(status_code=404, detail="run が無い")
+            raise api_error(404, "run_not_found", "run が無い")
         project = await session.get(Project, run.project_id)
         findings = await FindingRepository(session).list_for_run(run_id)
         return {
@@ -108,7 +111,7 @@ async def get_events(
         ]
 
 
-@router.get("/{run_id}/artifacts/{name}")
+@router.get("/{run_id}/artifacts/{name}", responses=error_responses(400, 404))
 async def get_artifact(
     run_id: uuid.UUID,
     name: str,
@@ -118,10 +121,10 @@ async def get_artifact(
     from fastapi.responses import Response
 
     if "/" in name or name.startswith("."):
-        raise HTTPException(status_code=400, detail="不正な名前")
+        raise api_error(400, "invalid_name", "不正な名前")
     try:
         data = await state.blobs.get(f"runs/{run_id}/{name}")
     except (FileNotFoundError, OSError) as e:
-        raise HTTPException(status_code=404, detail="成果物が無い") from e
+        raise api_error(404, "artifact_not_found", "成果物が無い") from e
     media = "application/json" if name.endswith(".json") else "text/markdown; charset=utf-8"
     return Response(content=data, media_type=media)

@@ -43,6 +43,26 @@ export interface RunVersions {
   settings_hash: string | null
 }
 
+/** 意味差分（PoC 12.2）の件数。src/speclino/domain/semantic_diff.py の SemanticDiffCounts。 */
+export interface SemanticDiffCounts {
+  new_violation: number
+  existing_violation: number
+  resolved_violation: number
+  became_undecidable: number
+  became_decidable: number
+  added: number
+  removed: number
+  unchanged: number
+  changed: number
+}
+
+/** review_run_service が manifest に同梱する意味差分の要約。 */
+export interface SemanticDiffSummary {
+  base_available: boolean
+  base_error: string | null
+  counts: SemanticDiffCounts
+}
+
 export interface RunManifest {
   schema_version: string
   run_id: string
@@ -52,6 +72,7 @@ export interface RunManifest {
   limits: AnalysisLimits
   fail_on: string[]
   mode: 'advisory' | 'blocking'
+  semantic_diff?: SemanticDiffSummary | null
 }
 
 /** `GET /api/review-runs` の1件（findings を含まない）。 */

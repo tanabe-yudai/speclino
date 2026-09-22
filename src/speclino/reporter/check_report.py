@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from speclino.conformance.gate import GateResult
 from speclino.conformance.reasons import VERDICT_PRIORITY
 from speclino.domain.finding import Finding, Findings, Verdict
+from speclino.domain.semantic_diff import SemanticDiff
 from speclino.reporter.review_md import GATE_STATUS_LABELS, render_details
 
 _SUMMARY_LIMIT = 1500  # GitHub Checks summary の目安
@@ -51,8 +52,13 @@ def _truncate(text: str, limit: int) -> str:
     return text[: limit - len(_TRUNCATE_MARKER)] + _TRUNCATE_MARKER
 
 
-def render_check(findings: Findings, gate: GateResult) -> CheckText:
-    """title は「違反 n / 未検証 m / 適合 k（ゲート: ...）」、summary は 1500 文字以内。"""
+def render_check(
+    findings: Findings, gate: GateResult, semantic_diff: SemanticDiff | None = None
+) -> CheckText:
+    """title は「違反 n / 未検証 m / 適合 k（ゲート: ...）」、summary は 1500 文字以内。
+
+    意味差分があれば summary に「新規違反 / 解消 / 判定不能化」の件数を添える（PoC 12.2）。
+    """
     counts = findings.counts
     unresolved = counts.UNKNOWN + counts.REVIEW
     gate_label = GATE_STATUS_LABELS[gate.status]
@@ -71,6 +77,12 @@ def render_check(findings: Findings, gate: GateResult) -> CheckText:
         f"対応範囲 {coverage.requirements_in_scope} / 判定済み {coverage.requirements_decided} / "
         f"未解析 {coverage.requirements_unanalyzed}",
     ]
+    if semantic_diff is not None and semantic_diff.base_available:
+        c = semantic_diff.counts
+        summary_lines.append(
+            f"base との差分: 新規違反 {c.new_violation} / 既存違反 {c.existing_violation} / "
+            f"解消 {c.resolved_violation} / 判定不能化 {c.became_undecidable}"
+        )
     if gate.blocking:
         blocking_ids = ", ".join(f.requirement_id for f in gate.blocking[:10])
         summary_lines.append("")

@@ -43,6 +43,7 @@ from speclino.db.repositories import (
 from speclino.domain.code_ir import AnalysisLimits
 from speclino.domain.finding import Finding, Findings
 from speclino.domain.run import ExecState, GateStatus
+from speclino.domain.semantic_diff import SemanticDiff
 from speclino.domain.spec_ir import ApprovalRecord, RuleLevel, SpecIR
 from speclino.ports.blob_store import BlobStore
 from speclino.ports.code_host import CodeHost
@@ -53,6 +54,7 @@ from speclino.services.check_pipeline import (
     CheckInputError,
     CheckRequest,
     CheckResult,
+    rediff,
     run_check,
     write_result,
 )
@@ -198,6 +200,7 @@ class ReviewRunService:
         gate: GateResult | None = None
         result: CheckResult | None = None
         findings: Findings | None = None
+        semantic: SemanticDiff | None = None
         agent_events: list[dict[str, Any]] = []
         error: str | None = None
         artifacts_uri: str | None = None
@@ -224,11 +227,13 @@ class ReviewRunService:
                     spec_overrides=overrides,
                     extra_findings=tuple(extra),
                     bindings_patch=bindings_patch or None,
+                    base_root=base_root,
                 )
                 with span("speclino.check", head=head_sha):
                     result = run_check(req)
                 findings = result.findings
                 gate = result.gate
+                semantic = result.semantic_diff
                 # 未解決があればエージェントが証拠を集める（判定はエンジン）
                 if self.config.agent_enabled and result.domain and result.bindings:
                     ctx = InvestigationContext(
@@ -253,6 +258,8 @@ class ReviewRunService:
                     questions = inv.questions
                     if inv.started:
                         findings = _merge_non_behavior_findings(result.findings, ctx.findings)
+                        # 証拠で verdict が変わり得るので、同じ base で意味差分を取り直す
+                        semantic, findings = rediff(result, findings)
                         gate = _regate(findings, result, self.config.fail_on)
                         if inv.log is not None and self.cost_guard is not None:
                             await self.cost_guard.record(
@@ -272,6 +279,7 @@ class ReviewRunService:
                     gate=gate,
                     validation=result.validation,
                     policy_findings=result.policy_findings,
+                    semantic_diff=semantic,
                 )
                 paths = write_result(final, out_dir)
                 (out_dir / "agent-events.json").write_text(
@@ -332,6 +340,16 @@ class ReviewRunService:
                 agent_end = next((e for e in agent_events if e["type"] == "agent.end"), None)
                 stored_manifest["agent"] = agent_end["payload"] if agent_end else None
                 stored_manifest["questions"] = question_ids
+                diff = semantic
+                stored_manifest["semantic_diff"] = (
+                    {
+                        "base_available": diff.base_available,
+                        "base_error": diff.base_error,
+                        "counts": diff.counts.model_dump(mode="json"),
+                    }
+                    if diff
+                    else None
+                )
             await runs.set_result(
                 run_id,
                 final_state,
@@ -367,7 +385,7 @@ class ReviewRunService:
             and exec_state == "completed"
         ):
             status, conclusion = to_check_state(gate.status, "completed")
-            text = render_check(findings, gate)
+            text = render_check(findings, gate, semantic)
             await self.code_host.update_check(
                 repo_full_name,
                 check_run_id,

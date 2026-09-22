@@ -33,7 +33,7 @@ eval:
 	uv run python -m speclino.eval.runner eval/golden/cancel_order --mode source --out build/eval/source.md
 
 openapi:
-	@echo "TODO"
+	uv run python -c "from speclino.api.app import create_app; from speclino.settings import Settings; import json; print(json.dumps(create_app(Settings(env='local', role='all')).openapi(), ensure_ascii=False, indent=2, sort_keys=True))" > openapi.json
 
 web-build:
 	cd web && npm run build

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 
@@ -22,3 +24,39 @@ async def test_healthz() -> None:
         response = await client.get("/healthz")
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "role": "all"}
+
+
+def test_committed_openapi_is_fresh() -> None:
+    """openapi.json（API-ERR-001 の入力）はルート変更のたびに `make openapi` で再生成する。"""
+    from pathlib import Path
+
+    generated = create_app(Settings(env="local", role="all")).openapi()
+    committed = json.loads(
+        (Path(__file__).resolve().parents[2] / "openapi.json").read_text(encoding="utf-8")
+    )
+    assert committed == generated, "openapi.json が古い。`make openapi` で再生成する"
+
+
+@pytest.mark.asyncio
+async def test_error_responses_use_error_response_shape() -> None:
+    """HTTPException も入力検証エラー（422）も {"error": {"code", "message"}} で返す。"""
+    app = create_app(Settings(env="local", role="all", code_host_kind="local"))
+    transport = httpx.ASGITransport(app=app)
+    # 依存関係（get_state）が lifespan で作る state を参照するため、lifespan 内で叩く
+    # （DB へは接続しない: 入力検証で 422 になりハンドラまで到達しない）
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=transport, base_url="http://test") as client,
+    ):
+        validation = await client.post("/internal/tasks/run", json={"run_id": "not-a-uuid"})
+        bad_path = await client.get("/api/review-runs/not-a-uuid/artifacts/x.json")
+        unknown_route = await client.get("/api/no-such-route")
+        wrong_method = await client.delete("/healthz")
+    assert validation.status_code == 422
+    assert validation.json()["error"]["code"] == "validation_error"
+    assert bad_path.status_code == 422 and "error" in bad_path.json()
+    # ルーティング由来（Starlette）の 404 / 405 も同じ形式
+    assert (
+        unknown_route.status_code == 404 and unknown_route.json()["error"]["code"] == "http_error"
+    )
+    assert wrong_method.status_code == 405 and "error" in wrong_method.json()

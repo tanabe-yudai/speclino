@@ -151,6 +151,11 @@ async def test_webhook_to_api_flow(
     assert review.status_code == 200 and "R-CANCEL-04" in review.text
     assert (await c.get(f"/api/review-runs/{run_id}/artifacts/../x")).status_code in (400, 404)
     assert host.checks[1]["conclusion"] == "failure"
+    # S28: base（正しい実装）との意味差分が Check の要約と成果物に出る
+    assert "新規違反 1 / 既存違反 0 / 解消 0" in host.checks[1]["summary"]
+    diff = (await c.get(f"/api/review-runs/{run_id}/artifacts/semantic-diff.json")).json()
+    assert diff["base_available"] and diff["counts"]["new_violation"] == 1
+    assert detail["manifest"]["semantic_diff"]["counts"]["new_violation"] == 1
 
 
 async def test_approve_spec_comment_triggers_rerun(

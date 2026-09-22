@@ -12,6 +12,7 @@ from pathlib import Path
 
 from speclino.conformance.engine import evaluate
 from speclino.conformance.gate import GateResult, aggregate_gate
+from speclino.conformance.semantic_diff import DiffSide, semantic_diff
 from speclino.domain.code_ir import AnalysisLimits, Outcome, UnknownCause
 from speclino.domain.code_ir import Path as CodePath
 from speclino.domain.finding import Findings
@@ -120,12 +121,35 @@ def test_write_artifacts_skips_optional_none_inputs(tmp_path: Path) -> None:
 
 
 def test_write_artifacts_includes_semantic_diff_when_given(tmp_path: Path) -> None:
-    findings = evaluate(co.SPEC, co.CORRECT, co.DOMAIN)
+    base_findings = evaluate(co.SPEC, co.CORRECT, co.DOMAIN)
+    findings = evaluate(co.SPEC, co.RESTORE_ADMIN_ONLY, co.DOMAIN)
     gate = _gate_for(findings)
-    diff = {"new": ["R-CANCEL-04"], "resolved": [], "existing": []}
-    out = write_artifacts(tmp_path, _manifest(), co.SPEC, co.CORRECT, findings, gate, diff)
+    diff = semantic_diff(
+        DiffSide("base", [co.SPEC], [co.CORRECT], base_findings),
+        DiffSide("head", [co.SPEC], [co.RESTORE_ADMIN_ONLY], findings),
+    )
+    out = write_artifacts(
+        tmp_path, _manifest(), co.SPEC, co.RESTORE_ADMIN_ONLY, findings, gate, diff
+    )
     assert "semantic-diff.json" in out
-    assert json.loads(out["semantic-diff.json"].read_text(encoding="utf-8")) == diff
+    data = json.loads(out["semantic-diff.json"].read_text(encoding="utf-8"))
+    assert data["counts"]["new_violation"] == 1
+    review = out["review.md"].read_text(encoding="utf-8")
+    assert "## 意味差分（base → head）" in review
+    assert "| R-CANCEL-04 | VERIFIED_IN_SCOPE | VIOLATED | 新規違反 |" in review
+    assert "- p3_success" in review and "+ p4_owner" in review
+    check = render_check(findings, gate, diff)
+    assert "新規違反 1 / 既存違反 0 / 解消 0 / 判定不能化 0" in check.summary
+
+
+def test_review_md_explains_missing_base() -> None:
+    findings = evaluate(co.SPEC, co.CORRECT, co.DOMAIN)
+    diff = semantic_diff(
+        None, DiffSide("head", [co.SPEC], [co.CORRECT], findings), base_error="仕様が無い"
+    )
+    text = render_review(_manifest(), findings, _gate_for(findings), "cancel_order", diff)
+    assert "base 側の判定が無いため差分を出せない（仕様が無い）" in text
+    assert "base との差分" not in render_check(findings, _gate_for(findings), diff).summary
 
 
 # ---------------------------------------------------------------- review_md

@@ -10,6 +10,13 @@ from speclino.conformance.gate import GateResult
 from speclino.domain.common import SourceRef
 from speclino.domain.finding import Finding, Findings, TestObservation, Verdict
 from speclino.domain.run import GateStatus, RunManifest
+from speclino.domain.semantic_diff import (
+    BehaviorDelta,
+    FindingChange,
+    PathSummary,
+    RuleDelta,
+    SemanticDiff,
+)
 
 VERDICT_LABELS: dict[Verdict, str] = {
     "VERIFIED_IN_SCOPE": "適合（確認範囲内）",
@@ -173,10 +180,91 @@ def render_details(findings: Findings) -> str:
     return "\n".join(sections).rstrip() + "\n"
 
 
+_FINDING_CHANGE_LABELS: dict[FindingChange, str] = {
+    "new_violation": "新規違反",
+    "existing_violation": "既存違反",
+    "resolved_violation": "解消された違反",
+    "became_undecidable": "判定不能化",
+    "became_decidable": "判定可能化",
+    "added": "追加された判定",
+    "removed": "削除された判定",
+    "changed": "その他の変化",
+    "unchanged": "変化なし",
+}
+_CHANGE_LABELS = {"added": "追加", "changed": "変更", "removed": "削除", "unchanged": "変化なし"}
+_PATH_LIMIT = 8  # 経路の一覧は長くなるので上限を設ける（全量は semantic-diff.json）
+
+
+def _render_rule_changes(rules: list[RuleDelta]) -> list[str]:
+    changed = [r for r in rules if r.status != "unchanged"]
+    if not changed:
+        return ["（なし）"]
+    return [f"- {r.rule_id}: {_CHANGE_LABELS[r.status]}" for r in changed]
+
+
+def _render_path_lines(sign: str, paths: list[PathSummary]) -> list[str]:
+    """経路の一覧（sign は追加 `+` / 削除 `-`）。長くなるので `_PATH_LIMIT` で打ち切る。"""
+    lines: list[str] = []
+    for p in paths[:_PATH_LIMIT]:
+        events = "; ".join(p.events) if p.events else "（イベントなし）"
+        lines.append(f"  - {sign} {p.path_id}: {_cell(p.guard)} → {p.outcome} / {_cell(events)}")
+    if len(paths) > _PATH_LIMIT:
+        lines.append(f"  - {sign} …他 {len(paths) - _PATH_LIMIT} 経路")
+    return lines
+
+
+def _render_behavior_changes(behaviors: list[BehaviorDelta]) -> list[str]:
+    changed = [b for b in behaviors if b.status != "unchanged"]
+    if not changed:
+        return ["（なし。経路の内容は base と同じ）"]
+    lines: list[str] = []
+    for b in changed:
+        n_add, n_del = len(b.added_paths), len(b.removed_paths)
+        lines.append(
+            f"- `{b.behavior_id}`: {_CHANGE_LABELS[b.status]}"
+            f"（追加 {n_add} / 削除 {n_del} / 同一 {b.unchanged_paths}）"
+        )
+        lines += _render_path_lines("+", b.added_paths)
+        lines += _render_path_lines("-", b.removed_paths)
+    return lines
+
+
+def render_semantic_diff(diff: SemanticDiff) -> str:
+    """PoC 12.2 の結果分類（新規／既存／解消／判定不能化、要求と実装の差分）。"""
+    if not diff.base_available:
+        reason = f"（{diff.base_error}）" if diff.base_error else ""
+        return f"base 側の判定が無いため差分を出せない{reason}。head の判定を「追加」として扱う。"
+    lines = [
+        f"- 比較: `{diff.base_commit}` → `{diff.head_commit}`",
+        "",
+        "| 区分 | 件数 |",
+        "| --- | --- |",
+    ]
+    lines += [
+        f"| {label} | {getattr(diff.counts, status)} |"
+        for status, label in _FINDING_CHANGE_LABELS.items()
+    ]
+    notable = [d for d in diff.findings if d.status not in ("unchanged", "added")]
+    if notable:
+        lines += ["", "| 要求ID | base | head | 区分 |", "| --- | --- | --- | --- |"]
+        lines += [
+            f"| {d.requirement_id} | {d.base_verdict or '-'} | {d.head_verdict or '-'}"
+            f" | {_FINDING_CHANGE_LABELS[d.status]} |"
+            for d in notable
+        ]
+    lines += ["", "### 要求の変更", "", *_render_rule_changes(diff.rules)]
+    lines += ["", "### 実装の振る舞いの変更", "", *_render_behavior_changes(diff.behaviors)]
+    return "\n".join(lines)
+
+
 def render_review(
-    manifest: RunManifest, findings: Findings, gate: GateResult | None, behavior_id: str
+    manifest: RunManifest,
+    findings: Findings,
+    gate: GateResult | None,
+    behavior_id: str,
+    semantic_diff: SemanticDiff | None = None,
 ) -> str:
-    """PoC 13.1（一覧）+ 17.3（対応状況の併記）+ 13.2（詳細）をまとめた review.md 本文。"""
+    """PoC 13.1（一覧）+ 17.3（対応状況の併記）+ 12.2（意味差分）+ 13.2（詳細）の review.md。"""
     parts = [
         "## 一覧",
         "",
@@ -186,10 +274,10 @@ def render_review(
         "",
         _render_coverage(findings),
         "",
-        "## 詳細",
-        "",
-        render_details(findings),
     ]
+    if semantic_diff is not None:
+        parts += ["## 意味差分（base → head）", "", render_semantic_diff(semantic_diff), ""]
+    parts += ["## 詳細", "", render_details(findings)]
     return "\n".join(parts)
 
 
@@ -198,6 +286,7 @@ __all__ = [
     "VERDICT_LABELS",
     "render_details",
     "render_review",
+    "render_semantic_diff",
 ]
 
 

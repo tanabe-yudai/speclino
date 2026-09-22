@@ -15,6 +15,7 @@ PoC 15章 / design/2026-09-22-hackathon-plan.md「判定モデル」の手順を
         `analyze_repo` で Code IR を作る
     (d) `conformance.engine.evaluate` で Findings を作る（複数 behavior は結合する）
     (e) `.speclino/policy/*.yaml` があれば VerifierRegistry で実行し Findings に追加する
+    (e') `base_root` があれば base も (a)〜(e) で判定し、意味差分（PoC 12 章）を作る
     (f) `conformance.gate.aggregate_gate` でゲート判定する
     (g) `RunManifest` を組み立てる（入力ハッシュ・版・上限・fail_on・mode）
 """
@@ -30,13 +31,15 @@ from uuid import uuid4
 
 import yaml
 import z3
+from pydantic import ValidationError
 
 from speclino import __version__
 from speclino.analysis.limits import DEFAULT_LIMITS, clamp
 from speclino.analysis.path_analyzer import ANALYZER_VERSION, analyze_repo
-from speclino.conformance.engine import ENGINE_VERSION, EngineConfig, evaluate
+from speclino.conformance.engine import ENGINE_VERSION, EngineConfig, EngineInputError, evaluate
 from speclino.conformance.exceptions import waived_ids
 from speclino.conformance.gate import DEFAULT_FAIL_ON, GatePolicy, GateResult, aggregate_gate
+from speclino.conformance.semantic_diff import DiffSide, annotate_findings, semantic_diff
 from speclino.domain.bindings import Bindings, OperationContract
 from speclino.domain.code_ir import AnalysisLimits, CodeIR
 from speclino.domain.common import SnapshotRef
@@ -44,6 +47,7 @@ from speclino.domain.domain_spec import DomainSpec
 from speclino.domain.finding import CoverageCounts, Finding, Findings, Verdict, VerdictCounts
 from speclino.domain.policy import PolicyExceptions, PolicyPackage
 from speclino.domain.run import RunInputs, RunManifest, RunVersions
+from speclino.domain.semantic_diff import SemanticDiff
 from speclino.domain.spec_ir import RuleLevel, SpecIR
 from speclino.reporter.json_out import write_artifacts
 from speclino.spec import (
@@ -55,7 +59,9 @@ from speclino.spec import (
     load_spec_ir,
     validate_spec_ir,
 )
+from speclino.verifiers.api_error_format import ApiErrorFormatVerifier
 from speclino.verifiers.base import Snapshot
+from speclino.verifiers.ci_required import CiRequiredVerifier
 from speclino.verifiers.exceptions import load_policy_exceptions
 from speclino.verifiers.make_targets import MakeTargetsVerifier
 from speclino.verifiers.registry import VerifierRegistry
@@ -92,6 +98,10 @@ class CheckRequest:
     today: date | None = None
     # 人の回答（human_ask）による run 限定の操作束縛: 操作 ID → 実装シンボル（S32）
     bindings_patch: dict[str, str] | None = None
+    # S28: base スナップショット。指定があれば「base 仕様 + base コード」でも判定し、head の
+    # Findings と突き合わせて意味差分（新規 / 既存 / 解消 / 判定不能化）を作る
+    base_root: Path | None = None
+    base_project_dir: Path | None = None
 
     @property
     def resolved_project_dir(self) -> Path:
@@ -112,6 +122,10 @@ class CheckResult:
     domain: DomainSpec | None = None
     bindings: Bindings | None = None
     contracts: dict[str, OperationContract] = field(default_factory=dict)
+    semantic_diff: SemanticDiff | None = None
+    # 意味差分の base 側（エージェントの再解析後に差分を取り直すために保持する）
+    base_side: DiffSide | None = None
+    base_error: str | None = None
 
 
 def run_check(req: CheckRequest) -> CheckResult:
@@ -206,6 +220,16 @@ def run_check(req: CheckRequest) -> CheckResult:
     policy_findings, policy_levels, policy_texts = _run_policies(project_dir)
     combined = _with_extra_findings(combined, [*policy_findings, *req.extra_findings])
 
+    # S28: base 側も同じ手順で判定し、Finding 同士を突き合わせる（head を base 仕様に照合しない）
+    diff: SemanticDiff | None = None
+    base_side: DiffSide | None = None
+    base_error: str | None = None
+    if req.base_root is not None:
+        base_side, base_error = _base_side(req, run_id)
+        head_side = DiffSide(req.head_sha, spec_irs, code_irs, combined)
+        diff = semantic_diff(base_side, head_side, base_error)
+        combined = annotate_findings(combined, diff)
+
     levels: dict[str, RuleLevel] = {rule.id: rule.level for spec in spec_irs for rule in spec.rules}
     levels.update(policy_levels)
 
@@ -252,7 +276,19 @@ def run_check(req: CheckRequest) -> CheckResult:
         domain=domain,
         bindings=bindings,
         contracts=contracts,
+        semantic_diff=diff,
+        base_side=base_side,
+        base_error=base_error,
     )
+
+
+def rediff(result: CheckResult, findings: Findings) -> tuple[SemanticDiff | None, Findings]:
+    """エージェントの証拠で head の Findings が変わった後に、同じ base で意味差分を取り直す。"""
+    if result.semantic_diff is None:
+        return None, findings
+    head = DiffSide(result.manifest.inputs.head_commit, result.spec_irs, result.code_irs, findings)
+    diff = semantic_diff(result.base_side, head, result.base_error)
+    return diff, annotate_findings(findings, diff)
 
 
 def write_result(result: CheckResult, out_dir: Path) -> dict[str, Path]:
@@ -266,13 +302,25 @@ def write_result(result: CheckResult, out_dir: Path) -> dict[str, Path]:
     if len(result.spec_irs) == 1:
         code = result.code_irs[0] if result.code_irs else None
         written = write_artifacts(
-            out_dir, result.manifest, result.spec_irs[0], code, result.findings, result.gate
+            out_dir,
+            result.manifest,
+            result.spec_irs[0],
+            code,
+            result.findings,
+            result.gate,
+            result.semantic_diff,
         )
         _write_domain(result, out_dir, written)
         return written
 
     written = write_artifacts(
-        out_dir, result.manifest, result.spec_irs[0], None, result.findings, result.gate
+        out_dir,
+        result.manifest,
+        result.spec_irs[0],
+        None,
+        result.findings,
+        result.gate,
+        result.semantic_diff,
     )
     _write_domain(result, out_dir, written)
     for spec in result.spec_irs:
@@ -289,6 +337,30 @@ def write_result(result: CheckResult, out_dir: Path) -> dict[str, Path]:
 
 
 # ---------------------------------------------------------------------- internals
+
+
+def _base_side(req: CheckRequest, run_id: str) -> tuple[DiffSide | None, str | None]:
+    """base スナップショットを head と同じ手順で判定し、意味差分の base 側を作る。
+
+    base は信頼済み（デフォルトブランチ）なので承認の付け替え・削除 Finding・回答による束縛は
+    適用せず、base のファイルどおりに判定する。base 側が判定できない（初回導入で仕様が無い等）
+    ときは (None, 理由) を返し、呼び出し側は head の判定を「追加」として並べる。
+    """
+    assert req.base_root is not None
+    base_req = CheckRequest(
+        repo_root=req.base_root,
+        head_sha=req.base_sha or "BASE",
+        project_dir=req.base_project_dir,
+        limits=req.limits,
+        run_id=f"{run_id}-base",
+        source_roots=req.source_roots,
+        today=req.today,
+    )
+    try:
+        base = run_check(base_req)
+    except (CheckInputError, EngineInputError, ValidationError, ValueError, OSError) as e:
+        return None, f"{type(e).__name__}: {e}"
+    return DiffSide(req.base_sha, base.spec_irs, base.code_irs, base.findings), None
 
 
 def _write_domain(result: CheckResult, out_dir: Path, written: dict[str, Path]) -> None:
@@ -386,6 +458,8 @@ def _policy_registry() -> VerifierRegistry:
     registry = VerifierRegistry()
     registry.register(MakeTargetsVerifier())
     registry.register(SpecFormatVerifier())
+    registry.register(CiRequiredVerifier())
+    registry.register(ApiErrorFormatVerifier())
     return registry
 
 
@@ -439,6 +513,7 @@ __all__ = [
     "CheckRequest",
     "CheckResult",
     "Mode",
+    "rediff",
     "run_check",
     "write_result",
 ]

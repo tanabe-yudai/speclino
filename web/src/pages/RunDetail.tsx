@@ -14,7 +14,7 @@ import { describeGateReason } from '../services/gate'
 import { formatDateTime, shortSha } from '../services/format'
 import { githubChecksUrl, githubPrUrl } from '../services/github'
 import { EXEC_STATE_LABELS, GATE_STATUS_LABELS, GATE_TONE, VERDICT_LABELS } from '../services/labels'
-import { describeLimits } from '../services/manifest'
+import { describeLimits, describeSemanticDiff } from '../services/manifest'
 import { collectScopeAndAssumptions, collectUnresolvedItems, countByVerdict, groupFindingsByVerdict } from '../services/verdict'
 import type { RunEvent } from '../types/events'
 import type { ReviewRunDetail } from '../types/run'
@@ -157,6 +157,7 @@ function RunSummary({ run }: { run: ReviewRunDetail }) {
   const { assumptions } = collectScopeAndAssumptions(run.findings)
   const unresolvedItems = collectUnresolvedItems(run.findings)
   const scopeItems = run.manifest ? [describeLimits(run.manifest)] : []
+  const semanticDiff = run.manifest ? describeSemanticDiff(run.manifest) : null
   const gateReason = describeGateReason(run.gate_status, run.manifest, run.findings)
   const canLinkGithub = Boolean(run.repo_full_name && run.pr_number != null)
 
@@ -182,6 +183,7 @@ function RunSummary({ run }: { run: ReviewRunDetail }) {
       </div>
 
       <p className="gate-reason">{gateReason}</p>
+      {semanticDiff && <p className="muted run-meta-line">{semanticDiff}</p>}
 
       <dl className="run-counts">
         <div>

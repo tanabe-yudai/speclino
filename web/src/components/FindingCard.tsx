@@ -2,6 +2,8 @@ import { Badge } from './Badge'
 import { CounterexamplePanel } from './CounterexamplePanel'
 import { githubBlobUrl } from '../services/github'
 import {
+  BASE_HEAD_STATUS_LABELS,
+  BASE_HEAD_STATUS_TONE,
   CATEGORY_LABELS,
   SEVERITY_LABELS,
   TEST_OBSERVATION_LABELS,
@@ -61,6 +63,11 @@ export function FindingCard({ finding, repoFullName, headSha }: FindingCardProps
     <article className={`finding-card finding-card-${finding.verdict.toLowerCase()}`}>
       <header className="finding-card-header">
         <Badge tone={VERDICT_TONE[finding.verdict]}>{VERDICT_LABELS[finding.verdict]}</Badge>
+        {finding.base_head_status && finding.base_head_status !== 'unchanged' && (
+          <Badge tone={BASE_HEAD_STATUS_TONE[finding.base_head_status]}>
+            base 比: {BASE_HEAD_STATUS_LABELS[finding.base_head_status]}
+          </Badge>
+        )}
         <span className="finding-requirement">{finding.requirement_id}</span>
         <span className="finding-category">{CATEGORY_LABELS[finding.category]}</span>
         <span className="finding-severity">重要度: {SEVERITY_LABELS[finding.severity]}</span>

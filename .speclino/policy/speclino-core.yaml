@@ -53,3 +53,57 @@ rules:
           - "## 観測境界"
     on_missing_input: unknown
     exceptions_allowed: true
+
+  - id: CI-001
+    version: "1.0.0"
+    level: mandatory
+    title: "CI ワークフローは pull_request で lint/test を必須にし、権限を読み取りに絞ること"
+    text: >
+      .github/workflows/ci.yml は pull_request トリガーを持ち、make lint / make test を
+      必須ステップとして実行し、pull_request_target イベントを使わず、トップレベル
+      permissions を宣言して書込み権限を含まないこと。
+    applies_to:
+      paths:
+        - ".github/workflows/ci.yml"
+      languages: []
+    source:
+      doc: design/product-spec-summary.md
+      anchor: "規約パッケージ"
+    verifier:
+      id: ci.required_conditions
+      version: "1.0.0"
+      params:
+        require_pull_request_trigger: true
+        required_steps: ["make lint", "make test"]
+        forbid_events: ["pull_request_target"]
+        require_read_permissions: true
+        allowed_write_permissions: ["id-token"]
+    on_missing_input: violation
+    exceptions_allowed: true
+
+  - id: API-ERR-001
+    version: "1.0.0"
+    level: advisory
+    title: "API のエラー応答は共通形式（ErrorResponse）で、ヘルパー経由で送出すること"
+    text: >
+      openapi.json の 4xx/5xx responses は #/components/schemas/ErrorResponse を参照し、
+      src/speclino/api 配下のソースは HTTPException(...) を直接 raise せず api_error(...)
+      ヘルパー経由で送出すること。既存ルートの置換前のため advisory とし、ゲートは落とさない。
+    applies_to:
+      paths:
+        - "openapi.json"
+        - "src/speclino/api/**/*.py"
+      languages: []
+    source:
+      doc: design/product-spec-summary.md
+      anchor: "規約パッケージ"
+    verifier:
+      id: api.error_format
+      version: "1.0.0"
+      params:
+        openapi_path: openapi.json
+        error_schema: ErrorResponse
+        api_glob: "src/speclino/api/**/*.py"
+        helper_symbol: api_error
+    on_missing_input: unknown
+    exceptions_allowed: true

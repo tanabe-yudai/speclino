@@ -9,9 +9,10 @@ import { ApiError } from './errors'
 async function readErrorMessage(response: Response): Promise<string> {
   try {
     const body: unknown = await response.clone().json()
-    if (body && typeof body === 'object' && 'detail' in body) {
-      const detail = (body as { detail?: unknown }).detail
-      if (typeof detail === 'string') return detail
+    // API-ERR-001: エラー本文は {"error": {"code", "message"}} 形式
+    if (body && typeof body === 'object' && 'error' in body) {
+      const error = (body as { error?: { message?: unknown } }).error
+      if (error && typeof error.message === 'string') return error.message
     }
   } catch {
     // JSON でなければ本文をそのまま使う。

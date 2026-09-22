@@ -85,32 +85,39 @@ def check(
         typer.echo(str(e), err=True)
         raise typer.Exit(code=2) from e
 
-    with TemporaryDirectory(prefix="speclino-check-") as tmp:
+    try:
+        rel_project = project_dir.relative_to(repo_root)
+    except ValueError as e:
+        typer.echo(f"--project は --repo の配下にする必要がある: {e}", err=True)
+        raise typer.Exit(code=2) from e
+
+    # head と base は別ディレクトリに展開する（同じ木に入れると解析器が互いを走査してしまう）
+    with (
+        TemporaryDirectory(prefix="speclino-check-") as tmp,
+        TemporaryDirectory(prefix="speclino-base-") as tmp_base,
+    ):
         try:
             analysis_root = export_snapshot(repo_root, head_sha, Path(tmp))
+            base_root = (
+                export_snapshot(repo_root, base_sha, Path(tmp_base))
+                if base_sha is not None
+                else None
+            )
         except GitError as e:
             typer.echo(str(e), err=True)
             raise typer.Exit(code=2) from e
-
-        if analysis_root == repo_root:
-            analysis_project_dir = project_dir
-        else:
-            try:
-                rel_project = project_dir.relative_to(repo_root)
-            except ValueError as e:
-                typer.echo(f"--project は --repo の配下にする必要がある: {e}", err=True)
-                raise typer.Exit(code=2) from e
-            analysis_project_dir = analysis_root / rel_project
 
         req = CheckRequest(
             repo_root=analysis_root,
             head_sha=head_sha,
             base_sha=base_sha,
-            project_dir=analysis_project_dir,
+            project_dir=analysis_root / rel_project,
             limits=limits,
             fail_on=fail_on_verdicts,
             mode="blocking" if blocking else "advisory",
             code_ir_override=Path(code_ir).resolve() if code_ir is not None else None,
+            base_root=base_root,
+            base_project_dir=base_root / rel_project if base_root is not None else None,
         )
 
         try:
