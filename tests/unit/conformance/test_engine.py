@@ -194,7 +194,13 @@ def test_undocumented_operation_call_is_review_open_world() -> None:
     assert extra.verdict == "REVIEW" and "notify_command" in extra.message and "p3" in extra.message
     assert fs.counts.REVIEW == 1 and fs.counts.VERIFIED_IN_SCOPE == 9
     # 禁止を明示した要求があれば VIOLATED（forbidden_effect）で、undocumented は出ない
-    forbid = co._rule("R-CANCEL-08", "R-CANCEL-08", co.SUCCESS, co._calls("notify_command", 0))
+    forbid = co._rule(
+        "R-CANCEL-08",
+        "R-CANCEL-08",
+        co.SUCCESS,
+        co._calls("notify_command", 0),
+        "command_invocation",
+    )
     spec = co.SPEC.model_copy(update={"rules": [*co.RULES, forbid]})
     fs2 = run(code, spec)
     assert not any(f.category == "undocumented_behavior" for f in fs2.findings)
