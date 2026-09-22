@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://speclino.dev/schemas/contract.schema.json",
+  "additionalProperties": false,
+  "description": "外部操作の承認済み要約（summary_ref の参照先）。未知の外部関数を副作用なしと仮定しない。",
+  "properties": {
+    "id": {
+      "minLength": 1,
+      "title": "Id",
+      "type": "string"
+    },
+    "symbol": {
+      "minLength": 1,
+      "title": "Symbol",
+      "type": "string"
+    },
+    "assumes_success": {
+      "description": "正常終了すると仮定するか",
+      "title": "Assumes Success",
+      "type": "boolean"
+    },
+    "returns": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "戻り値の型名。None は戻り値を使わない",
+      "title": "Returns"
+    },
+    "pure": {
+      "default": false,
+      "description": "状態を変更せず、同じ入力に同じ結果を返す",
+      "title": "Pure",
+      "type": "boolean"
+    },
+    "may_modify": {
+      "description": "変更し得るドメイン変数",
+      "items": {
+        "type": "string"
+      },
+      "title": "May Modify",
+      "type": "array"
+    },
+    "raises": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Raises",
+      "type": "array"
+    },
+    "models_internal_calls": {
+      "default": false,
+      "description": "内部呼出しまでモデル化しているか",
+      "title": "Models Internal Calls",
+      "type": "boolean"
+    },
+    "approved_by": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Approved By"
+    },
+    "notes": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Notes"
+    }
+  },
+  "required": [
+    "id",
+    "symbol",
+    "assumes_success"
+  ],
+  "title": "OperationContract",
+  "type": "object"
+}

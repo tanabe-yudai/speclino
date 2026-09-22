@@ -1,0 +1,377 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://speclino.dev/schemas/domain.schema.json",
+  "$defs": {
+    "Binary": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "enum": [
+            "eq",
+            "ne",
+            "lt",
+            "le",
+            "gt",
+            "ge",
+            "add",
+            "sub"
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "left": {
+          "discriminator": {
+            "mapping": {
+              "add": "#/$defs/Binary",
+              "and": "#/$defs/Nary",
+              "const": "#/$defs/Const",
+              "eq": "#/$defs/Binary",
+              "ge": "#/$defs/Binary",
+              "gt": "#/$defs/Binary",
+              "le": "#/$defs/Binary",
+              "lt": "#/$defs/Binary",
+              "ne": "#/$defs/Binary",
+              "not": "#/$defs/Not",
+              "or": "#/$defs/Nary",
+              "ref": "#/$defs/Ref",
+              "sub": "#/$defs/Binary"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "$ref": "#/$defs/Const"
+            },
+            {
+              "$ref": "#/$defs/Not"
+            },
+            {
+              "$ref": "#/$defs/Binary"
+            },
+            {
+              "$ref": "#/$defs/Nary"
+            }
+          ],
+          "title": "Left"
+        },
+        "right": {
+          "discriminator": {
+            "mapping": {
+              "add": "#/$defs/Binary",
+              "and": "#/$defs/Nary",
+              "const": "#/$defs/Const",
+              "eq": "#/$defs/Binary",
+              "ge": "#/$defs/Binary",
+              "gt": "#/$defs/Binary",
+              "le": "#/$defs/Binary",
+              "lt": "#/$defs/Binary",
+              "ne": "#/$defs/Binary",
+              "not": "#/$defs/Not",
+              "or": "#/$defs/Nary",
+              "ref": "#/$defs/Ref",
+              "sub": "#/$defs/Binary"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "$ref": "#/$defs/Const"
+            },
+            {
+              "$ref": "#/$defs/Not"
+            },
+            {
+              "$ref": "#/$defs/Binary"
+            },
+            {
+              "$ref": "#/$defs/Nary"
+            }
+          ],
+          "title": "Right"
+        }
+      },
+      "required": [
+        "op",
+        "left",
+        "right"
+      ],
+      "title": "Binary",
+      "type": "object"
+    },
+    "Const": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "const",
+          "title": "Op",
+          "type": "string"
+        },
+        "type": {
+          "description": "boolean / integer / 列挙型名 / opaque 型名",
+          "title": "Type",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "op",
+        "type",
+        "value"
+      ],
+      "title": "Const",
+      "type": "object"
+    },
+    "Nary": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "enum": [
+            "and",
+            "or"
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "args": {
+          "description": "空配列は拒否する",
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "add": "#/$defs/Binary",
+                "and": "#/$defs/Nary",
+                "const": "#/$defs/Const",
+                "eq": "#/$defs/Binary",
+                "ge": "#/$defs/Binary",
+                "gt": "#/$defs/Binary",
+                "le": "#/$defs/Binary",
+                "lt": "#/$defs/Binary",
+                "ne": "#/$defs/Binary",
+                "not": "#/$defs/Not",
+                "or": "#/$defs/Nary",
+                "ref": "#/$defs/Ref",
+                "sub": "#/$defs/Binary"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/Ref"
+              },
+              {
+                "$ref": "#/$defs/Const"
+              },
+              {
+                "$ref": "#/$defs/Not"
+              },
+              {
+                "$ref": "#/$defs/Binary"
+              },
+              {
+                "$ref": "#/$defs/Nary"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "Args",
+          "type": "array"
+        }
+      },
+      "required": [
+        "op",
+        "args"
+      ],
+      "title": "Nary",
+      "type": "object"
+    },
+    "Not": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "not",
+          "title": "Op",
+          "type": "string"
+        },
+        "arg": {
+          "discriminator": {
+            "mapping": {
+              "add": "#/$defs/Binary",
+              "and": "#/$defs/Nary",
+              "const": "#/$defs/Const",
+              "eq": "#/$defs/Binary",
+              "ge": "#/$defs/Binary",
+              "gt": "#/$defs/Binary",
+              "le": "#/$defs/Binary",
+              "lt": "#/$defs/Binary",
+              "ne": "#/$defs/Binary",
+              "not": "#/$defs/Not",
+              "or": "#/$defs/Nary",
+              "ref": "#/$defs/Ref",
+              "sub": "#/$defs/Binary"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "$ref": "#/$defs/Const"
+            },
+            {
+              "$ref": "#/$defs/Not"
+            },
+            {
+              "$ref": "#/$defs/Binary"
+            },
+            {
+              "$ref": "#/$defs/Nary"
+            }
+          ],
+          "title": "Arg"
+        }
+      },
+      "required": [
+        "op",
+        "arg"
+      ],
+      "title": "Not",
+      "type": "object"
+    },
+    "Ref": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "ref",
+          "title": "Op",
+          "type": "string"
+        },
+        "path": {
+          "description": "例: before.order.status",
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "path"
+      ],
+      "title": "Ref",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "0.1",
+      "default": "0.1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "enums": {
+      "additionalProperties": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "description": "列挙型名 → 値の一覧",
+      "title": "Enums",
+      "type": "object"
+    },
+    "opaque_types": {
+      "description": "同一性だけ比較する ID 型",
+      "items": {
+        "type": "string"
+      },
+      "title": "Opaque Types",
+      "type": "array"
+    },
+    "variables": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "変数名（名前空間なし。例 order.status）→ 型名",
+      "title": "Variables",
+      "type": "object"
+    },
+    "assumptions": {
+      "description": "入口で成立すると仮定する条件（before 名前空間）",
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "add": "#/$defs/Binary",
+            "and": "#/$defs/Nary",
+            "const": "#/$defs/Const",
+            "eq": "#/$defs/Binary",
+            "ge": "#/$defs/Binary",
+            "gt": "#/$defs/Binary",
+            "le": "#/$defs/Binary",
+            "lt": "#/$defs/Binary",
+            "ne": "#/$defs/Binary",
+            "not": "#/$defs/Not",
+            "or": "#/$defs/Nary",
+            "ref": "#/$defs/Ref",
+            "sub": "#/$defs/Binary"
+          },
+          "propertyName": "op"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/Ref"
+          },
+          {
+            "$ref": "#/$defs/Const"
+          },
+          {
+            "$ref": "#/$defs/Not"
+          },
+          {
+            "$ref": "#/$defs/Binary"
+          },
+          {
+            "$ref": "#/$defs/Nary"
+          }
+        ]
+      },
+      "title": "Assumptions",
+      "type": "array"
+    },
+    "observation_scope": {
+      "description": "この解析が判定できる観測境界の説明",
+      "items": {
+        "type": "string"
+      },
+      "title": "Observation Scope",
+      "type": "array"
+    },
+    "out_of_scope": {
+      "description": "対象外の説明",
+      "items": {
+        "type": "string"
+      },
+      "title": "Out Of Scope",
+      "type": "array"
+    }
+  },
+  "title": "DomainSpec",
+  "type": "object"
+}

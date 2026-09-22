@@ -1,0 +1,253 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://speclino.dev/schemas/run-manifest.schema.json",
+  "$defs": {
+    "AnalysisLimits": {
+      "additionalProperties": false,
+      "properties": {
+        "depth": {
+          "description": "直接呼出しを展開する深さ",
+          "minimum": 0,
+          "title": "Depth",
+          "type": "integer"
+        },
+        "max_paths": {
+          "minimum": 1,
+          "title": "Max Paths",
+          "type": "integer"
+        },
+        "solver_timeout_ms": {
+          "minimum": 1,
+          "title": "Solver Timeout Ms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "depth",
+        "max_paths",
+        "solver_timeout_ms"
+      ],
+      "title": "AnalysisLimits",
+      "type": "object"
+    },
+    "RunInputs": {
+      "additionalProperties": false,
+      "properties": {
+        "repository": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Repository"
+        },
+        "head_commit": {
+          "minLength": 1,
+          "title": "Head Commit",
+          "type": "string"
+        },
+        "base_commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Base Commit"
+        },
+        "spec_content_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Spec Content Hash"
+        },
+        "spec_ir_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Spec Ir Hash"
+        },
+        "bindings_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bindings Hash"
+        },
+        "domain_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Domain Hash"
+        },
+        "contracts_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Contracts Hash"
+        },
+        "policy_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Policy Hash"
+        },
+        "code_ir_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "--code-ir 入力時のハッシュ",
+          "title": "Code Ir Hash"
+        }
+      },
+      "required": [
+        "head_commit"
+      ],
+      "title": "RunInputs",
+      "type": "object"
+    },
+    "RunVersions": {
+      "additionalProperties": false,
+      "properties": {
+        "speclino": {
+          "title": "Speclino",
+          "type": "string"
+        },
+        "analyzer": {
+          "title": "Analyzer",
+          "type": "string"
+        },
+        "engine": {
+          "title": "Engine",
+          "type": "string"
+        },
+        "solver": {
+          "title": "Solver",
+          "type": "string"
+        },
+        "settings_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Settings Hash"
+        }
+      },
+      "required": [
+        "speclino",
+        "analyzer",
+        "engine",
+        "solver"
+      ],
+      "title": "RunVersions",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "0.1",
+      "default": "0.1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "run_id": {
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "inputs": {
+      "$ref": "#/$defs/RunInputs"
+    },
+    "versions": {
+      "$ref": "#/$defs/RunVersions"
+    },
+    "limits": {
+      "$ref": "#/$defs/AnalysisLimits"
+    },
+    "fail_on": {
+      "description": "ゲート失敗にする verdict",
+      "items": {
+        "type": "string"
+      },
+      "title": "Fail On",
+      "type": "array"
+    },
+    "mode": {
+      "default": "advisory",
+      "enum": [
+        "advisory",
+        "blocking"
+      ],
+      "title": "Mode",
+      "type": "string"
+    }
+  },
+  "required": [
+    "run_id",
+    "created_at",
+    "inputs",
+    "versions",
+    "limits"
+  ],
+  "title": "RunManifest",
+  "type": "object"
+}

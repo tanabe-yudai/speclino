@@ -1,0 +1,25 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+
+# Node
+node_modules/
+web/dist/
+
+# SpecLino
+.speclino-artifacts/
+
+# Env / secrets
+.env
+
+# Terraform
+*.tfstate*
+.terraform/
+
+# Build output
+build/

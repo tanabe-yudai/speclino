@@ -1,0 +1,19 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: speclino
+      POSTGRES_PASSWORD: speclino
+      POSTGRES_DB: speclino
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U speclino -d speclino"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - speclino-db-data:/var/lib/postgresql/data
+
+volumes:
+  speclino-db-data:

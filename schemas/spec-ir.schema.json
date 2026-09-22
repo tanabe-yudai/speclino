@@ -1,0 +1,805 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://speclino.dev/schemas/spec-ir.schema.json",
+  "$defs": {
+    "ApprovalRecord": {
+      "additionalProperties": false,
+      "description": "仕様解釈の承認記録。LLM が生成してはならない。",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "approver": {
+          "description": "承認者の識別子（GitHub ログイン等）",
+          "minLength": 1,
+          "title": "Approver",
+          "type": "string"
+        },
+        "approved_at": {
+          "format": "date-time",
+          "title": "Approved At",
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "merged_default_branch",
+            "pr_comment",
+            "manual"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "spec_content_hash": {
+          "description": "承認時の仕様本文ハッシュ（sha256:...）",
+          "title": "Spec Content Hash",
+          "type": "string"
+        },
+        "ir_content_hash": {
+          "description": "承認時の Spec IR ハッシュ（sha256:...）",
+          "title": "Ir Content Hash",
+          "type": "string"
+        },
+        "evidence_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidence Url"
+        }
+      },
+      "required": [
+        "id",
+        "approver",
+        "approved_at",
+        "source",
+        "spec_content_hash",
+        "ir_content_hash"
+      ],
+      "title": "ApprovalRecord",
+      "type": "object"
+    },
+    "Binary": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "enum": [
+            "eq",
+            "ne",
+            "lt",
+            "le",
+            "gt",
+            "ge",
+            "add",
+            "sub"
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "left": {
+          "discriminator": {
+            "mapping": {
+              "add": "#/$defs/Binary",
+              "and": "#/$defs/Nary",
+              "const": "#/$defs/Const",
+              "eq": "#/$defs/Binary",
+              "ge": "#/$defs/Binary",
+              "gt": "#/$defs/Binary",
+              "le": "#/$defs/Binary",
+              "lt": "#/$defs/Binary",
+              "ne": "#/$defs/Binary",
+              "not": "#/$defs/Not",
+              "or": "#/$defs/Nary",
+              "ref": "#/$defs/Ref",
+              "sub": "#/$defs/Binary"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "$ref": "#/$defs/Const"
+            },
+            {
+              "$ref": "#/$defs/Not"
+            },
+            {
+              "$ref": "#/$defs/Binary"
+            },
+            {
+              "$ref": "#/$defs/Nary"
+            }
+          ],
+          "title": "Left"
+        },
+        "right": {
+          "discriminator": {
+            "mapping": {
+              "add": "#/$defs/Binary",
+              "and": "#/$defs/Nary",
+              "const": "#/$defs/Const",
+              "eq": "#/$defs/Binary",
+              "ge": "#/$defs/Binary",
+              "gt": "#/$defs/Binary",
+              "le": "#/$defs/Binary",
+              "lt": "#/$defs/Binary",
+              "ne": "#/$defs/Binary",
+              "not": "#/$defs/Not",
+              "or": "#/$defs/Nary",
+              "ref": "#/$defs/Ref",
+              "sub": "#/$defs/Binary"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "$ref": "#/$defs/Const"
+            },
+            {
+              "$ref": "#/$defs/Not"
+            },
+            {
+              "$ref": "#/$defs/Binary"
+            },
+            {
+              "$ref": "#/$defs/Nary"
+            }
+          ],
+          "title": "Right"
+        }
+      },
+      "required": [
+        "op",
+        "left",
+        "right"
+      ],
+      "title": "Binary",
+      "type": "object"
+    },
+    "Const": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "const",
+          "title": "Op",
+          "type": "string"
+        },
+        "type": {
+          "description": "boolean / integer / 列挙型名 / opaque 型名",
+          "title": "Type",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "op",
+        "type",
+        "value"
+      ],
+      "title": "Const",
+      "type": "object"
+    },
+    "CountConstraint": {
+      "additionalProperties": false,
+      "properties": {
+        "operator": {
+          "enum": [
+            "eq",
+            "ge",
+            "le"
+          ],
+          "title": "Operator",
+          "type": "string"
+        },
+        "value": {
+          "minimum": 0,
+          "title": "Value",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "operator",
+        "value"
+      ],
+      "title": "CountConstraint",
+      "type": "object"
+    },
+    "EventRequirement": {
+      "additionalProperties": false,
+      "description": "種別・操作・phase で選んだイベントの総数と、各イベントの引数を検査する。\n\nイベント総数は引数による絞り込みの前に数える。arguments_equal に指定した項目は、\n選択された全イベントで一致することを要求する。",
+      "properties": {
+        "kind": {
+          "const": "event_requirement",
+          "title": "Kind",
+          "type": "string"
+        },
+        "event_kind": {
+          "enum": [
+            "call",
+            "write",
+            "return",
+            "raise"
+          ],
+          "title": "Event Kind",
+          "type": "string"
+        },
+        "operation_or_target": {
+          "description": "業務操作 ID または書込み対象",
+          "minLength": 1,
+          "title": "Operation Or Target",
+          "type": "string"
+        },
+        "phase": {
+          "enum": [
+            "invoked",
+            "applied",
+            "returned",
+            "raised"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "count": {
+          "$ref": "#/$defs/CountConstraint"
+        },
+        "arguments_equal": {
+          "additionalProperties": {
+            "discriminator": {
+              "mapping": {
+                "add": "#/$defs/Binary",
+                "and": "#/$defs/Nary",
+                "const": "#/$defs/Const",
+                "eq": "#/$defs/Binary",
+                "ge": "#/$defs/Binary",
+                "gt": "#/$defs/Binary",
+                "le": "#/$defs/Binary",
+                "lt": "#/$defs/Binary",
+                "ne": "#/$defs/Binary",
+                "not": "#/$defs/Not",
+                "or": "#/$defs/Nary",
+                "ref": "#/$defs/Ref",
+                "sub": "#/$defs/Binary"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/Ref"
+              },
+              {
+                "$ref": "#/$defs/Const"
+              },
+              {
+                "$ref": "#/$defs/Not"
+              },
+              {
+                "$ref": "#/$defs/Binary"
+              },
+              {
+                "$ref": "#/$defs/Nary"
+              }
+            ]
+          },
+          "title": "Arguments Equal",
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind",
+        "event_kind",
+        "operation_or_target",
+        "phase",
+        "count"
+      ],
+      "title": "EventRequirement",
+      "type": "object"
+    },
+    "ExpressionAssertion": {
+      "additionalProperties": false,
+      "description": "boolean Expr の真偽を検査する。終了状態や応答の比較に用いる。",
+      "properties": {
+        "kind": {
+          "const": "expression",
+          "title": "Kind",
+          "type": "string"
+        },
+        "expr": {
+          "discriminator": {
+            "mapping": {
+              "add": "#/$defs/Binary",
+              "and": "#/$defs/Nary",
+              "const": "#/$defs/Const",
+              "eq": "#/$defs/Binary",
+              "ge": "#/$defs/Binary",
+              "gt": "#/$defs/Binary",
+              "le": "#/$defs/Binary",
+              "lt": "#/$defs/Binary",
+              "ne": "#/$defs/Binary",
+              "not": "#/$defs/Not",
+              "or": "#/$defs/Nary",
+              "ref": "#/$defs/Ref",
+              "sub": "#/$defs/Binary"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "$ref": "#/$defs/Const"
+            },
+            {
+              "$ref": "#/$defs/Not"
+            },
+            {
+              "$ref": "#/$defs/Binary"
+            },
+            {
+              "$ref": "#/$defs/Nary"
+            }
+          ],
+          "title": "Expr"
+        }
+      },
+      "required": [
+        "kind",
+        "expr"
+      ],
+      "title": "ExpressionAssertion",
+      "type": "object"
+    },
+    "Nary": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "enum": [
+            "and",
+            "or"
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "args": {
+          "description": "空配列は拒否する",
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "add": "#/$defs/Binary",
+                "and": "#/$defs/Nary",
+                "const": "#/$defs/Const",
+                "eq": "#/$defs/Binary",
+                "ge": "#/$defs/Binary",
+                "gt": "#/$defs/Binary",
+                "le": "#/$defs/Binary",
+                "lt": "#/$defs/Binary",
+                "ne": "#/$defs/Binary",
+                "not": "#/$defs/Not",
+                "or": "#/$defs/Nary",
+                "ref": "#/$defs/Ref",
+                "sub": "#/$defs/Binary"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/Ref"
+              },
+              {
+                "$ref": "#/$defs/Const"
+              },
+              {
+                "$ref": "#/$defs/Not"
+              },
+              {
+                "$ref": "#/$defs/Binary"
+              },
+              {
+                "$ref": "#/$defs/Nary"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "Args",
+          "type": "array"
+        }
+      },
+      "required": [
+        "op",
+        "args"
+      ],
+      "title": "Nary",
+      "type": "object"
+    },
+    "Not": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "not",
+          "title": "Op",
+          "type": "string"
+        },
+        "arg": {
+          "discriminator": {
+            "mapping": {
+              "add": "#/$defs/Binary",
+              "and": "#/$defs/Nary",
+              "const": "#/$defs/Const",
+              "eq": "#/$defs/Binary",
+              "ge": "#/$defs/Binary",
+              "gt": "#/$defs/Binary",
+              "le": "#/$defs/Binary",
+              "lt": "#/$defs/Binary",
+              "ne": "#/$defs/Binary",
+              "not": "#/$defs/Not",
+              "or": "#/$defs/Nary",
+              "ref": "#/$defs/Ref",
+              "sub": "#/$defs/Binary"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "$ref": "#/$defs/Const"
+            },
+            {
+              "$ref": "#/$defs/Not"
+            },
+            {
+              "$ref": "#/$defs/Binary"
+            },
+            {
+              "$ref": "#/$defs/Nary"
+            }
+          ],
+          "title": "Arg"
+        }
+      },
+      "required": [
+        "op",
+        "arg"
+      ],
+      "title": "Not",
+      "type": "object"
+    },
+    "Ref": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "ref",
+          "title": "Op",
+          "type": "string"
+        },
+        "path": {
+          "description": "例: before.order.status",
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "path"
+      ],
+      "title": "Ref",
+      "type": "object"
+    },
+    "Rule": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "安定した要求／判定単位 ID（例 R-CANCEL-04）",
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "behavior_id": {
+          "minLength": 1,
+          "title": "Behavior Id",
+          "type": "string"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
+        "source_refs": {
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "minItems": 1,
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "approval_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "この仕様解釈を承認した記録の ID。None は未承認",
+          "title": "Approval Ref"
+        },
+        "modality": {
+          "enum": [
+            "must",
+            "must_not"
+          ],
+          "title": "Modality",
+          "type": "string"
+        },
+        "level": {
+          "default": "mandatory",
+          "enum": [
+            "mandatory",
+            "advisory"
+          ],
+          "title": "Level",
+          "type": "string"
+        },
+        "claim_scope": {
+          "enum": [
+            "memory_state",
+            "command_invocation",
+            "service_outcome",
+            "http_response",
+            "persisted_state"
+          ],
+          "title": "Claim Scope",
+          "type": "string"
+        },
+        "applicability": {
+          "description": "この要求が適用される入口条件",
+          "discriminator": {
+            "mapping": {
+              "add": "#/$defs/Binary",
+              "and": "#/$defs/Nary",
+              "const": "#/$defs/Const",
+              "eq": "#/$defs/Binary",
+              "ge": "#/$defs/Binary",
+              "gt": "#/$defs/Binary",
+              "le": "#/$defs/Binary",
+              "lt": "#/$defs/Binary",
+              "ne": "#/$defs/Binary",
+              "not": "#/$defs/Not",
+              "or": "#/$defs/Nary",
+              "ref": "#/$defs/Ref",
+              "sub": "#/$defs/Binary"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "$ref": "#/$defs/Const"
+            },
+            {
+              "$ref": "#/$defs/Not"
+            },
+            {
+              "$ref": "#/$defs/Binary"
+            },
+            {
+              "$ref": "#/$defs/Nary"
+            }
+          ],
+          "title": "Applicability"
+        },
+        "assertion": {
+          "discriminator": {
+            "mapping": {
+              "event_requirement": "#/$defs/EventRequirement",
+              "expression": "#/$defs/ExpressionAssertion"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ExpressionAssertion"
+            },
+            {
+              "$ref": "#/$defs/EventRequirement"
+            }
+          ],
+          "title": "Assertion"
+        }
+      },
+      "required": [
+        "id",
+        "behavior_id",
+        "source_refs",
+        "modality",
+        "claim_scope",
+        "applicability",
+        "assertion"
+      ],
+      "title": "Rule",
+      "type": "object"
+    },
+    "SourceRef": {
+      "additionalProperties": false,
+      "description": "仕様またはコード上の位置。requirement_id か symbol のどちらかを持つ。",
+      "properties": {
+        "snapshot_id": {
+          "minLength": 1,
+          "title": "Snapshot Id",
+          "type": "string"
+        },
+        "requirement_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requirement Id"
+        },
+        "symbol": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "完全修飾シンボル",
+          "title": "Symbol"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "line_start": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line Start"
+        },
+        "line_end": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line End"
+        }
+      },
+      "required": [
+        "snapshot_id"
+      ],
+      "title": "SourceRef",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "0.1",
+      "default": "0.1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "behavior_id": {
+      "minLength": 1,
+      "title": "Behavior Id",
+      "type": "string"
+    },
+    "spec_snapshot_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "仕様スナップショットの ID",
+      "title": "Spec Snapshot Id"
+    },
+    "spec_content_hash": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "仕様本文のハッシュ",
+      "title": "Spec Content Hash"
+    },
+    "rules": {
+      "items": {
+        "$ref": "#/$defs/Rule"
+      },
+      "title": "Rules",
+      "type": "array"
+    },
+    "approvals": {
+      "items": {
+        "$ref": "#/$defs/ApprovalRecord"
+      },
+      "title": "Approvals",
+      "type": "array"
+    },
+    "unextracted": {
+      "description": "抽出しきれなかった要求 ID。対応できる要求だけを分母にしないために残す",
+      "items": {
+        "type": "string"
+      },
+      "title": "Unextracted",
+      "type": "array"
+    }
+  },
+  "required": [
+    "behavior_id"
+  ],
+  "title": "SpecIR",
+  "type": "object"
+}

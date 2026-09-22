@@ -1,0 +1,298 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://speclino.dev/schemas/trace.schema.json",
+  "$defs": {
+    "Completeness": {
+      "additionalProperties": false,
+      "properties": {
+        "missing_events": {
+          "description": "トレースの欠落があるか",
+          "title": "Missing Events",
+          "type": "boolean"
+        },
+        "instrumented_kinds": {
+          "items": {
+            "enum": [
+              "call",
+              "write",
+              "return",
+              "raise"
+            ],
+            "type": "string"
+          },
+          "title": "Instrumented Kinds",
+          "type": "array"
+        },
+        "terminated_normally": {
+          "description": "正常に終了記録を取得したか",
+          "title": "Terminated Normally",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "missing_events",
+        "terminated_normally"
+      ],
+      "title": "Completeness",
+      "type": "object"
+    },
+    "TraceEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "sequence": {
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "call",
+            "write",
+            "return",
+            "raise"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "phase": {
+          "enum": [
+            "invoked",
+            "applied",
+            "returned",
+            "raised"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "operation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Operation"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target"
+        },
+        "arguments": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "title": "Arguments",
+          "type": "object"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        },
+        "source": {
+          "description": "計測したソースまたはアダプターの識別子",
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sequence",
+        "kind",
+        "phase",
+        "source"
+      ],
+      "title": "TraceEvent",
+      "type": "object"
+    },
+    "TraceOutcome": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "http_response",
+            "return",
+            "exception",
+            "unresolved"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Status"
+        },
+        "exception_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exception Type"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "TraceOutcome",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "0.1",
+      "default": "0.1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "run_id": {
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "test_id": {
+      "minLength": 1,
+      "title": "Test Id",
+      "type": "string"
+    },
+    "code_commit": {
+      "minLength": 1,
+      "title": "Code Commit",
+      "type": "string"
+    },
+    "behavior_id": {
+      "minLength": 1,
+      "title": "Behavior Id",
+      "type": "string"
+    },
+    "origin": {
+      "default": "runtime_trace",
+      "enum": [
+        "static_analysis",
+        "static_test_call_analysis",
+        "runtime_trace"
+      ],
+      "title": "Origin",
+      "type": "string"
+    },
+    "before": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "string"
+          }
+        ]
+      },
+      "title": "Before",
+      "type": "object"
+    },
+    "events": {
+      "items": {
+        "$ref": "#/$defs/TraceEvent"
+      },
+      "title": "Events",
+      "type": "array"
+    },
+    "after": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "string"
+          }
+        ]
+      },
+      "title": "After",
+      "type": "object"
+    },
+    "outcome": {
+      "$ref": "#/$defs/TraceOutcome"
+    },
+    "mocked": {
+      "description": "モックに置き換えた操作 ID",
+      "items": {
+        "type": "string"
+      },
+      "title": "Mocked",
+      "type": "array"
+    },
+    "observation_scope": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Observation Scope",
+      "type": "array"
+    },
+    "completeness": {
+      "$ref": "#/$defs/Completeness"
+    }
+  },
+  "required": [
+    "run_id",
+    "test_id",
+    "code_commit",
+    "behavior_id",
+    "outcome",
+    "completeness"
+  ],
+  "title": "TraceRecord",
+  "type": "object"
+}

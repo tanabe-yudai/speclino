@@ -1,0 +1,69 @@
+[project]
+name = "speclino"
+version = "0.1.0"
+description = "仕様とコードの意味差分をエージェントと決定的な検査器で検証する"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi>=0.133",
+  "uvicorn[standard]",
+  "pydantic>=2.10",
+  "pydantic-settings",
+  "z3-solver>=5.1",
+  "google-adk>=2.9,<2.10",
+  "google-genai>=2.19,<3",
+  "sqlalchemy[asyncio]>=2.0",
+  "alembic",
+  "asyncpg",
+  "httpx",
+  "pyyaml",
+  "jsonschema",
+  "typer",
+  "PyJWT[crypto]",
+  "structlog",
+]
+
+[project.scripts]
+speclino = "speclino.cli:app"
+
+[dependency-groups]
+dev = [
+  "ruff",
+  "mypy",
+  "pytest",
+  "pytest-asyncio",
+  "respx",
+  "types-PyYAML",
+  "types-jsonschema",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/speclino"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["z3", "z3.*", "google.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+  "live: 実LLMを呼ぶ（CI除外）",
+  "spec(id): SpecLino 自身の仕様IDに対応するテスト",
+]

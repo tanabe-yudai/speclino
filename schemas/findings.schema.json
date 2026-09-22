@@ -1,0 +1,445 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://speclino.dev/schemas/findings.schema.json",
+  "$defs": {
+    "Counterexample": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "symbolic",
+            "observed"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "path_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path Id"
+        },
+        "assignments": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "description": "変数（名前空間つき）→ 値",
+          "title": "Assignments",
+          "type": "object"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "description"
+      ],
+      "title": "Counterexample",
+      "type": "object"
+    },
+    "CoverageCounts": {
+      "additionalProperties": false,
+      "description": "一致率だけを出さないための併記項目（PoC 17.3）。",
+      "properties": {
+        "requirements_total": {
+          "default": 0,
+          "title": "Requirements Total",
+          "type": "integer"
+        },
+        "requirements_approved": {
+          "default": 0,
+          "title": "Requirements Approved",
+          "type": "integer"
+        },
+        "requirements_in_scope": {
+          "default": 0,
+          "title": "Requirements In Scope",
+          "type": "integer"
+        },
+        "requirements_decided": {
+          "default": 0,
+          "title": "Requirements Decided",
+          "type": "integer"
+        },
+        "requirements_unanalyzed": {
+          "default": 0,
+          "title": "Requirements Unanalyzed",
+          "type": "integer"
+        }
+      },
+      "title": "CoverageCounts",
+      "type": "object"
+    },
+    "Finding": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "決定的に生成する安定 ID",
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "requirement_id": {
+          "minLength": 1,
+          "title": "Requirement Id",
+          "type": "string"
+        },
+        "behavior_id": {
+          "minLength": 1,
+          "title": "Behavior Id",
+          "type": "string"
+        },
+        "verdict": {
+          "enum": [
+            "VERIFIED_IN_SCOPE",
+            "VIOLATED",
+            "UNKNOWN",
+            "REVIEW"
+          ],
+          "title": "Verdict",
+          "type": "string"
+        },
+        "category": {
+          "enum": [
+            "missing_effect",
+            "forbidden_effect",
+            "constraint_mismatch",
+            "state_mismatch",
+            "outcome_mismatch",
+            "argument_mismatch",
+            "cardinality_mismatch",
+            "undocumented_behavior",
+            "unsupported_analysis",
+            "ambiguous_spec",
+            "stale_approval",
+            "vacuous_applicability",
+            "potential_violation",
+            "solver_limit",
+            "conformant"
+          ],
+          "title": "Category",
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "high",
+            "medium",
+            "low",
+            "info"
+          ],
+          "title": "Severity",
+          "type": "string"
+        },
+        "message": {
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "expected": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected"
+        },
+        "actual": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Actual"
+        },
+        "counterexample": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Counterexample"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "evidence_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "assumptions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Assumptions",
+          "type": "array"
+        },
+        "claim_scope": {
+          "enum": [
+            "memory_state",
+            "command_invocation",
+            "service_outcome",
+            "http_response",
+            "persisted_state"
+          ],
+          "title": "Claim Scope",
+          "type": "string"
+        },
+        "analysis_scope": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "検査した経路と対応モデルの範囲",
+          "title": "Analysis Scope"
+        },
+        "code_refs": {
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "title": "Code Refs",
+          "type": "array"
+        },
+        "spec_refs": {
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "title": "Spec Refs",
+          "type": "array"
+        },
+        "base_head_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "new",
+                "existing",
+                "resolved",
+                "unchanged"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Base Head Status"
+        },
+        "test_observation": {
+          "anyOf": [
+            {
+              "enum": [
+                "OBSERVED",
+                "NOT_OBSERVED",
+                "CONTRADICTED"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "動的観測は静的 verdict と別軸",
+          "title": "Test Observation"
+        },
+        "next_steps": {
+          "description": "未検証を検証可能にする具体策（UNKNOWN / REVIEW 用）",
+          "items": {
+            "type": "string"
+          },
+          "title": "Next Steps",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "requirement_id",
+        "behavior_id",
+        "verdict",
+        "category",
+        "severity",
+        "message",
+        "claim_scope"
+      ],
+      "title": "Finding",
+      "type": "object"
+    },
+    "SourceRef": {
+      "additionalProperties": false,
+      "description": "仕様またはコード上の位置。requirement_id か symbol のどちらかを持つ。",
+      "properties": {
+        "snapshot_id": {
+          "minLength": 1,
+          "title": "Snapshot Id",
+          "type": "string"
+        },
+        "requirement_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requirement Id"
+        },
+        "symbol": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "完全修飾シンボル",
+          "title": "Symbol"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "line_start": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line Start"
+        },
+        "line_end": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line End"
+        }
+      },
+      "required": [
+        "snapshot_id"
+      ],
+      "title": "SourceRef",
+      "type": "object"
+    },
+    "VerdictCounts": {
+      "additionalProperties": false,
+      "properties": {
+        "VERIFIED_IN_SCOPE": {
+          "default": 0,
+          "title": "Verified In Scope",
+          "type": "integer"
+        },
+        "VIOLATED": {
+          "default": 0,
+          "title": "Violated",
+          "type": "integer"
+        },
+        "UNKNOWN": {
+          "default": 0,
+          "title": "Unknown",
+          "type": "integer"
+        },
+        "REVIEW": {
+          "default": 0,
+          "title": "Review",
+          "type": "integer"
+        }
+      },
+      "title": "VerdictCounts",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "0.1",
+      "default": "0.1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "run_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Run Id"
+    },
+    "findings": {
+      "items": {
+        "$ref": "#/$defs/Finding"
+      },
+      "title": "Findings",
+      "type": "array"
+    },
+    "counts": {
+      "$ref": "#/$defs/VerdictCounts"
+    },
+    "coverage": {
+      "$ref": "#/$defs/CoverageCounts"
+    }
+  },
+  "title": "Findings",
+  "type": "object"
+}

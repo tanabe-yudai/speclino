@@ -1,0 +1,27 @@
+{
+  "owner": "tanabe-yudai",
+  "repo": "tanabe-yudai/spec-lino",
+  "project_number": 3,
+  "project_id": "PVT_kwHOAMsekc4BkQjE",
+  "project_url": "https://github.com/users/tanabe-yudai/projects/3",
+  "fields": {
+    "Status": {
+      "id": "PVTSSF_lAHOAMsekc4BkQjEzhjBxJ8",
+      "options": {
+        "Todo": "933a4e6a",
+        "In Progress": "a0ccd69d",
+        "Blocked": "5de56ad7",
+        "Done": "25b2ee44"
+      }
+    },
+    "Priority": {
+      "id": "PVTSSF_lAHOAMsekc4BkQjEzhjBxLk",
+      "options": { "P0": "fddc6b3a", "P1": "80abd9db", "P2": "5b7a9f24" }
+    },
+    "Depends on": { "id": "PVTF_lAHOAMsekc4BkQjEzhjBxMg" },
+    "Story": { "id": "PVTF_lAHOAMsekc4BkQjEzhjBxNc" }
+  },
+  "milestones": {
+    "M0": 1, "M1": 2, "M2": 3, "M3": 4, "M4": 5, "M5": 6
+  }
+}

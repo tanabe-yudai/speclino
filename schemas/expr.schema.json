@@ -1,0 +1,240 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://speclino.dev/schemas/expr.schema.json",
+  "title": "Expr",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/Ref"
+    },
+    {
+      "$ref": "#/$defs/Const"
+    },
+    {
+      "$ref": "#/$defs/Not"
+    },
+    {
+      "$ref": "#/$defs/Binary"
+    },
+    {
+      "$ref": "#/$defs/Nary"
+    }
+  ],
+  "$defs": {
+    "Binary": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "enum": [
+            "eq",
+            "ne",
+            "lt",
+            "le",
+            "gt",
+            "ge",
+            "add",
+            "sub"
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "left": {
+          "discriminator": {
+            "mapping": {
+              "add": "#/$defs/Binary",
+              "and": "#/$defs/Nary",
+              "const": "#/$defs/Const",
+              "eq": "#/$defs/Binary",
+              "ge": "#/$defs/Binary",
+              "gt": "#/$defs/Binary",
+              "le": "#/$defs/Binary",
+              "lt": "#/$defs/Binary",
+              "ne": "#/$defs/Binary",
+              "not": "#/$defs/Not",
+              "or": "#/$defs/Nary",
+              "ref": "#/$defs/Ref",
+              "sub": "#/$defs/Binary"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "$ref": "#/$defs/Const"
+            },
+            {
+              "$ref": "#/$defs/Not"
+            },
+            {
+              "$ref": "#/$defs/Binary"
+            },
+            {
+              "$ref": "#/$defs/Nary"
+            }
+          ],
+          "title": "Left"
+        },
+        "right": {
+          "discriminator": {
+            "mapping": {
+              "add": "#/$defs/Binary",
+              "and": "#/$defs/Nary",
+              "const": "#/$defs/Const",
+              "eq": "#/$defs/Binary",
+              "ge": "#/$defs/Binary",
+              "gt": "#/$defs/Binary",
+              "le": "#/$defs/Binary",
+              "lt": "#/$defs/Binary",
+              "ne": "#/$defs/Binary",
+              "not": "#/$defs/Not",
+              "or": "#/$defs/Nary",
+              "ref": "#/$defs/Ref",
+              "sub": "#/$defs/Binary"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "$ref": "#/$defs/Const"
+            },
+            {
+              "$ref": "#/$defs/Not"
+            },
+            {
+              "$ref": "#/$defs/Binary"
+            },
+            {
+              "$ref": "#/$defs/Nary"
+            }
+          ],
+          "title": "Right"
+        }
+      },
+      "required": [
+        "op",
+        "left",
+        "right"
+      ],
+      "title": "Binary",
+      "type": "object"
+    },
+    "Const": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "const",
+          "title": "Op",
+          "type": "string"
+        },
+        "type": {
+          "description": "boolean / integer / 列挙型名 / opaque 型名",
+          "title": "Type",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "op",
+        "type",
+        "value"
+      ],
+      "title": "Const",
+      "type": "object"
+    },
+    "Nary": {
+      "$ref": "#/$defs/Nary"
+    },
+    "Not": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "not",
+          "title": "Op",
+          "type": "string"
+        },
+        "arg": {
+          "discriminator": {
+            "mapping": {
+              "add": "#/$defs/Binary",
+              "and": "#/$defs/Nary",
+              "const": "#/$defs/Const",
+              "eq": "#/$defs/Binary",
+              "ge": "#/$defs/Binary",
+              "gt": "#/$defs/Binary",
+              "le": "#/$defs/Binary",
+              "lt": "#/$defs/Binary",
+              "ne": "#/$defs/Binary",
+              "not": "#/$defs/Not",
+              "or": "#/$defs/Nary",
+              "ref": "#/$defs/Ref",
+              "sub": "#/$defs/Binary"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "$ref": "#/$defs/Const"
+            },
+            {
+              "$ref": "#/$defs/Not"
+            },
+            {
+              "$ref": "#/$defs/Binary"
+            },
+            {
+              "$ref": "#/$defs/Nary"
+            }
+          ],
+          "title": "Arg"
+        }
+      },
+      "required": [
+        "op",
+        "arg"
+      ],
+      "title": "Not",
+      "type": "object"
+    },
+    "Ref": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "ref",
+          "title": "Op",
+          "type": "string"
+        },
+        "path": {
+          "description": "例: before.order.status",
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "path"
+      ],
+      "title": "Ref",
+      "type": "object"
+    }
+  }
+}

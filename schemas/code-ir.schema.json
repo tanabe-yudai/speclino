@@ -1,0 +1,1004 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://speclino.dev/schemas/code-ir.schema.json",
+  "$defs": {
+    "AnalysisLimits": {
+      "additionalProperties": false,
+      "properties": {
+        "depth": {
+          "description": "直接呼出しを展開する深さ",
+          "minimum": 0,
+          "title": "Depth",
+          "type": "integer"
+        },
+        "max_paths": {
+          "minimum": 1,
+          "title": "Max Paths",
+          "type": "integer"
+        },
+        "solver_timeout_ms": {
+          "minimum": 1,
+          "title": "Solver Timeout Ms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "depth",
+        "max_paths",
+        "solver_timeout_ms"
+      ],
+      "title": "AnalysisLimits",
+      "type": "object"
+    },
+    "Binary": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "enum": [
+            "eq",
+            "ne",
+            "lt",
+            "le",
+            "gt",
+            "ge",
+            "add",
+            "sub"
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "left": {
+          "discriminator": {
+            "mapping": {
+              "add": "#/$defs/Binary",
+              "and": "#/$defs/Nary",
+              "const": "#/$defs/Const",
+              "eq": "#/$defs/Binary",
+              "ge": "#/$defs/Binary",
+              "gt": "#/$defs/Binary",
+              "le": "#/$defs/Binary",
+              "lt": "#/$defs/Binary",
+              "ne": "#/$defs/Binary",
+              "not": "#/$defs/Not",
+              "or": "#/$defs/Nary",
+              "ref": "#/$defs/Ref",
+              "sub": "#/$defs/Binary"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "$ref": "#/$defs/Const"
+            },
+            {
+              "$ref": "#/$defs/Not"
+            },
+            {
+              "$ref": "#/$defs/Binary"
+            },
+            {
+              "$ref": "#/$defs/Nary"
+            }
+          ],
+          "title": "Left"
+        },
+        "right": {
+          "discriminator": {
+            "mapping": {
+              "add": "#/$defs/Binary",
+              "and": "#/$defs/Nary",
+              "const": "#/$defs/Const",
+              "eq": "#/$defs/Binary",
+              "ge": "#/$defs/Binary",
+              "gt": "#/$defs/Binary",
+              "le": "#/$defs/Binary",
+              "lt": "#/$defs/Binary",
+              "ne": "#/$defs/Binary",
+              "not": "#/$defs/Not",
+              "or": "#/$defs/Nary",
+              "ref": "#/$defs/Ref",
+              "sub": "#/$defs/Binary"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "$ref": "#/$defs/Const"
+            },
+            {
+              "$ref": "#/$defs/Not"
+            },
+            {
+              "$ref": "#/$defs/Binary"
+            },
+            {
+              "$ref": "#/$defs/Nary"
+            }
+          ],
+          "title": "Right"
+        }
+      },
+      "required": [
+        "op",
+        "left",
+        "right"
+      ],
+      "title": "Binary",
+      "type": "object"
+    },
+    "Const": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "const",
+          "title": "Op",
+          "type": "string"
+        },
+        "type": {
+          "description": "boolean / integer / 列挙型名 / opaque 型名",
+          "title": "Type",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "op",
+        "type",
+        "value"
+      ],
+      "title": "Const",
+      "type": "object"
+    },
+    "Event": {
+      "additionalProperties": false,
+      "properties": {
+        "sequence": {
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "call",
+            "write",
+            "return",
+            "raise"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "phase": {
+          "enum": [
+            "invoked",
+            "applied",
+            "returned",
+            "raised"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "operation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "call のときの業務操作 ID",
+          "title": "Operation"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "write のときの更新対象",
+          "title": "Target"
+        },
+        "arguments": {
+          "additionalProperties": {
+            "discriminator": {
+              "mapping": {
+                "add": "#/$defs/Binary",
+                "and": "#/$defs/Nary",
+                "const": "#/$defs/Const",
+                "eq": "#/$defs/Binary",
+                "ge": "#/$defs/Binary",
+                "gt": "#/$defs/Binary",
+                "le": "#/$defs/Binary",
+                "lt": "#/$defs/Binary",
+                "ne": "#/$defs/Binary",
+                "not": "#/$defs/Not",
+                "or": "#/$defs/Nary",
+                "ref": "#/$defs/Ref",
+                "sub": "#/$defs/Binary"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/Ref"
+              },
+              {
+                "$ref": "#/$defs/Const"
+              },
+              {
+                "$ref": "#/$defs/Not"
+              },
+              {
+                "$ref": "#/$defs/Binary"
+              },
+              {
+                "$ref": "#/$defs/Nary"
+              }
+            ]
+          },
+          "title": "Arguments",
+          "type": "object"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "add": "#/$defs/Binary",
+                  "and": "#/$defs/Nary",
+                  "const": "#/$defs/Const",
+                  "eq": "#/$defs/Binary",
+                  "ge": "#/$defs/Binary",
+                  "gt": "#/$defs/Binary",
+                  "le": "#/$defs/Binary",
+                  "lt": "#/$defs/Binary",
+                  "ne": "#/$defs/Binary",
+                  "not": "#/$defs/Not",
+                  "or": "#/$defs/Nary",
+                  "ref": "#/$defs/Ref",
+                  "sub": "#/$defs/Binary"
+                },
+                "propertyName": "op"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/Ref"
+                },
+                {
+                  "$ref": "#/$defs/Const"
+                },
+                {
+                  "$ref": "#/$defs/Not"
+                },
+                {
+                  "$ref": "#/$defs/Binary"
+                },
+                {
+                  "$ref": "#/$defs/Nary"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        },
+        "certainty": {
+          "default": "must",
+          "enum": [
+            "must",
+            "may"
+          ],
+          "title": "Certainty",
+          "type": "string"
+        },
+        "source_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "sequence",
+        "kind",
+        "phase"
+      ],
+      "title": "Event",
+      "type": "object"
+    },
+    "Nary": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "enum": [
+            "and",
+            "or"
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "args": {
+          "description": "空配列は拒否する",
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "add": "#/$defs/Binary",
+                "and": "#/$defs/Nary",
+                "const": "#/$defs/Const",
+                "eq": "#/$defs/Binary",
+                "ge": "#/$defs/Binary",
+                "gt": "#/$defs/Binary",
+                "le": "#/$defs/Binary",
+                "lt": "#/$defs/Binary",
+                "ne": "#/$defs/Binary",
+                "not": "#/$defs/Not",
+                "or": "#/$defs/Nary",
+                "ref": "#/$defs/Ref",
+                "sub": "#/$defs/Binary"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/Ref"
+              },
+              {
+                "$ref": "#/$defs/Const"
+              },
+              {
+                "$ref": "#/$defs/Not"
+              },
+              {
+                "$ref": "#/$defs/Binary"
+              },
+              {
+                "$ref": "#/$defs/Nary"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "Args",
+          "type": "array"
+        }
+      },
+      "required": [
+        "op",
+        "args"
+      ],
+      "title": "Nary",
+      "type": "object"
+    },
+    "Not": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "not",
+          "title": "Op",
+          "type": "string"
+        },
+        "arg": {
+          "discriminator": {
+            "mapping": {
+              "add": "#/$defs/Binary",
+              "and": "#/$defs/Nary",
+              "const": "#/$defs/Const",
+              "eq": "#/$defs/Binary",
+              "ge": "#/$defs/Binary",
+              "gt": "#/$defs/Binary",
+              "le": "#/$defs/Binary",
+              "lt": "#/$defs/Binary",
+              "ne": "#/$defs/Binary",
+              "not": "#/$defs/Not",
+              "or": "#/$defs/Nary",
+              "ref": "#/$defs/Ref",
+              "sub": "#/$defs/Binary"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "$ref": "#/$defs/Const"
+            },
+            {
+              "$ref": "#/$defs/Not"
+            },
+            {
+              "$ref": "#/$defs/Binary"
+            },
+            {
+              "$ref": "#/$defs/Nary"
+            }
+          ],
+          "title": "Arg"
+        }
+      },
+      "required": [
+        "op",
+        "arg"
+      ],
+      "title": "Not",
+      "type": "object"
+    },
+    "Outcome": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "http_response",
+            "return",
+            "exception",
+            "unresolved"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "maximum": 599,
+              "minimum": 100,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Status"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "add": "#/$defs/Binary",
+                  "and": "#/$defs/Nary",
+                  "const": "#/$defs/Const",
+                  "eq": "#/$defs/Binary",
+                  "ge": "#/$defs/Binary",
+                  "gt": "#/$defs/Binary",
+                  "le": "#/$defs/Binary",
+                  "lt": "#/$defs/Binary",
+                  "ne": "#/$defs/Binary",
+                  "not": "#/$defs/Not",
+                  "or": "#/$defs/Nary",
+                  "ref": "#/$defs/Ref",
+                  "sub": "#/$defs/Binary"
+                },
+                "propertyName": "op"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/Ref"
+                },
+                {
+                  "$ref": "#/$defs/Const"
+                },
+                {
+                  "$ref": "#/$defs/Not"
+                },
+                {
+                  "$ref": "#/$defs/Binary"
+                },
+                {
+                  "$ref": "#/$defs/Nary"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        },
+        "exception_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exception Type"
+        },
+        "source_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "Outcome",
+      "type": "object"
+    },
+    "Path": {
+      "additionalProperties": false,
+      "properties": {
+        "path_id": {
+          "minLength": 1,
+          "title": "Path Id",
+          "type": "string"
+        },
+        "guard": {
+          "description": "この経路を通る入口条件（before 名前空間）",
+          "discriminator": {
+            "mapping": {
+              "add": "#/$defs/Binary",
+              "and": "#/$defs/Nary",
+              "const": "#/$defs/Const",
+              "eq": "#/$defs/Binary",
+              "ge": "#/$defs/Binary",
+              "gt": "#/$defs/Binary",
+              "le": "#/$defs/Binary",
+              "lt": "#/$defs/Binary",
+              "ne": "#/$defs/Binary",
+              "not": "#/$defs/Not",
+              "or": "#/$defs/Nary",
+              "ref": "#/$defs/Ref",
+              "sub": "#/$defs/Binary"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "$ref": "#/$defs/Const"
+            },
+            {
+              "$ref": "#/$defs/Not"
+            },
+            {
+              "$ref": "#/$defs/Binary"
+            },
+            {
+              "$ref": "#/$defs/Nary"
+            }
+          ],
+          "title": "Guard"
+        },
+        "state_updates": {
+          "items": {
+            "$ref": "#/$defs/StateUpdate"
+          },
+          "title": "State Updates",
+          "type": "array"
+        },
+        "events": {
+          "items": {
+            "$ref": "#/$defs/Event"
+          },
+          "title": "Events",
+          "type": "array"
+        },
+        "outcome": {
+          "$ref": "#/$defs/Outcome"
+        },
+        "precision": {
+          "enum": [
+            "exact_in_model",
+            "overapproximate",
+            "incomplete"
+          ],
+          "title": "Precision",
+          "type": "string"
+        },
+        "unknown_causes": {
+          "items": {
+            "$ref": "#/$defs/UnknownCause"
+          },
+          "title": "Unknown Causes",
+          "type": "array"
+        },
+        "source_refs": {
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "title": "Source Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "path_id",
+        "guard",
+        "outcome",
+        "precision"
+      ],
+      "title": "Path",
+      "type": "object"
+    },
+    "Ref": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "ref",
+          "title": "Op",
+          "type": "string"
+        },
+        "path": {
+          "description": "例: before.order.status",
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "path"
+      ],
+      "title": "Ref",
+      "type": "object"
+    },
+    "SnapshotRef": {
+      "additionalProperties": false,
+      "description": "入力スナップショット（解決済みコミット、パス、内容ハッシュ）。",
+      "properties": {
+        "snapshot_id": {
+          "minLength": 1,
+          "title": "Snapshot Id",
+          "type": "string"
+        },
+        "repository": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Repository"
+        },
+        "commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "解決済みコミット SHA",
+          "title": "Commit"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "content_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "sha256:... 形式",
+          "title": "Content Hash"
+        }
+      },
+      "required": [
+        "snapshot_id"
+      ],
+      "title": "SnapshotRef",
+      "type": "object"
+    },
+    "SourceRef": {
+      "additionalProperties": false,
+      "description": "仕様またはコード上の位置。requirement_id か symbol のどちらかを持つ。",
+      "properties": {
+        "snapshot_id": {
+          "minLength": 1,
+          "title": "Snapshot Id",
+          "type": "string"
+        },
+        "requirement_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requirement Id"
+        },
+        "symbol": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "完全修飾シンボル",
+          "title": "Symbol"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "line_start": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line Start"
+        },
+        "line_end": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line End"
+        }
+      },
+      "required": [
+        "snapshot_id"
+      ],
+      "title": "SourceRef",
+      "type": "object"
+    },
+    "StateUpdate": {
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "description": "更新対象の変数名（名前空間なし）",
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        },
+        "value": {
+          "discriminator": {
+            "mapping": {
+              "add": "#/$defs/Binary",
+              "and": "#/$defs/Nary",
+              "const": "#/$defs/Const",
+              "eq": "#/$defs/Binary",
+              "ge": "#/$defs/Binary",
+              "gt": "#/$defs/Binary",
+              "le": "#/$defs/Binary",
+              "lt": "#/$defs/Binary",
+              "ne": "#/$defs/Binary",
+              "not": "#/$defs/Not",
+              "or": "#/$defs/Nary",
+              "ref": "#/$defs/Ref",
+              "sub": "#/$defs/Binary"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "$ref": "#/$defs/Const"
+            },
+            {
+              "$ref": "#/$defs/Not"
+            },
+            {
+              "$ref": "#/$defs/Binary"
+            },
+            {
+              "$ref": "#/$defs/Nary"
+            }
+          ],
+          "title": "Value"
+        },
+        "source_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "target",
+        "value"
+      ],
+      "title": "StateUpdate",
+      "type": "object"
+    },
+    "UnknownCause": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "enum": [
+            "unsupported_syntax",
+            "unresolved_call",
+            "missing_contract",
+            "unresolved_attribute",
+            "limit_depth",
+            "limit_paths",
+            "limit_time",
+            "unmodeled_outcome",
+            "other"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "detail": {
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "source_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "affects": {
+          "description": "影響を受ける要求 ID（分かる場合）",
+          "items": {
+            "type": "string"
+          },
+          "title": "Affects",
+          "type": "array"
+        }
+      },
+      "required": [
+        "code",
+        "detail"
+      ],
+      "title": "UnknownCause",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "0.1",
+      "default": "0.1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "behavior_id": {
+      "minLength": 1,
+      "title": "Behavior Id",
+      "type": "string"
+    },
+    "entrypoint": {
+      "description": "完全修飾シンボル",
+      "minLength": 1,
+      "title": "Entrypoint",
+      "type": "string"
+    },
+    "snapshot": {
+      "$ref": "#/$defs/SnapshotRef"
+    },
+    "analyzer_version": {
+      "minLength": 1,
+      "title": "Analyzer Version",
+      "type": "string"
+    },
+    "limits": {
+      "$ref": "#/$defs/AnalysisLimits"
+    },
+    "paths": {
+      "items": {
+        "$ref": "#/$defs/Path"
+      },
+      "title": "Paths",
+      "type": "array"
+    },
+    "unknown_causes": {
+      "description": "経路に紐づかない振る舞い全体の未解決要因",
+      "items": {
+        "$ref": "#/$defs/UnknownCause"
+      },
+      "title": "Unknown Causes",
+      "type": "array"
+    },
+    "origin": {
+      "default": "static_analysis",
+      "enum": [
+        "static_analysis",
+        "handwritten"
+      ],
+      "title": "Origin",
+      "type": "string"
+    }
+  },
+  "required": [
+    "behavior_id",
+    "entrypoint",
+    "snapshot",
+    "analyzer_version",
+    "limits"
+  ],
+  "title": "CodeIR",
+  "type": "object"
+}

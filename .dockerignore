@@ -1,0 +1,13 @@
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.git
+.speclino-artifacts
+node_modules
+web/dist
+dist
+build
+.env

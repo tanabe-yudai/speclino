@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://speclino.dev/schemas/bindings.schema.json",
+  "$defs": {
+    "BehaviorBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "entrypoint": {
+          "description": "完全修飾シンボル",
+          "minLength": 1,
+          "title": "Entrypoint",
+          "type": "string"
+        },
+        "variables": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "ドメイン変数名 → 実装上の参照（例 actor.id: user.id）",
+          "title": "Variables",
+          "type": "object"
+        }
+      },
+      "required": [
+        "entrypoint"
+      ],
+      "title": "BehaviorBinding",
+      "type": "object"
+    },
+    "OperationBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "symbol": {
+          "description": "完全修飾シンボル",
+          "minLength": 1,
+          "title": "Symbol",
+          "type": "string"
+        },
+        "claim_scope": {
+          "enum": [
+            "memory_state",
+            "command_invocation",
+            "service_outcome",
+            "http_response",
+            "persisted_state"
+          ],
+          "title": "Claim Scope",
+          "type": "string"
+        },
+        "argument_bindings": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "引数名 → positional:N | keyword:name",
+          "title": "Argument Bindings",
+          "type": "object"
+        },
+        "summary_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "contracts/ の契約 ID",
+          "title": "Summary Ref"
+        }
+      },
+      "required": [
+        "symbol",
+        "claim_scope"
+      ],
+      "title": "OperationBinding",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "0.1",
+      "default": "0.1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "behaviors": {
+      "additionalProperties": {
+        "$ref": "#/$defs/BehaviorBinding"
+      },
+      "title": "Behaviors",
+      "type": "object"
+    },
+    "operations": {
+      "additionalProperties": {
+        "$ref": "#/$defs/OperationBinding"
+      },
+      "title": "Operations",
+      "type": "object"
+    }
+  },
+  "title": "Bindings",
+  "type": "object"
+}
