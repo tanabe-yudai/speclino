@@ -270,7 +270,7 @@ class ConformanceEngine:
 
     # ---------------------------------------------------------------- internals
     def _undocumented_behavior(self, spec: SpecIR, code: CodeIR) -> Finding | None:
-        """仕様に記載されない追加処理（open-world、PoC 10.5）: どの要求にも現れない操作の呼出しは REVIEW。
+        """仕様に無い追加処理（open-world、PoC 10.5）: どの要求にも現れない操作の呼出しは REVIEW。
 
         禁止と明記されていれば count 0 の要求が VIOLATED を出すので、ここでは扱わない。
         """

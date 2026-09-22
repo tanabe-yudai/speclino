@@ -180,7 +180,7 @@ def test_engine_can_be_reused_across_evaluations() -> None:
 
 
 def test_undocumented_operation_call_is_review_open_world() -> None:
-    """仕様に無い操作の呼出しは REVIEW: undocumented_behavior（禁止と明記されていれば VIOLATED）。"""
+    """仕様に無い操作の呼出しは REVIEW: undocumented_behavior。禁止と明記されていれば VIOLATED。"""
     notify = co.Event(sequence=4, kind="call", phase="invoked", operation="notify_command")
     code = co.code_ir(
         [
