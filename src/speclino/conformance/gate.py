@@ -2,6 +2,9 @@
 
 verdict は正直に 4 値を保ち、ゲートはフェイルクローズ: mandatory ルールに fail_on の verdict が
 1 つでも残れば失敗。実行状態（exec_state）とは分離する。
+
+仕分け（`triage`: ループ）と決定（`decide_gate`: 分岐だけ）を分けている。`decide_gate` は
+SpecLino 自身の解析対象（specs/SPEC-GATE-001.md、R-GATE-01〜03）なので対応構文だけで書く。
 """
 
 from __future__ import annotations
@@ -33,15 +36,32 @@ class GateResult:
     reason: str = ""
 
 
-def aggregate_gate(
+@dataclass(frozen=True)
+class Triage:
+    """Findings を level と fail_on で仕分けた結果。`decide_gate` はこれだけを見る。"""
+
+    has_findings: bool
+    has_mandatory: bool
+    blocking: list[Finding]
+    advisory: list[Finding]
+    waived: list[Finding]
+
+    @property
+    def has_blocking(self) -> bool:
+        return bool(self.blocking)
+
+    @property
+    def has_waived(self) -> bool:
+        return bool(self.waived)
+
+
+def triage(
     findings: Findings,
     levels: dict[str, RuleLevel],
     policy: GatePolicy = DEFAULT_POLICY,
     waived_ids: frozenset[str] = frozenset(),
-) -> GateResult:
+) -> Triage:
     """levels は requirement_id → mandatory|advisory。無いものは mandatory とみなす（安全側）。"""
-    if not findings.findings:
-        return GateResult("fail", reason="必須の検証集合が空。空の検証集合を通過として扱わない")
     blocking: list[Finding] = []
     advisory: list[Finding] = []
     waived: list[Finding] = []
@@ -58,30 +78,69 @@ def aggregate_gate(
             blocking.append(f)
         else:
             advisory.append(f)
-    if not has_mandatory:
-        return GateResult("fail", advisory=advisory, reason="必須ルールが 1 つも無い")
-    if blocking:
-        if policy.mode == "advisory":
-            return GateResult(
-                "fail",
-                blocking=blocking,
-                advisory=advisory,
-                waived=waived,
-                reason=f"advisory モード: 必須ルール {len(blocking)} 件が非成立（警告のみ）",
-            )
-        counts = {v: sum(1 for f in blocking if f.verdict == v) for v in policy.fail_on}
-        desc = ", ".join(f"{v} {n}" for v, n in counts.items() if n)
-        return GateResult(
-            "fail",
-            blocking=blocking,
-            advisory=advisory,
-            waived=waived,
-            reason=f"必須ルールが非成立: {desc}",
-        )
-    status: GateStatus = "pass_with_exceptions" if waived else "pass"
+    return Triage(bool(findings.findings), has_mandatory, blocking, advisory, waived)
+
+
+def decide_gate(t: Triage, policy: GatePolicy) -> GateResult:
+    """R-GATE-01: 検証集合が空か必須ルールが無ければ通過を返さない。R-GATE-02: 必須ルールの
+    非成立が残れば失敗。R-GATE-03: それ以外は通過（免除があれば例外付き通過）。"""
+    if not t.has_findings:
+        return _fail(t, "必須の検証集合が空。空の検証集合を通過として扱わない")
+    if not t.has_mandatory:
+        return _fail(t, "必須ルールが 1 つも無い")
+    if t.has_blocking:
+        return _fail(t, _blocking_reason(t, policy))
+    if t.has_waived:
+        return _pass_with_exceptions(t)
+    return _pass(t)
+
+
+def aggregate_gate(
+    findings: Findings,
+    levels: dict[str, RuleLevel],
+    policy: GatePolicy = DEFAULT_POLICY,
+    waived_ids: frozenset[str] = frozenset(),
+) -> GateResult:
+    return decide_gate(triage(findings, levels, policy, waived_ids), policy)
+
+
+# ------------------------------------------------------------------ outcomes
+# 決定の各出口。bindings.yaml で操作（gate_fail / gate_pass / gate_pass_waived）に束縛する
+
+
+def _fail(t: Triage, reason: str) -> GateResult:
+    return GateResult("fail", t.blocking, t.advisory, t.waived, reason)
+
+
+def _pass(t: Triage) -> GateResult:
+    return GateResult("pass", [], t.advisory, t.waived, "必須ルールはすべて成立")
+
+
+def _pass_with_exceptions(t: Triage) -> GateResult:
     return GateResult(
-        status,
-        advisory=advisory,
-        waived=waived,
-        reason="必須ルールはすべて成立" + ("（例外による免除あり）" if waived else ""),
+        "pass_with_exceptions",
+        [],
+        t.advisory,
+        t.waived,
+        "必須ルールはすべて成立（例外による免除あり）",
     )
+
+
+def _blocking_reason(t: Triage, policy: GatePolicy) -> str:
+    if policy.mode == "advisory":
+        return f"advisory モード: 必須ルール {len(t.blocking)} 件が非成立（警告のみ）"
+    counts = {v: sum(1 for f in t.blocking if f.verdict == v) for v in policy.fail_on}
+    desc = ", ".join(f"{v} {n}" for v, n in counts.items() if n)
+    return f"必須ルールが非成立: {desc}"
+
+
+__all__ = [
+    "DEFAULT_FAIL_ON",
+    "DEFAULT_POLICY",
+    "GatePolicy",
+    "GateResult",
+    "Triage",
+    "aggregate_gate",
+    "decide_gate",
+    "triage",
+]

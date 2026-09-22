@@ -1,13 +1,25 @@
 schema_version: "0.1"
-enums: {}
+enums:
+  ExecState: [queued, running, awaiting_answer, completed, failed, cancelled, superseded]
 opaque_types: [ToolName]
 variables:
+  # tool_gateway_invoke（SPEC-TOOL-001）
   call.tool: ToolName
   permitted: boolean
   budget_exhausted: boolean
+  # gate_decide（SPEC-GATE-001）: Triage の仕分け結果
+  has_findings: boolean
+  has_mandatory: boolean
+  has_blocking: boolean
+  has_waived: boolean
+  # run_freshness（SPEC-RUN-001）
+  exec_state: ExecState
+  is_latest: boolean
 assumptions: []
 observation_scope:
   - ToolGateway.invoke 内の呼出しイベント（registry.execute / audit.*）と戻り値の種別
+  - decide_gate / should_publish 内の出口（操作）の呼出し有無と回数
 out_of_scope:
   - ツール実装そのものの正しさ
   - 監査記録の永続化の成否
+  - Findings の仕分け（triage）と最新 run の特定（DB 問合せ）

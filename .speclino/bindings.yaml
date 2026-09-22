@@ -6,6 +6,18 @@ behaviors:
       call.tool: call.tool
       permitted: pure_call:self.permissions.allows
       budget_exhausted: pure_call:self.budget.is_exhausted
+  gate_decide:
+    entrypoint: speclino.conformance.gate.decide_gate
+    variables:
+      has_findings: t.has_findings
+      has_mandatory: t.has_mandatory
+      has_blocking: t.has_blocking
+      has_waived: t.has_waived
+  run_freshness:
+    entrypoint: speclino.services.run_freshness.should_publish
+    variables:
+      exec_state: exec_state
+      is_latest: pure_call:speclino.services.run_freshness._is_latest
 operations:
   tool_execute:
     symbol: self.registry.execute
@@ -27,5 +39,30 @@ operations:
     symbol: speclino.agent.gateway.ToolResult.denied
     claim_scope: service_outcome
     argument_bindings: {}
+  gate_fail:
+    symbol: speclino.conformance.gate._fail
+    claim_scope: service_outcome
+    argument_bindings: {}
+  gate_pass:
+    symbol: speclino.conformance.gate._pass
+    claim_scope: service_outcome
+    argument_bindings: {}
+  gate_pass_waived:
+    symbol: speclino.conformance.gate._pass_with_exceptions
+    claim_scope: service_outcome
+    argument_bindings: {}
+  publish:
+    symbol: speclino.services.run_freshness._publish
+    claim_scope: service_outcome
+    argument_bindings: {}
+  mark_superseded:
+    symbol: speclino.services.run_freshness._mark_superseded
+    claim_scope: service_outcome
+    argument_bindings: {}
+  mark_not_latest:
+    symbol: speclino.services.run_freshness._mark_not_latest
+    claim_scope: service_outcome
+    argument_bindings: {}
 known_pure:
   - time.monotonic
+  - speclino.conformance.gate._blocking_reason

@@ -1,0 +1,488 @@
+{
+  "approvals": [
+    {
+      "approved_at": "2026-09-22T00:00:00Z",
+      "approver": "tanabe-yudai",
+      "evidence_url": null,
+      "id": "speclino-self-gate-v1",
+      "ir_content_hash": "sha256:fcb58c11f1381da41dc1829b8546527e92fbff796ba2099f42be2f47bf473dfa",
+      "source": "manual",
+      "spec_content_hash": "sha256:59bf62bc9e4a95894e5d8fe4c3e478d40c01615032dcf0d0dd4e1ca85787a43a"
+    }
+  ],
+  "behavior_id": "gate_decide",
+  "rules": [
+    {
+      "applicability": {
+        "args": [
+          {
+            "arg": {
+              "op": "ref",
+              "path": "before.has_findings"
+            },
+            "op": "not"
+          },
+          {
+            "arg": {
+              "op": "ref",
+              "path": "before.has_mandatory"
+            },
+            "op": "not"
+          }
+        ],
+        "op": "or"
+      },
+      "approval_ref": "speclino-self-gate-v1",
+      "assertion": {
+        "arguments_equal": {},
+        "count": {
+          "operator": "eq",
+          "value": 1
+        },
+        "event_kind": "call",
+        "kind": "event_requirement",
+        "operation_or_target": "gate_fail",
+        "phase": "invoked"
+      },
+      "behavior_id": "gate_decide",
+      "claim_scope": "service_outcome",
+      "id": "R-GATE-01",
+      "level": "mandatory",
+      "modality": "must",
+      "source_refs": [
+        {
+          "line_end": null,
+          "line_start": null,
+          "path": "specs/SPEC-GATE-001.md",
+          "requirement_id": "R-GATE-01",
+          "snapshot_id": "speclino-specs",
+          "symbol": null
+        }
+      ],
+      "tests": [],
+      "title": null
+    },
+    {
+      "applicability": {
+        "args": [
+          {
+            "arg": {
+              "op": "ref",
+              "path": "before.has_findings"
+            },
+            "op": "not"
+          },
+          {
+            "arg": {
+              "op": "ref",
+              "path": "before.has_mandatory"
+            },
+            "op": "not"
+          }
+        ],
+        "op": "or"
+      },
+      "approval_ref": "speclino-self-gate-v1",
+      "assertion": {
+        "arguments_equal": {},
+        "count": {
+          "operator": "eq",
+          "value": 0
+        },
+        "event_kind": "call",
+        "kind": "event_requirement",
+        "operation_or_target": "gate_pass",
+        "phase": "invoked"
+      },
+      "behavior_id": "gate_decide",
+      "claim_scope": "service_outcome",
+      "id": "R-GATE-01b",
+      "level": "mandatory",
+      "modality": "must",
+      "source_refs": [
+        {
+          "line_end": null,
+          "line_start": null,
+          "path": "specs/SPEC-GATE-001.md",
+          "requirement_id": "R-GATE-01b",
+          "snapshot_id": "speclino-specs",
+          "symbol": null
+        }
+      ],
+      "tests": [],
+      "title": null
+    },
+    {
+      "applicability": {
+        "args": [
+          {
+            "arg": {
+              "op": "ref",
+              "path": "before.has_findings"
+            },
+            "op": "not"
+          },
+          {
+            "arg": {
+              "op": "ref",
+              "path": "before.has_mandatory"
+            },
+            "op": "not"
+          }
+        ],
+        "op": "or"
+      },
+      "approval_ref": "speclino-self-gate-v1",
+      "assertion": {
+        "arguments_equal": {},
+        "count": {
+          "operator": "eq",
+          "value": 0
+        },
+        "event_kind": "call",
+        "kind": "event_requirement",
+        "operation_or_target": "gate_pass_waived",
+        "phase": "invoked"
+      },
+      "behavior_id": "gate_decide",
+      "claim_scope": "service_outcome",
+      "id": "R-GATE-01c",
+      "level": "mandatory",
+      "modality": "must",
+      "source_refs": [
+        {
+          "line_end": null,
+          "line_start": null,
+          "path": "specs/SPEC-GATE-001.md",
+          "requirement_id": "R-GATE-01c",
+          "snapshot_id": "speclino-specs",
+          "symbol": null
+        }
+      ],
+      "tests": [],
+      "title": null
+    },
+    {
+      "applicability": {
+        "args": [
+          {
+            "op": "ref",
+            "path": "before.has_findings"
+          },
+          {
+            "op": "ref",
+            "path": "before.has_mandatory"
+          },
+          {
+            "op": "ref",
+            "path": "before.has_blocking"
+          }
+        ],
+        "op": "and"
+      },
+      "approval_ref": "speclino-self-gate-v1",
+      "assertion": {
+        "arguments_equal": {},
+        "count": {
+          "operator": "eq",
+          "value": 1
+        },
+        "event_kind": "call",
+        "kind": "event_requirement",
+        "operation_or_target": "gate_fail",
+        "phase": "invoked"
+      },
+      "behavior_id": "gate_decide",
+      "claim_scope": "service_outcome",
+      "id": "R-GATE-02",
+      "level": "mandatory",
+      "modality": "must",
+      "source_refs": [
+        {
+          "line_end": null,
+          "line_start": null,
+          "path": "specs/SPEC-GATE-001.md",
+          "requirement_id": "R-GATE-02",
+          "snapshot_id": "speclino-specs",
+          "symbol": null
+        }
+      ],
+      "tests": [],
+      "title": null
+    },
+    {
+      "applicability": {
+        "args": [
+          {
+            "op": "ref",
+            "path": "before.has_findings"
+          },
+          {
+            "op": "ref",
+            "path": "before.has_mandatory"
+          },
+          {
+            "op": "ref",
+            "path": "before.has_blocking"
+          }
+        ],
+        "op": "and"
+      },
+      "approval_ref": "speclino-self-gate-v1",
+      "assertion": {
+        "arguments_equal": {},
+        "count": {
+          "operator": "eq",
+          "value": 0
+        },
+        "event_kind": "call",
+        "kind": "event_requirement",
+        "operation_or_target": "gate_pass",
+        "phase": "invoked"
+      },
+      "behavior_id": "gate_decide",
+      "claim_scope": "service_outcome",
+      "id": "R-GATE-02b",
+      "level": "mandatory",
+      "modality": "must",
+      "source_refs": [
+        {
+          "line_end": null,
+          "line_start": null,
+          "path": "specs/SPEC-GATE-001.md",
+          "requirement_id": "R-GATE-02b",
+          "snapshot_id": "speclino-specs",
+          "symbol": null
+        }
+      ],
+      "tests": [],
+      "title": null
+    },
+    {
+      "applicability": {
+        "args": [
+          {
+            "op": "ref",
+            "path": "before.has_findings"
+          },
+          {
+            "op": "ref",
+            "path": "before.has_mandatory"
+          },
+          {
+            "op": "ref",
+            "path": "before.has_blocking"
+          }
+        ],
+        "op": "and"
+      },
+      "approval_ref": "speclino-self-gate-v1",
+      "assertion": {
+        "arguments_equal": {},
+        "count": {
+          "operator": "eq",
+          "value": 0
+        },
+        "event_kind": "call",
+        "kind": "event_requirement",
+        "operation_or_target": "gate_pass_waived",
+        "phase": "invoked"
+      },
+      "behavior_id": "gate_decide",
+      "claim_scope": "service_outcome",
+      "id": "R-GATE-02c",
+      "level": "mandatory",
+      "modality": "must",
+      "source_refs": [
+        {
+          "line_end": null,
+          "line_start": null,
+          "path": "specs/SPEC-GATE-001.md",
+          "requirement_id": "R-GATE-02c",
+          "snapshot_id": "speclino-specs",
+          "symbol": null
+        }
+      ],
+      "tests": [],
+      "title": null
+    },
+    {
+      "applicability": {
+        "args": [
+          {
+            "op": "ref",
+            "path": "before.has_findings"
+          },
+          {
+            "op": "ref",
+            "path": "before.has_mandatory"
+          },
+          {
+            "arg": {
+              "op": "ref",
+              "path": "before.has_blocking"
+            },
+            "op": "not"
+          }
+        ],
+        "op": "and"
+      },
+      "approval_ref": "speclino-self-gate-v1",
+      "assertion": {
+        "arguments_equal": {},
+        "count": {
+          "operator": "eq",
+          "value": 0
+        },
+        "event_kind": "call",
+        "kind": "event_requirement",
+        "operation_or_target": "gate_fail",
+        "phase": "invoked"
+      },
+      "behavior_id": "gate_decide",
+      "claim_scope": "service_outcome",
+      "id": "R-GATE-03",
+      "level": "mandatory",
+      "modality": "must",
+      "source_refs": [
+        {
+          "line_end": null,
+          "line_start": null,
+          "path": "specs/SPEC-GATE-001.md",
+          "requirement_id": "R-GATE-03",
+          "snapshot_id": "speclino-specs",
+          "symbol": null
+        }
+      ],
+      "tests": [],
+      "title": null
+    },
+    {
+      "applicability": {
+        "args": [
+          {
+            "args": [
+              {
+                "op": "ref",
+                "path": "before.has_findings"
+              },
+              {
+                "op": "ref",
+                "path": "before.has_mandatory"
+              },
+              {
+                "arg": {
+                  "op": "ref",
+                  "path": "before.has_blocking"
+                },
+                "op": "not"
+              }
+            ],
+            "op": "and"
+          },
+          {
+            "arg": {
+              "op": "ref",
+              "path": "before.has_waived"
+            },
+            "op": "not"
+          }
+        ],
+        "op": "and"
+      },
+      "approval_ref": "speclino-self-gate-v1",
+      "assertion": {
+        "arguments_equal": {},
+        "count": {
+          "operator": "eq",
+          "value": 1
+        },
+        "event_kind": "call",
+        "kind": "event_requirement",
+        "operation_or_target": "gate_pass",
+        "phase": "invoked"
+      },
+      "behavior_id": "gate_decide",
+      "claim_scope": "service_outcome",
+      "id": "R-GATE-03b",
+      "level": "mandatory",
+      "modality": "must",
+      "source_refs": [
+        {
+          "line_end": null,
+          "line_start": null,
+          "path": "specs/SPEC-GATE-001.md",
+          "requirement_id": "R-GATE-03b",
+          "snapshot_id": "speclino-specs",
+          "symbol": null
+        }
+      ],
+      "tests": [],
+      "title": null
+    },
+    {
+      "applicability": {
+        "args": [
+          {
+            "args": [
+              {
+                "op": "ref",
+                "path": "before.has_findings"
+              },
+              {
+                "op": "ref",
+                "path": "before.has_mandatory"
+              },
+              {
+                "arg": {
+                  "op": "ref",
+                  "path": "before.has_blocking"
+                },
+                "op": "not"
+              }
+            ],
+            "op": "and"
+          },
+          {
+            "op": "ref",
+            "path": "before.has_waived"
+          }
+        ],
+        "op": "and"
+      },
+      "approval_ref": "speclino-self-gate-v1",
+      "assertion": {
+        "arguments_equal": {},
+        "count": {
+          "operator": "eq",
+          "value": 1
+        },
+        "event_kind": "call",
+        "kind": "event_requirement",
+        "operation_or_target": "gate_pass_waived",
+        "phase": "invoked"
+      },
+      "behavior_id": "gate_decide",
+      "claim_scope": "service_outcome",
+      "id": "R-GATE-03c",
+      "level": "mandatory",
+      "modality": "must",
+      "source_refs": [
+        {
+          "line_end": null,
+          "line_start": null,
+          "path": "specs/SPEC-GATE-001.md",
+          "requirement_id": "R-GATE-03c",
+          "snapshot_id": "speclino-specs",
+          "symbol": null
+        }
+      ],
+      "tests": [],
+      "title": null
+    }
+  ],
+  "schema_version": "0.1",
+  "spec_content_hash": "sha256:59bf62bc9e4a95894e5d8fe4c3e478d40c01615032dcf0d0dd4e1ca85787a43a",
+  "spec_snapshot_id": "speclino-specs",
+  "unextracted": []
+}

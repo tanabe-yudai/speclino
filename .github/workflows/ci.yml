@@ -28,7 +28,8 @@ jobs:
       - run: uv run alembic upgrade head
       - run: make test
       - run: make eval
-      # 自己検証: SpecLino 自身の仕様（SPEC-TOOL-001）と規約（MAKE-001 / SPEC-FMT-001）
+      # 自己検証: SpecLino 自身の仕様（SPEC-TOOL-001 / SPEC-GATE-001 / SPEC-RUN-001）と規約
+      # （MAKE-001 / SPEC-FMT-001 / CI-001 / API-ERR-001）
       - run: uv run speclino check --repo . --head WORKTREE --out build/self-check --fail-on VIOLATED --fail-on UNKNOWN --fail-on REVIEW --blocking
 
   web:
