@@ -1,0 +1,35 @@
+{
+  "schema_version": "0.1",
+  "behavior_id": "cancel_order",
+  "entrypoint": "examples.orders.app.service.cancel_order",
+  "snapshot": {
+    "snapshot_id": "local",
+    "repository": null,
+    "commit": null,
+    "path": null,
+    "content_hash": null
+  },
+  "analyzer_version": "0.1.0",
+  "limits": {
+    "depth": 2,
+    "max_paths": 64,
+    "solver_timeout_ms": 500
+  },
+  "paths": [],
+  "unknown_causes": [
+    {
+      "code": "limit_paths",
+      "detail": "経路数が上限 64 を超えた",
+      "source_ref": {
+        "snapshot_id": "local",
+        "requirement_id": null,
+        "symbol": "examples.orders.app.service.cancel_order",
+        "path": "examples/orders/app/service.py",
+        "line_start": 23,
+        "line_end": 23
+      },
+      "affects": []
+    }
+  ],
+  "origin": "static_analysis"
+}

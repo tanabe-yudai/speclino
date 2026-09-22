@@ -1,0 +1,44 @@
+id: 27_reject_after_update
+title: 状態を更新してから拒否する
+description: >-
+  認可されていない利用者を 403 で拒否する直前（`if not (user.is_admin or ...):` の分岐内）で
+  order.status を CANCELLED へ書き込んでしまう不具合。この write を認可判定より前（無条件）に
+  置くと、後続の `order.status != OrderStatus.PENDING` 判定が更新後の定数値で評価されて
+  しまい（PoC 9.2）成功経路自体が到達不能になり、無関係な要求（R-CANCEL-02〜06）まで巻き込む
+  ため、意図した不具合（拒否経路での禁止された書込み）の再現として不適切と判断した。そこで write
+  は「拒否される分岐の内部」に限定する。この結果 p1_forbidden 経路だけで order.status への
+  書込みが 1 回発生し、R-CANCEL-07a（拒否経路での書込み 0 を要求）が forbidden_effect で
+  VIOLATED になる。認可・状態判定・成功系の要求（R-CANCEL-01〜06）と、在庫復元・監査記録の
+  禁止（R-CANCEL-07b/07c）は影響を受けない。
+expected:
+  R-CANCEL-01:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-02:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-03:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-04:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-05:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-06:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07a:
+    verdict: VIOLATED
+    category: forbidden_effect
+  R-CANCEL-07b:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07c:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+counterexample_must_include:
+  R-CANCEL-07a:
+    path_id: p1_403
+    assignments: {}

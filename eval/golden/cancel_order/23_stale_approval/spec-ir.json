@@ -1,0 +1,733 @@
+{
+  "schema_version": "0.1",
+  "behavior_id": "cancel_order",
+  "spec_snapshot_id": "demo-spec",
+  "spec_content_hash": "sha256:489a98b16ced6b1646b6868228fd14078b4f3a060271ffa37740932899379945",
+  "rules": [
+    {
+      "id": "R-CANCEL-01",
+      "behavior_id": "cancel_order",
+      "title": null,
+      "source_refs": [
+        {
+          "snapshot_id": "demo-spec",
+          "requirement_id": "R-CANCEL-01",
+          "symbol": null,
+          "path": null,
+          "line_start": null,
+          "line_end": null
+        }
+      ],
+      "approval_ref": "demo-approval",
+      "modality": "must",
+      "level": "mandatory",
+      "claim_scope": "service_outcome",
+      "applicability": {
+        "op": "not",
+        "arg": {
+          "op": "or",
+          "args": [
+            {
+              "op": "ref",
+              "path": "before.actor.is_admin"
+            },
+            {
+              "op": "eq",
+              "left": {
+                "op": "ref",
+                "path": "before.actor.id"
+              },
+              "right": {
+                "op": "ref",
+                "path": "before.order.owner_id"
+              }
+            }
+          ]
+        }
+      },
+      "assertion": {
+        "kind": "expression",
+        "expr": {
+          "op": "eq",
+          "left": {
+            "op": "ref",
+            "path": "outcome.status"
+          },
+          "right": {
+            "op": "const",
+            "type": "integer",
+            "value": 403
+          }
+        }
+      },
+      "tests": []
+    },
+    {
+      "id": "R-CANCEL-02",
+      "behavior_id": "cancel_order",
+      "title": null,
+      "source_refs": [
+        {
+          "snapshot_id": "demo-spec",
+          "requirement_id": "R-CANCEL-02",
+          "symbol": null,
+          "path": null,
+          "line_start": null,
+          "line_end": null
+        }
+      ],
+      "approval_ref": "demo-approval",
+      "modality": "must",
+      "level": "mandatory",
+      "claim_scope": "service_outcome",
+      "applicability": {
+        "op": "and",
+        "args": [
+          {
+            "op": "or",
+            "args": [
+              {
+                "op": "ref",
+                "path": "before.actor.is_admin"
+              },
+              {
+                "op": "eq",
+                "left": {
+                  "op": "ref",
+                  "path": "before.actor.id"
+                },
+                "right": {
+                  "op": "ref",
+                  "path": "before.order.owner_id"
+                }
+              }
+            ]
+          },
+          {
+            "op": "ne",
+            "left": {
+              "op": "ref",
+              "path": "before.order.status"
+            },
+            "right": {
+              "op": "const",
+              "type": "OrderStatus",
+              "value": "PENDING"
+            }
+          }
+        ]
+      },
+      "assertion": {
+        "kind": "expression",
+        "expr": {
+          "op": "eq",
+          "left": {
+            "op": "ref",
+            "path": "outcome.status"
+          },
+          "right": {
+            "op": "const",
+            "type": "integer",
+            "value": 409
+          }
+        }
+      },
+      "tests": []
+    },
+    {
+      "id": "R-CANCEL-03",
+      "behavior_id": "cancel_order",
+      "title": null,
+      "source_refs": [
+        {
+          "snapshot_id": "demo-spec",
+          "requirement_id": "R-CANCEL-03",
+          "symbol": null,
+          "path": null,
+          "line_start": null,
+          "line_end": null
+        }
+      ],
+      "approval_ref": "demo-approval",
+      "modality": "must",
+      "level": "mandatory",
+      "claim_scope": "memory_state",
+      "applicability": {
+        "op": "and",
+        "args": [
+          {
+            "op": "or",
+            "args": [
+              {
+                "op": "ref",
+                "path": "before.actor.is_admin"
+              },
+              {
+                "op": "eq",
+                "left": {
+                  "op": "ref",
+                  "path": "before.actor.id"
+                },
+                "right": {
+                  "op": "ref",
+                  "path": "before.order.owner_id"
+                }
+              }
+            ]
+          },
+          {
+            "op": "eq",
+            "left": {
+              "op": "ref",
+              "path": "before.order.status"
+            },
+            "right": {
+              "op": "const",
+              "type": "OrderStatus",
+              "value": "PENDING"
+            }
+          }
+        ]
+      },
+      "assertion": {
+        "kind": "expression",
+        "expr": {
+          "op": "eq",
+          "left": {
+            "op": "ref",
+            "path": "after.order.status"
+          },
+          "right": {
+            "op": "const",
+            "type": "OrderStatus",
+            "value": "CANCELLED"
+          }
+        }
+      },
+      "tests": []
+    },
+    {
+      "id": "R-CANCEL-04",
+      "behavior_id": "cancel_order",
+      "title": null,
+      "source_refs": [
+        {
+          "snapshot_id": "demo-spec",
+          "requirement_id": "R-CANCEL-04",
+          "symbol": null,
+          "path": null,
+          "line_start": null,
+          "line_end": null
+        }
+      ],
+      "approval_ref": null,
+      "modality": "must",
+      "level": "mandatory",
+      "claim_scope": "command_invocation",
+      "applicability": {
+        "op": "and",
+        "args": [
+          {
+            "op": "or",
+            "args": [
+              {
+                "op": "ref",
+                "path": "before.actor.is_admin"
+              },
+              {
+                "op": "eq",
+                "left": {
+                  "op": "ref",
+                  "path": "before.actor.id"
+                },
+                "right": {
+                  "op": "ref",
+                  "path": "before.order.owner_id"
+                }
+              }
+            ]
+          },
+          {
+            "op": "eq",
+            "left": {
+              "op": "ref",
+              "path": "before.order.status"
+            },
+            "right": {
+              "op": "const",
+              "type": "OrderStatus",
+              "value": "PENDING"
+            }
+          }
+        ]
+      },
+      "assertion": {
+        "kind": "event_requirement",
+        "event_kind": "call",
+        "operation_or_target": "inventory_restore_command",
+        "phase": "invoked",
+        "count": {
+          "operator": "eq",
+          "value": 1
+        },
+        "arguments_equal": {
+          "items": {
+            "op": "ref",
+            "path": "before.order.items"
+          }
+        }
+      },
+      "tests": []
+    },
+    {
+      "id": "R-CANCEL-05",
+      "behavior_id": "cancel_order",
+      "title": null,
+      "source_refs": [
+        {
+          "snapshot_id": "demo-spec",
+          "requirement_id": "R-CANCEL-05",
+          "symbol": null,
+          "path": null,
+          "line_start": null,
+          "line_end": null
+        }
+      ],
+      "approval_ref": "demo-approval",
+      "modality": "must",
+      "level": "mandatory",
+      "claim_scope": "command_invocation",
+      "applicability": {
+        "op": "and",
+        "args": [
+          {
+            "op": "or",
+            "args": [
+              {
+                "op": "ref",
+                "path": "before.actor.is_admin"
+              },
+              {
+                "op": "eq",
+                "left": {
+                  "op": "ref",
+                  "path": "before.actor.id"
+                },
+                "right": {
+                  "op": "ref",
+                  "path": "before.order.owner_id"
+                }
+              }
+            ]
+          },
+          {
+            "op": "eq",
+            "left": {
+              "op": "ref",
+              "path": "before.order.status"
+            },
+            "right": {
+              "op": "const",
+              "type": "OrderStatus",
+              "value": "PENDING"
+            }
+          }
+        ]
+      },
+      "assertion": {
+        "kind": "event_requirement",
+        "event_kind": "call",
+        "operation_or_target": "audit_record_command",
+        "phase": "invoked",
+        "count": {
+          "operator": "eq",
+          "value": 1
+        },
+        "arguments_equal": {
+          "actor_id": {
+            "op": "ref",
+            "path": "before.actor.id"
+          },
+          "action": {
+            "op": "const",
+            "type": "AuditAction",
+            "value": "CANCEL_ORDER"
+          }
+        }
+      },
+      "tests": []
+    },
+    {
+      "id": "R-CANCEL-06",
+      "behavior_id": "cancel_order",
+      "title": null,
+      "source_refs": [
+        {
+          "snapshot_id": "demo-spec",
+          "requirement_id": "R-CANCEL-06",
+          "symbol": null,
+          "path": null,
+          "line_start": null,
+          "line_end": null
+        }
+      ],
+      "approval_ref": "demo-approval",
+      "modality": "must",
+      "level": "mandatory",
+      "claim_scope": "http_response",
+      "applicability": {
+        "op": "and",
+        "args": [
+          {
+            "op": "or",
+            "args": [
+              {
+                "op": "ref",
+                "path": "before.actor.is_admin"
+              },
+              {
+                "op": "eq",
+                "left": {
+                  "op": "ref",
+                  "path": "before.actor.id"
+                },
+                "right": {
+                  "op": "ref",
+                  "path": "before.order.owner_id"
+                }
+              }
+            ]
+          },
+          {
+            "op": "eq",
+            "left": {
+              "op": "ref",
+              "path": "before.order.status"
+            },
+            "right": {
+              "op": "const",
+              "type": "OrderStatus",
+              "value": "PENDING"
+            }
+          }
+        ]
+      },
+      "assertion": {
+        "kind": "expression",
+        "expr": {
+          "op": "eq",
+          "left": {
+            "op": "ref",
+            "path": "outcome.status"
+          },
+          "right": {
+            "op": "const",
+            "type": "integer",
+            "value": 204
+          }
+        }
+      },
+      "tests": []
+    },
+    {
+      "id": "R-CANCEL-07a",
+      "behavior_id": "cancel_order",
+      "title": null,
+      "source_refs": [
+        {
+          "snapshot_id": "demo-spec",
+          "requirement_id": "R-CANCEL-07",
+          "symbol": null,
+          "path": null,
+          "line_start": null,
+          "line_end": null
+        }
+      ],
+      "approval_ref": "demo-approval",
+      "modality": "must",
+      "level": "mandatory",
+      "claim_scope": "memory_state",
+      "applicability": {
+        "op": "or",
+        "args": [
+          {
+            "op": "not",
+            "arg": {
+              "op": "or",
+              "args": [
+                {
+                  "op": "ref",
+                  "path": "before.actor.is_admin"
+                },
+                {
+                  "op": "eq",
+                  "left": {
+                    "op": "ref",
+                    "path": "before.actor.id"
+                  },
+                  "right": {
+                    "op": "ref",
+                    "path": "before.order.owner_id"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "op": "and",
+            "args": [
+              {
+                "op": "or",
+                "args": [
+                  {
+                    "op": "ref",
+                    "path": "before.actor.is_admin"
+                  },
+                  {
+                    "op": "eq",
+                    "left": {
+                      "op": "ref",
+                      "path": "before.actor.id"
+                    },
+                    "right": {
+                      "op": "ref",
+                      "path": "before.order.owner_id"
+                    }
+                  }
+                ]
+              },
+              {
+                "op": "ne",
+                "left": {
+                  "op": "ref",
+                  "path": "before.order.status"
+                },
+                "right": {
+                  "op": "const",
+                  "type": "OrderStatus",
+                  "value": "PENDING"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "assertion": {
+        "kind": "event_requirement",
+        "event_kind": "write",
+        "operation_or_target": "order.status",
+        "phase": "applied",
+        "count": {
+          "operator": "eq",
+          "value": 0
+        },
+        "arguments_equal": {}
+      },
+      "tests": []
+    },
+    {
+      "id": "R-CANCEL-07b",
+      "behavior_id": "cancel_order",
+      "title": null,
+      "source_refs": [
+        {
+          "snapshot_id": "demo-spec",
+          "requirement_id": "R-CANCEL-07",
+          "symbol": null,
+          "path": null,
+          "line_start": null,
+          "line_end": null
+        }
+      ],
+      "approval_ref": "demo-approval",
+      "modality": "must",
+      "level": "mandatory",
+      "claim_scope": "command_invocation",
+      "applicability": {
+        "op": "or",
+        "args": [
+          {
+            "op": "not",
+            "arg": {
+              "op": "or",
+              "args": [
+                {
+                  "op": "ref",
+                  "path": "before.actor.is_admin"
+                },
+                {
+                  "op": "eq",
+                  "left": {
+                    "op": "ref",
+                    "path": "before.actor.id"
+                  },
+                  "right": {
+                    "op": "ref",
+                    "path": "before.order.owner_id"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "op": "and",
+            "args": [
+              {
+                "op": "or",
+                "args": [
+                  {
+                    "op": "ref",
+                    "path": "before.actor.is_admin"
+                  },
+                  {
+                    "op": "eq",
+                    "left": {
+                      "op": "ref",
+                      "path": "before.actor.id"
+                    },
+                    "right": {
+                      "op": "ref",
+                      "path": "before.order.owner_id"
+                    }
+                  }
+                ]
+              },
+              {
+                "op": "ne",
+                "left": {
+                  "op": "ref",
+                  "path": "before.order.status"
+                },
+                "right": {
+                  "op": "const",
+                  "type": "OrderStatus",
+                  "value": "PENDING"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "assertion": {
+        "kind": "event_requirement",
+        "event_kind": "call",
+        "operation_or_target": "inventory_restore_command",
+        "phase": "invoked",
+        "count": {
+          "operator": "eq",
+          "value": 0
+        },
+        "arguments_equal": {}
+      },
+      "tests": []
+    },
+    {
+      "id": "R-CANCEL-07c",
+      "behavior_id": "cancel_order",
+      "title": null,
+      "source_refs": [
+        {
+          "snapshot_id": "demo-spec",
+          "requirement_id": "R-CANCEL-07",
+          "symbol": null,
+          "path": null,
+          "line_start": null,
+          "line_end": null
+        }
+      ],
+      "approval_ref": "demo-approval",
+      "modality": "must",
+      "level": "mandatory",
+      "claim_scope": "command_invocation",
+      "applicability": {
+        "op": "or",
+        "args": [
+          {
+            "op": "not",
+            "arg": {
+              "op": "or",
+              "args": [
+                {
+                  "op": "ref",
+                  "path": "before.actor.is_admin"
+                },
+                {
+                  "op": "eq",
+                  "left": {
+                    "op": "ref",
+                    "path": "before.actor.id"
+                  },
+                  "right": {
+                    "op": "ref",
+                    "path": "before.order.owner_id"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "op": "and",
+            "args": [
+              {
+                "op": "or",
+                "args": [
+                  {
+                    "op": "ref",
+                    "path": "before.actor.is_admin"
+                  },
+                  {
+                    "op": "eq",
+                    "left": {
+                      "op": "ref",
+                      "path": "before.actor.id"
+                    },
+                    "right": {
+                      "op": "ref",
+                      "path": "before.order.owner_id"
+                    }
+                  }
+                ]
+              },
+              {
+                "op": "ne",
+                "left": {
+                  "op": "ref",
+                  "path": "before.order.status"
+                },
+                "right": {
+                  "op": "const",
+                  "type": "OrderStatus",
+                  "value": "PENDING"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "assertion": {
+        "kind": "event_requirement",
+        "event_kind": "call",
+        "operation_or_target": "audit_record_command",
+        "phase": "invoked",
+        "count": {
+          "operator": "eq",
+          "value": 0
+        },
+        "arguments_equal": {}
+      },
+      "tests": []
+    }
+  ],
+  "approvals": [
+    {
+      "id": "demo-approval",
+      "approver": "tanabe-yudai",
+      "approved_at": "2026-09-22T00:00:00Z",
+      "source": "manual",
+      "spec_content_hash": "sha256:489a98b16ced6b1646b6868228fd14078b4f3a060271ffa37740932899379945",
+      "ir_content_hash": "sha256:pending",
+      "evidence_url": null
+    }
+  ],
+  "unextracted": []
+}

@@ -1,0 +1,34 @@
+id: 15_helper_split
+title: 対応する直接ヘルパーへ処理を分割する
+description: 在庫復元と監査記録を同一ファイル内のヘルパー関数 `_finish(order, user)` に分割する。
+  `_finish` は bindings.operations に登録されていないリポジトリ内関数として扱われ、既定の呼出し
+  深さ上限（2）以内（呼出し深さ 1）で展開されるため、イベント列は 01_correct と同じになる。
+  PoC 17.1「対応する直接ヘルパーへ処理を分割する → 正常に追跡する」を確認する。
+expected:
+  R-CANCEL-01:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-02:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-03:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-04:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-05:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-06:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07a:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07b:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07c:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant

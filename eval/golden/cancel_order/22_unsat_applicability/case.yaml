@@ -1,0 +1,40 @@
+id: 22_unsat_applicability
+title: 適用条件が充足不能
+spec_ir_override: spec-ir.json
+description: >-
+  実装は 01_correct と同一で、変えるのは仕様側だけである。このケース固有の `spec-ir.json`
+  （runner が `spec_ir_override` で読み込む）では R-CANCEL-04 の applicability を
+  `before.order.status == PENDING and before.order.status == SHIPPED`（同一変数が
+  同時に 2 つの列挙値を取ることを要求する、恒偽の式）に差し替えてある。
+  conformance_engine は要求ごとに「入口仮定 ∧ applicability」の充足性を最初に確認し
+  （PoC 10.3 の判定規則、`ConformanceEngine.evaluate_rule` のステップ2）、UNSAT なら
+  空虚な成功として VERIFIED を出さず REVIEW: vacuous_applicability にする。R-CANCEL-04 だけ
+  この扱いになり、他の要求は 01_correct と同じ結果になる。
+expected:
+  R-CANCEL-01:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-02:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-03:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-04:
+    verdict: REVIEW
+    category: vacuous_applicability
+  R-CANCEL-05:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-06:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07a:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07b:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07c:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant

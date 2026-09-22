@@ -1,0 +1,38 @@
+id: 19_path_limit
+title: 解析上限・ソルバー制限に達する
+description: >-
+  成功経路に、意味の無い独立した if/else を 8 個並べる。path_analyzer は分岐を意味的に
+  刈り込まず愚直に展開するため 2^8=256 通りの成功経路が生じ、既存の 403/409 経路と合わせて
+  既定の経路数上限（`AnalysisLimits.max_paths` = 64、`src/speclino/analysis/limits.py`）を
+  超える。上限超過時 `PathAnalyzer.analyze` は集めていた経路を全て捨て、
+  `code.paths=[]`・`code.unknown_causes=[limit_paths]` を返す（現在の実装の制約。経路を
+  部分的にでも残す設計ではない）。conformance_engine は経路が 1 つも無いと網羅性チェックで
+  `unsupported_analysis` の UNKNOWN に倒すため、R-CANCEL-01〜07c の全要求が UNKNOWN になる。
+expected:
+  R-CANCEL-01:
+    verdict: UNKNOWN
+    category: unsupported_analysis
+  R-CANCEL-02:
+    verdict: UNKNOWN
+    category: unsupported_analysis
+  R-CANCEL-03:
+    verdict: UNKNOWN
+    category: unsupported_analysis
+  R-CANCEL-04:
+    verdict: UNKNOWN
+    category: unsupported_analysis
+  R-CANCEL-05:
+    verdict: UNKNOWN
+    category: unsupported_analysis
+  R-CANCEL-06:
+    verdict: UNKNOWN
+    category: unsupported_analysis
+  R-CANCEL-07a:
+    verdict: UNKNOWN
+    category: unsupported_analysis
+  R-CANCEL-07b:
+    verdict: UNKNOWN
+    category: unsupported_analysis
+  R-CANCEL-07c:
+    verdict: UNKNOWN
+    category: unsupported_analysis

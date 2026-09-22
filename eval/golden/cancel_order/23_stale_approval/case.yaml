@@ -1,0 +1,39 @@
+id: 23_stale_approval
+title: 仕様本文が承認後に変わる
+spec_ir_override: spec-ir.json
+description: >-
+  実装は 01_correct と同一で、変えるのは仕様側だけである。このケース固有の `spec-ir.json`
+  （runner が `spec_ir_override` で読み込む）では R-CANCEL-04 の `approval_ref` を `null`
+  にしてあり、承認記録（approvals）にこの要求の解釈を裏付ける記録が無い状態を表す（仕様本文が
+  承認後に変わり、まだ再承認されていない、という想定）。conformance_engine は要求ごとに承認の
+  有無を最初に確認し（`ConformanceEngine.evaluate_rule` のステップ0）、未承認なら型検査や
+  経路検査に進まず REVIEW: stale_approval にする。旧 IR のまま黙って成功（VERIFIED）を出さない
+  ことを確認する。R-CANCEL-04 だけこの扱いになり、他の要求は 01_correct と同じ結果になる。
+expected:
+  R-CANCEL-01:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-02:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-03:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-04:
+    verdict: REVIEW
+    category: stale_approval
+  R-CANCEL-05:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-06:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07a:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07b:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07c:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant

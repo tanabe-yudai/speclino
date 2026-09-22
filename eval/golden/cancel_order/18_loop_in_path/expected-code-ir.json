@@ -1,0 +1,300 @@
+{
+  "analyzer_version": "0.1.0",
+  "behavior_id": "cancel_order",
+  "entrypoint": "examples.orders.app.service.cancel_order",
+  "limits": {
+    "depth": 2,
+    "max_paths": 64,
+    "solver_timeout_ms": 500
+  },
+  "origin": "static_analysis",
+  "paths": [
+    {
+      "events": [],
+      "guard": {
+        "arg": {
+          "args": [
+            {
+              "op": "ref",
+              "path": "before.actor.is_admin"
+            },
+            {
+              "left": {
+                "op": "ref",
+                "path": "before.actor.id"
+              },
+              "op": "eq",
+              "right": {
+                "op": "ref",
+                "path": "before.order.owner_id"
+              }
+            }
+          ],
+          "op": "or"
+        },
+        "op": "not"
+      },
+      "outcome": {
+        "exception_type": null,
+        "kind": "http_response",
+        "source_ref": {
+          "line_end": 24,
+          "line_start": 24,
+          "path": "examples/orders/app/service.py",
+          "requirement_id": null,
+          "snapshot_id": "local",
+          "symbol": "examples.orders.app.service.cancel_order"
+        },
+        "status": 403,
+        "value": null
+      },
+      "path_id": "p1_403",
+      "precision": "exact_in_model",
+      "source_refs": [
+        {
+          "line_end": 24,
+          "line_start": 23,
+          "path": "examples/orders/app/service.py",
+          "requirement_id": null,
+          "snapshot_id": "local",
+          "symbol": "examples.orders.app.service.cancel_order"
+        }
+      ],
+      "state_updates": [],
+      "unknown_causes": []
+    },
+    {
+      "events": [],
+      "guard": {
+        "args": [
+          {
+            "args": [
+              {
+                "op": "ref",
+                "path": "before.actor.is_admin"
+              },
+              {
+                "left": {
+                  "op": "ref",
+                  "path": "before.actor.id"
+                },
+                "op": "eq",
+                "right": {
+                  "op": "ref",
+                  "path": "before.order.owner_id"
+                }
+              }
+            ],
+            "op": "or"
+          },
+          {
+            "left": {
+              "op": "ref",
+              "path": "before.order.status"
+            },
+            "op": "ne",
+            "right": {
+              "op": "const",
+              "type": "OrderStatus",
+              "value": "PENDING"
+            }
+          }
+        ],
+        "op": "and"
+      },
+      "outcome": {
+        "exception_type": null,
+        "kind": "http_response",
+        "source_ref": {
+          "line_end": 26,
+          "line_start": 26,
+          "path": "examples/orders/app/service.py",
+          "requirement_id": null,
+          "snapshot_id": "local",
+          "symbol": "examples.orders.app.service.cancel_order"
+        },
+        "status": 409,
+        "value": null
+      },
+      "path_id": "p2_409",
+      "precision": "exact_in_model",
+      "source_refs": [
+        {
+          "line_end": 26,
+          "line_start": 23,
+          "path": "examples/orders/app/service.py",
+          "requirement_id": null,
+          "snapshot_id": "local",
+          "symbol": "examples.orders.app.service.cancel_order"
+        }
+      ],
+      "state_updates": [],
+      "unknown_causes": []
+    },
+    {
+      "events": [
+        {
+          "arguments": {},
+          "certainty": "must",
+          "kind": "write",
+          "operation": null,
+          "phase": "applied",
+          "sequence": 1,
+          "source_ref": {
+            "line_end": 27,
+            "line_start": 27,
+            "path": "examples/orders/app/service.py",
+            "requirement_id": null,
+            "snapshot_id": "local",
+            "symbol": "examples.orders.app.service.cancel_order"
+          },
+          "target": "order.status",
+          "value": {
+            "op": "const",
+            "type": "OrderStatus",
+            "value": "CANCELLED"
+          }
+        },
+        {
+          "arguments": {
+            "action": {
+              "op": "const",
+              "type": "AuditAction",
+              "value": "CANCEL_ORDER"
+            },
+            "actor_id": {
+              "op": "ref",
+              "path": "before.actor.id"
+            }
+          },
+          "certainty": "must",
+          "kind": "call",
+          "operation": "audit_record_command",
+          "phase": "invoked",
+          "sequence": 2,
+          "source_ref": {
+            "line_end": 30,
+            "line_start": 30,
+            "path": "examples/orders/app/service.py",
+            "requirement_id": null,
+            "snapshot_id": "local",
+            "symbol": "examples.orders.app.service.cancel_order"
+          },
+          "target": null,
+          "value": null
+        }
+      ],
+      "guard": {
+        "args": [
+          {
+            "args": [
+              {
+                "op": "ref",
+                "path": "before.actor.is_admin"
+              },
+              {
+                "left": {
+                  "op": "ref",
+                  "path": "before.actor.id"
+                },
+                "op": "eq",
+                "right": {
+                  "op": "ref",
+                  "path": "before.order.owner_id"
+                }
+              }
+            ],
+            "op": "or"
+          },
+          {
+            "arg": {
+              "left": {
+                "op": "ref",
+                "path": "before.order.status"
+              },
+              "op": "ne",
+              "right": {
+                "op": "const",
+                "type": "OrderStatus",
+                "value": "PENDING"
+              }
+            },
+            "op": "not"
+          }
+        ],
+        "op": "and"
+      },
+      "outcome": {
+        "exception_type": null,
+        "kind": "http_response",
+        "source_ref": {
+          "line_end": 31,
+          "line_start": 31,
+          "path": "examples/orders/app/service.py",
+          "requirement_id": null,
+          "snapshot_id": "local",
+          "symbol": "examples.orders.app.service.cancel_order"
+        },
+        "status": 204,
+        "value": null
+      },
+      "path_id": "p3_204",
+      "precision": "incomplete",
+      "source_refs": [
+        {
+          "line_end": 31,
+          "line_start": 23,
+          "path": "examples/orders/app/service.py",
+          "requirement_id": null,
+          "snapshot_id": "local",
+          "symbol": "examples.orders.app.service.cancel_order"
+        }
+      ],
+      "state_updates": [
+        {
+          "source_ref": {
+            "line_end": 27,
+            "line_start": 27,
+            "path": "examples/orders/app/service.py",
+            "requirement_id": null,
+            "snapshot_id": "local",
+            "symbol": "examples.orders.app.service.cancel_order"
+          },
+          "target": "order.status",
+          "value": {
+            "op": "const",
+            "type": "OrderStatus",
+            "value": "CANCELLED"
+          }
+        }
+      ],
+      "unknown_causes": [
+        {
+          "affects": [],
+          "code": "unsupported_syntax",
+          "detail": "For は対応外の構文（構造解析: 領域が触れ得る観測は call:inventory_restore_command）",
+          "may_affect": [
+            "call:inventory_restore_command"
+          ],
+          "source_ref": {
+            "line_end": 28,
+            "line_start": 28,
+            "path": "examples/orders/app/service.py",
+            "requirement_id": null,
+            "snapshot_id": "local",
+            "symbol": "examples.orders.app.service.cancel_order"
+          }
+        }
+      ]
+    }
+  ],
+  "schema_version": "0.1",
+  "snapshot": {
+    "commit": null,
+    "content_hash": null,
+    "path": null,
+    "repository": null,
+    "snapshot_id": "local"
+  },
+  "unknown_causes": []
+}

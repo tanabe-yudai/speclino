@@ -4,6 +4,10 @@ mode:
   handwritten: expected-code-ir.json（手書き Code IR）を検査器に入力する（PoC M1）
   source:      app/service.py を解析器に入力し、生成 Code IR で検査する（PoC M2）
 一致率だけを出さず、要求数・承認済み数・対応範囲数・判定済み数・未解析数を併記する。
+
+case.yaml に `spec_ir_override: <相対パス>` を指定すると、そのケースだけ共有の
+spec-ir.json ではなく `<case_dir>/<相対パス>` の Spec IR を使って検査する（適用条件が
+充足不能、承認切れ等、ケース固有の Spec IR が必要な S34 の 22/23 のようなケース向け）。
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ from pydantic import BaseModel, Field
 from speclino.analysis.limits import DEFAULT_LIMITS
 from speclino.analysis.path_analyzer import analyze_repo
 from speclino.conformance.engine import evaluate
+from speclino.conformance.finite_check import cross_check
 from speclino.domain.code_ir import CodeIR
 from speclino.domain.finding import Findings
 from speclino.spec import load_bindings, load_domain, load_spec_ir
@@ -38,10 +43,17 @@ class CaseResult(BaseModel):
     mismatches: list[str] = Field(default_factory=list)
     counterexample_ok: bool | None = None
     counterexample_detail: str = ""
+    # 有限ドメイン検算（PoC 3.1 / S35）: Z3 の判定と総当たりが食い違った要求
+    finite_disagreements: list[str] = Field(default_factory=list)
+    finite_agreements: int = 0
 
     @property
     def ok(self) -> bool:
-        return not self.mismatches and self.counterexample_ok is not False
+        return (
+            not self.mismatches
+            and self.counterexample_ok is not False
+            and not self.finite_disagreements
+        )
 
 
 class EvalReport(BaseModel):
@@ -60,6 +72,49 @@ class EvalReport(BaseModel):
     @property
     def all_match(self) -> bool:
         return all(c.ok for c in self.cases)
+
+    @property
+    def finite_check_agreements(self) -> int:
+        return sum(c.finite_agreements for c in self.cases)
+
+    @property
+    def finite_check_disagreements(self) -> int:
+        return sum(len(c.finite_disagreements) for c in self.cases)
+
+    @property
+    def total_findings(self) -> int:
+        """expected に列挙され、判定を比較した Finding の総数（ケース横断）。"""
+        return sum(sum(row.values()) for row in self.confusion.values())
+
+    @property
+    def violated_detection_rate(self) -> float | None:
+        """既知違反の検出率（PoC 17.3）: 期待 VIOLATED のうち実際 VIOLATED の割合。"""
+        total = sum(self.confusion["VIOLATED"].values())
+        if total == 0:
+            return None
+        return self.confusion["VIOLATED"]["VIOLATED"] / total
+
+    @property
+    def unknown_rate(self) -> float | None:
+        """UNKNOWN 率（PoC 17.3）: 全 Finding のうち実際 UNKNOWN の割合。"""
+        if self.total_findings == 0:
+            return None
+        return sum(row["UNKNOWN"] for row in self.confusion.values()) / self.total_findings
+
+    @property
+    def review_rate(self) -> float | None:
+        """要確認率（PoC 17.3）: 全 Finding のうち実際 REVIEW の割合。"""
+        if self.total_findings == 0:
+            return None
+        return sum(row["REVIEW"] for row in self.confusion.values()) / self.total_findings
+
+    @property
+    def counterexample_reproduction_rate(self) -> float | None:
+        """反例の再現率（PoC 17.3）: counterexample_must_include を指定した Finding のうち、
+        反例（path_id / assignments）が一致した割合。"""
+        if self.counterexample_total == 0:
+            return None
+        return self.counterexample_matches / self.counterexample_total
 
 
 def _source_repo(golden_root: Path, case_dir: Path, tmp: Path) -> Path:
@@ -103,6 +158,10 @@ def run_golden(golden_dir: Path, mode: Mode = "handwritten") -> EvalReport:
     )
     for case_dir in sorted(p for p in golden_dir.iterdir() if p.is_dir()):
         meta = yaml.safe_load((case_dir / "case.yaml").read_text(encoding="utf-8"))
+        case_spec = spec
+        override = meta.get("spec_ir_override")
+        if override:
+            case_spec = load_spec_ir(case_dir / override)
         if mode == "handwritten":
             code = CodeIR.model_validate(
                 json.loads((case_dir / "expected-code-ir.json").read_text())
@@ -112,9 +171,14 @@ def run_golden(golden_dir: Path, mode: Mode = "handwritten") -> EvalReport:
                 raise SystemExit("source モードには bindings.yaml が必要")
             with tempfile.TemporaryDirectory(prefix="speclino-golden-") as tmp:
                 root = _source_repo(golden_dir, case_dir, Path(tmp))
-                code = analyze_repo(root, spec.behavior_id, domain, bindings, limits=DEFAULT_LIMITS)
-        findings = evaluate(spec, code, domain)
+                code = analyze_repo(
+                    root, case_spec.behavior_id, domain, bindings, limits=DEFAULT_LIMITS
+                )
+        findings = evaluate(case_spec, code, domain)
         result = _compare(meta, findings, strict_path_id=(mode == "handwritten"))
+        finite = cross_check(case_spec, code, domain)
+        result.finite_disagreements = finite.disagreements
+        result.finite_agreements = finite.agreements
         cases.append(result)
         for rid, exp in result.expected.items():
             act = result.actual.get(rid, {"verdict": "UNKNOWN"})
@@ -181,11 +245,19 @@ def _compare(meta: dict[str, Any], findings: Findings, strict_path_id: bool = Tr
     )
 
 
+def _fmt_rate(rate: float | None) -> str:
+    return "-" if rate is None else f"{rate * 100:.1f}%"
+
+
 def render_markdown(report: EvalReport) -> str:
     lines = [f"# Golden 評価（mode={report.mode}）", ""]
     lines.append(f"- ケース: {sum(c.ok for c in report.cases)}/{len(report.cases)} 一致")
     lines.append(f"- 誤った VERIFIED: **{report.false_verified}**（0 でなければ CI 失敗）")
     lines.append(f"- 反例の一致: {report.counterexample_matches}/{report.counterexample_total}")
+    lines.append(
+        "- 有限ドメイン検算（Z3 と総当たりの照合）: "
+        f"一致 {report.finite_check_agreements} / 不一致 **{report.finite_check_disagreements}**"
+    )
     lines.append("")
     lines.append("## 併記（PoC 17.3）")
     lines.append("")
@@ -195,6 +267,17 @@ def render_markdown(report: EvalReport) -> str:
         f"| {report.requirements_total} | {report.requirements_approved}"
         f" | {report.requirements_in_scope} "
         f"| {report.requirements_decided} | {report.requirements_unanalyzed} |"
+    )
+    lines.append("")
+    lines.append("## 指標（PoC 17.3: 一致率だけを出さない）")
+    lines.append("")
+    lines.append("| 既知違反の検出率 | UNKNOWN 率 | 要確認率（REVIEW） | 反例の再現率 |")
+    lines.append("| --- | --- | --- | --- |")
+    lines.append(
+        f"| {_fmt_rate(report.violated_detection_rate)}"
+        f" | {_fmt_rate(report.unknown_rate)}"
+        f" | {_fmt_rate(report.review_rate)}"
+        f" | {_fmt_rate(report.counterexample_reproduction_rate)} |"
     )
     lines.append("")
     lines.append("## 混同行列（期待 → 実際）")
@@ -211,7 +294,7 @@ def render_markdown(report: EvalReport) -> str:
     lines.append("| ID | タイトル | 結果 | 不一致 |")
     lines.append("| --- | --- | --- | --- |")
     for c in report.cases:
-        note = "; ".join(c.mismatches) or c.counterexample_detail
+        note = "; ".join([*c.mismatches, *c.finite_disagreements]) or c.counterexample_detail
         lines.append(f"| {c.id} | {c.title} | {'OK' if c.ok else 'NG'} | {note} |")
     return "\n".join(lines) + "\n"
 

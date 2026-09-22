@@ -1,0 +1,41 @@
+id: 21_mock_only
+title: モックへの呼び出しだけがある
+description: >-
+  `inventory.restore` の代わりに、同一ファイル内で定義したテストダブル `_mock_restore`（本体は
+  `pass`）を呼ぶ。`_mock_restore` は bindings.operations に無いリポジトリ内関数として深さ 1 で
+  展開されるが、副作用もイベントも発行しない。inventory_restore_command の呼出し回数は 0 の
+  まま経路は exact_in_model で確定する（未解決要因が無いため UNKNOWN にはならない）ため、
+  R-CANCEL-04 は確定的に missing_effect の VIOLATED になる。モック相手への呼び出しは永続化の
+  証拠にならない（design 4.2 / 11.2）ことを、実装の見た目は「呼んでいる」ケースで示す。
+expected:
+  R-CANCEL-01:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-02:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-03:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-04:
+    verdict: VIOLATED
+    category: missing_effect
+  R-CANCEL-05:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-06:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07a:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07b:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07c:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+counterexample_must_include:
+  R-CANCEL-04:
+    path_id: p3_204
+    assignments: {}

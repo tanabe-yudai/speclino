@@ -1,0 +1,46 @@
+id: 20_admin_only_test_observed
+title: 管理者のテストだけを観測した
+description: >-
+  コードは 07_restore_admin_only と同一（在庫復元を `if user.is_admin:` で管理者経路だけに
+  限定する不具合）であり、静的評価の結果も 07 と同じになる。PoC 17.1 の原文は「管理者のテストだけを
+  観測した → 所有者経路を観測済みにしない」という動的観測（test_run / trace_importer）側の論点で、
+  「静的には REVIEW/UNKNOWN でも、管理者のテストだけが通っていることを理由に所有者経路まで
+  緑にしてはならない」という設計意図を確認するためのものである。今回の S34（golden と holdout の
+  整備）のスコープでは runner に test_run/trace_importer を接続していないため、
+  `Finding.test_observation` は静的評価だけでは生成されない（`design/...` 11.1 の
+  static_verdict と test_observation を分けて持つという設計どおり、両者は別軸であり、
+  一方が無いことは他方を代替しない）。この不足自体が「観測していないものを観測済み扱いにしない」
+  という論点を裏付ける。手書き IR は 07 の解析結果と同型（`_finish` 等のヘルパーを使わない
+  ため path_analyzer の出力を素直に保存したもの）。
+expected:
+  R-CANCEL-01:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-02:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-03:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-04:
+    verdict: VIOLATED
+    category: missing_effect
+  R-CANCEL-05:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-06:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07a:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07b:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07c:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+counterexample_must_include:
+  R-CANCEL-04:
+    path_id: p4_204
+    assignments: {}

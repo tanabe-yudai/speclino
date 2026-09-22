@@ -1,0 +1,34 @@
+id: 14_equivalent_condition
+title: 同等の条件式へ書き換える
+description: 認可条件 `not (a or b)` をド・モルガンの法則で `(not a) and (not b)` に、状態条件
+  `!= PENDING` を `not (== PENDING)` に書き換える。どちらも元の式と論理的に同値であり、
+  Z3 上の充足可能性は変わらないため全要求が VERIFIED_IN_SCOPE になる。PoC 17.1「同等の条件式へ
+  書き換える → 誤った違反を出さない」を確認する。
+expected:
+  R-CANCEL-01:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-02:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-03:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-04:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-05:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-06:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07a:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07b:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07c:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant

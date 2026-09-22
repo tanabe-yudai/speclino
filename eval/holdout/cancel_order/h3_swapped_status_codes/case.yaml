@@ -1,0 +1,44 @@
+id: h3_swapped_status_codes
+title: 409 と 403 を入れ替える
+description: >-
+  認可エラーと状態競合エラーの応答コードを入れ替える（無権限者に 409、非 PENDING に 403 を
+  返すようにする）。403/409 はどちらも非成功域のため成功/拒否の区分自体は変わらず、
+  R-CANCEL-01・R-CANCEL-02 はどちらも outcome_mismatch になる（constraint_mismatch には
+  ならない）。他の要求は影響を受けない。holdout（調整に使わない検証用）ケースであり、
+  `make eval` には含めない。
+expected:
+  R-CANCEL-01:
+    verdict: VIOLATED
+    category: outcome_mismatch
+  R-CANCEL-02:
+    verdict: VIOLATED
+    category: outcome_mismatch
+  R-CANCEL-03:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-04:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-05:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-06:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07a:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07b:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07c:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+counterexample_must_include:
+  R-CANCEL-01:
+    path_id: p1_409
+    assignments:
+      before.actor.is_admin: false
+  R-CANCEL-02:
+    path_id: p2_403
+    assignments: {}

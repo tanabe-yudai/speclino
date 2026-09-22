@@ -1,0 +1,35 @@
+id: 13_rename_locals
+title: ローカル変数名だけを変える
+description: 認可判定・状態判定の結果を一度ローカル変数（_perm / _pending）に受けてから参照する。
+  entrypoint の引数名（user / order）は bindings.yaml の variables（"user.is_admin" 等）に
+  直接埋め込まれているため変更できない一方、それ以外のローカル変数名は解析器・検査器の判定に
+  影響しない。式の構造は 01_correct と同一になるため全要求が VERIFIED_IN_SCOPE になり、
+  PoC 17.1「ローカル変数名だけを変える → 誤った意味差分を出さない」を確認する。
+expected:
+  R-CANCEL-01:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-02:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-03:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-04:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-05:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-06:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07a:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07b:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07c:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant

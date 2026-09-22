@@ -1,0 +1,49 @@
+id: 16_audit_called_twice
+title: "未記載の追加処理（代替: 監査記録を 2 回呼ぶ）"
+description: >-
+  PoC 17.1 の原文は「未記載の通知を追加する → REVIEW。禁止と明記されていれば
+  VIOLATED」。だが conformance_engine の undocumented_behavior 検出（`_undocumented_behavior`,
+  PoC 10.5）は `code.paths[*].events[*]` のうち kind="call" のイベント（= bindings.operations
+  に登録され `_emit_operation` で発行されたイベント）だけを対象にする。このケースで触ってよいのは
+  `eval/golden/cancel_order/` 配下の新規ケースディレクトリだけで、bindings.yaml（在庫復元・監査
+  記録の 2 操作のみを登録）と、source モードの一時リポジトリへコピーするファイル一覧を決めている
+  `runner._source_repo`（`src/speclino/eval/runner.py` の今回の変更は指標レポート拡張と
+  spec_ir_override 対応に限る）のどちらも変更できない。bindings に無いシンボルへの呼出しは
+  call イベントではなく unresolved_call の unknown_causes になるため、そもそも
+  undocumented_behavior の判定対象に乗らない。したがって「未記載の通知」を額面通りに
+  source モードで再現する経路が無い。代わりに同じ「仕様が把握していない追加の振る舞い」という
+  主旨を、検出可能な形で再現する（audit_record_command を成功経路で 2 回呼ぶ）。R-CANCEL-05
+  （count eq 1）のみ cardinality_mismatch になる。undocumented_behavior 自体は
+  `tests/unit/conformance/test_engine.py` で別途検証済み。
+expected:
+  R-CANCEL-01:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-02:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-03:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-04:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-05:
+    verdict: VIOLATED
+    category: cardinality_mismatch
+  R-CANCEL-06:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07a:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07b:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07c:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+counterexample_must_include:
+  R-CANCEL-05:
+    path_id: p3_204
+    assignments: {}
