@@ -1,0 +1,21 @@
+"""DB repositories（S14）。各クラスは `AsyncSession` を受け取り、対応するテーブルを操作する。"""
+
+from __future__ import annotations
+
+from speclino.db.repositories.audit import AuditRepository
+from speclino.db.repositories.cost_ledger import CostLedgerRepository
+from speclino.db.repositories.findings import FindingRepository
+from speclino.db.repositories.projects import ProjectRepository
+from speclino.db.repositories.review_runs import ReviewRunRepository
+from speclino.db.repositories.run_events import RunEventRepository
+from speclino.db.repositories.webhook_deliveries import WebhookDeliveryRepository
+
+__all__ = [
+    "AuditRepository",
+    "CostLedgerRepository",
+    "FindingRepository",
+    "ProjectRepository",
+    "ReviewRunRepository",
+    "RunEventRepository",
+    "WebhookDeliveryRepository",
+]
