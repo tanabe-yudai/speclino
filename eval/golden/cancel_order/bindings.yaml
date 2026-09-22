@@ -1,0 +1,27 @@
+schema_version: "0.1"
+
+behaviors:
+  cancel_order:
+    entrypoint: examples.orders.app.service.cancel_order
+    variables:
+      actor.is_admin: user.is_admin
+      actor.id: user.id
+      order.owner_id: order.owner_id
+      order.status: order.status
+      order.items: order.items
+
+operations:
+  inventory_restore_command:
+    symbol: examples.orders.app.inventory.restore
+    claim_scope: command_invocation
+    argument_bindings:
+      items: positional:0
+    summary_ref: inventory_restore_v1
+
+  audit_record_command:
+    symbol: examples.orders.app.audit.record
+    claim_scope: command_invocation
+    argument_bindings:
+      actor_id: positional:0
+      action: positional:1
+    summary_ref: audit_record_v1

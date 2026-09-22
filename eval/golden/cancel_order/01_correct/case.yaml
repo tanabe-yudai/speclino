@@ -1,0 +1,32 @@
+id: 01_correct
+title: 正しい実装
+description: examples/orders/app/service.py と同一の正しい実装。対応範囲の要求は全て VERIFIED_IN_SCOPE になることを確認する（PoC 17.1
+  一行目）。
+expected:
+  R-CANCEL-01:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-02:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-03:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-04:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-05:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-06:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07a:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07b:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07c:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant

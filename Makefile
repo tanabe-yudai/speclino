@@ -29,7 +29,7 @@ db-migrate:
 	uv run alembic upgrade head
 
 eval:
-	@echo "TODO(S09)"
+	uv run python -m speclino.eval.runner eval/golden --mode handwritten --out build/eval/report.md
 
 openapi:
 	@echo "TODO"

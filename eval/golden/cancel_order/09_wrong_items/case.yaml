@@ -1,0 +1,36 @@
+id: 09_wrong_items
+title: 別の注文の商品を渡す
+description: 'PoC 17.1 の原文は「別の注文の商品を渡す → argument_mismatch」。だが domain / bindings は単一の order しか持たず、opaque
+  な ItemSet 型は同一性だけを比較するため「別注文の商品」という値そのものを domain 内で表現できない（before.order.items 以外の ItemSet 定数を Spec IR/Code
+  IRの語彙で作れない）。実際に別 order を渡す形にすると argument_bindings が解決できる別の変数をdomain に追加する必要があり、このケースの意図（=渡した値が期待と違う）から外れる。そこで実装バグとしては同種の「渡す引数を取り違える」系統だが、より一般的に観測できる形で「items
+  引数を解決できない呼出し」（inventory.restore(order.id) — Order の実在する属性だがdomain.variables に無いため bindings で解決できない）を採用する。engine
+  はarguments_equal の対象キーがイベントの引数に無い場合、違反と決めつけずにUNKNOWN(unsupported_analysis) を返す（PoC 10.3: 未解決呼出しは違反ではなく
+  UNKNOWN）。R-CANCEL-04 のみ UNKNOWN、他は影響を受けない。'
+expected:
+  R-CANCEL-01:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-02:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-03:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-04:
+    verdict: UNKNOWN
+    category: unsupported_analysis
+  R-CANCEL-05:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-06:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07a:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07b:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07c:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant

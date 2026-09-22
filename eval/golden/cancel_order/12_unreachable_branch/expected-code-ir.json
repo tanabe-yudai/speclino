@@ -1,0 +1,380 @@
+{
+  "schema_version": "0.1",
+  "behavior_id": "cancel_order",
+  "entrypoint": "examples.orders.app.service.cancel_order",
+  "snapshot": {
+    "snapshot_id": "golden",
+    "repository": null,
+    "commit": "golden",
+    "path": null,
+    "content_hash": null
+  },
+  "analyzer_version": "handwritten",
+  "limits": {
+    "depth": 2,
+    "max_paths": 64,
+    "solver_timeout_ms": 500
+  },
+  "paths": [
+    {
+      "path_id": "p1_forbidden",
+      "guard": {
+        "op": "not",
+        "arg": {
+          "op": "or",
+          "args": [
+            {
+              "op": "ref",
+              "path": "before.actor.is_admin"
+            },
+            {
+              "op": "eq",
+              "left": {
+                "op": "ref",
+                "path": "before.actor.id"
+              },
+              "right": {
+                "op": "ref",
+                "path": "before.order.owner_id"
+              }
+            }
+          ]
+        }
+      },
+      "state_updates": [],
+      "events": [],
+      "outcome": {
+        "kind": "http_response",
+        "status": 403,
+        "value": null,
+        "exception_type": null,
+        "source_ref": null
+      },
+      "precision": "exact_in_model",
+      "unknown_causes": [],
+      "source_refs": [
+        {
+          "snapshot_id": "golden",
+          "requirement_id": null,
+          "symbol": "examples.orders.app.service.cancel_order",
+          "path": null,
+          "line_start": null,
+          "line_end": null
+        }
+      ]
+    },
+    {
+      "path_id": "p2_conflict",
+      "guard": {
+        "op": "and",
+        "args": [
+          {
+            "op": "or",
+            "args": [
+              {
+                "op": "ref",
+                "path": "before.actor.is_admin"
+              },
+              {
+                "op": "eq",
+                "left": {
+                  "op": "ref",
+                  "path": "before.actor.id"
+                },
+                "right": {
+                  "op": "ref",
+                  "path": "before.order.owner_id"
+                }
+              }
+            ]
+          },
+          {
+            "op": "ne",
+            "left": {
+              "op": "ref",
+              "path": "before.order.status"
+            },
+            "right": {
+              "op": "const",
+              "type": "OrderStatus",
+              "value": "PENDING"
+            }
+          }
+        ]
+      },
+      "state_updates": [],
+      "events": [],
+      "outcome": {
+        "kind": "http_response",
+        "status": 409,
+        "value": null,
+        "exception_type": null,
+        "source_ref": null
+      },
+      "precision": "exact_in_model",
+      "unknown_causes": [],
+      "source_refs": [
+        {
+          "snapshot_id": "golden",
+          "requirement_id": null,
+          "symbol": "examples.orders.app.service.cancel_order",
+          "path": null,
+          "line_start": null,
+          "line_end": null
+        }
+      ]
+    },
+    {
+      "path_id": "p3_success",
+      "guard": {
+        "op": "and",
+        "args": [
+          {
+            "op": "or",
+            "args": [
+              {
+                "op": "ref",
+                "path": "before.actor.is_admin"
+              },
+              {
+                "op": "eq",
+                "left": {
+                  "op": "ref",
+                  "path": "before.actor.id"
+                },
+                "right": {
+                  "op": "ref",
+                  "path": "before.order.owner_id"
+                }
+              }
+            ]
+          },
+          {
+            "op": "eq",
+            "left": {
+              "op": "ref",
+              "path": "before.order.status"
+            },
+            "right": {
+              "op": "const",
+              "type": "OrderStatus",
+              "value": "PENDING"
+            }
+          }
+        ]
+      },
+      "state_updates": [
+        {
+          "target": "order.status",
+          "value": {
+            "op": "const",
+            "type": "OrderStatus",
+            "value": "CANCELLED"
+          },
+          "source_ref": null
+        }
+      ],
+      "events": [
+        {
+          "sequence": 1,
+          "kind": "write",
+          "phase": "applied",
+          "operation": null,
+          "target": "order.status",
+          "arguments": {},
+          "value": {
+            "op": "const",
+            "type": "OrderStatus",
+            "value": "CANCELLED"
+          },
+          "certainty": "must",
+          "source_ref": null
+        },
+        {
+          "sequence": 2,
+          "kind": "call",
+          "phase": "invoked",
+          "operation": "audit_record_command",
+          "target": null,
+          "arguments": {
+            "actor_id": {
+              "op": "ref",
+              "path": "before.actor.id"
+            },
+            "action": {
+              "op": "const",
+              "type": "AuditAction",
+              "value": "CANCEL_ORDER"
+            }
+          },
+          "value": null,
+          "certainty": "must",
+          "source_ref": null
+        }
+      ],
+      "outcome": {
+        "kind": "http_response",
+        "status": 204,
+        "value": null,
+        "exception_type": null,
+        "source_ref": null
+      },
+      "precision": "exact_in_model",
+      "unknown_causes": [],
+      "source_refs": [
+        {
+          "snapshot_id": "golden",
+          "requirement_id": null,
+          "symbol": "examples.orders.app.service.cancel_order",
+          "path": null,
+          "line_start": null,
+          "line_end": null
+        }
+      ]
+    },
+    {
+      "path_id": "p4_unreachable",
+      "guard": {
+        "op": "and",
+        "args": [
+          {
+            "op": "and",
+            "args": [
+              {
+                "op": "or",
+                "args": [
+                  {
+                    "op": "ref",
+                    "path": "before.actor.is_admin"
+                  },
+                  {
+                    "op": "eq",
+                    "left": {
+                      "op": "ref",
+                      "path": "before.actor.id"
+                    },
+                    "right": {
+                      "op": "ref",
+                      "path": "before.order.owner_id"
+                    }
+                  }
+                ]
+              },
+              {
+                "op": "eq",
+                "left": {
+                  "op": "ref",
+                  "path": "before.order.status"
+                },
+                "right": {
+                  "op": "const",
+                  "type": "OrderStatus",
+                  "value": "PENDING"
+                }
+              }
+            ]
+          },
+          {
+            "op": "eq",
+            "left": {
+              "op": "const",
+              "type": "OrderStatus",
+              "value": "CANCELLED"
+            },
+            "right": {
+              "op": "const",
+              "type": "OrderStatus",
+              "value": "SHIPPED"
+            }
+          }
+        ]
+      },
+      "state_updates": [
+        {
+          "target": "order.status",
+          "value": {
+            "op": "const",
+            "type": "OrderStatus",
+            "value": "CANCELLED"
+          },
+          "source_ref": null
+        }
+      ],
+      "events": [
+        {
+          "sequence": 1,
+          "kind": "write",
+          "phase": "applied",
+          "operation": null,
+          "target": "order.status",
+          "arguments": {},
+          "value": {
+            "op": "const",
+            "type": "OrderStatus",
+            "value": "CANCELLED"
+          },
+          "certainty": "must",
+          "source_ref": null
+        },
+        {
+          "sequence": 2,
+          "kind": "call",
+          "phase": "invoked",
+          "operation": "inventory_restore_command",
+          "target": null,
+          "arguments": {
+            "items": {
+              "op": "ref",
+              "path": "before.order.items"
+            }
+          },
+          "value": null,
+          "certainty": "must",
+          "source_ref": null
+        },
+        {
+          "sequence": 3,
+          "kind": "call",
+          "phase": "invoked",
+          "operation": "audit_record_command",
+          "target": null,
+          "arguments": {
+            "actor_id": {
+              "op": "ref",
+              "path": "before.actor.id"
+            },
+            "action": {
+              "op": "const",
+              "type": "AuditAction",
+              "value": "CANCEL_ORDER"
+            }
+          },
+          "value": null,
+          "certainty": "must",
+          "source_ref": null
+        }
+      ],
+      "outcome": {
+        "kind": "http_response",
+        "status": 204,
+        "value": null,
+        "exception_type": null,
+        "source_ref": null
+      },
+      "precision": "exact_in_model",
+      "unknown_causes": [],
+      "source_refs": [
+        {
+          "snapshot_id": "golden",
+          "requirement_id": null,
+          "symbol": "examples.orders.app.service.cancel_order",
+          "path": null,
+          "line_start": null,
+          "line_end": null
+        }
+      ]
+    }
+  ],
+  "unknown_causes": [],
+  "origin": "handwritten"
+}

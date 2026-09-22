@@ -1,0 +1,37 @@
+id: 10_audit_owner_id
+title: 監査に実行者ではなく所有者の ID を渡す
+description: audit.record の第一引数を user.id ではなく order.owner_id にする。R-CANCEL-05 のみ argument_mismatch。所有者経路では
+  actor.id == owner_id が成り立つため一致してしまい、反例は管理者かつ非所有者の経路でのみ得られる（before.actor.is_admin = true が論理的に必須）。
+expected:
+  R-CANCEL-01:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-02:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-03:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-04:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-05:
+    verdict: VIOLATED
+    category: argument_mismatch
+  R-CANCEL-06:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07a:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07b:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07c:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+counterexample_must_include:
+  R-CANCEL-05:
+    path_id: p3_success
+    assignments:
+      before.actor.is_admin: true

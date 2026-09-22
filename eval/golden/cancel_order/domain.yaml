@@ -1,0 +1,31 @@
+schema_version: "0.1"
+
+enums:
+  OrderStatus: [PENDING, SHIPPED, CANCELLED]
+  AuditAction: [CANCEL_ORDER]
+
+opaque_types:
+  - UserId
+  - OrderId
+  - ItemSet
+
+variables:
+  actor.is_admin: boolean
+  actor.id: UserId
+  order.owner_id: UserId
+  order.status: OrderStatus
+  order.items: ItemSet
+
+# 前提（注文取得・入力検証・認証済み利用者の取得の完了）は処理入口より前の話であり、
+# before 名前空間の式では表現しないため空にする（specs/orders-cancel.md の「前提」参照）。
+assumptions: []
+
+observation_scope:
+  - サービス関数内の状態値（order.status への代入）
+  - 在庫復元コマンド・監査記録コマンドの呼び出しと引数・回数
+  - アダプターがモデル化したHTTP応答（ステータスコード）
+
+out_of_scope:
+  - DBコミットなど永続化の成否
+  - 在庫復元・監査記録コマンドの内部処理
+  - 並行実行・配送保証

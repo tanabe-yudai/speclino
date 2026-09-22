@@ -47,6 +47,8 @@ packages = ["src/speclino"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Golden の変異コードは意図的に壊した実装なので lint 対象外
+extend-exclude = ["eval/golden"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

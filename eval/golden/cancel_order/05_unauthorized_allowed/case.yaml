@@ -1,0 +1,48 @@
+id: 05_unauthorized_allowed
+title: 無権限者のキャンセルを許す
+description: '認可判定 (if not (user.is_admin or user.id == order.owner_id): raise 403) を削除する。Code IR は認可を一切参照しない
+  2 経路（非 PENDING→409、PENDING→成功）になる。R-CANCEL-01（無権限者は403のはず）は p1_success 経路（204）との比較で最初に見つかり constraint_mismatch（PoC
+  17.1 の見出し）。加えて R-CANCEL-07a/b/c（拒否されるべき経路での書込み・呼出し禁止）も p1_success 経路で forbidden_effect になる — 無認可の利用者が実際に状態変更・副作用を起こしてしまうため、これも意味のある検出。経路の並び順（成功経路を先に置く）が
+  worst 集約の代表経路選択に影響するため、この順序を採用した。'
+expected:
+  R-CANCEL-01:
+    verdict: VIOLATED
+    category: constraint_mismatch
+  R-CANCEL-02:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-03:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-04:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-05:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-06:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07a:
+    verdict: VIOLATED
+    category: forbidden_effect
+  R-CANCEL-07b:
+    verdict: VIOLATED
+    category: forbidden_effect
+  R-CANCEL-07c:
+    verdict: VIOLATED
+    category: forbidden_effect
+counterexample_must_include:
+  R-CANCEL-01:
+    path_id: p1_success
+    assignments:
+      before.actor.is_admin: false
+  R-CANCEL-07a:
+    path_id: p1_success
+    assignments: {}
+  R-CANCEL-07b:
+    path_id: p1_success
+    assignments: {}
+  R-CANCEL-07c:
+    path_id: p1_success
+    assignments: {}

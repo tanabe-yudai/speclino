@@ -1,0 +1,38 @@
+id: 12_unreachable_branch
+title: 到達不能分岐にだけ必須呼び出しがある
+description: order.status を CANCELLED に更新した直後に `if order.status == OrderStatus.SHIPPED:` でrestore を条件付き呼出しにする。PoC
+  9.2「状態変更後に評価した条件は変更後の値に基づいて計算する」により、この分岐の条件は before.order.status への参照ではなく CANCELLED == SHIPPED という定数比較になり、恒偽（到達不能）。この経路(p4_unreachable)のguard
+  は充足不能なため、どの要求に対しても relevant にならず、restore を含まない主経路(p3_success)だけが R-CANCEL-04 の判定対象になる。網羅性（相補性）は p3_success
+  単独で保たれるため UNKNOWN にはならず、確定的に missing_effect になる。
+expected:
+  R-CANCEL-01:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-02:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-03:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-04:
+    verdict: VIOLATED
+    category: missing_effect
+  R-CANCEL-05:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-06:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07a:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07b:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07c:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+counterexample_must_include:
+  R-CANCEL-04:
+    path_id: p3_success
+    assignments: {}

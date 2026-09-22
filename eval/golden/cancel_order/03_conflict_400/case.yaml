@@ -1,0 +1,36 @@
+id: 03_conflict_400
+title: 409 を 400 に変える
+description: 認可された利用者が非 PENDING の注文をキャンセルしたときの応答を 409 から 400 に変える。R-CANCEL-02 のみ outcome_mismatch（403/409
+  とも非成功域のため成功/拒否の区分自体は変わらない）。
+expected:
+  R-CANCEL-01:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-02:
+    verdict: VIOLATED
+    category: outcome_mismatch
+  R-CANCEL-03:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-04:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-05:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-06:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07a:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07b:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07c:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+counterexample_must_include:
+  R-CANCEL-02:
+    path_id: p2_conflict
+    assignments: {}
