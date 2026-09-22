@@ -50,3 +50,17 @@ class ScriptedLlm(BaseLlm):
     @classmethod
     def reset(cls) -> None:
         cls.requests = []
+
+
+class ScriptedJsonLlm:
+    """TextLlm ポートのテスト用実装。与えた JSON 文字列をそのまま返し、プロンプトを記録する。"""
+
+    def __init__(self, response: str) -> None:
+        self.response = response
+        self.prompts: list[str] = []
+        self.schemas: list[dict[str, Any]] = []
+
+    async def generate_json(self, prompt: str, schema: dict[str, Any]) -> str:
+        self.prompts.append(prompt)
+        self.schemas.append(schema)
+        return self.response

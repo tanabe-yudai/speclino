@@ -187,3 +187,60 @@ def replay(
         typer.echo(f"  差異: {d}")
     typer.echo("一致" if res.identical else "不一致")
     raise typer.Exit(code=0 if res.identical else 1)
+
+
+@app.command("spec-extract")
+def spec_extract(
+    spec: Annotated[Path, typer.Option("--spec", help="仕様 Markdown")],
+    behavior: Annotated[str, typer.Option("--behavior", help="bindings.behaviors のキー")],
+    project: Annotated[Path, typer.Option("--project", help=".speclino/ の在処")] = Path("."),
+    out: Annotated[
+        Path | None, typer.Option("--out", help="候補 Spec IR の出力先（既定: 標準出力）")
+    ] = None,
+    model: Annotated[str, typer.Option("--model", help="Gemini モデル")] = "gemini-3.8-flash",
+) -> None:
+    """Markdown から Spec IR の候補を Gemini で抽出する（承認はしない。曖昧箇所は診断に残す）。
+
+    終了コード: 0=候補が検証を通った（警告は表示）/ 2=候補に誤り（語彙外の参照など）または
+    入力不正。候補は approval_ref 無しで出力され、承認は `/speclino approve-spec` で行う。
+    """
+    import asyncio
+    import json
+
+    from speclino.adapters.llm.gemini_json import GeminiJsonLlm
+    from speclino.spec import load_bindings, load_domain
+    from speclino.spec.spec_extractor import extract_spec
+
+    try:
+        domain = load_domain(project / ".speclino" / "domain.yaml")
+        bindings = load_bindings(project / ".speclino" / "bindings.yaml")
+        markdown = spec.read_text(encoding="utf-8")
+    except (OSError, ValidationError, ValueError) as e:
+        typer.echo(f"入力不正: {e}", err=True)
+        raise typer.Exit(code=2) from e
+    if behavior not in bindings.behaviors:
+        typer.echo(f"bindings.behaviors に無い behavior: {behavior}", err=True)
+        raise typer.Exit(code=2)
+    try:
+        rel = str(spec.resolve().relative_to(project.resolve()))
+    except ValueError:
+        rel = str(spec)
+    result = asyncio.run(
+        extract_spec(markdown, behavior, domain, bindings, GeminiJsonLlm(model), spec_path=rel)
+    )
+    payload = json.dumps(result.spec.model_dump(mode="json"), ensure_ascii=False, indent=2)
+    if out is not None:
+        out.write_text(payload + "\n", encoding="utf-8")
+        typer.echo(str(out))
+    else:
+        typer.echo(payload)
+    for d in [*result.errors, *result.warnings]:
+        typer.echo(
+            f"{d.severity}[{d.code}] {d.rule_id or '-'} {d.path or ''}: {d.message}", err=True
+        )
+    typer.echo(
+        f"候補 {len(result.spec.rules)} 件 / 未抽出 {len(result.spec.unextracted)} 件 / "
+        f"誤り {len(result.errors)} 件 / 警告 {len(result.warnings)} 件",
+        err=True,
+    )
+    raise typer.Exit(code=2 if result.errors else 0)

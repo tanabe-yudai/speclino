@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     approvers: list[str] = []  # プロジェクト設定に無いときの既定の承認者
     demo_rerun_limit_per_day: int = 20
 
+    # MCP（S33）: 静的 Bearer。未設定なら /mcp をマウントしない
+    mcp_token: str | None = None
+
     # 認証（S13）
     auth_kind: Literal["dev", "identity_platform"] = "dev"
     firebase_project_id: str | None = None

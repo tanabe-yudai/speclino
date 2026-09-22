@@ -21,6 +21,7 @@ dependencies = [
   "typer",
   "PyJWT[crypto]",
   "structlog",
+  "mcp>=2,<3",
 ]
 
 [project.scripts]
