@@ -21,7 +21,7 @@ from speclino.analysis.symbolic_state import (
     Unresolved,
     guard_expr,
 )
-from speclino.domain.bindings import Bindings, OperationContract
+from speclino.domain.bindings import Bindings, OperationBinding, OperationContract
 from speclino.domain.code_ir import (
     AnalysisLimits,
     CodeIR,
@@ -91,6 +91,7 @@ class PathAnalyzer:
         self.snapshot = snapshot or SnapshotRef(snapshot_id="local")
         self.builder = ExprBuilder(index, domain)
         self._op_by_symbol = {ob.symbol: (op_id, ob) for op_id, ob in bindings.operations.items()}
+        self._known_pure = set(bindings.known_pure)
         self._path_count = 0
 
     # ------------------------------------------------------------------ public
@@ -164,7 +165,9 @@ class PathAnalyzer:
                     out += self._explore([*stmt.orelse, *rest], fn, frame.copy(), else_d, depth)
                     return out
                 case ast.Assign() | ast.AnnAssign():
-                    self._assign(stmt, fn, frame, d)
+                    ended = self._assign(stmt, fn, frame, d, depth, rest)
+                    if ended is not None:
+                        return ended
                 case ast.Expr(value=ast.Call() as call):
                     ended = self._call(call, fn, frame, d, depth, rest)
                     if ended is not None:
@@ -192,21 +195,40 @@ class PathAnalyzer:
 
     # ------------------------------------------------------------- statements
     def _assign(
-        self, stmt: ast.Assign | ast.AnnAssign, fn: FunctionInfo, frame: Frame, d: Draft
-    ) -> None:
+        self,
+        stmt: ast.Assign | ast.AnnAssign,
+        fn: FunctionInfo,
+        frame: Frame,
+        d: Draft,
+        depth: int,
+        rest: list[ast.stmt],
+    ) -> list[Draft] | None:
+        """代入文。右辺が呼出しなら副作用（イベント／展開）を取りこぼさない。"""
         if isinstance(stmt, ast.Assign):
             if len(stmt.targets) != 1:
                 self._unknown(d, "unsupported_syntax", "多重代入は対応外", fn, stmt.lineno)
-                return
+                return None
             target, value_node = stmt.targets[0], stmt.value
         else:
             if stmt.value is None:
-                return
+                return None
             target, value_node = stmt.target, stmt.value
         if isinstance(target, ast.Name):
+            if isinstance(value_node, ast.Call):
+                qual = self.builder.callee_qualname(value_node.func, frame)
+                pure_var = d.state.pure_call_vars.get(qual or "")
+                if pure_var is not None:
+                    # 純粋な呼出しの結果は名前付き変数（副作用なし、イベントなし）
+                    frame.locals[target.id] = d.state.value(pure_var)
+                    return None
+                ended = self._call(value_node, fn, frame, d, depth, rest)
+                frame.locals[target.id] = Unresolved(
+                    "call_result", f"呼出し結果: {ast.unparse(value_node)}", value_node.lineno
+                )
+                return ended
             value = self.builder.to_expr(value_node, frame, d.state)
             frame.locals[target.id] = value
-            return
+            return None
         chain = self.builder.attribute_chain(target)
         if chain is None or chain[0] not in frame.locals:
             self._unknown(
@@ -216,7 +238,7 @@ class PathAnalyzer:
                 fn,
                 stmt.lineno,
             )
-            return
+            return None
         root = frame.locals[chain[0]]
         if not isinstance(root, RootAlias):
             self._unknown(
@@ -226,7 +248,7 @@ class PathAnalyzer:
                 fn,
                 stmt.lineno,
             )
-            return
+            return None
         var = d.state.var_of_impl(".".join([root.root, *chain[1:]]))
         if var is None:
             self._unknown(
@@ -236,11 +258,11 @@ class PathAnalyzer:
                 fn,
                 stmt.lineno,
             )
-            return
+            return None
         value = self.builder.to_expr(value_node, frame, d.state, self.domain.type_of(var))
         if isinstance(value, Unresolved):
             self._unknown(d, value.code, value.detail, fn, value.lineno)
-            return
+            return None
         src = self._src(fn, stmt.lineno)
         d.state.assign(var, value)
         d.updates.append(StateUpdate(target=var, value=value, source_ref=src))
@@ -254,6 +276,7 @@ class PathAnalyzer:
                 source_ref=src,
             )
         )
+        return None
 
     def _call(
         self,
@@ -277,48 +300,57 @@ class PathAnalyzer:
             return None
         if qual in self._op_by_symbol:
             op_id, ob = self._op_by_symbol[qual]
-            args: dict[str, Expr] = {}
-            for name, spec in ob.argument_bindings.items():
-                node = _pick_arg(call, spec)
-                if node is None:
-                    continue
-                e = self.builder.to_expr(node, frame, d.state)
-                if isinstance(e, Unresolved):
-                    self._unknown(
-                        d,
-                        e.code,
-                        f"{op_id} の引数 {name}: {e.detail}",
-                        fn,
-                        e.lineno,
-                        incomplete=False,
-                    )
-                    continue
-                args[name] = e
-            d.events.append(
-                Event(
-                    sequence=len(d.events) + 1,
-                    kind="call",
-                    phase="invoked",
-                    operation=op_id,
-                    arguments=args,
-                    source_ref=self._src(fn, call.lineno),
-                )
-            )
-            contract = self.contracts.get(ob.summary_ref or "")
-            if contract is not None and contract.may_modify:
-                for var in contract.may_modify:
-                    self._unknown(
-                        d,
-                        "missing_contract",
-                        f"{op_id} が {var} を変更し得るが値は不明",
-                        fn,
-                        call.lineno,
-                    )
+            self._emit_operation(op_id, ob, call, fn, frame, d)
+            return None
+        if qual in self._known_pure:
             return None
         if self.index.is_function(qual):
             return self._inline(qual, call, fn, frame, d, depth, rest)
         self._unknown(d, "unresolved_call", f"契約の無い外部呼出し: {qual}", fn, call.lineno)
         return None
+
+    def _emit_operation(
+        self,
+        op_id: str,
+        ob: OperationBinding,
+        call: ast.Call,
+        fn: FunctionInfo,
+        frame: Frame,
+        d: Draft,
+    ) -> None:
+        """契約済み操作の呼出しイベント。引数は argument_bindings に従って解決する。"""
+        args: dict[str, Expr] = {}
+        for name, spec in ob.argument_bindings.items():
+            node = _pick_arg(call, spec)
+            if node is None:
+                continue
+            e = self.builder.to_expr(node, frame, d.state)
+            if isinstance(e, Unresolved):
+                self._unknown(
+                    d, e.code, f"{op_id} の引数 {name}: {e.detail}", fn, e.lineno, incomplete=False
+                )
+                continue
+            args[name] = e
+        d.events.append(
+            Event(
+                sequence=len(d.events) + 1,
+                kind="call",
+                phase="invoked",
+                operation=op_id,
+                arguments=args,
+                source_ref=self._src(fn, call.lineno),
+            )
+        )
+        contract = self.contracts.get(ob.summary_ref or "")
+        if contract is not None and contract.may_modify:
+            for var in contract.may_modify:
+                self._unknown(
+                    d,
+                    "missing_contract",
+                    f"{op_id} が {var} を変更し得るが値は不明",
+                    fn,
+                    call.lineno,
+                )
 
     def _inline(
         self,
@@ -403,6 +435,13 @@ class PathAnalyzer:
             if outcome is not None:
                 d.outcome = outcome.model_copy(update={"source_ref": src})
                 return
+            if qual in self._op_by_symbol:
+                # 契約済み操作の結果を返す（例 return ToolResult.denied(...)）:
+                # 呼出しイベントを記録して return
+                op_id, ob = self._op_by_symbol[qual]
+                self._emit_operation(op_id, ob, stmt.value, fn, frame, d)
+                d.outcome = Outcome(kind="return", source_ref=src)
+                return
             self._unknown(
                 d,
                 "unmodeled_outcome",
@@ -413,6 +452,10 @@ class PathAnalyzer:
             d.outcome = Outcome(kind="unresolved", source_ref=src)
             return
         value = self.builder.to_expr(stmt.value, frame, d.state)
+        if isinstance(value, Unresolved) and value.code == "call_result":
+            # サービス層の戻り値（呼出し結果）。値は持たないが経路は完全
+            d.outcome = Outcome(kind="return", source_ref=src)
+            return
         if isinstance(value, Unresolved):
             self._unknown(d, "unmodeled_outcome", value.detail, fn, value.lineno)
             d.outcome = Outcome(kind="unresolved", source_ref=src)

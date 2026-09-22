@@ -1,0 +1,13 @@
+schema_version: "0.1"
+enums: {}
+opaque_types: [ToolName]
+variables:
+  call.tool: ToolName
+  permitted: boolean
+  budget_exhausted: boolean
+assumptions: []
+observation_scope:
+  - ToolGateway.invoke 内の呼出しイベント（registry.execute / audit.*）と戻り値の種別
+out_of_scope:
+  - ツール実装そのものの正しさ
+  - 監査記録の永続化の成否

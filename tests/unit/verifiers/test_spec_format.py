@@ -111,5 +111,7 @@ def test_repository_template_is_verified(make_rule: MakeRule) -> None:
     )
     snapshot = DirectorySnapshot(root=REPO_ROOT)
     findings = SpecFormatVerifier().run(rule, snapshot)
-    assert len(findings) == 1
-    assert findings[0].verdict == "VERIFIED_IN_SCOPE", findings[0].message
+    # specs/_template.md と自己検証の仕様（specs/SPEC-*.md）がすべて適合する
+    assert len(findings) >= 2
+    for f in findings:
+        assert f.verdict == "VERIFIED_IN_SCOPE", (f.requirement_id, f.message)

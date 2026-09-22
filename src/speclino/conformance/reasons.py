@@ -15,6 +15,25 @@ VERDICT_PRIORITY: dict[Verdict, int] = {
 }
 
 
+# 同じ verdict の経路が複数あるときに代表として報告する category の優先順位（本質的なものを先に）
+CATEGORY_PRIORITY: dict[str, int] = {
+    "constraint_mismatch": 0,
+    "forbidden_effect": 1,
+    "missing_effect": 2,
+    "state_mismatch": 3,
+    "argument_mismatch": 4,
+    "cardinality_mismatch": 5,
+    "outcome_mismatch": 6,
+    "potential_violation": 7,
+    "solver_limit": 8,
+    "unsupported_analysis": 9,
+}
+
+
+def category_rank(category: str) -> int:
+    return CATEGORY_PRIORITY.get(category, 50)
+
+
 def worst(verdicts: list[Verdict]) -> Verdict:
     return min(verdicts, key=lambda v: VERDICT_PRIORITY[v]) if verdicts else "UNKNOWN"
 

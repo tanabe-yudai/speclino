@@ -52,7 +52,18 @@ class SymState:
     values: dict[str, Expr] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        self.impl_to_var = {impl: var for var, impl in self.binding.variables.items()}
+        self.impl_to_var = {
+            impl: var
+            for var, impl in self.binding.variables.items()
+            if not impl.startswith("pure_call:")
+        }
+        # 契約済みの純粋な呼出し結果を名前付き変数として扱う
+        # （例 self.permissions.allows → permitted）
+        self.pure_call_vars = {
+            impl.removeprefix("pure_call:"): var
+            for var, impl in self.binding.variables.items()
+            if impl.startswith("pure_call:")
+        }
         for var in self.domain.variables:
             self.values.setdefault(var, ref(f"before.{var}"))
 
@@ -98,11 +109,16 @@ class ExprBuilder:
         return None
 
     def callee_qualname(self, func: ast.expr, frame: Frame) -> str | None:
-        """呼出し先の完全修飾名。ローカル変数（入口引数）を根に持つメソッド呼出しは None。"""
+        """呼出し先のシンボル。モジュール名で解決できれば完全修飾名、入口引数（self 等）を根に
+        持つメソッド呼出しは別名を展開した属性チェーン（例 self.registry.execute）を返す。
+        後者は bindings.operations の symbol と文字列で照合する。"""
         chain = self.attribute_chain(func)
         if not chain:
             return None
         if chain[0] in frame.locals:
+            root = frame.locals[chain[0]]
+            if isinstance(root, RootAlias) and len(chain) > 1:
+                return ".".join([root.root, *chain[1:]])
             return None
         head = frame.module.resolve_name(chain[0])
         return ".".join([head, *chain[1:]])

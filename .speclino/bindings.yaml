@@ -1,0 +1,31 @@
+schema_version: "0.1"
+behaviors:
+  tool_gateway_invoke:
+    entrypoint: speclino.agent.gateway.ToolGateway.invoke
+    variables:
+      call.tool: call.tool
+      permitted: pure_call:self.permissions.allows
+      budget_exhausted: pure_call:self.budget.is_exhausted
+operations:
+  tool_execute:
+    symbol: self.registry.execute
+    claim_scope: command_invocation
+    argument_bindings: {}
+  audit_denied:
+    symbol: self.audit.record_denied
+    claim_scope: command_invocation
+    argument_bindings: {}
+  audit_allowed:
+    symbol: self.audit.record_allowed
+    claim_scope: command_invocation
+    argument_bindings: {}
+  budget_charge:
+    symbol: self.budget.charge
+    claim_scope: command_invocation
+    argument_bindings: {}
+  deny_result:
+    symbol: speclino.agent.gateway.ToolResult.denied
+    claim_scope: service_outcome
+    argument_bindings: {}
+known_pure:
+  - time.monotonic

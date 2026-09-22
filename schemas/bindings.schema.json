@@ -97,6 +97,14 @@
       },
       "title": "Operations",
       "type": "object"
+    },
+    "known_pure": {
+      "description": "副作用が無く結果を検査に使わない外部呼出し（例 time.monotonic）",
+      "items": {
+        "type": "string"
+      },
+      "title": "Known Pure",
+      "type": "array"
     }
   },
   "title": "Bindings",

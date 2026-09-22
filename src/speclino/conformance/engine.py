@@ -16,6 +16,7 @@ import z3
 
 from speclino.conformance.encode import Z3Context
 from speclino.conformance.reasons import (
+    category_rank,
     count_category,
     finding_id,
     outcome_category,
@@ -248,7 +249,12 @@ class ConformanceEngine:
                 [],
             )
         verdict = worst([res.verdict for _, res in results])
-        path, res = next((p, r_) for p, r_ in results if r_.verdict == verdict)
+        # 同じ verdict の経路が複数なら、より本質的な category を代表にする
+        # （例: 拒否すべき入力が成功する constraint_mismatch を outcome_mismatch より優先）
+        path, res = min(
+            ((p, r_) for p, r_ in results if r_.verdict == verdict),
+            key=lambda pr: category_rank(pr[1].category),
+        )
         if verdict == "VERIFIED_IN_SCOPE":
             res = _PathResult(
                 "VERIFIED_IN_SCOPE",

@@ -52,6 +52,10 @@ class Bindings(IRModel):
     schema_version: Literal["0.1"] = SCHEMA_VERSION
     behaviors: dict[str, BehaviorBinding] = Field(default_factory=dict)
     operations: dict[str, OperationBinding] = Field(default_factory=dict)
+    known_pure: list[str] = Field(
+        default_factory=list,
+        description="副作用が無く結果を検査に使わない外部呼出し（例 time.monotonic）",
+    )
 
     def operation_by_symbol(self, symbol: str) -> tuple[str, OperationBinding] | None:
         for op_id, ob in self.operations.items():
