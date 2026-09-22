@@ -97,3 +97,13 @@ export interface ReviewRunSummary {
 export interface ReviewRunDetail extends ReviewRunSummary {
   findings: Finding[]
 }
+
+/** `POST /api/review-runs/{id}/rerun`（デモ再実行、S39）の応答。 */
+export interface RerunResponse {
+  run_id: string
+  used_today: number
+  limit: number
+  remaining: number
+  cost_ok: boolean
+  cost_note: string
+}

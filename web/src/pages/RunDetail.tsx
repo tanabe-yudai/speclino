@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { getReviewMarkdown, getRun, getRunEvents } from '../api/reviewRuns'
@@ -8,6 +8,7 @@ import { Badge } from '../components/Badge'
 import { ErrorState } from '../components/ErrorState'
 import { FindingCard } from '../components/FindingCard'
 import { LoadingState } from '../components/LoadingState'
+import { RerunButton } from '../components/RerunButton'
 import { ScopeBlock } from '../components/ScopeBlock'
 import { Timeline } from '../components/Timeline'
 import { describeGateReason } from '../services/gate'
@@ -17,9 +18,12 @@ import { EXEC_STATE_LABELS, GATE_STATUS_LABELS, GATE_TONE, VERDICT_LABELS } from
 import { describeLimits, describeSemanticDiff } from '../services/manifest'
 import { collectScopeAndAssumptions, collectUnresolvedItems, countByVerdict, groupFindingsByVerdict } from '../services/verdict'
 import type { RunEvent } from '../types/events'
-import type { ReviewRunDetail } from '../types/run'
+import type { RerunResponse, ReviewRunDetail } from '../types/run'
 
 type Tab = 'timeline' | 'markdown'
+
+const OPEN_STATES = new Set(['queued', 'running', 'awaiting_answer'])
+const POLL_INTERVAL_MS = 2000
 
 const DETAIL_VERDICTS = ['VIOLATED', 'REVIEW', 'UNKNOWN'] as const
 
@@ -57,6 +61,14 @@ function RunDetailView({ id }: { id: string }) {
   useEffect(() => {
     fetchRun()
   }, [fetchRun])
+
+  // 未完了の run は完了するまで数秒おきに取り直す（再実行ボタン直後に待たせない）
+  const inProgress = run !== null && OPEN_STATES.has(run.exec_state)
+  useEffect(() => {
+    if (!inProgress) return
+    const timer = window.setTimeout(fetchRun, POLL_INTERVAL_MS)
+    return () => window.clearTimeout(timer)
+  }, [inProgress, run, fetchRun])
 
   function retryRun() {
     setRun(null)
@@ -152,6 +164,9 @@ function RunDetailView({ id }: { id: string }) {
 }
 
 function RunSummary({ run }: { run: ReviewRunDetail }) {
+  const navigate = useNavigate()
+  // 再実行ボタンから遷移してきたときは、回数・費用枠の情報を router state で受け取る
+  const rerun = (useLocation().state as { rerun?: RerunResponse } | null)?.rerun
   const counts = countByVerdict(run.findings)
   const unverifiedCount = counts.UNKNOWN + counts.REVIEW
   const { assumptions } = collectScopeAndAssumptions(run.findings)
@@ -214,6 +229,17 @@ function RunSummary({ run }: { run: ReviewRunDetail }) {
           <span className="muted">GitHub へのリンクなし（PR 情報が未設定）</span>
         )}
       </div>
+
+      {rerun && rerun.run_id === run.id && (
+        <p className="rerun-notice">
+          再実行を開始しました（本日 {rerun.used_today}/{rerun.limit} 回、残り {rerun.remaining}）
+          {!rerun.cost_ok && ` ・ 費用枠超過のためエージェント調査は行われません（${rerun.cost_note}）`}
+        </p>
+      )}
+      <RerunButton
+        runId={run.id}
+        onStarted={(res) => navigate(`/runs/${res.run_id}`, { state: { rerun: res } })}
+      />
 
       <p className="muted run-meta-line">
         作成: {formatDateTime(run.created_at)} ／ 完了: {formatDateTime(run.finished_at)} ／ トリガー: {run.trigger}

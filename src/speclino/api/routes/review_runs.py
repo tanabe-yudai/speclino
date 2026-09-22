@@ -14,6 +14,7 @@ from speclino.api.deps import AppState, get_state
 from speclino.api.errors import api_error, error_responses
 from speclino.db.models import Project, ReviewRun
 from speclino.db.repositories import FindingRepository, ReviewRunRepository, RunEventRepository
+from speclino.services.demo_rerun import RerunNotFound, demo_rerun
 
 router = APIRouter(
     prefix="/api/review-runs", tags=["review-runs"], responses=error_responses(401, 403)
@@ -95,6 +96,36 @@ async def get_run(
             **_run_view(run, project.repo_full_name if project else None),
             "findings": [f.payload for f in findings],
         }
+
+
+@router.post("/{run_id}/rerun", status_code=202, responses=error_responses(404, 429))
+async def rerun_run(
+    run_id: uuid.UUID,
+    state: AppState = Depends(get_state),
+    user: str = Depends(require_user),
+) -> dict[str, Any]:
+    """デモ再実行（S39）: 同じ head/base で run を作り直す。日次の回数上限と費用枠で守る。"""
+    try:
+        outcome = await demo_rerun(
+            state.session_factory,
+            state.service,
+            state.service.cost_guard,
+            run_id,
+            user,
+            state.settings.demo_rerun_limit_per_day,
+        )
+    except RerunNotFound as e:
+        raise api_error(404, "run_not_found", "run が無い") from e
+    if outcome.run_id is None:
+        raise api_error(429, "rerun_limit", outcome.reason)
+    return {
+        "run_id": str(outcome.run_id),
+        "used_today": outcome.used_today,
+        "limit": outcome.limit,
+        "remaining": outcome.remaining,
+        "cost_ok": outcome.cost_ok,
+        "cost_note": outcome.cost_note,
+    }
 
 
 @router.get("/{run_id}/events")

@@ -60,3 +60,21 @@ async def test_error_responses_use_error_response_shape() -> None:
         unknown_route.status_code == 404 and unknown_route.json()["error"]["code"] == "http_error"
     )
     assert wrong_method.status_code == 405 and "error" in wrong_method.json()
+
+
+@pytest.mark.asyncio
+async def test_spa_deep_links_fall_back_to_index() -> None:
+    """/runs/<id> のようなクライアント側ルートは index.html を返す（API の 404 はそのまま）。"""
+    from pathlib import Path
+
+    if not (Path(__file__).resolve().parents[2] / "web" / "dist" / "index.html").is_file():
+        pytest.skip("web/dist が無い（make web-build）")
+    app = create_app(Settings(env="local", role="all", code_host_kind="local"))
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c,
+    ):
+        deep = await c.get("/runs/00000000-0000-0000-0000-000000000000")
+        api = await c.get("/api/no-such-route")
+    assert deep.status_code == 200 and '<div id="root"' in deep.text
+    assert api.status_code == 404 and api.json()["error"]["code"] == "http_error"

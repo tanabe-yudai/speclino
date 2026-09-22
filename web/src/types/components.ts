@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react'
 import type { Counterexample, Finding } from './finding'
 import type { RunEvent } from './events'
+import type { RerunResponse } from './run'
 
 export type BadgeTone = 'success' | 'warning' | 'danger' | 'neutral' | 'info'
 
@@ -43,4 +44,10 @@ export interface ScopeBlockProps {
 
 export interface TimelineProps {
   events: RunEvent[]
+}
+
+export interface RerunButtonProps {
+  runId: string
+  /** 再実行が作られた後に呼ぶ（新しい run へ移動するなど）。 */
+  onStarted: (result: RerunResponse) => void
 }

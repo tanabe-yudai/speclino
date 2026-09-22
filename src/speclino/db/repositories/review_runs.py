@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Any, cast
 
 from sqlalchemy import CursorResult, func, select, update
@@ -81,6 +82,15 @@ class ReviewRunRepository:
         )
         result = await self._session.execute(stmt)
         return cast(CursorResult[Any], result).rowcount
+
+    async def count_since(self, trigger_prefix: str, since: datetime) -> int:
+        """`since` 以降に作られ trigger が prefix で始まる run の数（デモ再実行の回数制限）。"""
+        stmt = (
+            select(func.count())
+            .select_from(ReviewRun)
+            .where(ReviewRun.trigger.like(f"{trigger_prefix}%"), ReviewRun.created_at >= since)
+        )
+        return int((await self._session.execute(stmt)).scalar_one())
 
     async def latest_run_for_pr(
         self, project_id: uuid.UUID, pr_number: int | None

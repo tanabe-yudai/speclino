@@ -4,7 +4,7 @@ import { apiFetch } from './client'
 import { ApiError } from './errors'
 import { MOCK_EVENTS, MOCK_REVIEW_MARKDOWN, MOCK_RUNS, MOCK_RUN_DETAILS } from './mock/fixtures'
 import type { RunEvent } from '../types/events'
-import type { ReviewRunDetail, ReviewRunSummary } from '../types/run'
+import type { RerunResponse, ReviewRunDetail, ReviewRunSummary } from '../types/run'
 
 const USE_MOCK = import.meta.env.VITE_MOCK === '1'
 
@@ -34,4 +34,11 @@ export async function getReviewMarkdown(id: string): Promise<string> {
     return markdown
   }
   return apiFetch<string>(`/api/review-runs/${id}/artifacts/review.md`)
+}
+
+export async function rerunRun(id: string): Promise<RerunResponse> {
+  if (USE_MOCK) {
+    return { run_id: id, used_today: 1, limit: 20, remaining: 19, cost_ok: true, cost_note: 'mock' }
+  }
+  return apiFetch<RerunResponse>(`/api/review-runs/${id}/rerun`, { method: 'POST' })
 }
