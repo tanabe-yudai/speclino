@@ -29,7 +29,8 @@ db-migrate:
 	uv run alembic upgrade head
 
 eval:
-	uv run python -m speclino.eval.runner eval/golden --mode handwritten --out build/eval/report.md
+	uv run python -m speclino.eval.runner eval/golden/cancel_order --mode handwritten --out build/eval/handwritten.md
+	uv run python -m speclino.eval.runner eval/golden/cancel_order --mode source --out build/eval/source.md
 
 openapi:
 	@echo "TODO"
