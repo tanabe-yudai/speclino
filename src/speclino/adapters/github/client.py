@@ -1,0 +1,147 @@
+"""GitHubClient: `CodeHost` ポートの GitHub 実装（S19）。
+
+各リクエストで installation token を使う。5xx と 429 は最大 3 回、0.5s×2^n で再試行する。
+"""
+
+from __future__ import annotations
+
+import asyncio
+import io
+import tarfile
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from pathlib import Path
+
+import httpx
+
+from speclino.adapters.github.app_auth import GitHubAppAuth
+
+_MAX_RETRIES = 3
+_RETRY_BASE_DELAY_SECONDS = 0.5
+_RETRYABLE_CLIENT_STATUS = 429
+_ANNOTATIONS_PER_REQUEST = 50
+
+
+def _should_retry(status_code: int) -> bool:
+    return status_code >= 500 or status_code == _RETRYABLE_CLIENT_STATUS
+
+
+@dataclass
+class GitHubClient:
+    """CodeHost を実装する。`auth` と `installation_id` で対象インストールを認証する。"""
+
+    auth: GitHubAppAuth
+    installation_id: int
+    http: httpx.AsyncClient
+    base_url: str = "https://api.github.com"
+
+    def __post_init__(self) -> None:
+        self._sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
+
+    async def _headers(self) -> dict[str, str]:
+        token = await self.auth.installation_token(self.installation_id, self.http, self.base_url)
+        return {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+        }
+
+    async def _request(
+        self,
+        method: str,
+        url: str,
+        *,
+        json_body: object | None = None,
+        follow_redirects: bool = False,
+    ) -> httpx.Response:
+        headers = await self._headers()
+        response: httpx.Response | None = None
+        for attempt in range(_MAX_RETRIES + 1):
+            response = await self.http.request(
+                method,
+                url,
+                headers=headers,
+                json=json_body,
+                follow_redirects=follow_redirects,
+            )
+            if not _should_retry(response.status_code):
+                response.raise_for_status()
+                return response
+            if attempt < _MAX_RETRIES:
+                await self._sleep(_RETRY_BASE_DELAY_SECONDS * (2**attempt))
+        assert response is not None
+        response.raise_for_status()
+        return response
+
+    async def create_check(
+        self,
+        repo: str,
+        head_sha: str,
+        name: str,
+        details_url: str | None,
+        external_id: str | None,
+    ) -> int:
+        body: dict[str, object] = {"name": name, "head_sha": head_sha}
+        if details_url is not None:
+            body["details_url"] = details_url
+        if external_id is not None:
+            body["external_id"] = external_id
+        response = await self._request(
+            "POST", f"{self.base_url}/repos/{repo}/check-runs", json_body=body
+        )
+        return int(response.json()["id"])
+
+    async def update_check(
+        self,
+        repo: str,
+        check_run_id: int,
+        status: str,
+        conclusion: str | None,
+        title: str,
+        summary: str,
+        text: str,
+        annotations: list[dict[str, object]],
+    ) -> None:
+        url = f"{self.base_url}/repos/{repo}/check-runs/{check_run_id}"
+        chunks = [
+            annotations[i : i + _ANNOTATIONS_PER_REQUEST]
+            for i in range(0, len(annotations), _ANNOTATIONS_PER_REQUEST)
+        ] or [[]]
+        for chunk in chunks:
+            body: dict[str, object] = {
+                "status": status,
+                "output": {
+                    "title": title,
+                    "summary": summary,
+                    "text": text,
+                    "annotations": chunk,
+                },
+            }
+            if conclusion is not None:
+                body["conclusion"] = conclusion
+            await self._request("PATCH", url, json_body=body)
+
+    async def post_comment(self, repo: str, issue_number: int, body: str) -> int:
+        response = await self._request(
+            "POST",
+            f"{self.base_url}/repos/{repo}/issues/{issue_number}/comments",
+            json_body={"body": body},
+        )
+        return int(response.json()["id"])
+
+    async def fetch_snapshot(self, repo: str, sha: str, dest_dir: Path) -> Path:
+        response = await self._request(
+            "GET",
+            f"{self.base_url}/repos/{repo}/tarball/{sha}",
+            follow_redirects=True,
+        )
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        with tarfile.open(fileobj=io.BytesIO(response.content), mode="r:gz") as tar:
+            names = tar.getnames()
+            tar.extractall(dest_dir, filter="data")
+        top_levels = {name.split("/", 1)[0] for name in names if name}
+        if len(top_levels) != 1:
+            raise ValueError(f"tarball の最上位ディレクトリが一意ではない: {sorted(top_levels)}")
+        return dest_dir / next(iter(top_levels))
+
+
+__all__ = ["GitHubClient"]
