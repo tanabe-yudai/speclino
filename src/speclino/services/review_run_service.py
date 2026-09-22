@@ -46,6 +46,7 @@ from speclino.domain.run import ExecState, GateStatus
 from speclino.domain.spec_ir import ApprovalRecord, RuleLevel, SpecIR
 from speclino.ports.blob_store import BlobStore
 from speclino.ports.code_host import CodeHost
+from speclino.ports.sandbox import Sandbox
 from speclino.ports.task_queue import TaskQueue
 from speclino.reporter.check_report import check_annotations, render_check
 from speclino.services.check_pipeline import (
@@ -73,6 +74,7 @@ class ReviewRunConfig:
     model: str | BaseLlm = DEFAULT_MODEL
     details_url_base: str | None = None  # 例 https://speclino.example/runs
     agent_enabled: bool = True
+    sandbox: Sandbox | None = None  # test_run（無ければツールを出さない）
 
 
 @dataclass
@@ -238,6 +240,8 @@ class ReviewRunService:
                         findings=findings,
                         code_irs={c.behavior_id: c for c in result.code_irs},
                         limits=self.config.limits,
+                        base_root=base_root,
+                        sandbox=self.config.sandbox,
                     )
                     cost_ok = (True, "")
                     if self.cost_guard is not None:
@@ -311,11 +315,28 @@ class ReviewRunService:
             final_state: ExecState = (
                 "superseded" if current.exec_state == "superseded" else exec_state
             )
+            stored_manifest = result.manifest.model_dump(mode="json") if result else None
+            if stored_manifest is not None:
+                # UI 用の要約（ゲート理由・免除・エージェント予算）を manifest に同梱する
+                stored_manifest["gate"] = (
+                    {
+                        "status": gate.status,
+                        "reason": gate.reason,
+                        "blocking_ids": [f.id for f in gate.blocking],
+                        "advisory_ids": [f.id for f in gate.advisory],
+                        "waived_ids": [f.id for f in gate.waived],
+                    }
+                    if gate
+                    else None
+                )
+                agent_end = next((e for e in agent_events if e["type"] == "agent.end"), None)
+                stored_manifest["agent"] = agent_end["payload"] if agent_end else None
+                stored_manifest["questions"] = question_ids
             await runs.set_result(
                 run_id,
                 final_state,
                 gate_status if exec_state in ("completed", "awaiting_answer") else None,
-                result.manifest.model_dump(mode="json") if result else None,
+                stored_manifest,
                 artifacts_uri,
             )
             await events.append(

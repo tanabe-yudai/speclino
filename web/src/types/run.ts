@@ -1,0 +1,78 @@
+/**
+ * ReviewRun（1回のレビュー実行）の型。src/speclino/domain/run.py と
+ * src/speclino/api/routes/review_runs.py の `_run_view` に対応させる。
+ */
+
+import type { Finding } from './finding'
+
+export type ExecState =
+  | 'queued'
+  | 'running'
+  | 'awaiting_answer'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'superseded'
+
+export type GateStatus = 'pass' | 'pass_with_exceptions' | 'fail'
+
+export interface AnalysisLimits {
+  depth: number
+  max_paths: number
+  solver_timeout_ms: number
+}
+
+export interface RunInputs {
+  repository: string | null
+  head_commit: string
+  base_commit: string | null
+  spec_content_hash: string | null
+  spec_ir_hash: string | null
+  bindings_hash: string | null
+  domain_hash: string | null
+  contracts_hash: string | null
+  policy_hash: string | null
+  code_ir_hash: string | null
+}
+
+export interface RunVersions {
+  speclino: string
+  analyzer: string
+  engine: string
+  solver: string
+  settings_hash: string | null
+}
+
+export interface RunManifest {
+  schema_version: string
+  run_id: string
+  created_at: string
+  inputs: RunInputs
+  versions: RunVersions
+  limits: AnalysisLimits
+  fail_on: string[]
+  mode: 'advisory' | 'blocking'
+}
+
+/** `GET /api/review-runs` の1件（findings を含まない）。 */
+export interface ReviewRunSummary {
+  id: string
+  repo_full_name: string | null
+  pr_number: number | null
+  head_sha: string
+  base_sha: string | null
+  trigger: string
+  exec_state: ExecState
+  gate_status: GateStatus | null
+  check_run_id: number | null
+  artifacts_uri: string | null
+  manifest: RunManifest | null
+  budget: Record<string, unknown> | null
+  created_at: string | null
+  finished_at: string | null
+}
+
+/** `GET /api/review-runs/{id}` は findings を追加で持つ。 */
+export interface ReviewRunDetail extends ReviewRunSummary {
+  findings: Finding[]
+}
