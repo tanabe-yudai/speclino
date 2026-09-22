@@ -13,15 +13,22 @@ locals {
       cpu    = "1"
       memory = "2Gi"
     }
+  }
+
+  # Preview 機能（Cloud Run sandboxes）を使う sandbox サービスは opt-in。
+  # 初回 apply で web/worker まで巻き込んで失敗しないよう、既定では作らない。
+  sandbox_service = var.enable_sandbox ? {
     sandbox = {
       cpu    = "1"
       memory = "1Gi"
     }
-  }
+  } : {}
+
+  all_services = merge(local.cloud_run_services, local.sandbox_service)
 }
 
 resource "google_cloud_run_v2_service" "services" {
-  for_each = local.cloud_run_services
+  for_each = local.all_services
   provider = google-beta
 
   project  = var.project_id
@@ -116,8 +123,10 @@ resource "google_cloud_run_v2_service_iam_member" "worker_invoker" {
   member   = "serviceAccount:${google_service_account.this["tasks"].email}"
 }
 
-# sandbox: worker SA からのみ呼出し可能。
+# sandbox: worker SA からのみ呼出し可能（enable_sandbox のときだけ作る）。
 resource "google_cloud_run_v2_service_iam_member" "sandbox_invoker" {
+  count = var.enable_sandbox ? 1 : 0
+
   project  = var.project_id
   location = var.region
   name     = google_cloud_run_v2_service.services["sandbox"].name

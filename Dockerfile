@@ -5,6 +5,14 @@ WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ ./
+# Vite はビルド時に VITE_* を埋め込むため、Firebase の設定はここで渡す必要がある。
+# 未指定でもビルドは通り、その場合フロントは「開発モードで入る」（ヘッダ認証）になる。
+ARG VITE_FIREBASE_API_KEY=""
+ARG VITE_FIREBASE_AUTH_DOMAIN=""
+ARG VITE_FIREBASE_PROJECT_ID=""
+ENV VITE_FIREBASE_API_KEY=$VITE_FIREBASE_API_KEY \
+    VITE_FIREBASE_AUTH_DOMAIN=$VITE_FIREBASE_AUTH_DOMAIN \
+    VITE_FIREBASE_PROJECT_ID=$VITE_FIREBASE_PROJECT_ID
 RUN npm run build
 
 FROM python:3.12-slim AS runtime

@@ -21,6 +21,8 @@ web/dist/
 # Terraform
 *.tfstate*
 .terraform/
+tfplan
+*.tfvars
 
 # Build output
 build/

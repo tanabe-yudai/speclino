@@ -45,7 +45,13 @@ jobs:
         run: |
           IMAGE="${REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${REPOSITORY}/${IMAGE_NAME}:${SHA}"
           echo "IMAGE=${IMAGE}" >> "$GITHUB_ENV"
-          docker build -t "${IMAGE}" .
+          # Firebase の設定は Vite がビルド時に埋め込む（実行時の env では効かない）。
+          # 値は公開前提のクライアント設定（秘密ではない）。
+          docker build -t "${IMAGE}" \
+            --build-arg "VITE_FIREBASE_API_KEY=${{ vars.VITE_FIREBASE_API_KEY }}" \
+            --build-arg "VITE_FIREBASE_AUTH_DOMAIN=${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}" \
+            --build-arg "VITE_FIREBASE_PROJECT_ID=${{ vars.VITE_FIREBASE_PROJECT_ID }}" \
+            .
 
       - name: Push image
         run: docker push "${IMAGE}"

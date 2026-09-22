@@ -270,7 +270,8 @@ UNKNOWN にしないようにしている（例: ループが在庫復元しか�
 （**自己検証**）。
 
 GitHub App を作って実 PR に接続し、必須チェックにするまでの手順は
-[guides/github-app-setup.md](guides/github-app-setup.md)。
+[guides/github-app-setup.md](guides/github-app-setup.md)、GCP への初回デプロイは
+[guides/deploy-runbook.md](guides/deploy-runbook.md)。
 
 ## 自己検証
 

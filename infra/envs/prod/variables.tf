@@ -43,3 +43,15 @@ variable "monitoring_notification_channels" {
   type        = list(string)
   default     = []
 }
+
+variable "enable_sandbox" {
+  description = <<-EOT
+    speclino-sandbox サービス（Cloud Run sandboxes、Preview）を作るか。
+    Preview 機能はプロジェクトが許可されていないと apply が失敗し、for_each の他 2 サービスも
+    巻き込むため、既定は false。S38（sandbox PoC）で true にする。
+    false のとき test_run は無効（`SPECLINO_SANDBOX_KIND=disabled` 相当）で、動的証拠が
+    取れないぶん未検証はゲート失敗のまま残る。
+  EOT
+  type        = bool
+  default     = false
+}

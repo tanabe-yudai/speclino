@@ -10,7 +10,7 @@ output "worker_url" {
 
 output "sandbox_url" {
   description = "speclino-sandbox の URL（IAM 必須、worker SA のみ呼出し可）"
-  value       = google_cloud_run_v2_service.services["sandbox"].uri
+  value       = var.enable_sandbox ? google_cloud_run_v2_service.services["sandbox"].uri : null
 }
 
 output "artifact_registry" {

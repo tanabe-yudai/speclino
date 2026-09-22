@@ -1,18 +1,38 @@
 """Identity Platform（Firebase Auth）の ID トークン検証（S13）。
 
-Google の公開鍵で署名を検証し、aud=プロジェクト ID、iss=https://securetoken.google.com/<project>
-を確認する。google-auth の `verify_firebase_token` を使う。
+Google の公開鍵で署名を検証したうえで、`aud` = プロジェクト ID と
+`iss` = `https://securetoken.google.com/<project>` を確認する。
+
+`google-auth` の `verify_firebase_token` は署名と `aud` は見るが **`iss` は検証しない**ため、
+発行者の確認はこのモジュールで明示的に行う（別の Google 発行トークンを取り違えないため）。
 """
 
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 from speclino.settings import Settings
 
+ISSUER_PREFIX = "https://securetoken.google.com/"
+
+
+def _check_claims(claims: dict[str, Any], project_id: str) -> str:
+    """検証済みトークンのクレームから利用者の識別子を取り出す。"""
+    issuer = claims.get("iss")
+    if issuer != f"{ISSUER_PREFIX}{project_id}":
+        raise ValueError(f"発行者が不正: {issuer!r}")
+    if claims.get("aud") != project_id:
+        raise ValueError("aud がプロジェクト ID と一致しない")
+    identifier = claims.get("email") or claims.get("user_id") or claims.get("sub")
+    if not identifier:
+        raise ValueError("利用者を識別できるクレームが無い")
+    return str(identifier)
+
 
 async def verify_bearer(token: str, settings: Settings) -> str:
-    if not settings.firebase_project_id:
+    project_id = settings.firebase_project_id
+    if not project_id:
         raise ValueError("firebase_project_id が未設定")
     try:
         from google.auth.transport import requests as google_requests
@@ -20,16 +40,17 @@ async def verify_bearer(token: str, settings: Settings) -> str:
     except ImportError as e:  # pragma: no cover
         raise ValueError("google-auth が無い") from e
 
-    def _verify() -> dict[str, object]:
+    def _verify() -> dict[str, Any]:
         claims = id_token.verify_firebase_token(  # type: ignore[no-untyped-call]
-            token, google_requests.Request(), audience=settings.firebase_project_id
+            token, google_requests.Request(), audience=project_id
         )
         return dict(claims)
 
     try:
         claims = await asyncio.to_thread(_verify)
-    except Exception as e:  # noqa: BLE001 - 検証失敗はすべて 401 にする
+    except Exception as e:  # noqa: BLE001 - 署名・期限の検証失敗はすべて 401 にする
         raise ValueError(f"ID トークンの検証に失敗: {type(e).__name__}") from e
-    email = claims.get("email")
-    uid = claims.get("user_id") or claims.get("sub")
-    return str(email or uid)
+    return _check_claims(claims, project_id)
+
+
+__all__ = ["ISSUER_PREFIX", "verify_bearer"]
