@@ -118,6 +118,9 @@ class ConformanceEngine:
                 f"behavior_id が一致しない: spec={spec.behavior_id} code={code.behavior_id}"
             )
         findings = [self.evaluate_rule(rule, spec, code) for rule in spec.rules]
+        undocumented = self._undocumented_behavior(spec, code)
+        if undocumented is not None:
+            findings.append(undocumented)
         counts = VerdictCounts()
         for f in findings:
             counts = counts.model_copy(update={f.verdict: getattr(counts, f.verdict) + 1})
@@ -266,6 +269,44 @@ class ConformanceEngine:
         return make(res, path.path_id, list(path.source_refs))
 
     # ---------------------------------------------------------------- internals
+    def _undocumented_behavior(self, spec: SpecIR, code: CodeIR) -> Finding | None:
+        """仕様に記載されない追加処理（open-world、PoC 10.5）: どの要求にも現れない操作の呼出しは REVIEW。
+
+        禁止と明記されていれば count 0 の要求が VIOLATED を出すので、ここでは扱わない。
+        """
+        referenced = {
+            a.operation_or_target
+            for r in spec.rules
+            if isinstance((a := r.assertion), EventRequirement)
+        }
+        extra: dict[str, list[str]] = {}
+        for path in code.paths:
+            for e in path.events:
+                if e.kind == "call" and e.operation and e.operation not in referenced:
+                    extra.setdefault(e.operation, []).append(path.path_id)
+        if not extra:
+            return None
+        desc = "; ".join(
+            f"{op}（経路 {', '.join(sorted(set(ps)))}）" for op, ps in sorted(extra.items())
+        )
+        return Finding(
+            id=finding_id(
+                f"{spec.behavior_id}:undocumented", spec.behavior_id, None, "undocumented_behavior"
+            ),
+            requirement_id=f"{spec.behavior_id}:undocumented",
+            behavior_id=spec.behavior_id,
+            verdict="REVIEW",
+            category="undocumented_behavior",
+            severity="medium",
+            message=f"仕様に記載の無い操作を呼んでいる: {desc}",
+            claim_scope="command_invocation",
+            analysis_scope=self._scope_text(code),
+            code_refs=[sr for p in code.paths for sr in p.source_refs][:1],
+            next_steps=[
+                "仕様（Spec IR）にこの操作の要求を追加するか、禁止なら回数 0 の要求を明示する",
+            ],
+        )
+
     def _approved(self, rule: Rule, spec: SpecIR) -> bool:
         if rule.approval_ref is None:
             return False

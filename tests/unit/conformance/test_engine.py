@@ -177,3 +177,25 @@ def test_engine_can_be_reused_across_evaluations() -> None:
     engine = ConformanceEngine(co.DOMAIN)
     assert engine.evaluate(co.SPEC, co.CORRECT).counts.VIOLATED == 0
     assert engine.evaluate(co.SPEC, co.RESTORE_ADMIN_ONLY).counts.VIOLATED == 1
+
+
+def test_undocumented_operation_call_is_review_open_world() -> None:
+    """仕様に無い操作の呼出しは REVIEW: undocumented_behavior（禁止と明記されていれば VIOLATED）。"""
+    notify = co.Event(sequence=4, kind="call", phase="invoked", operation="notify_command")
+    code = co.code_ir(
+        [
+            co.P_FORBIDDEN,
+            co.P_CONFLICT,
+            co.path("p3", co.SUCCESS, 204, [*co.SUCCESS_EVENTS, notify], co.SUCCESS_UPDATES),
+        ]
+    )
+    fs = run(code)
+    extra = next(f for f in fs.findings if f.category == "undocumented_behavior")
+    assert extra.verdict == "REVIEW" and "notify_command" in extra.message and "p3" in extra.message
+    assert fs.counts.REVIEW == 1 and fs.counts.VERIFIED_IN_SCOPE == 9
+    # 禁止を明示した要求があれば VIOLATED（forbidden_effect）で、undocumented は出ない
+    forbid = co._rule("R-CANCEL-08", "R-CANCEL-08", co.SUCCESS, co._calls("notify_command", 0))
+    spec = co.SPEC.model_copy(update={"rules": [*co.RULES, forbid]})
+    fs2 = run(code, spec)
+    assert not any(f.category == "undocumented_behavior" for f in fs2.findings)
+    assert by_id(fs2)["R-CANCEL-08"].category == "forbidden_effect"

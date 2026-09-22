@@ -42,6 +42,11 @@ owner: tanabe-yudai
 - 条件: `permitted` が真、かつ `budget_exhausted` が偽
 - 期待する結果: `audit_allowed` を 1 回呼び、`audit_denied` は呼ばない
 
+### R-TOOL-02d
+
+- 条件: `permitted` が真、かつ `budget_exhausted` が偽
+- 期待する結果: 実行前に `budget_charge`（予算の消費）を 1 回呼ぶ
+
 ### R-TOOL-03
 
 - 条件: `permitted` が真、かつ `budget_exhausted` が真
