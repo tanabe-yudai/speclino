@@ -28,8 +28,11 @@ def _canonical(obj: object) -> str:
 
 
 def rule_content_hash(rule: Rule) -> str:
-    """Rule の正規化 JSON（approval_ref を除く）のハッシュ。承認対象は「解釈」そのもの。"""
-    data = rule.model_dump(mode="json")
+    """Rule の正規化 JSON（approval_ref を除き既定値を省く）のハッシュ。承認対象は「解釈」。
+
+    既定値を省くことで、後から任意フィールドが増えても既存の承認ハッシュが変わらない。
+    """
+    data = rule.model_dump(mode="json", exclude_defaults=True)
     data.pop("approval_ref", None)
     return content_hash(_canonical(data))
 

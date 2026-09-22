@@ -17,6 +17,7 @@ from speclino.agent.gateway import ToolGateway, ToolRegistry
 from speclino.agent.permissions import AgentPermissions
 from speclino.agent.tools import InvestigationContext, build_tool_fns, register_must_tools
 from speclino.agent.tools.should_tools import build_should_tool_fns, register_should_tools
+from speclino.agent.tools.test_run import build_test_run_fn, register_test_run
 from speclino.domain.finding import Finding, Findings
 
 INSTRUCTION_PATH = (
@@ -72,6 +73,9 @@ async def investigate(
     register_should_tools(registry, ctx)
     holder: dict[str, ToolGateway] = {}
     tool_fns = build_tool_fns(lambda: holder["gw"]) + build_should_tool_fns(lambda: holder["gw"])
+    if ctx.sandbox is not None and ctx.base_root is not None:
+        register_test_run(registry, ctx)
+        tool_fns.append(build_test_run_fn(lambda: holder["gw"]))
     investigator = Investigator(
         permissions=permissions,
         registry=registry,

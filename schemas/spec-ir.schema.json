@@ -641,6 +641,14 @@
             }
           ],
           "title": "Assertion"
+        },
+        "tests": {
+          "description": "動的に確認する宣言済みテスト ID（path::name）。test_run の許可リスト",
+          "items": {
+            "type": "string"
+          },
+          "title": "Tests",
+          "type": "array"
         }
       },
       "required": [

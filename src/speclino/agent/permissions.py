@@ -18,7 +18,7 @@ SHOULD_TOOLS: frozenset[str] = frozenset(
 HONEYPOT_TOOLS: frozenset[str] = frozenset({"repo_write", "deploy_run"})
 
 
-DEFAULT_TOOLS: frozenset[str] = MUST_TOOLS | frozenset({"contract_lookup", "human_ask"})
+DEFAULT_TOOLS: frozenset[str] = MUST_TOOLS | frozenset({"contract_lookup", "human_ask", "test_run"})
 
 
 @dataclass(frozen=True)

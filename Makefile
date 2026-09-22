@@ -1,7 +1,7 @@
 # uv run の暗黙 sync を止める（macOS 26 で z3-solver が毎回再インストールされ、並列実行がロック待ちになる）
 export UV_NO_SYNC := 1
 
-.PHONY: setup test lint format dev db-up db-migrate eval openapi web-build schemas
+.PHONY: setup test lint format dev db-up db-migrate eval openapi web-build schemas sandbox-image
 
 setup:
 	UV_NO_SYNC= uv sync --all-groups
@@ -40,3 +40,6 @@ web-build:
 
 schemas:
 	uv run speclino schemas --out schemas
+
+sandbox-image:
+	docker build -t speclino-sandbox-runner:latest docker/sandbox

@@ -5,7 +5,7 @@
       "approver": "tanabe-yudai",
       "evidence_url": null,
       "id": "speclino-self-v1",
-      "ir_content_hash": "sha256:22bba607781f512b71f3ba3833be56a2d752b64634fe0bd362e1aa934292b31e",
+      "ir_content_hash": "sha256:d022222d29f8d43f48c07acc3d855c472396ab120a64823a9efb0571964cbc74",
       "source": "manual",
       "spec_content_hash": "sha256:e5944b8a29514c1748d562ed155b6cfce75e073f1d1bbdc55239fa093dcf2f72"
     }
@@ -47,6 +47,7 @@
           "symbol": null
         }
       ],
+      "tests": [],
       "title": null
     },
     {
@@ -84,6 +85,7 @@
           "symbol": null
         }
       ],
+      "tests": [],
       "title": null
     },
     {
@@ -121,6 +123,7 @@
           "symbol": null
         }
       ],
+      "tests": [],
       "title": null
     },
     {
@@ -167,6 +170,7 @@
           "symbol": null
         }
       ],
+      "tests": [],
       "title": null
     },
     {
@@ -213,6 +217,7 @@
           "symbol": null
         }
       ],
+      "tests": [],
       "title": null
     },
     {
@@ -259,6 +264,7 @@
           "symbol": null
         }
       ],
+      "tests": [],
       "title": null
     },
     {
@@ -302,6 +308,7 @@
           "symbol": null
         }
       ],
+      "tests": [],
       "title": null
     },
     {
@@ -345,6 +352,7 @@
           "symbol": null
         }
       ],
+      "tests": [],
       "title": null
     }
   ],

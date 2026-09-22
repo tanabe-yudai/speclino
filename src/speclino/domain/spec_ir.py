@@ -59,6 +59,10 @@ class Rule(IRModel):
     claim_scope: ClaimScope
     applicability: Expr = Field(description="この要求が適用される入口条件")
     assertion: Assertion
+    tests: list[str] = Field(
+        default_factory=list,
+        description="動的に確認する宣言済みテスト ID（path::name）。test_run の許可リスト",
+    )
 
 
 class ApprovalRecord(IRModel):

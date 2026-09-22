@@ -23,9 +23,18 @@ from speclino.api.app import create_app
 from speclino.api.deps import AppState
 from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
 from speclino.settings import Settings
+from speclino.spec import load_spec_ir
 from speclino.spec.spec_validator import rule_content_hash
-from tests.fixtures import cancel_order as co
 from tests.integration.services.test_review_run_service import make_demo_repo
+
+
+def _base_rule(rule_id: str):  # type: ignore[no-untyped-def]
+    """base（examples/orders の承認済み Spec IR）から Rule を引く。"""
+    spec = load_spec_ir(
+        Path(__file__).resolve().parents[3] / "examples/orders/specs/ir/cancel_order.spec-ir.json"
+    )
+    return next(r for r in spec.rules if r.id == rule_id)
+
 
 _DATABASE_URL = os.environ.get("SPECLINO_DATABASE_URL")
 pytestmark = [
@@ -151,7 +160,7 @@ async def test_approve_spec_comment_triggers_rerun(
     raw, headers = signed(pr_payload(repo, head2, base, 2), "pull_request")
     first = (await c.post("/webhooks/github", content=raw, headers=headers)).json()
     assert (await c.get(f"/api/review-runs/{first['run_id']}")).json()["gate_status"] == "fail"
-    base_hash = rule_content_hash(co.RULES[3])
+    base_hash = rule_content_hash(_base_rule("R-CANCEL-04"))
     # 承認者でない人のコマンドは拒否（監査に残る）
     raw, headers = signed(
         comment_payload(repo, 2, f"/speclino approve-spec removed:{base_hash}", "stranger"),

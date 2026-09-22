@@ -54,7 +54,10 @@
             "value": 403
           }
         }
-      }
+      },
+      "tests": [
+        "examples/orders/tests/test_spec_cancel.py::test_stranger_gets_403"
+      ]
     },
     {
       "id": "R-CANCEL-02",
@@ -120,7 +123,10 @@
             "value": 409
           }
         }
-      }
+      },
+      "tests": [
+        "examples/orders/tests/test_spec_cancel.py::test_shipped_gets_409"
+      ]
     },
     {
       "id": "R-CANCEL-03",
@@ -186,7 +192,10 @@
             "value": "CANCELLED"
           }
         }
-      }
+      },
+      "tests": [
+        "examples/orders/tests/test_spec_cancel.py::test_owner_cancel_sets_cancelled_and_204"
+      ]
     },
     {
       "id": "R-CANCEL-04",
@@ -253,7 +262,11 @@
             "path": "before.order.items"
           }
         }
-      }
+      },
+      "tests": [
+        "examples/orders/tests/test_spec_cancel.py::test_owner_cancel_restores_inventory_once",
+        "examples/orders/tests/test_spec_cancel.py::test_admin_cancel_restores_inventory_once"
+      ]
     },
     {
       "id": "R-CANCEL-05",
@@ -391,7 +404,10 @@
             "value": 204
           }
         }
-      }
+      },
+      "tests": [
+        "examples/orders/tests/test_spec_cancel.py::test_owner_cancel_sets_cancelled_and_204"
+      ]
     },
     {
       "id": "R-CANCEL-07a",
@@ -480,7 +496,10 @@
           "operator": "eq",
           "value": 0
         }
-      }
+      },
+      "tests": [
+        "examples/orders/tests/test_spec_cancel.py::test_rejected_paths_have_no_side_effects"
+      ]
     },
     {
       "id": "R-CANCEL-07b",
@@ -569,7 +588,10 @@
           "operator": "eq",
           "value": 0
         }
-      }
+      },
+      "tests": [
+        "examples/orders/tests/test_spec_cancel.py::test_rejected_paths_have_no_side_effects"
+      ]
     },
     {
       "id": "R-CANCEL-07c",

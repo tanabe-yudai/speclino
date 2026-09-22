@@ -11,6 +11,7 @@ from speclino.domain.code_ir import AnalysisLimits, CodeIR
 from speclino.domain.domain_spec import DomainSpec
 from speclino.domain.finding import Finding, Findings
 from speclino.domain.spec_ir import SpecIR
+from speclino.ports.sandbox import Sandbox
 
 UNRESOLVED_CATEGORIES_FOR_HUMANS = frozenset(
     {"stale_approval", "vacuous_applicability", "ambiguous_spec"}
@@ -31,6 +32,8 @@ class InvestigationContext:
     events: list[dict[str, Any]] = field(default_factory=list)
     plans_recorded: int = 0
     questions: list[dict[str, Any]] = field(default_factory=list)  # human_ask の登録（未回答）
+    base_root: Path | None = None  # base スナップショット（テストと設定の信頼側）
+    sandbox: Sandbox | None = None  # 隔離テスト実行（無ければ test_run は使えない）
 
     def unresolved(self) -> list[Finding]:
         """エージェントが取り組む Finding。人の判断が要る種別は除く。"""
