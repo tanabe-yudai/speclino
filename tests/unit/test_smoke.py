@@ -78,3 +78,14 @@ async def test_spa_deep_links_fall_back_to_index() -> None:
         api = await c.get("/api/no-such-route")
     assert deep.status_code == 200 and '<div id="root"' in deep.text
     assert api.status_code == 404 and api.json()["error"]["code"] == "http_error"
+
+
+def test_web_role_starts_without_github_credentials() -> None:
+    """秘密鍵は worker だけが持つ（design のサービス構成表）。web は遅延生成で起動できる。"""
+    from speclino.api.deps import LazyCodeHost, build_state
+
+    state = build_state(Settings(env="prod", role="web", code_host_kind="github"))
+    assert isinstance(state.code_host, LazyCodeHost)
+    # 実際に GitHub を使う操作で初めて設定不足が分かる（= worker 側で失敗する）
+    with pytest.raises(RuntimeError, match="GitHub App"):
+        _ = state.code_host.inner

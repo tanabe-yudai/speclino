@@ -25,6 +25,47 @@ locals {
   } : {}
 
   all_services = merge(local.cloud_run_services, local.sandbox_service)
+
+  # 全サービス共通の環境変数。
+  common_env = {
+    SPECLINO_ENV                = "prod"
+    GOOGLE_CLOUD_PROJECT        = var.project_id
+    GOOGLE_CLOUD_LOCATION       = "global"
+    GOOGLE_GENAI_USE_ENTERPRISE = "true"
+    # 成果物は GCS に置く（既定の fs は Cloud Run のインスタンスごとに消える）。
+    SPECLINO_BLOB_KIND  = "gcs"
+    SPECLINO_GCS_BUCKET = google_storage_bucket.artifacts.name
+  }
+
+  # web だけが Cloud Tasks にタスクを作る（worker は自分で enqueue しない）。
+  # `gcloud run services update --set-env-vars` で足すと次の apply で消えるため、
+  # 環境変数は Terraform 側で持つ（run.tf の ignore_changes はイメージのみ）。
+  #
+  # worker の URL を同じリソースの別インスタンスから参照すると循環になるので、
+  # public_url と同じく変数で受け取り 2 回目の apply で解決する。
+  web_queue_env = var.worker_url == "" ? {} : {
+    SPECLINO_QUEUE_KIND                             = "cloud_tasks"
+    SPECLINO_CLOUD_TASKS_PROJECT                    = var.project_id
+    SPECLINO_CLOUD_TASKS_LOCATION                   = var.region
+    SPECLINO_CLOUD_TASKS_QUEUE                      = google_cloud_tasks_queue.runs.name
+    SPECLINO_CLOUD_TASKS_WORKER_URL                 = var.worker_url
+    SPECLINO_CLOUD_TASKS_OIDC_SERVICE_ACCOUNT_EMAIL = google_service_account.this["tasks"].email
+  }
+
+  web_env = merge(local.web_queue_env, {
+    SPECLINO_AUTH_KIND           = "identity_platform"
+    SPECLINO_FIREBASE_PROJECT_ID = var.project_id
+  })
+
+  worker_env = var.database_url == "" ? {} : { SPECLINO_DATABASE_URL = var.database_url }
+
+  service_env = {
+    web     = merge(local.common_env, local.web_env, local.public_url_env)
+    worker  = merge(local.common_env, local.worker_env, local.public_url_env)
+    sandbox = local.common_env
+  }
+
+  public_url_env = var.public_url == "" ? {} : { SPECLINO_PUBLIC_URL = var.public_url }
 }
 
 resource "google_cloud_run_v2_service" "services" {
@@ -75,21 +116,24 @@ resource "google_cloud_run_v2_service" "services" {
         name  = "SPECLINO_ROLE"
         value = each.key
       }
-      env {
-        name  = "SPECLINO_ENV"
-        value = "prod"
+
+      dynamic "env" {
+        for_each = local.service_env[each.key]
+        content {
+          name  = env.key
+          value = env.value
+        }
       }
-      env {
-        name  = "GOOGLE_CLOUD_PROJECT"
-        value = var.project_id
-      }
-      env {
-        name  = "GOOGLE_CLOUD_LOCATION"
-        value = "global"
-      }
-      env {
-        name  = "GOOGLE_GENAI_USE_ENTERPRISE"
-        value = "true"
+    }
+
+    # worker だけ Cloud SQL に Unix ソケットで繋ぐ（S26）。
+    dynamic "volumes" {
+      for_each = each.key == "worker" && var.cloudsql_instance != "" ? [1] : []
+      content {
+        name = "cloudsql"
+        cloud_sql_instance {
+          instances = [var.cloudsql_instance]
+        }
       }
     }
   }

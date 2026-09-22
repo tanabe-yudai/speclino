@@ -64,6 +64,24 @@ terraform output
 Preview で、プロジェクトが許可されていないと apply 全体が失敗するため。S38 で
 `-var enable_sandbox=true` にして試す。
 
+### 2 回目の apply（URL が決まってから）
+
+Cloud Run の URL は作成後に決まるため、自分自身を参照する設定は 2 回目の apply で入れる。
+
+```sh
+terraform output web_url worker_url
+cat >> terraform.tfvars <<EOF
+public_url = "<web_url>"
+worker_url = "<worker_url>"
+EOF
+terraform plan -out=tfplan && terraform apply tfplan
+```
+
+これで web に `SPECLINO_QUEUE_KIND=cloud_tasks` と Cloud Tasks の宛先・OIDC SA が入る。
+**環境変数は Terraform が持つ**（`gcloud run services update --set-env-vars` で足すと次の
+apply で消える）。Cloud SQL を作った後は `database_url` と `cloudsql_instance` も tfvars に
+足して apply する。
+
 ### Identity Platform が失敗する場合
 
 `google_identity_platform_config` は、プロジェクトで Identity Platform が一度も初期化されて
@@ -136,20 +154,25 @@ GitHub Actions から自動デプロイする場合は、リポジトリ変数�
 `VITE_FIREBASE_API_KEY` / `VITE_FIREBASE_AUTH_DOMAIN` / `VITE_FIREBASE_PROJECT_ID` を設定する
 （クライアント設定なので secret ではなく variable でよい）。
 
-## 6. 環境変数の設定
+## 6. 環境変数（Terraform で管理する）
+
+役割ごとの環境変数は `infra/envs/prod/run.tf` が持つ。`gcloud run services update` で
+足さないこと（次の `terraform apply` で消える）。tfvars に入れるのは次の 4 つ:
+
+| 変数 | 値 | いつ |
+| --- | --- | --- |
+| `public_url` | `terraform output web_url` | 2 回目の apply |
+| `worker_url` | `terraform output worker_url` | 2 回目の apply |
+| `database_url` | Cloud SQL の接続 URL | Cloud SQL 作成後 |
+| `cloudsql_instance` | `<project>:<region>:speclino-db` | Cloud SQL 作成後 |
+
+秘密（GitHub App 秘密鍵・Webhook secret・MCP トークン）だけは Secret Manager から渡す:
 
 ```sh
-WEB_URL=$(gcloud run services describe speclino-web --project=$P --region=asia-northeast1 --format='value(status.url)')
-WORKER_URL=$(gcloud run services describe speclino-worker --project=$P --region=asia-northeast1 --format='value(status.url)')
-
 gcloud run services update speclino-web --project=$P --region=asia-northeast1 \
-  --set-env-vars="SPECLINO_PUBLIC_URL=$WEB_URL,SPECLINO_QUEUE_KIND=cloud_tasks,SPECLINO_BLOB_KIND=gcs,SPECLINO_GCS_BUCKET=$P-artifacts,SPECLINO_AUTH_KIND=identity_platform,SPECLINO_FIREBASE_PROJECT_ID=$P,SPECLINO_WORKER_URL=$WORKER_URL" \
   --set-secrets="SPECLINO_GITHUB_WEBHOOK_SECRET=github-webhook-secret:latest,SPECLINO_MCP_TOKEN=mcp-token:latest"
-
 gcloud run services update speclino-worker --project=$P --region=asia-northeast1 \
-  --set-env-vars="SPECLINO_PUBLIC_URL=$WEB_URL,SPECLINO_BLOB_KIND=gcs,SPECLINO_GCS_BUCKET=$P-artifacts,SPECLINO_DATABASE_URL=<Cloud SQL の URL>" \
-  --set-secrets="SPECLINO_GITHUB_PRIVATE_KEY=github-app-private-key:latest" \
-  --add-cloudsql-instances=<接続名>
+  --set-secrets="SPECLINO_GITHUB_PRIVATE_KEY=github-app-private-key:latest"
 ```
 
 web には GitHub App の秘密鍵を渡さない（`LazyCodeHost` により web は秘密鍵なしで起動する）。

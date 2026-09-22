@@ -33,6 +33,14 @@ class Settings(BaseSettings):
     code_host_kind: Literal["github", "local"] = "github"
     local_repos: dict[str, Path] = {}  # code_host_kind=local のとき repo_full_name → パス
 
+    # Cloud Tasks（S26）: queue_kind=cloud_tasks で使う。未設定だと build_state が落ちる
+    cloud_tasks_project: str | None = None
+    cloud_tasks_location: str | None = None
+    cloud_tasks_queue: str | None = None
+    cloud_tasks_worker_url: str | None = None  # worker の URL（内部で /internal/tasks/run を付与）
+    cloud_tasks_oidc_service_account_email: str | None = None
+    cloud_tasks_dispatch_deadline_s: int = 1500  # 根拠: infra/envs/prod/tasks.tf 冒頭コメント
+
     # エージェント
     agent_enabled: bool = True
     agent_model: str = "gemini-3.8-flash"

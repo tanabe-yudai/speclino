@@ -55,3 +55,42 @@ variable "enable_sandbox" {
   type        = bool
   default     = false
 }
+
+variable "public_url" {
+  description = <<-EOT
+    web サービスの公開 URL（`https://speclino-web-....run.app`）。
+    Cloud Run の URL は作成後に決まるため、初回 apply では空のままにし、
+    `terraform output web_url` で得た値を tfvars に書いて 2 回目の apply で反映する。
+    空のときは Check の詳細リンクとフロントの絶対 URL が使えない。
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "worker_url" {
+  description = <<-EOT
+    worker サービスの URL。web が Cloud Tasks のタスクを作るときの宛先になる。
+    public_url と同じく作成後に決まるため、初回 apply では空にし、
+    `terraform output worker_url` の値を tfvars に書いて 2 回目の apply で反映する。
+    空のあいだ web は Cloud Tasks を使わない設定のままになる（初回はサンプルイメージなので影響なし）。
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "database_url" {
+  description = <<-EOT
+    worker が使う Cloud SQL への接続 URL
+    （例 `postgresql+asyncpg://speclino:<pw>@/speclino?host=/cloudsql/<接続名>`）。
+    S26 で Cloud SQL を作ってから設定する。空のときは worker は既定のローカル DB を見る。
+  EOT
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "cloudsql_instance" {
+  description = "worker に接続する Cloud SQL インスタンスの接続名（`<project>:<region>:<instance>`）。空なら接続しない。"
+  type        = string
+  default     = ""
+}

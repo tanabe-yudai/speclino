@@ -13,8 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from speclino.adapters.github.app_auth import GitHubAppAuth
 from speclino.adapters.github.client import GitHubClient
 from speclino.adapters.localgit.local_code_host import LocalCodeHost
+from speclino.adapters.queue.cloud_tasks import CloudTasksQueue
 from speclino.adapters.queue.inprocess import InProcessQueue
 from speclino.adapters.storage.fs import FileSystemBlobStore
+from speclino.adapters.storage.gcs import GcsBlobStore
 from speclino.agent.permissions import AgentPermissions
 from speclino.db.repositories.cost_ledger import CostLedgerRepository
 from speclino.db.session import make_engine, make_session_factory
@@ -78,18 +80,95 @@ def build_code_host(settings: Settings, installation_id: int | None = None) -> C
     )
 
 
+class LazyCodeHost:
+    """初回利用時にだけ実体を作る CodeHost。
+
+    web ロールは run を作って enqueue するだけで、Check の更新とスナップショット取得は
+    worker が行う。起動時に実体を作ると web にも GitHub App の秘密鍵が要ることになり、
+    「秘密鍵は worker だけが持つ」構成（design のサービス構成表）を取れない。
+    """
+
+    def __init__(self, settings: Settings) -> None:
+        self._settings = settings
+        self._inner: CodeHost | None = None
+
+    @property
+    def inner(self) -> CodeHost:
+        if self._inner is None:
+            self._inner = build_code_host(self._settings)
+        return self._inner
+
+    async def create_check(
+        self, repo: str, head_sha: str, name: str, details_url: str | None, external_id: str | None
+    ) -> int:
+        return await self.inner.create_check(repo, head_sha, name, details_url, external_id)
+
+    async def update_check(
+        self,
+        repo: str,
+        check_run_id: int,
+        status: str,
+        conclusion: str | None,
+        title: str,
+        summary: str,
+        text: str,
+        annotations: list[dict[str, object]],
+    ) -> None:
+        await self.inner.update_check(
+            repo, check_run_id, status, conclusion, title, summary, text, annotations
+        )
+
+    async def post_comment(self, repo: str, issue_number: int, body: str) -> int:
+        return await self.inner.post_comment(repo, issue_number, body)
+
+    async def fetch_snapshot(self, repo: str, sha: str, dest_dir: Path) -> Path:
+        return await self.inner.fetch_snapshot(repo, sha, dest_dir)
+
+
 def build_state(settings: Settings) -> AppState:
     engine = make_engine(settings)
     factory = make_session_factory(engine)
-    blobs: BlobStore = FileSystemBlobStore(settings.artifact_dir)
-    code_host = build_code_host(settings)
+    if settings.blob_kind == "fs":
+        blobs: BlobStore = FileSystemBlobStore(settings.artifact_dir)
+    else:
+        bucket = settings.gcs_bucket
+        if not bucket:
+            raise RuntimeError("gcs バケットの設定が無い（SPECLINO_GCS_BUCKET）")
+        blobs = GcsBlobStore(bucket)
+    code_host: CodeHost = LazyCodeHost(settings)
     holder: dict[str, ReviewRunService] = {}
     if settings.queue_kind == "inprocess":
         queue: TaskQueue = InProcessQueue(
             lambda run_id: holder["svc"].execute(run_id), immediate=False
         )
-    else:  # pragma: no cover - S26 で Cloud Tasks を実装
-        raise RuntimeError("cloud_tasks キューは未実装（S26）")
+    else:
+        project = settings.cloud_tasks_project
+        location = settings.cloud_tasks_location
+        queue_name = settings.cloud_tasks_queue
+        worker_url = settings.cloud_tasks_worker_url
+        oidc_email = settings.cloud_tasks_oidc_service_account_email
+        missing = [
+            name
+            for name, value in (
+                ("SPECLINO_CLOUD_TASKS_PROJECT", project),
+                ("SPECLINO_CLOUD_TASKS_LOCATION", location),
+                ("SPECLINO_CLOUD_TASKS_QUEUE", queue_name),
+                ("SPECLINO_CLOUD_TASKS_WORKER_URL", worker_url),
+                ("SPECLINO_CLOUD_TASKS_OIDC_SERVICE_ACCOUNT_EMAIL", oidc_email),
+            )
+            if not value
+        ]
+        if missing:
+            raise RuntimeError(f"cloud_tasks キューの設定が無い: {', '.join(missing)}")
+        assert project and location and queue_name and worker_url and oidc_email
+        queue = CloudTasksQueue(
+            project=project,
+            location=location,
+            queue=queue_name,
+            worker_url=worker_url,
+            oidc_service_account_email=oidc_email,
+            dispatch_deadline_s=settings.cloud_tasks_dispatch_deadline_s,
+        )
     ledger: CostLedger = _SessionLedger(factory)
     service = ReviewRunService(
         session_factory=factory,
