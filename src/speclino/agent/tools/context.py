@@ -30,6 +30,7 @@ class InvestigationContext:
     source_roots: tuple[str, ...] = (".", "src")
     events: list[dict[str, Any]] = field(default_factory=list)
     plans_recorded: int = 0
+    questions: list[dict[str, Any]] = field(default_factory=list)  # human_ask の登録（未回答）
 
     def unresolved(self) -> list[Finding]:
         """エージェントが取り組む Finding。人の判断が要る種別は除く。"""

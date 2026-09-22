@@ -21,6 +21,7 @@ from speclino.db.repositories import (
     ApprovalRepository,
     AuditRepository,
     ProjectRepository,
+    QuestionRepository,
     ReviewRunRepository,
     WebhookDeliveryRepository,
 )
@@ -121,9 +122,14 @@ async def _handle_comment(state: AppState, cm: Any) -> dict[str, Any]:
                     approver=cm.author_login,
                     comment_url=cm.comment_url,
                 )
+            if cmd.kind == "answer":
+                outcome = await _record_answer(session, cmd.args, cm, latest)
+                results.append({"kind": cmd.kind, **outcome})
+                continue
             results.append({"kind": cmd.kind, "accepted": True})
-    # 承認・再実行のあとは最新 head で再検証する
+    # 承認・回答・再実行のあとは最新 head で再検証する（回答は親 run を持つ子 run として）
     if latest is not None and any(r["accepted"] for r in results):
+        answered = [r for r in results if r["kind"] == "answer" and r["accepted"]]
         run_id = await state.service.create_run(
             repo_full_name=cm.repo_full_name,
             head_sha=latest.head_sha,
@@ -131,6 +137,30 @@ async def _handle_comment(state: AppState, cm: Any) -> dict[str, Any]:
             pr_number=cm.issue_number,
             trigger="comment",
             installation_id=cm.installation_id,
+            parent_run_id=answered[0]["parent_run_id"] if answered else None,
         )
         return {"status": "queued", "run_id": str(run_id), "commands": results}
     return {"status": "handled", "commands": results}
+
+
+async def _record_answer(
+    session: Any, args: tuple[str, ...], cm: Any, latest: Any
+) -> dict[str, Any]:
+    """`/speclino answer Q-<id> <選択肢>`。head が変わっていれば stale（FR 015）。"""
+    qid, option = args[0].removeprefix("Q-"), args[1]
+    qrepo = QuestionRepository(session)
+    q = await qrepo.find_by_short_id(qid)
+    if q is None:
+        return {"accepted": False, "reason": f"未回答の質問 Q-{qid} が無い"}
+    options = q.options.get("options") or []
+    if option not in options:
+        return {"accepted": False, "reason": f"選択肢は {options} のいずれか"}
+    if latest is not None and latest.head_sha != q.head_sha:
+        await qrepo.set_answer(
+            q.id, {"option": option, "by": cm.author_login, "stale": True}, "stale"
+        )
+        return {"accepted": False, "reason": "質問後に head が変わったため再確認が必要（stale）"}
+    await qrepo.set_answer(
+        q.id, {"option": option, "by": cm.author_login, "url": cm.comment_url}, "answered"
+    )
+    return {"accepted": True, "parent_run_id": q.run_id}

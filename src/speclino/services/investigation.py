@@ -16,6 +16,7 @@ from speclino.agent.app import DEFAULT_MODEL, InvestigationLog, Investigator
 from speclino.agent.gateway import ToolGateway, ToolRegistry
 from speclino.agent.permissions import AgentPermissions
 from speclino.agent.tools import InvestigationContext, build_tool_fns, register_must_tools
+from speclino.agent.tools.should_tools import build_should_tool_fns, register_should_tools
 from speclino.domain.finding import Finding, Findings
 
 INSTRUCTION_PATH = (
@@ -32,6 +33,7 @@ class InvestigationResult:
     events: list[dict[str, Any]] = field(default_factory=list)
     reason: str = ""
     prompt_version: str = PROMPT_VERSION
+    questions: list[dict[str, Any]] = field(default_factory=list)
 
 
 def build_prompt(unresolved: list[Finding], budget: AgentPermissions) -> str:
@@ -67,8 +69,9 @@ async def investigate(
         )
     registry = ToolRegistry()
     register_must_tools(registry, ctx)
+    register_should_tools(registry, ctx)
     holder: dict[str, ToolGateway] = {}
-    tool_fns = build_tool_fns(lambda: holder["gw"])
+    tool_fns = build_tool_fns(lambda: holder["gw"]) + build_should_tool_fns(lambda: holder["gw"])
     investigator = Investigator(
         permissions=permissions,
         registry=registry,
@@ -91,4 +94,14 @@ async def investigate(
     )
     for e in investigator.audit.entries:
         ctx.record("audit", e)
-    return InvestigationResult(True, ctx.findings, log, list(ctx.events), "調査を実行した")
+        if e.get("injection_suspected"):
+            ctx.record(
+                "security.injection_suspected",
+                {
+                    "tool": e["tool"],
+                    "note": "リポジトリ由来の指示による書込み/デプロイ要求を拒否した",
+                },
+            )
+    return InvestigationResult(
+        True, ctx.findings, log, list(ctx.events), "調査を実行した", questions=list(ctx.questions)
+    )

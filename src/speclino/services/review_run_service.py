@@ -36,6 +36,7 @@ from speclino.db.repositories import (
     AuditRepository,
     FindingRepository,
     ProjectRepository,
+    QuestionRepository,
     ReviewRunRepository,
     RunEventRepository,
 )
@@ -59,6 +60,7 @@ from speclino.services.investigation import investigate
 from speclino.services.obligation_diff import effective_spec
 from speclino.services.run_freshness import should_publish
 from speclino.spec import load_spec_ir
+from speclino.telemetry import configure_tracing, span
 
 CHECK_NAME = "SpecLino / gate"
 
@@ -94,8 +96,12 @@ class ReviewRunService:
         installation_id: int | None = None,
         default_branch: str = "main",
         settings: dict[str, Any] | None = None,
+        parent_run_id: UUID | None = None,
     ) -> UUID:
-        """run を queued で作り、同じ PR の未完了 run を superseded にして enqueue する。"""
+        """run を queued で作り、同じ PR の未完了 run を superseded にして enqueue する。
+
+        parent_run_id を持つ子 run は、親（とその祖先）の回答済み質問を引き継いで再開する。
+        """
         async with self.session_factory() as session, session.begin():
             projects = ProjectRepository(session)
             project = await projects.upsert(
@@ -111,6 +117,7 @@ class ReviewRunService:
                 head_sha=head_sha,
                 base_sha=base_sha,
                 trigger=trigger,
+                parent_run_id=parent_run_id,
             )
             superseded = await runs.supersede_open_runs(project.id, pr_number, run.id)
             await RunEventRepository(session).append(
@@ -124,6 +131,11 @@ class ReviewRunService:
 
     # ------------------------------------------------------------ execute
     async def execute(self, run_id: UUID) -> None:
+        configure_tracing()
+        with span("speclino.review_run", run_id=str(run_id)):
+            await self._execute(run_id)
+
+    async def _execute(self, run_id: UUID) -> None:
         async with self.session_factory() as session, session.begin():
             runs = ReviewRunRepository(session)
             if not await runs.try_acquire(run_id):
@@ -151,6 +163,14 @@ class ReviewRunService:
             events = RunEventRepository(session)
             await events.append(run_id, "state", {"exec_state": "running"})
             head_sha, base_sha, pr_number = run.head_sha, run.base_sha, run.pr_number
+            answers = await _collect_answers(session, run.parent_run_id)
+            bindings_patch = {
+                a["option"]: a["symbol"]
+                for a in answers
+                if a.get("kind") == "binding" and a.get("option") not in (None, "none")
+            }
+            for a in answers:
+                await events.append(run_id, "human_answer", a)
 
         details_url = (
             f"{self.config.details_url_base}/{run_id}" if self.config.details_url_base else None
@@ -172,6 +192,7 @@ class ReviewRunService:
         )
 
         exec_state: ExecState = "completed"
+        questions: list[dict[str, Any]] = []
         gate: GateResult | None = None
         result: CheckResult | None = None
         findings: Findings | None = None
@@ -200,8 +221,10 @@ class ReviewRunService:
                     run_id=str(run_id),
                     spec_overrides=overrides,
                     extra_findings=tuple(extra),
+                    bindings_patch=bindings_patch or None,
                 )
-                result = run_check(req)
+                with span("speclino.check", head=head_sha):
+                    result = run_check(req)
                 findings = result.findings
                 gate = result.gate
                 # 未解決があればエージェントが証拠を集める（判定はエンジン）
@@ -223,6 +246,7 @@ class ReviewRunService:
                         ctx, self.config.permissions, self.config.model, cost_ok
                     )
                     agent_events = inv.events
+                    questions = inv.questions
                     if inv.started:
                         findings = _merge_non_behavior_findings(result.findings, ctx.findings)
                         gate = _regate(findings, result, self.config.fail_on)
@@ -270,6 +294,19 @@ class ReviewRunService:
                 await events.append(run_id, ev["type"], ev["payload"])
             if findings is not None:
                 await FindingRepository(session).replace_for_run(run_id, findings.findings)
+            question_ids: list[str] = []
+            if questions and exec_state == "completed":
+                qrepo = QuestionRepository(session)
+                for q in questions:
+                    row = await qrepo.add(
+                        run_id=run_id,
+                        requirement_id=q.get("requirement_id"),
+                        head_sha=head_sha,
+                        text=q["question"],
+                        options={k: v for k, v in q.items() if k != "question"},
+                    )
+                    question_ids.append(str(row.id))
+                exec_state = "awaiting_answer"
             gate_status: GateStatus | None = gate.status if gate else None
             final_state: ExecState = (
                 "superseded" if current.exec_state == "superseded" else exec_state
@@ -277,7 +314,7 @@ class ReviewRunService:
             await runs.set_result(
                 run_id,
                 final_state,
-                gate_status if exec_state == "completed" else None,
+                gate_status if exec_state in ("completed", "awaiting_answer") else None,
                 result.manifest.model_dump(mode="json") if result else None,
                 artifacts_uri,
             )
@@ -320,6 +357,21 @@ class ReviewRunService:
                 text.text,
                 check_annotations(findings),
             )
+        elif fresh.publish and exec_state == "awaiting_answer" and findings is not None:
+            body = _question_comment(questions, question_ids)
+            if pr_number is not None:
+                await self.code_host.post_comment(repo_full_name, pr_number, body)
+            status, conclusion = to_check_state(None, "awaiting_answer")
+            await self.code_host.update_check(
+                repo_full_name,
+                check_run_id,
+                status,
+                conclusion,
+                f"回答待ち（質問 {len(questions)} 件）",
+                body[:1500],
+                render_check(findings, gate).text if gate else "",
+                check_annotations(findings),
+            )
         elif fresh.publish:
             status, conclusion = to_check_state(None, exec_state)
             await self.code_host.update_check(
@@ -343,6 +395,53 @@ class ReviewRunService:
                 "",
                 [],
             )
+
+
+async def _collect_answers(
+    session: AsyncSession, parent_run_id: UUID | None
+) -> list[dict[str, Any]]:
+    """親 run（とその祖先、最大 3 世代）の回答済み質問を集める。"""
+    answers: list[dict[str, Any]] = []
+    runs = ReviewRunRepository(session)
+    qrepo = QuestionRepository(session)
+    current = parent_run_id
+    for _ in range(3):
+        if current is None:
+            break
+        for q in await qrepo.list_for_run(current, "answered"):
+            if q.answer:
+                answers.append(
+                    {
+                        "question_id": str(q.id),
+                        "kind": q.options.get("kind"),
+                        "symbol": q.options.get("symbol"),
+                        "requirement_id": q.requirement_id,
+                        **q.answer,
+                    }
+                )
+        parent = await runs.get(current)
+        current = parent.parent_run_id if parent else None
+    return answers
+
+
+def _question_comment(questions: list[dict[str, Any]], ids: list[str]) -> str:
+    lines = [
+        "SpecLino からの確認事項です。承認者は次の形式で回答してください: "
+        "`/speclino answer Q-<ID> <選択肢>`",
+        "",
+    ]
+    for q, qid in zip(questions, ids, strict=True):
+        short = qid[:8]
+        lines.append(f"### Q-{short}（{q.get('requirement_id') or '-'} / {q['kind']}）")
+        lines.append(q["question"])
+        if q.get("symbol"):
+            lines.append(f"- 対象シンボル: `{q['symbol']}`")
+        lines.append("- 選択肢: " + " / ".join(f"`{o}`" for o in q["options"]))
+        lines.append("")
+    lines.append(
+        "仕様の意味を変える回答はできません。必要なら specs/ と specs/ir を修正してください。"
+    )
+    return "\n".join(lines)
 
 
 def _reconcile_specs(

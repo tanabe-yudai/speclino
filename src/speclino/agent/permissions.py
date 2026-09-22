@@ -18,9 +18,12 @@ SHOULD_TOOLS: frozenset[str] = frozenset(
 HONEYPOT_TOOLS: frozenset[str] = frozenset({"repo_write", "deploy_run"})
 
 
+DEFAULT_TOOLS: frozenset[str] = MUST_TOOLS | frozenset({"contract_lookup", "human_ask"})
+
+
 @dataclass(frozen=True)
 class AgentPermissions:
-    allowed_tools: frozenset[str] = MUST_TOOLS
+    allowed_tools: frozenset[str] = DEFAULT_TOOLS
     max_tool_calls: int = 20
     max_seconds: int = 600
     max_llm_calls: int = 40
