@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Literal, cast
 from uuid import uuid4
@@ -35,6 +35,7 @@ from speclino import __version__
 from speclino.analysis.limits import DEFAULT_LIMITS, clamp
 from speclino.analysis.path_analyzer import ANALYZER_VERSION, analyze_repo
 from speclino.conformance.engine import ENGINE_VERSION, EngineConfig, evaluate
+from speclino.conformance.exceptions import waived_ids
 from speclino.conformance.gate import DEFAULT_FAIL_ON, GatePolicy, GateResult, aggregate_gate
 from speclino.domain.bindings import Bindings, OperationContract
 from speclino.domain.code_ir import AnalysisLimits, CodeIR
@@ -87,6 +88,10 @@ class CheckRequest:
     spec_overrides: dict[str, SpecIR] | None = None
     # 削除された要求などパイプライン外で作った Finding（ゲートに含める）
     extra_findings: tuple[Finding, ...] = ()
+    # 例外の期限判定に使う日付（テストで固定できる）
+    today: date | None = None
+    # 人の回答（human_ask）による run 限定の操作束縛: 操作 ID → 実装シンボル（S32）
+    bindings_patch: dict[str, str] | None = None
 
     @property
     def resolved_project_dir(self) -> Path:
@@ -121,6 +126,16 @@ def run_check(req: CheckRequest) -> CheckResult:
         raise CheckInputError(f"bindings.yaml が無い: {bindings_path}")
     domain = load_domain(domain_path)
     bindings = load_bindings(bindings_path)
+    if req.bindings_patch:
+        ops = {
+            op_id: (
+                ob.model_copy(update={"symbol": req.bindings_patch[op_id]})
+                if op_id in req.bindings_patch
+                else ob
+            )
+            for op_id, ob in bindings.operations.items()
+        }
+        bindings = bindings.model_copy(update={"operations": ops})
 
     contracts_dir = project_dir / ".speclino" / "contracts"
     contracts = load_contracts(contracts_dir) if contracts_dir.is_dir() else {}
@@ -195,7 +210,10 @@ def run_check(req: CheckRequest) -> CheckResult:
     levels.update(policy_levels)
 
     fail_on = req.fail_on or DEFAULT_FAIL_ON
-    gate = aggregate_gate(combined, levels, GatePolicy(fail_on=fail_on, mode=req.mode))
+    # 例外（免除）: 有効期限内で対象が一致する VIOLATED だけ。適合には書き換えず別記する（AC-009）
+    exceptions = _load_exceptions(project_dir)
+    waived = waived_ids(combined, exceptions, req.today or date.today())
+    gate = aggregate_gate(combined, levels, GatePolicy(fail_on=fail_on, mode=req.mode), waived)
 
     manifest = RunManifest(
         run_id=run_id,
@@ -247,13 +265,16 @@ def write_result(result: CheckResult, out_dir: Path) -> dict[str, Path]:
     """
     if len(result.spec_irs) == 1:
         code = result.code_irs[0] if result.code_irs else None
-        return write_artifacts(
+        written = write_artifacts(
             out_dir, result.manifest, result.spec_irs[0], code, result.findings, result.gate
         )
+        _write_domain(result, out_dir, written)
+        return written
 
     written = write_artifacts(
         out_dir, result.manifest, result.spec_irs[0], None, result.findings, result.gate
     )
+    _write_domain(result, out_dir, written)
     for spec in result.spec_irs:
         name = f"spec-ir.{spec.behavior_id}.json"
         path = out_dir / name
@@ -268,6 +289,15 @@ def write_result(result: CheckResult, out_dir: Path) -> dict[str, Path]:
 
 
 # ---------------------------------------------------------------------- internals
+
+
+def _write_domain(result: CheckResult, out_dir: Path, written: dict[str, Path]) -> None:
+    """replay（AC-013）に必要なドメイン定義も凍結する。"""
+    if result.domain is None:
+        return
+    path = out_dir / "domain.json"
+    _write_json(path, result.domain.model_dump(mode="json"))
+    written["domain.json"] = path
 
 
 def _write_json(path: Path, data: object) -> None:
@@ -371,18 +401,20 @@ def _policy_levels(package: PolicyPackage, findings: list[Finding]) -> dict[str,
     return levels
 
 
+def _load_exceptions(project_dir: Path) -> PolicyExceptions:
+    exceptions_path = project_dir / ".speclino" / "exceptions.yaml"
+    if not exceptions_path.is_file():
+        return PolicyExceptions(exceptions=[])
+    return load_policy_exceptions(yaml.safe_load(exceptions_path.read_text(encoding="utf-8")) or {})
+
+
 def _run_policies(project_dir: Path) -> tuple[list[Finding], dict[str, RuleLevel], list[str]]:
     """`.speclino/policy/*.yaml` があれば VerifierRegistry で実行する。無ければ何もしない。"""
     policy_dir = project_dir / ".speclino" / "policy"
     if not policy_dir.is_dir():
         return [], {}, []
 
-    exceptions_path = project_dir / ".speclino" / "exceptions.yaml"
-    exceptions = (
-        load_policy_exceptions(yaml.safe_load(exceptions_path.read_text(encoding="utf-8")) or {})
-        if exceptions_path.is_file()
-        else PolicyExceptions(exceptions=[])
-    )
+    exceptions = _load_exceptions(project_dir)
     snapshot = DirectorySnapshot(root=project_dir)
     registry = _policy_registry()
 

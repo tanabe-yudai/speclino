@@ -1,0 +1,159 @@
+{
+  "run": {
+    "id": "9871e2ff-4602-4382-b512-0bacd3006ae2",
+    "exec_state": "completed",
+    "gate_status": "fail",
+    "head_sha": "f81f51e1a284f80e21e3a9d71ff030d7d015f304",
+    "base_sha": "d32730ac9271958039ef1c8bb699852b53522ec0",
+    "pr_number": 1,
+    "trigger": "pull_request",
+    "manifest": {
+      "mode": "blocking",
+      "inputs": {
+        "repository": "/var/folders/4j/9xx64r5x2xb77cp6xnqjyl7m0000gn/T/speclino-run-dkqj3_mw/head/f81f51e1a284",
+        "base_commit": "d32730ac9271958039ef1c8bb699852b53522ec0",
+        "domain_hash": "sha256:ba3f260e87a6779e6d555e2cb1e2811c6d53d3d99c936f50ff5a3ce3865f3df5",
+        "head_commit": "f81f51e1a284f80e21e3a9d71ff030d7d015f304",
+        "policy_hash": null,
+        "code_ir_hash": null,
+        "spec_ir_hash": "sha256:f68976920f586c076d483e08ddeaa26090023951e8fd98d66703cca33281da3d",
+        "bindings_hash": "sha256:08a2ad27363d05653e8ac74f362786af4fe611f0615d301739e2bc0317dcf4f4",
+        "contracts_hash": "sha256:73aa135b3b2eb4972136d7b67838fcdf2c74840a07493bad26c5758bd7a720eb",
+        "spec_content_hash": "sha256:489a98b16ced6b1646b6868228fd14078b4f3a060271ffa37740932899379945"
+      },
+      "limits": {
+        "depth": 2,
+        "max_paths": 64,
+        "solver_timeout_ms": 500
+      },
+      "run_id": "9871e2ff-4602-4382-b512-0bacd3006ae2",
+      "fail_on": [
+        "VIOLATED",
+        "UNKNOWN",
+        "REVIEW"
+      ],
+      "versions": {
+        "engine": "0.1.0",
+        "solver": "5.1.0",
+        "analyzer": "0.1.0",
+        "speclino": "0.1.0",
+        "settings_hash": null
+      },
+      "created_at": "2026-09-22T08:10:40.304859Z",
+      "schema_version": "0.1"
+    }
+  },
+  "finding_violated": {
+    "id": "F-fcb4c85958e4",
+    "actual": "inventory_restore_command を 0 回",
+    "message": "経路 p4_204 で要求 R-CANCEL-04 に反する: 期待「inventory_restore_command を eq 1 回（引数 items が一致）」に対し「inventory_restore_command を 0 回」",
+    "verdict": "VIOLATED",
+    "category": "missing_effect",
+    "expected": "inventory_restore_command を eq 1 回（引数 items が一致）",
+    "severity": "high",
+    "code_refs": [
+      {
+        "path": "examples/orders/app/service.py",
+        "symbol": "examples.orders.app.service.cancel_order",
+        "line_end": 27,
+        "line_start": 19,
+        "snapshot_id": "f81f51e1a284f80e21e3a9d71ff030d7d015f304",
+        "requirement_id": null
+      }
+    ],
+    "spec_refs": [
+      {
+        "path": null,
+        "symbol": null,
+        "line_end": null,
+        "line_start": null,
+        "snapshot_id": "demo-spec",
+        "requirement_id": "R-CANCEL-04"
+      }
+    ],
+    "next_steps": [],
+    "assumptions": [],
+    "behavior_id": "cancel_order",
+    "claim_scope": "command_invocation",
+    "evidence_refs": [
+      "p4_204"
+    ],
+    "analysis_scope": "4 経路（呼出し深さ 2、経路上限 64、ソルバー 500ms、解析器 0.1.0）",
+    "counterexample": {
+      "kind": "symbolic",
+      "path_id": "p4_204",
+      "assignments": {},
+      "description": "条件: ((before.actor.is_admin or before.actor.id == before.order.owner_id) and not(before.order.status != PENDING) and not(before.actor.is_admin)); 実装: inventory_restore_command を 0 回"
+    },
+    "requirement_id": "R-CANCEL-04",
+    "base_head_status": null,
+    "test_observation": null
+  },
+  "finding_verified": {
+    "id": "F-e813ed1b8c1f",
+    "actual": null,
+    "message": "関連する 1 経路すべてで要求が成立（対応モデル内）",
+    "verdict": "VERIFIED_IN_SCOPE",
+    "category": "conformant",
+    "expected": "outcome.status == 403",
+    "severity": "info",
+    "code_refs": [
+      {
+        "path": "examples/orders/app/service.py",
+        "symbol": "examples.orders.app.service.cancel_order",
+        "line_end": 20,
+        "line_start": 19,
+        "snapshot_id": "f81f51e1a284f80e21e3a9d71ff030d7d015f304",
+        "requirement_id": null
+      }
+    ],
+    "spec_refs": [
+      {
+        "path": null,
+        "symbol": null,
+        "line_end": null,
+        "line_start": null,
+        "snapshot_id": "demo-spec",
+        "requirement_id": "R-CANCEL-01"
+      }
+    ],
+    "next_steps": [],
+    "assumptions": [],
+    "behavior_id": "cancel_order",
+    "claim_scope": "service_outcome",
+    "evidence_refs": [],
+    "analysis_scope": "4 経路（呼出し深さ 2、経路上限 64、ソルバー 500ms、解析器 0.1.0）",
+    "counterexample": null,
+    "requirement_id": "R-CANCEL-01",
+    "base_head_status": null,
+    "test_observation": null
+  },
+  "events": [
+    {
+      "seq": 1,
+      "type": "state",
+      "payload": {
+        "trigger": "pull_request",
+        "exec_state": "queued",
+        "superseded": 0
+      }
+    },
+    {
+      "seq": 2,
+      "type": "state",
+      "payload": {
+        "exec_state": "running"
+      }
+    },
+    {
+      "seq": 3,
+      "type": "state",
+      "payload": {
+        "gate": "fail",
+        "error": null,
+        "publish": "publish",
+        "exec_state": "completed"
+      }
+    }
+  ]
+}

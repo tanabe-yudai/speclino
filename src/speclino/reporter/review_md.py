@@ -101,7 +101,7 @@ def _render_refs(refs: list[SourceRef], *, prefer_symbol: bool) -> str:
 
 
 def _render_finding_detail(f: Finding) -> str:
-    lines = [f"### {f.requirement_id}: {f.message}", ""]
+    lines = [f"### {f.requirement_id}: {_cell(f.message)}", ""]
     lines.append(f"- 判定: {f.verdict}（{VERDICT_LABELS[f.verdict]}）／分類: {f.category}")
     kind = f.counterexample.kind if f.counterexample is not None else "静的"
     lines.append(f"- 根拠種別: {kind}")
@@ -134,7 +134,7 @@ def _render_verified_table(findings: list[Finding]) -> str:
         return "（なし）"
     lines = ["| 要求ID | 確認範囲 | 概要 |", "| --- | --- | --- |"]
     for f in sorted(findings, key=lambda f: f.requirement_id):
-        lines.append(f"| {f.requirement_id} | {f.claim_scope} | {f.message} |")
+        lines.append(f"| {f.requirement_id} | {f.claim_scope} | {_cell(f.message)} |")
     return "\n".join(lines)
 
 
@@ -199,3 +199,8 @@ __all__ = [
     "render_details",
     "render_review",
 ]
+
+
+def _cell(text: str) -> str:
+    """GFM の表セル用に改行と縦棒を無害化する（1 行の概要にする）。"""
+    return " ".join(part.strip() for part in text.splitlines() if part.strip()).replace("|", "\\|")

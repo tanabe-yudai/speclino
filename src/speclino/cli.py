@@ -161,3 +161,22 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+@app.command()
+def replay(
+    run_dir: Annotated[Path, typer.Argument(help="成果物ディレクトリ（run-manifest.json 等）")],
+) -> None:
+    """凍結した IR から判定を再評価し、保存された結果と一致するか確認する（AC-013）。"""
+    from speclino.services.replay_service import replay as _replay
+
+    try:
+        res = _replay(run_dir)
+    except (OSError, ValueError) as e:
+        typer.echo(f"入力不正: {e}", err=True)
+        raise typer.Exit(code=2) from e
+    typer.echo(f"run_id: {res.run_id}  behavior: {res.behavior_id}  compared: {res.compared}")
+    for d in res.differences:
+        typer.echo(f"  差異: {d}")
+    typer.echo("一致" if res.identical else "不一致")
+    raise typer.Exit(code=0 if res.identical else 1)
