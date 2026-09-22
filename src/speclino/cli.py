@@ -225,9 +225,17 @@ def spec_extract(
         rel = str(spec.resolve().relative_to(project.resolve()))
     except ValueError:
         rel = str(spec)
-    result = asyncio.run(
-        extract_spec(markdown, behavior, domain, bindings, GeminiJsonLlm(model), spec_path=rel)
-    )
+    try:
+        result = asyncio.run(
+            extract_spec(markdown, behavior, domain, bindings, GeminiJsonLlm(model), spec_path=rel)
+        )
+    except Exception as e:  # noqa: BLE001 - LLM 呼出しの失敗は入力不正と同じ扱い（終了コード 2）
+        typer.echo(
+            f"Gemini の呼出しに失敗: {type(e).__name__}: {e}\n"
+            "GOOGLE_API_KEY を設定するか、GOOGLE_GENAI_USE_VERTEXAI=true と ADC を用意する",
+            err=True,
+        )
+        raise typer.Exit(code=2) from e
     payload = json.dumps(result.spec.model_dump(mode="json"), ensure_ascii=False, indent=2)
     if out is not None:
         out.write_text(payload + "\n", encoding="utf-8")

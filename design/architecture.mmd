@@ -1,0 +1,23 @@
+flowchart TB
+  subgraph clients["利用者"]
+    direction LR
+    GH["GitHub<br/>PR / コメント / 再実行"]
+    ED["エディタのエージェント<br/>MCP + Bearer"]
+    JU["ブラウザ<br/>Identity Platform（メール／パスワード）"]
+  end
+
+  WEB["<b>Cloud Run: speclino-web</b>（公開）<br/>FastAPI: /webhooks/github ・ /api/* ・ /mcp ・ React SPA"]
+  WORKER["<b>Cloud Run: speclino-worker</b>（IAM 必須・GitHub App 秘密鍵を持つ）<br/>ReviewRunService = 決定的なオーケストレータ"]
+  SANDBOX["<b>Cloud Run: speclino-sandbox</b><br/>権限ゼロ SA / ネットワーク無し<br/>宣言済みテストだけを実行"]
+  GEMINI["Gemini（ADK）<br/>証拠収集と質問のみ。判定はしない"]
+
+  GH -- "webhook（HMAC 検証・重複排除）" --> WEB
+  ED --> WEB
+  JU --> WEB
+  WEB -- "Cloud Tasks（OIDC）" --> WORKER
+  WORKER -- "Checks API（成功 / 失敗 / 要対応）" --> GH
+  WORKER -- "ツールは ToolGateway 経由・書込みなし" --> GEMINI
+  WORKER -- "Rule.tests の ID のみ" --> SANDBOX
+  WORKER --> SQL[("Cloud SQL<br/>run / finding / evidence<br/>question / approval / audit")]
+  WORKER --> GCS[("GCS<br/>run-manifest / spec-ir / code-ir<br/>findings / semantic-diff / review.md")]
+  WEB -. "成果物を読んで表示" .-> GCS

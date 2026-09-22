@@ -1,7 +1,7 @@
 # uv run の暗黙 sync を止める（macOS 26 で z3-solver が毎回再インストールされ、並列実行がロック待ちになる）
 export UV_NO_SYNC := 1
 
-.PHONY: setup test lint format dev db-up db-migrate eval openapi web-build schemas sandbox-image
+.PHONY: setup test lint format dev db-up db-migrate eval openapi web-build schemas sandbox-image diagrams
 
 setup:
 	UV_NO_SYNC= uv sync --all-groups
@@ -43,3 +43,10 @@ schemas:
 
 sandbox-image:
 	docker build -t speclino-sandbox-runner:latest docker/sandbox
+
+# アーキテクチャ図（design/*.mmd が正本。README の mermaid ブロックと同じ内容）
+diagrams:
+	npx --yes @mermaid-js/mermaid-cli@11 -i design/architecture.mmd -o design/architecture.png -b white -s 2
+	npx --yes @mermaid-js/mermaid-cli@11 -i design/architecture.mmd -o design/architecture.svg -b white
+	npx --yes @mermaid-js/mermaid-cli@11 -i design/pipeline.mmd -o design/pipeline.png -b white -s 2
+	npx --yes @mermaid-js/mermaid-cli@11 -i design/pipeline.mmd -o design/pipeline.svg -b white
