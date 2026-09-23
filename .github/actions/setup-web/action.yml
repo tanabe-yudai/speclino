@@ -1,0 +1,13 @@
+name: setup-web
+description: Node を入れて web の依存を入れる（ステージごとのジョブで共通）
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: "24"
+        cache: npm
+        cache-dependency-path: web/package-lock.json
+    - run: npm ci
+      shell: bash
+      working-directory: web

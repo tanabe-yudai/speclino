@@ -22,7 +22,8 @@
 
 ## コマンド
 
-- `make setup` / `make test` / `make lint` / `make format` / `make eval`
+- `make setup` / `make lint`（ruff）/ `make typecheck`（mypy）/ `make test` / `make eval` / `make check`（lint+typecheck+test）/ `make format`
+- CI のジョブは**検査の段階**で分ける（lint / typecheck / test / eval / self-check / web の lint・typecheck・build / secrets）。言語でまとめない
 - `make db-up && make db-migrate`（ローカル PostgreSQL）
 - `uv run speclino check --repo . --base main --head HEAD --out build/review`（`--code-ir <file>` で手書き Code IR を直接入力）
 - `make dev`（FastAPI、`SPECLINO_ROLE=all`）、`cd web && npm run dev`

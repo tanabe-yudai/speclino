@@ -74,7 +74,8 @@ rules:
       version: "1.0.0"
       params:
         require_pull_request_trigger: true
-        required_steps: ["make lint", "make test"]
+        # 段階ごとのジョブに分かれていても、run の 1 行として現れていればよい
+        required_steps: ["make lint", "make typecheck", "make test"]
         forbid_events: ["pull_request_target"]
         require_read_permissions: true
         allowed_write_permissions: ["id-token"]

@@ -1,0 +1,10 @@
+name: setup-python
+description: uv を入れて依存を同期する（ステージごとのジョブで共通）
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@v6
+      with:
+        enable-cache: true
+    - run: uv sync --all-groups
+      shell: bash

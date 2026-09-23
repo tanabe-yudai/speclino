@@ -315,7 +315,9 @@ CI-001（pull_request トリガー・必須ステップ・読取り専用権限�
 ## 開発
 
 ```sh
-make lint            # ruff + mypy strict
+make lint            # ruff（静的検査・書式）
+make typecheck       # mypy strict
+make check           # lint + typecheck + test をまとめて
 make eval            # Golden 評価
 make dev             # FastAPI（http://localhost:8080）
 cd web && npm run dev

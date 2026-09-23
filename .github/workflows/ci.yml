@@ -2,6 +2,8 @@ name: CI
 
 on: [push, pull_request]
 
+# ジョブは言語ではなく**検査の段階**で分ける。失敗したジョブ名を見ただけで
+# 「書式なのか・型なのか・テストなのか・仕様との差分なのか」が分かるようにする。
 permissions:
   contents: read
   # gitleaks は PR のコミット一覧（GET /repos/.../pulls/{n}/commits）を読んで差分を絞る。
@@ -9,7 +11,24 @@ permissions:
   pull-requests: read
 
 jobs:
-  python:
+  lint:
+    name: lint (python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-python
+      - run: make lint
+
+  typecheck:
+    name: typecheck (python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-python
+      - run: make typecheck
+
+  test:
+    name: test (python)
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -25,29 +44,60 @@ jobs:
       SPECLINO_DATABASE_URL: postgresql+asyncpg://speclino:speclino@localhost:5432/speclino
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-      - run: uv sync --all-groups
-      - run: make lint
+      - uses: ./.github/actions/setup-python
       - run: uv run alembic upgrade head
       - run: make test
-      - run: make eval
-      # 自己検証: SpecLino 自身の仕様（SPEC-TOOL-001 / SPEC-GATE-001 / SPEC-RUN-001）と規約
-      # （MAKE-001 / SPEC-FMT-001 / CI-001 / API-ERR-001）
-      - run: uv run speclino check --repo . --head WORKTREE --out build/self-check --fail-on VIOLATED --fail-on UNKNOWN --fail-on REVIEW --blocking
 
-  web:
+  eval:
+    name: eval (golden)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-      - run: npm ci
+      - uses: ./.github/actions/setup-python
+      # Golden 27 ケース。誤った VERIFIED が 1 件でもあれば失敗する
+      - run: make eval
+
+  self-check:
+    name: self-check (speclino)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-python
+      # SpecLino 自身の仕様（SPEC-TOOL-001 / SPEC-GATE-001 / SPEC-RUN-001）と規約
+      # （MAKE-001 / SPEC-FMT-001 / CI-001 / API-ERR-001）。未検証も失敗にする
+      - run: >-
+          uv run speclino check --repo . --head WORKTREE --out build/self-check
+          --fail-on VIOLATED --fail-on UNKNOWN --fail-on REVIEW --blocking
+
+  lint-web:
+    name: lint (web)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-web
+      - run: npm run lint
         working-directory: web
+
+  typecheck-web:
+    name: typecheck (web)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-web
+      - run: npm run typecheck
+        working-directory: web
+
+  build-web:
+    name: build (web)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-web
       - run: npm run build
         working-directory: web
 
-  gitleaks:
+  secrets:
+    name: secrets (gitleaks)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -56,9 +106,8 @@ jobs:
       - uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # PR へのコメントと要約の投稿には pull-requests / issues の write が要るが、
-          # 規約 CI-001 は読取り専用の権限しか許さない。検出結果はジョブのログと
-          # 終了コードで分かるので、API を叩く付加機能は切る（403 で失敗しなくなる）。
+          # PR コメントとジョブ要約の投稿には write が要るが、CI-001 は読取り専用しか
+          # 許さない。検出結果は終了コードとログで分かるので付加機能は切る。
           GITLEAKS_ENABLE_COMMENTS: "false"
           GITLEAKS_ENABLE_SUMMARY: "false"
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
