@@ -266,8 +266,23 @@ gcloud sql users create speclino --instance=speclino-db --project=$P --password=
 `vars.DEPLOY_ENABLED` で有効化）に任せる。
 
 **先に Firebase（Identity Platform）のクライアント設定を取る**。Vite はこれをビルド時に
-埋め込むので、実行時の環境変数では効かない。コンソール → Identity Platform →
-「アプリケーションの設定の詳細」から apiKey と authDomain を控える。
+埋め込むので、実行時の環境変数では効かない。
+
+> Identity Platform は Firebase Authentication を GCP 製品にしたもので、実体は同じ
+> （`identitytoolkit.googleapis.com`）。クライアントは Firebase JS SDK を使うため、変数名が
+> `VITE_FIREBASE_*` になっている。Identity Platform を有効化すると
+> `Browser key (auto created by Firebase)` という API キーが自動で作られる。
+
+```sh
+KEY_UID=$(gcloud services api-keys list --project=$P \
+  --filter='displayName:"Browser key"' --format='value(uid)')
+export FB_API_KEY=$(gcloud services api-keys get-key-string "$KEY_UID" \
+  --project=$P --format='value(keyString)')
+echo "$FB_API_KEY"        # AIzaSy... で始まる 39 文字
+```
+
+apiKey は秘密ではない（ブラウザに配信される識別子）。保護はドメイン制限と Identity Platform
+側の設定で行うので、CI の variables に平文で置いてよい。
 
 **リポジトリ直下で実行する**（`docker build .` が Dockerfile を読むため）。
 
@@ -276,7 +291,7 @@ cd "$REPO"
 gcloud auth configure-docker $REGION-docker.pkg.dev
 IMAGE=$REGION-docker.pkg.dev/$P/speclino/speclino:$(git rev-parse --short HEAD)
 docker build --platform linux/amd64 -t $IMAGE \
-  --build-arg VITE_FIREBASE_API_KEY=<apiKey> \
+  --build-arg VITE_FIREBASE_API_KEY="$FB_API_KEY" \
   --build-arg VITE_FIREBASE_AUTH_DOMAIN=$P.firebaseapp.com \
   --build-arg VITE_FIREBASE_PROJECT_ID=$P \
   .
