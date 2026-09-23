@@ -78,15 +78,15 @@ variable "worker_url" {
   default     = ""
 }
 
-variable "database_url" {
+variable "mount_secrets" {
   description = <<-EOT
-    worker が使う Cloud SQL への接続 URL
-    （例 `postgresql+asyncpg://speclino:<pw>@/speclino?host=/cloudsql/<接続名>`）。
-    S26 で Cloud SQL を作ってから設定する。空のときは worker は既定のローカル DB を見る。
+    Secret Manager の値を Cloud Run の環境変数として参照するか（`secrets.tf` の secret_env）。
+    参照する秘密にバージョンが無いとリビジョンが起動できないため、全ての値を投入してから
+    true にする。DB のパスワードを含む接続 URL は `database-url` に入れる（tfvars に書くと
+    Terraform の state に載ってしまう）。
   EOT
-  type        = string
-  default     = ""
-  sensitive   = true
+  type        = bool
+  default     = false
 }
 
 variable "cloudsql_instance" {

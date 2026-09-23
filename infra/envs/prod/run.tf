@@ -57,10 +57,7 @@ locals {
     SPECLINO_FIREBASE_PROJECT_ID = var.project_id
   })
 
-  worker_env = merge(
-    var.database_url == "" ? {} : { SPECLINO_DATABASE_URL = var.database_url },
-    var.github_app_id == "" ? {} : { SPECLINO_GITHUB_APP_ID = var.github_app_id },
-  )
+  worker_env = var.github_app_id == "" ? {} : { SPECLINO_GITHUB_APP_ID = var.github_app_id }
 
   service_env = {
     web     = merge(local.common_env, local.web_env, local.public_url_env)
@@ -125,6 +122,20 @@ resource "google_cloud_run_v2_service" "services" {
         content {
           name  = env.key
           value = env.value
+        }
+      }
+
+      # Secret Manager の値は参照だけを宣言する（値は Terraform の state に入らない）。
+      dynamic "env" {
+        for_each = var.mount_secrets ? local.secret_env[each.key] : {}
+        content {
+          name = env.key
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.this[env.value].secret_id
+              version = "latest"
+            }
+          }
         }
       }
     }

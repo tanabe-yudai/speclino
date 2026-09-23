@@ -15,6 +15,23 @@ locals {
     "github-webhook-secret"  = ["web"]
     "mcp-token"              = ["web"]
     "session-secret"         = ["web"]
+    # Cloud SQL の接続 URL（パスワードを含むため tfvars ではなくここに置く）
+    "database-url" = ["worker"]
+  }
+
+  # Cloud Run の環境変数として参照する秘密（役割 → 環境変数名 → secret_id）。
+  # 値は state に入らない（参照だけを宣言する）。mount_secrets = false のあいだは
+  # 何も参照しないので、まだ値を入れていない秘密があっても起動できる。
+  secret_env = {
+    web = {
+      SPECLINO_GITHUB_WEBHOOK_SECRET = "github-webhook-secret"
+      SPECLINO_MCP_TOKEN             = "mcp-token"
+    }
+    worker = {
+      SPECLINO_GITHUB_PRIVATE_KEY = "github-app-private-key"
+      SPECLINO_DATABASE_URL       = "database-url"
+    }
+    sandbox = {}
   }
 
   secret_accessor_bindings = {
