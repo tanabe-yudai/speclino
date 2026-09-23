@@ -42,6 +42,13 @@ class CodeHost(Protocol):
         """Issue/PR にコメントを投稿し、コメント ID を返す。"""
         ...
 
+    async def upsert_comment(self, repo: str, issue_number: int, marker: str, body: str) -> int:
+        """`marker` を含む既存コメントがあれば更新し、無ければ投稿する。
+
+        push のたびにコメントが増えないようにするため、判定の要約はこれで出す。
+        """
+        ...
+
     async def fetch_snapshot(self, repo: str, sha: str, dest_dir: Path) -> Path:
         """repo の sha 時点のスナップショットを dest_dir に展開し、最上位ディレクトリを返す。"""
         ...

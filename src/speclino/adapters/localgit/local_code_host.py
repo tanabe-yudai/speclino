@@ -65,9 +65,19 @@ class LocalCodeHost:
             }
         )
 
+    async def upsert_comment(self, repo: str, issue_number: int, marker: str, body: str) -> int:
+        for existing in self.comments:
+            if existing["issue_number"] == issue_number and marker in str(existing["body"]):
+                existing["body"] = body
+                return int(existing["id"])
+        return await self.post_comment(repo, issue_number, body)
+
     async def post_comment(self, repo: str, issue_number: int, body: str) -> int:
-        self.comments.append({"repo": repo, "issue_number": issue_number, "body": body})
-        return len(self.comments)
+        comment_id = len(self.comments) + 1
+        self.comments.append(
+            {"id": comment_id, "repo": repo, "issue_number": issue_number, "body": body}
+        )
+        return comment_id
 
     async def fetch_snapshot(self, repo: str, sha: str, dest_dir: Path) -> Path:
         root = self.repos[repo]

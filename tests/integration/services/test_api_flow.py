@@ -21,6 +21,7 @@ from speclino.adapters.queue.inprocess import InProcessQueue
 from speclino.adapters.storage.fs import FileSystemBlobStore
 from speclino.api.app import create_app
 from speclino.api.deps import AppState
+from speclino.reporter.check_report import COMMENT_MARKER
 from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
 from speclino.settings import Settings
 from speclino.spec import load_spec_ir
@@ -151,6 +152,12 @@ async def test_webhook_to_api_flow(
     assert review.status_code == 200 and "R-CANCEL-04" in review.text
     assert (await c.get(f"/api/review-runs/{run_id}/artifacts/../x")).status_code in (400, 404)
     assert host.checks[1]["conclusion"] == "failure"
+    # 会話タブに判定の要約コメントが 1 件出る（Checks タブを開かなくても読める）
+    gate_comments = [c for c in host.comments if COMMENT_MARKER in c["body"]]
+    assert len(gate_comments) == 1, host.comments
+    body = gate_comments[0]["body"]
+    assert "SpecLino / gate: 失敗" in body
+    assert "R-CANCEL-04" in body and "inventory_restore_command" in body
     # S28: base（正しい実装）との意味差分が Check の要約と成果物に出る
     assert "新規違反 1 / 既存違反 0 / 解消 0" in host.checks[1]["summary"]
     diff = (await c.get(f"/api/review-runs/{run_id}/artifacts/semantic-diff.json")).json()

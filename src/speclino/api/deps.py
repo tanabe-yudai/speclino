@@ -121,6 +121,9 @@ class LazyCodeHost:
     async def post_comment(self, repo: str, issue_number: int, body: str) -> int:
         return await self.inner.post_comment(repo, issue_number, body)
 
+    async def upsert_comment(self, repo: str, issue_number: int, marker: str, body: str) -> int:
+        return await self.inner.upsert_comment(repo, issue_number, marker, body)
+
     async def fetch_snapshot(self, repo: str, sha: str, dest_dir: Path) -> Path:
         return await self.inner.fetch_snapshot(repo, sha, dest_dir)
 

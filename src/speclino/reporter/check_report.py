@@ -92,6 +92,40 @@ def render_check(
     return CheckText(title=title, summary=summary, text=render_details(findings))
 
 
+COMMENT_MARKER = "<!-- speclino:gate -->"
+_COMMENT_LIMIT = 60000  # GitHub のコメント上限（65536）に対する余裕
+
+
+def render_pr_comment(
+    findings: Findings,
+    gate: GateResult,
+    details_url: str | None = None,
+    semantic_diff: SemanticDiff | None = None,
+) -> str:
+    """PR に出す判定の要約。
+
+    先頭に `COMMENT_MARKER` を置き、push のたびに新しいコメントを作らず同じものを
+    更新できるようにする（`CodeHost.upsert_comment`）。Check の詳細（Checks タブ）を
+    開かなくても、会話タブで違反と反例が読めるようにするのが目的。
+    """
+    text = render_check(findings, gate, semantic_diff)
+    parts = [
+        COMMENT_MARKER,
+        f"## SpecLino / gate: {GATE_STATUS_LABELS[gate.status]}",
+        "",
+        text.summary,
+        "",
+    ]
+    if details_url:
+        parts += [f"[この実行の詳細を開く]({details_url})", ""]
+    parts.append(render_details(findings))
+    body = "\n".join(parts)
+    if len(body) > _COMMENT_LIMIT:
+        head = body[:_COMMENT_LIMIT]
+        body = head + "\n\n…（省略。詳細は Checks タブまたは上のリンクを参照）\n"
+    return body
+
+
 def check_annotations(findings: Findings, max_items: int = 50) -> list[dict[str, object]]:
     """GitHub Checks の annotation 形式。VERIFIED と path/line の無い Finding は出さない。"""
     candidates = [f for f in findings.findings if f.verdict in _ANNOTATION_LEVEL]
@@ -117,4 +151,10 @@ def check_annotations(findings: Findings, max_items: int = 50) -> list[dict[str,
     return result
 
 
-__all__ = ["CheckText", "check_annotations", "render_check"]
+__all__ = [
+    "COMMENT_MARKER",
+    "CheckText",
+    "check_annotations",
+    "render_check",
+    "render_pr_comment",
+]

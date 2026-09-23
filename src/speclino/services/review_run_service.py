@@ -49,7 +49,12 @@ from speclino.ports.blob_store import BlobStore
 from speclino.ports.code_host import CodeHost
 from speclino.ports.sandbox import Sandbox
 from speclino.ports.task_queue import TaskQueue
-from speclino.reporter.check_report import check_annotations, render_check
+from speclino.reporter.check_report import (
+    COMMENT_MARKER,
+    check_annotations,
+    render_check,
+    render_pr_comment,
+)
 from speclino.services.check_pipeline import (
     CheckInputError,
     CheckRequest,
@@ -413,6 +418,15 @@ class ReviewRunService:
                 text.text,
                 check_annotations(findings),
             )
+            # 会話タブでも判定と反例が読めるようにする。push のたびに増やさないよう、
+            # 目印（COMMENT_MARKER）つきの既存コメントを更新する。
+            if pr_number is not None:
+                await self.code_host.upsert_comment(
+                    repo_full_name,
+                    pr_number,
+                    COMMENT_MARKER,
+                    render_pr_comment(findings, gate, details_url, semantic),
+                )
         elif fresh.publish and exec_state == "awaiting_answer" and findings is not None:
             body = _question_comment(questions, question_ids)
             if pr_number is not None:

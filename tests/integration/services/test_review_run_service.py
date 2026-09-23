@@ -25,6 +25,7 @@ from speclino.db.repositories import (
     ReviewRunRepository,
     RunEventRepository,
 )
+from speclino.reporter.check_report import COMMENT_MARKER
 from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
 from speclino.spec import load_spec_ir
 from speclino.spec.spec_validator import rule_content_hash
@@ -256,3 +257,28 @@ async def test_agent_failure_does_not_fail_the_run(
         findings = await FindingRepository(session).list_for_run(run_id)
     assert any(e.type == "agent.error" for e in events), "失敗はイベントに残す"
     assert any(f.payload["verdict"] == "UNKNOWN" for f in findings), "判定は表示できる"
+
+
+async def test_gate_comment_is_updated_not_duplicated(engine: AsyncEngine, tmp_path: Path) -> None:
+    """再実行しても PR コメントは増えず、同じコメントが更新される。"""
+    repo = f"e2e/comment-{uuid.uuid4().hex[:8]}"
+    base, head, _ = make_demo_repo(tmp_path / "repo")
+    host = LocalCodeHost(repos={repo: tmp_path / "repo"})
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    holder: dict[str, ReviewRunService] = {}
+    queue = InProcessQueue(lambda rid: holder["svc"].execute(rid), immediate=True)
+    service = ReviewRunService(
+        factory,
+        host,
+        queue,
+        FileSystemBlobStore(tmp_path / "blobs"),
+        ReviewRunConfig(agent_enabled=False),
+    )
+    holder["svc"] = service
+    for _ in range(2):
+        await service.create_run(
+            repo_full_name=repo, head_sha=head, base_sha=base, pr_number=5, trigger="test"
+        )
+    gate_comments = [c for c in host.comments if COMMENT_MARKER in c["body"]]
+    assert len(gate_comments) == 1, [c["body"][:60] for c in host.comments]
+    assert "SpecLino / gate" in gate_comments[0]["body"]

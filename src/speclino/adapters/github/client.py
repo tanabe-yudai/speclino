@@ -141,6 +141,27 @@ class GitHubClient:
         )
         return int(response.json()["id"])
 
+    async def upsert_comment(self, repo: str, issue_number: int, marker: str, body: str) -> int:
+        """`marker`（HTML コメントの目印）を含む自分のコメントを探して更新する。
+
+        見つからなければ新規投稿する。push のたびに判定コメントが積み上がるのを防ぐ。
+        """
+        listed = await self._request(
+            "GET",
+            f"{self.base_url}/repos/{repo}/issues/{issue_number}/comments?per_page=100",
+            repo=repo,
+        )
+        for comment in listed.json():
+            if marker in str(comment.get("body", "")):
+                updated = await self._request(
+                    "PATCH",
+                    f"{self.base_url}/repos/{repo}/issues/comments/{comment['id']}",
+                    repo=repo,
+                    json_body={"body": body},
+                )
+                return int(updated.json()["id"])
+        return await self.post_comment(repo, issue_number, body)
+
     async def fetch_snapshot(self, repo: str, sha: str, dest_dir: Path) -> Path:
         response = await self._request(
             "GET",
