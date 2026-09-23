@@ -1,6 +1,16 @@
 name: CI
 
-on: [push, pull_request]
+# push と pull_request の両方を無条件に受けると、PR のあるブランチで全ジョブが 2 回走る。
+# ブランチへの push は PR 側で検査されるので、push は main（マージ後の確認）だけにする。
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 同じ ref に新しい push が来たら、走っている実行を打ち切る（古い結果を待たない）。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 # ジョブは言語ではなく**検査の段階**で分ける。失敗したジョブ名を見ただけで
 # 「書式なのか・型なのか・テストなのか・仕様との差分なのか」が分かるようにする。
