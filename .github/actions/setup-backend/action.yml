@@ -1,5 +1,5 @@
-name: setup-python
-description: uv を入れて依存を同期する（ステージごとのジョブで共通）
+name: setup-backend
+description: バックエンド（Python / uv）の依存を用意する（ステージごとのジョブで共通）
 runs:
   using: composite
   steps:

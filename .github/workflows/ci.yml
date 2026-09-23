@@ -22,23 +22,23 @@ permissions:
 
 jobs:
   lint:
-    name: lint (python)
+    name: lint (backend)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-python
+      - uses: ./.github/actions/setup-backend
       - run: make lint
 
   typecheck:
-    name: typecheck (python)
+    name: typecheck (backend)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-python
+      - uses: ./.github/actions/setup-backend
       - run: make typecheck
 
   test:
-    name: test (python)
+    name: test (backend)
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -54,55 +54,57 @@ jobs:
       SPECLINO_DATABASE_URL: postgresql+asyncpg://speclino:speclino@localhost:5432/speclino
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-python
+      - uses: ./.github/actions/setup-backend
       - run: uv run alembic upgrade head
       - run: make test
 
   eval:
-    name: eval (golden)
+    name: eval (detection quality)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-python
-      # Golden 27 ケース。誤った VERIFIED が 1 件でもあれば失敗する
+      - uses: ./.github/actions/setup-backend
+      # 答えの分かっている 27 ケース（eval/golden）で判定品質を測る。
+      # 検出できるはずの違反を見落とす／解析できないものを適合と言う（誤った VERIFIED）が
+      # 1 件でもあれば失敗する。eval/holdout は調整に使わない別題材
       - run: make eval
 
   self-check:
-    name: self-check (speclino)
+    name: self-check (speclino on itself)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-python
+      - uses: ./.github/actions/setup-backend
       # SpecLino 自身の仕様（SPEC-TOOL-001 / SPEC-GATE-001 / SPEC-RUN-001）と規約
       # （MAKE-001 / SPEC-FMT-001 / CI-001 / API-ERR-001）。未検証も失敗にする
       - run: >-
           uv run speclino check --repo . --head WORKTREE --out build/self-check
           --fail-on VIOLATED --fail-on UNKNOWN --fail-on REVIEW --blocking
 
-  lint-web:
-    name: lint (web)
+  lint-frontend:
+    name: lint (frontend)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-web
+      - uses: ./.github/actions/setup-frontend
       - run: npm run lint
         working-directory: web
 
-  typecheck-web:
-    name: typecheck (web)
+  typecheck-frontend:
+    name: typecheck (frontend)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-web
+      - uses: ./.github/actions/setup-frontend
       - run: npm run typecheck
         working-directory: web
 
-  build-web:
-    name: build (web)
+  build-frontend:
+    name: build (frontend)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-web
+      - uses: ./.github/actions/setup-frontend
       - run: npm run build
         working-directory: web
 

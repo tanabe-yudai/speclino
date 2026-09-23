@@ -1,5 +1,5 @@
-name: setup-web
-description: Node を入れて web の依存を入れる（ステージごとのジョブで共通）
+name: setup-frontend
+description: フロントエンド（Node / npm）の依存を用意する（ステージごとのジョブで共通）
 runs:
   using: composite
   steps:
