@@ -1,0 +1,268 @@
+{
+  "approvals": [
+    {
+      "approved_at": "2026-09-22T00:00:00Z",
+      "approver": "tanabe-yudai",
+      "evidence_url": null,
+      "id": "speclino-self-run-v1",
+      "ir_content_hash": "sha256:bec95508e5019a8b5a50558f084f455a866a775717a861da26d07f0b4a87132b",
+      "source": "manual",
+      "spec_content_hash": "sha256:87d7af4744271f4eacceb20fb585621880995822afef01a6c3e52caee3c5e39c"
+    }
+  ],
+  "behavior_id": "run_freshness",
+  "rules": [
+    {
+      "applicability": {
+        "left": {
+          "op": "ref",
+          "path": "before.exec_state"
+        },
+        "op": "eq",
+        "right": {
+          "op": "const",
+          "type": "ExecState",
+          "value": "superseded"
+        }
+      },
+      "approval_ref": "speclino-self-run-v1",
+      "assertion": {
+        "arguments_equal": {},
+        "count": {
+          "operator": "eq",
+          "value": 0
+        },
+        "event_kind": "call",
+        "kind": "event_requirement",
+        "operation_or_target": "publish",
+        "phase": "invoked"
+      },
+      "behavior_id": "run_freshness",
+      "claim_scope": "service_outcome",
+      "id": "R-RUN-01",
+      "level": "mandatory",
+      "modality": "must",
+      "source_refs": [
+        {
+          "line_end": null,
+          "line_start": null,
+          "path": "specs/SPEC-RUN-001.md",
+          "requirement_id": "R-RUN-01",
+          "snapshot_id": "speclino-specs",
+          "symbol": null
+        }
+      ],
+      "tests": [],
+      "title": null
+    },
+    {
+      "applicability": {
+        "left": {
+          "op": "ref",
+          "path": "before.exec_state"
+        },
+        "op": "eq",
+        "right": {
+          "op": "const",
+          "type": "ExecState",
+          "value": "superseded"
+        }
+      },
+      "approval_ref": "speclino-self-run-v1",
+      "assertion": {
+        "arguments_equal": {},
+        "count": {
+          "operator": "eq",
+          "value": 1
+        },
+        "event_kind": "call",
+        "kind": "event_requirement",
+        "operation_or_target": "mark_superseded",
+        "phase": "invoked"
+      },
+      "behavior_id": "run_freshness",
+      "claim_scope": "service_outcome",
+      "id": "R-RUN-01b",
+      "level": "mandatory",
+      "modality": "must",
+      "source_refs": [
+        {
+          "line_end": null,
+          "line_start": null,
+          "path": "specs/SPEC-RUN-001.md",
+          "requirement_id": "R-RUN-01b",
+          "snapshot_id": "speclino-specs",
+          "symbol": null
+        }
+      ],
+      "tests": [],
+      "title": null
+    },
+    {
+      "applicability": {
+        "args": [
+          {
+            "left": {
+              "op": "ref",
+              "path": "before.exec_state"
+            },
+            "op": "ne",
+            "right": {
+              "op": "const",
+              "type": "ExecState",
+              "value": "superseded"
+            }
+          },
+          {
+            "arg": {
+              "op": "ref",
+              "path": "before.is_latest"
+            },
+            "op": "not"
+          }
+        ],
+        "op": "and"
+      },
+      "approval_ref": "speclino-self-run-v1",
+      "assertion": {
+        "arguments_equal": {},
+        "count": {
+          "operator": "eq",
+          "value": 0
+        },
+        "event_kind": "call",
+        "kind": "event_requirement",
+        "operation_or_target": "publish",
+        "phase": "invoked"
+      },
+      "behavior_id": "run_freshness",
+      "claim_scope": "service_outcome",
+      "id": "R-RUN-02",
+      "level": "mandatory",
+      "modality": "must",
+      "source_refs": [
+        {
+          "line_end": null,
+          "line_start": null,
+          "path": "specs/SPEC-RUN-001.md",
+          "requirement_id": "R-RUN-02",
+          "snapshot_id": "speclino-specs",
+          "symbol": null
+        }
+      ],
+      "tests": [],
+      "title": null
+    },
+    {
+      "applicability": {
+        "args": [
+          {
+            "left": {
+              "op": "ref",
+              "path": "before.exec_state"
+            },
+            "op": "ne",
+            "right": {
+              "op": "const",
+              "type": "ExecState",
+              "value": "superseded"
+            }
+          },
+          {
+            "arg": {
+              "op": "ref",
+              "path": "before.is_latest"
+            },
+            "op": "not"
+          }
+        ],
+        "op": "and"
+      },
+      "approval_ref": "speclino-self-run-v1",
+      "assertion": {
+        "arguments_equal": {},
+        "count": {
+          "operator": "eq",
+          "value": 1
+        },
+        "event_kind": "call",
+        "kind": "event_requirement",
+        "operation_or_target": "mark_not_latest",
+        "phase": "invoked"
+      },
+      "behavior_id": "run_freshness",
+      "claim_scope": "service_outcome",
+      "id": "R-RUN-02b",
+      "level": "mandatory",
+      "modality": "must",
+      "source_refs": [
+        {
+          "line_end": null,
+          "line_start": null,
+          "path": "specs/SPEC-RUN-001.md",
+          "requirement_id": "R-RUN-02b",
+          "snapshot_id": "speclino-specs",
+          "symbol": null
+        }
+      ],
+      "tests": [],
+      "title": null
+    },
+    {
+      "applicability": {
+        "args": [
+          {
+            "left": {
+              "op": "ref",
+              "path": "before.exec_state"
+            },
+            "op": "ne",
+            "right": {
+              "op": "const",
+              "type": "ExecState",
+              "value": "superseded"
+            }
+          },
+          {
+            "op": "ref",
+            "path": "before.is_latest"
+          }
+        ],
+        "op": "and"
+      },
+      "approval_ref": "speclino-self-run-v1",
+      "assertion": {
+        "arguments_equal": {},
+        "count": {
+          "operator": "eq",
+          "value": 1
+        },
+        "event_kind": "call",
+        "kind": "event_requirement",
+        "operation_or_target": "publish",
+        "phase": "invoked"
+      },
+      "behavior_id": "run_freshness",
+      "claim_scope": "service_outcome",
+      "id": "R-RUN-03",
+      "level": "mandatory",
+      "modality": "must",
+      "source_refs": [
+        {
+          "line_end": null,
+          "line_start": null,
+          "path": "specs/SPEC-RUN-001.md",
+          "requirement_id": "R-RUN-03",
+          "snapshot_id": "speclino-specs",
+          "symbol": null
+        }
+      ],
+      "tests": [],
+      "title": null
+    }
+  ],
+  "schema_version": "0.1",
+  "spec_content_hash": "sha256:87d7af4744271f4eacceb20fb585621880995822afef01a6c3e52caee3c5e39c",
+  "spec_snapshot_id": "speclino-specs",
+  "unextracted": []
+}

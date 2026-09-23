@@ -74,6 +74,7 @@ def test_validation_error_is_input_error(tmp_path: Path) -> None:
         run_check(orders_request(project_dir=project))
 
 
+@pytest.mark.selfcheck
 def test_self_repository_check_passes_including_policies() -> None:
     res = run_check(CheckRequest(repo_root=REPO, head_sha="WORKTREE", run_id="self"))
     ids = {f.requirement_id for f in res.findings.findings}

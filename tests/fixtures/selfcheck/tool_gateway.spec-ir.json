@@ -1,0 +1,410 @@
+{
+  "approvals": [
+    {
+      "approved_at": "2026-09-22T00:00:00Z",
+      "approver": "tanabe-yudai",
+      "evidence_url": null,
+      "id": "speclino-self-v1",
+      "ir_content_hash": "sha256:93498427479e594e1ff544efb2312123ebc1b3b4e1144678eb7ca21e381d8f4f",
+      "source": "manual",
+      "spec_content_hash": "sha256:98aa4026fff25e2e911f5847236eeff9ff2796fc8cbe1c822006dab64ec904bb"
+    }
+  ],
+  "behavior_id": "tool_gateway_invoke",
+  "rules": [
+    {
+      "applicability": {
+        "arg": {
+          "op": "ref",
+          "path": "before.permitted"
+        },
+        "op": "not"
+      },
+      "approval_ref": "speclino-self-v1",
+      "assertion": {
+        "arguments_equal": {},
+        "count": {
+          "operator": "eq",
+          "value": 0
+        },
+        "event_kind": "call",
+        "kind": "event_requirement",
+        "operation_or_target": "tool_execute",
+        "phase": "invoked"
+      },
+      "behavior_id": "tool_gateway_invoke",
+      "claim_scope": "command_invocation",
+      "id": "R-TOOL-01",
+      "level": "mandatory",
+      "modality": "must",
+      "source_refs": [
+        {
+          "line_end": null,
+          "line_start": null,
+          "path": "specs/SPEC-TOOL-001.md",
+          "requirement_id": "R-TOOL-01",
+          "snapshot_id": "speclino-specs",
+          "symbol": null
+        }
+      ],
+      "tests": [],
+      "title": null
+    },
+    {
+      "applicability": {
+        "arg": {
+          "op": "ref",
+          "path": "before.permitted"
+        },
+        "op": "not"
+      },
+      "approval_ref": "speclino-self-v1",
+      "assertion": {
+        "arguments_equal": {},
+        "count": {
+          "operator": "eq",
+          "value": 1
+        },
+        "event_kind": "call",
+        "kind": "event_requirement",
+        "operation_or_target": "audit_denied",
+        "phase": "invoked"
+      },
+      "behavior_id": "tool_gateway_invoke",
+      "claim_scope": "command_invocation",
+      "id": "R-TOOL-01b",
+      "level": "mandatory",
+      "modality": "must",
+      "source_refs": [
+        {
+          "line_end": null,
+          "line_start": null,
+          "path": "specs/SPEC-TOOL-001.md",
+          "requirement_id": "R-TOOL-01b",
+          "snapshot_id": "speclino-specs",
+          "symbol": null
+        }
+      ],
+      "tests": [],
+      "title": null
+    },
+    {
+      "applicability": {
+        "arg": {
+          "op": "ref",
+          "path": "before.permitted"
+        },
+        "op": "not"
+      },
+      "approval_ref": "speclino-self-v1",
+      "assertion": {
+        "arguments_equal": {},
+        "count": {
+          "operator": "eq",
+          "value": 1
+        },
+        "event_kind": "call",
+        "kind": "event_requirement",
+        "operation_or_target": "deny_result",
+        "phase": "invoked"
+      },
+      "behavior_id": "tool_gateway_invoke",
+      "claim_scope": "service_outcome",
+      "id": "R-TOOL-01c",
+      "level": "mandatory",
+      "modality": "must",
+      "source_refs": [
+        {
+          "line_end": null,
+          "line_start": null,
+          "path": "specs/SPEC-TOOL-001.md",
+          "requirement_id": "R-TOOL-01c",
+          "snapshot_id": "speclino-specs",
+          "symbol": null
+        }
+      ],
+      "tests": [],
+      "title": null
+    },
+    {
+      "applicability": {
+        "args": [
+          {
+            "op": "ref",
+            "path": "before.permitted"
+          },
+          {
+            "arg": {
+              "op": "ref",
+              "path": "before.budget_exhausted"
+            },
+            "op": "not"
+          }
+        ],
+        "op": "and"
+      },
+      "approval_ref": "speclino-self-v1",
+      "assertion": {
+        "arguments_equal": {},
+        "count": {
+          "operator": "eq",
+          "value": 1
+        },
+        "event_kind": "call",
+        "kind": "event_requirement",
+        "operation_or_target": "tool_execute",
+        "phase": "invoked"
+      },
+      "behavior_id": "tool_gateway_invoke",
+      "claim_scope": "command_invocation",
+      "id": "R-TOOL-02",
+      "level": "mandatory",
+      "modality": "must",
+      "source_refs": [
+        {
+          "line_end": null,
+          "line_start": null,
+          "path": "specs/SPEC-TOOL-001.md",
+          "requirement_id": "R-TOOL-02",
+          "snapshot_id": "speclino-specs",
+          "symbol": null
+        }
+      ],
+      "tests": [],
+      "title": null
+    },
+    {
+      "applicability": {
+        "args": [
+          {
+            "op": "ref",
+            "path": "before.permitted"
+          },
+          {
+            "arg": {
+              "op": "ref",
+              "path": "before.budget_exhausted"
+            },
+            "op": "not"
+          }
+        ],
+        "op": "and"
+      },
+      "approval_ref": "speclino-self-v1",
+      "assertion": {
+        "arguments_equal": {},
+        "count": {
+          "operator": "eq",
+          "value": 1
+        },
+        "event_kind": "call",
+        "kind": "event_requirement",
+        "operation_or_target": "audit_allowed",
+        "phase": "invoked"
+      },
+      "behavior_id": "tool_gateway_invoke",
+      "claim_scope": "command_invocation",
+      "id": "R-TOOL-02b",
+      "level": "mandatory",
+      "modality": "must",
+      "source_refs": [
+        {
+          "line_end": null,
+          "line_start": null,
+          "path": "specs/SPEC-TOOL-001.md",
+          "requirement_id": "R-TOOL-02b",
+          "snapshot_id": "speclino-specs",
+          "symbol": null
+        }
+      ],
+      "tests": [],
+      "title": null
+    },
+    {
+      "applicability": {
+        "args": [
+          {
+            "op": "ref",
+            "path": "before.permitted"
+          },
+          {
+            "arg": {
+              "op": "ref",
+              "path": "before.budget_exhausted"
+            },
+            "op": "not"
+          }
+        ],
+        "op": "and"
+      },
+      "approval_ref": "speclino-self-v1",
+      "assertion": {
+        "arguments_equal": {},
+        "count": {
+          "operator": "eq",
+          "value": 0
+        },
+        "event_kind": "call",
+        "kind": "event_requirement",
+        "operation_or_target": "audit_denied",
+        "phase": "invoked"
+      },
+      "behavior_id": "tool_gateway_invoke",
+      "claim_scope": "command_invocation",
+      "id": "R-TOOL-02c",
+      "level": "mandatory",
+      "modality": "must",
+      "source_refs": [
+        {
+          "line_end": null,
+          "line_start": null,
+          "path": "specs/SPEC-TOOL-001.md",
+          "requirement_id": "R-TOOL-02b",
+          "snapshot_id": "speclino-specs",
+          "symbol": null
+        }
+      ],
+      "tests": [],
+      "title": null
+    },
+    {
+      "applicability": {
+        "args": [
+          {
+            "op": "ref",
+            "path": "before.permitted"
+          },
+          {
+            "op": "ref",
+            "path": "before.budget_exhausted"
+          }
+        ],
+        "op": "and"
+      },
+      "approval_ref": "speclino-self-v1",
+      "assertion": {
+        "arguments_equal": {},
+        "count": {
+          "operator": "eq",
+          "value": 0
+        },
+        "event_kind": "call",
+        "kind": "event_requirement",
+        "operation_or_target": "tool_execute",
+        "phase": "invoked"
+      },
+      "behavior_id": "tool_gateway_invoke",
+      "claim_scope": "command_invocation",
+      "id": "R-TOOL-03",
+      "level": "mandatory",
+      "modality": "must",
+      "source_refs": [
+        {
+          "line_end": null,
+          "line_start": null,
+          "path": "specs/SPEC-TOOL-001.md",
+          "requirement_id": "R-TOOL-03",
+          "snapshot_id": "speclino-specs",
+          "symbol": null
+        }
+      ],
+      "tests": [],
+      "title": null
+    },
+    {
+      "applicability": {
+        "args": [
+          {
+            "op": "ref",
+            "path": "before.permitted"
+          },
+          {
+            "op": "ref",
+            "path": "before.budget_exhausted"
+          }
+        ],
+        "op": "and"
+      },
+      "approval_ref": "speclino-self-v1",
+      "assertion": {
+        "arguments_equal": {},
+        "count": {
+          "operator": "eq",
+          "value": 1
+        },
+        "event_kind": "call",
+        "kind": "event_requirement",
+        "operation_or_target": "audit_denied",
+        "phase": "invoked"
+      },
+      "behavior_id": "tool_gateway_invoke",
+      "claim_scope": "command_invocation",
+      "id": "R-TOOL-03b",
+      "level": "mandatory",
+      "modality": "must",
+      "source_refs": [
+        {
+          "line_end": null,
+          "line_start": null,
+          "path": "specs/SPEC-TOOL-001.md",
+          "requirement_id": "R-TOOL-03",
+          "snapshot_id": "speclino-specs",
+          "symbol": null
+        }
+      ],
+      "tests": [],
+      "title": null
+    },
+    {
+      "applicability": {
+        "args": [
+          {
+            "op": "ref",
+            "path": "before.permitted"
+          },
+          {
+            "arg": {
+              "op": "ref",
+              "path": "before.budget_exhausted"
+            },
+            "op": "not"
+          }
+        ],
+        "op": "and"
+      },
+      "approval_ref": "speclino-self-v1",
+      "assertion": {
+        "arguments_equal": {},
+        "count": {
+          "operator": "eq",
+          "value": 1
+        },
+        "event_kind": "call",
+        "kind": "event_requirement",
+        "operation_or_target": "budget_charge",
+        "phase": "invoked"
+      },
+      "behavior_id": "tool_gateway_invoke",
+      "claim_scope": "command_invocation",
+      "id": "R-TOOL-02d",
+      "level": "mandatory",
+      "modality": "must",
+      "source_refs": [
+        {
+          "line_end": null,
+          "line_start": null,
+          "path": "specs/SPEC-TOOL-001.md",
+          "requirement_id": "R-TOOL-02d",
+          "snapshot_id": "speclino-specs",
+          "symbol": null
+        }
+      ],
+      "tests": [],
+      "title": null
+    }
+  ],
+  "schema_version": "0.1",
+  "spec_content_hash": "sha256:98aa4026fff25e2e911f5847236eeff9ff2796fc8cbe1c822006dab64ec904bb",
+  "spec_snapshot_id": "speclino-specs",
+  "unextracted": []
+}

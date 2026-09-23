@@ -76,4 +76,5 @@ markers = [
   "live: 実LLMを呼ぶ（CI除外）",
   "spec(id): SpecLino 自身の仕様IDに対応するテスト",
   "integration: 実DBが必要な統合テスト（SPECLINO_DATABASE_URL 未設定なら skip）",
+  "selfcheck: SpecLino を現在のリポジトリ自身に当てる検証。デモブランチでは落ちるのが正しい",
 ]

@@ -5,6 +5,7 @@ Issue #11 の完了条件: 「このリポジトリ自身の Makefile と specs/
 
 from __future__ import annotations
 
+import pytest
 import yaml
 
 from speclino.domain.policy import PolicyExceptions, PolicyPackage
@@ -34,6 +35,7 @@ def test_speclino_core_package_is_valid() -> None:
     }
 
 
+@pytest.mark.selfcheck
 def test_this_repository_conforms_to_speclino_core() -> None:
     package = _load_package()
     registry = VerifierRegistry()

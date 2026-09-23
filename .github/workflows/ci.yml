@@ -65,15 +65,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-backend
       # SpecLino 自身の仕様（SPEC-TOOL-001 / SPEC-GATE-001 / SPEC-RUN-001）と規約
-      # （MAKE-001 / SPEC-FMT-001 / CI-001 / API-ERR-001）を、**CLI だけで**検査する。
+      # （MAKE-001 / SPEC-FMT-001 / CI-001 / API-ERR-001）を、**CLI だけで**検査する
+      # （pytest 側の selfcheck マーカーのテストも合わせて実行する。`make selfcheck` 参照）。
       #
       # PR に出る `SpecLino / gate` は同じ判定を本番（Cloud Run）で出すが、あちらは
       # GCP・DB・GitHub App が生きていることに依存し、エージェントと base 差分も含む。
       # こちらはリポジトリだけで完結するので、GCP を畳んだ後や clone した人の手元でも動き、
       # 「LLM を使わずに決定的解析だけで違反を検出できる」ことの裏付けにもなる。
-      - run: >-
-          uv run speclino check --repo . --head WORKTREE --out build/self-check
-          --fail-on VIOLATED --fail-on UNKNOWN --fail-on REVIEW --blocking
+      - run: make selfcheck
 
   lint-frontend:
     name: lint (frontend)

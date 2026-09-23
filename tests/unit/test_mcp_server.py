@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import httpx
@@ -15,11 +16,39 @@ from speclino.mcp_server.server import _read_context, allowed_hosts, build_mcp
 from speclino.settings import Settings
 
 REPO = Path(__file__).resolve().parents[2]
+# tests/fixtures/selfcheck に凍結済みの Spec IR（R-TOOL-01 / R-GATE-01 を含む）を使う。
+# live の specs/ir に依存しないので、デモが Spec IR を消しても振る舞いを検証できる。
+SELFCHECK_FIXTURES = REPO / "tests" / "fixtures" / "selfcheck"
 TOKEN = "test-mcp-token"
 
 
-def test_read_context_lists_vocabulary_policies_and_rules() -> None:
-    ctx = _read_context(REPO)
+def test_read_context_lists_vocabulary_policies_and_rules(tmp_path: Path) -> None:
+    """_read_context（MCP の context_get）の抽出結果を検証する。
+
+    domain.yaml / bindings.yaml / policy はこの関数の実装上そのまま yaml.safe_load されるだけ
+    （pydantic 検証を通らない）なので最小限の内容で足りる。specs/ir だけは load_spec_ir を通るため、
+    凍結済みで型的に妥当な Spec IR（R-TOOL-01 / R-GATE-01 を含む）を再利用する。
+    """
+    speclino_dir = tmp_path / ".speclino"
+    (speclino_dir / "policy").mkdir(parents=True)
+    (speclino_dir / "domain.yaml").write_text(
+        "variables:\n  has_findings: boolean\n", encoding="utf-8"
+    )
+    (speclino_dir / "bindings.yaml").write_text("behaviors:\n  gate_decide: {}\n", encoding="utf-8")
+    (speclino_dir / "policy" / "policy.yaml").write_text(
+        "rules:\n"
+        + "".join(
+            f"  - id: {rid}\n    level: mandatory\n    title: {rid} fixture\n"
+            for rid in ("MAKE-001", "SPEC-FMT-001", "CI-001")
+        ),
+        encoding="utf-8",
+    )
+    ir_dir = tmp_path / "specs" / "ir"
+    ir_dir.mkdir(parents=True)
+    for name in ("tool_gateway.spec-ir.json", "gate_decide.spec-ir.json"):
+        shutil.copy(SELFCHECK_FIXTURES / name, ir_dir / name)
+
+    ctx = _read_context(tmp_path)
     assert "has_findings" in ctx["domain"]["variables"]
     assert "gate_decide" in ctx["bindings"]["behaviors"]
     assert {p["id"] for p in ctx["policies"]} >= {"MAKE-001", "SPEC-FMT-001", "CI-001"}

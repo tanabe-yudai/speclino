@@ -1,16 +1,29 @@
 # uv run の暗黙 sync を止める（macOS 26 で z3-solver が毎回再インストールされ、並列実行がロック待ちになる）
 export UV_NO_SYNC := 1
 
-.PHONY: setup test lint typecheck check format dev db-up db-migrate eval openapi web-build schemas sandbox-image diagrams
+.PHONY: setup test lint typecheck check format dev db-up db-migrate eval openapi web-build schemas sandbox-image diagrams selfcheck
 
 setup:
 	UV_NO_SYNC= uv sync --all-groups
 	cd web && npm ci
 
+# 振る舞いと検出能力のテスト。デモブランチ（SpecLino 自身の実装・仕様をわざと壊す）でも
+# 緑であるべきなので、「今のリポジトリが適合していること」を前提にする selfcheck は除く。
 test:
-	uv run pytest -m "not live"
+	uv run pytest -m "not live and not selfcheck"
 
-# CI ではステージごとに分かれたジョブが lint / typecheck / test を個別に実行する。
+# SpecLino を自分自身に当てた結果。デモブランチでは落ちるのが主役（CI の self-check ジョブと同じ主張）。
+# pytest 側（selfcheck マーカー）と CLI 側（specs/ir を使った自己検査）の両方を実行する。
+# 片方が落ちても もう片方を必ず動かし、終了コードは最後にまとめる。デモブランチでは凍結 fixture の
+# ドリフト検査が必ず落ちるが、見せたいのは CLI が出す違反と反例なので、そこで止まっては困る。
+selfcheck:
+	@rc=0; \
+	uv run pytest -m selfcheck || rc=$$?; \
+	uv run speclino check --repo . --head WORKTREE --out build/self-check \
+		--fail-on VIOLATED --fail-on UNKNOWN --fail-on REVIEW --blocking || rc=$$?; \
+	exit $$rc
+
+# CI ではステージごとに分かれたジョブが lint / typecheck / test / self-check を個別に実行する。
 # 手元でまとめて回すときは `make check`。
 lint:
 	uv run ruff check .
@@ -19,7 +32,7 @@ lint:
 typecheck:
 	uv run mypy src
 
-check: lint typecheck test
+check: lint typecheck test selfcheck
 
 format:
 	uv run ruff format .
