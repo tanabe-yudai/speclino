@@ -26,6 +26,13 @@ locals {
 
   all_services = merge(local.cloud_run_services, local.sandbox_service)
 
+  # DB を使う役割（sandbox はテスト実行だけなので使わない）。
+  uses_cloudsql = {
+    web     = var.cloudsql_instance != ""
+    worker  = var.cloudsql_instance != ""
+    sandbox = false
+  }
+
   # 全サービス共通の環境変数。
   common_env = {
     SPECLINO_ENV                = "prod"
@@ -138,11 +145,21 @@ resource "google_cloud_run_v2_service" "services" {
           }
         }
       }
+
+      # 接続 URL の host=/cloudsql/<接続名> が指すソケットの置き場所。
+      dynamic "volume_mounts" {
+        for_each = local.uses_cloudsql[each.key] ? [1] : []
+        content {
+          name       = "cloudsql"
+          mount_path = "/cloudsql"
+        }
+      }
     }
 
-    # worker だけ Cloud SQL に Unix ソケットで繋ぐ（S26）。
+    # web / worker とも Cloud SQL に Unix ソケットで繋ぐ（S26）。
+    # web は run の一覧・詳細を読み、webhook で run を作る。sandbox は DB を使わない。
     dynamic "volumes" {
-      for_each = each.key == "worker" && var.cloudsql_instance != "" ? [1] : []
+      for_each = local.uses_cloudsql[each.key] ? [1] : []
       content {
         name = "cloudsql"
         cloud_sql_instance {

@@ -15,8 +15,9 @@ locals {
     "github-webhook-secret"  = ["web"]
     "mcp-token"              = ["web"]
     "session-secret"         = ["web"]
-    # Cloud SQL の接続 URL（パスワードを含むため tfvars ではなくここに置く）
-    "database-url" = ["worker"]
+    # Cloud SQL の接続 URL（パスワードを含むため tfvars ではなくここに置く）。
+    # web も run の一覧・詳細を DB から読むので両方に許可する（iam.tf の cloudsql.client も両方）。
+    "database-url" = ["web", "worker"]
   }
 
   # Cloud Run の環境変数として参照する秘密（役割 → 環境変数名 → secret_id）。
@@ -26,6 +27,7 @@ locals {
     web = {
       SPECLINO_GITHUB_WEBHOOK_SECRET = "github-webhook-secret"
       SPECLINO_MCP_TOKEN             = "mcp-token"
+      SPECLINO_DATABASE_URL          = "database-url"
     }
     worker = {
       SPECLINO_GITHUB_PRIVATE_KEY = "github-app-private-key"
