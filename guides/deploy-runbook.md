@@ -28,9 +28,15 @@ terraform output state_bucket                        # → example-project-tfsta
 > プロジェクト ID が既に使われていると `already exists` で失敗する。その場合は
 > `-var project_id=example-project-<接尾辞>` にして、以降の手順でも同じ値を使う。
 
+> **bootstrap の state はローカル**（`infra/bootstrap/terraform.tfstate`）。tfstate バケット
+> 自体をここで作るため、そこには置けない。失うと作成済みのプロジェクトとバケットを Terraform
+> が管理できなくなる（`terraform import` で復旧は可能）。`.gitignore` 済みなので Git には
+> 入らない。消さないこと。
+
 ## 2. prod（Cloud Run・Tasks・Secret・WIF・Identity Platform・予算）
 
-`tfvars` を用意する:
+prod の state は bootstrap が作った GCS バケットに置く（`gs://example-project-tfstate/envs/prod/`、
+versioning 有効）。`tfvars` を用意する:
 
 ```sh
 cd ../envs/prod
@@ -39,7 +45,9 @@ cp terraform.tfvars.example terraform.tfvars
 ```
 
 ```sh
-terraform init -backend-config="bucket=example-project-tfstate"
+terraform init \
+  -backend-config="bucket=example-project-tfstate" \
+  -backend-config="prefix=envs/prod"
 terraform plan -out=tfplan
 terraform show tfplan | grep -E '^  # |^Plan:'
 terraform apply tfplan
