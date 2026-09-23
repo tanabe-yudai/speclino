@@ -51,7 +51,13 @@
 
 エージェントが判定を上書きできない構造: (a) 判定を書くツールがない (b) `conformance_engine` は型付き Spec IR / Code IR / Evidence しか受けず、Code IR と Evidence を作るのは決定的なモジュール（path_analyzer、verifiers、trace_importer）だけ (c) LLM の文章は `agent_note` として保存され engine の入力にならない (d) `conformance` から `google.*` / `agent` / `adapters` の import をテストで禁止。乗っ取られた場合の最悪結果は「証拠不足→未検証→ゲート失敗」。
 
-**本番は同一イメージを役割別 Cloud Run サービスに分ける**（`SPECLINO_ROLE=web|worker|sandbox`、`all` はローカル専用）。min-instances=0。VPC / NAT は作らない。
+**本番は同一イメージを役割別 Cloud Run サービスに分ける**（`SPECLINO_ROLE=web|worker|sandbox`、`all` はローカル専用）。min-instances=0。**VPC / NAT は作らない**。理由:
+
+1. **要らない** — Cloud SQL は Cloud SQL コネクタ（Unix ソケット）、Gemini / GCS / Secret Manager / Cloud Tasks は Google の内部経路、GitHub API は Cloud Run の既定 egress で直接出られる。NAT が要るのは VPC 経由で全 egress を流す構成にした場合だけ。
+2. **固定費** — Serverless VPC コネクタはアイドルでも月 $8〜10、Cloud NAT も時間課金。min-instances=0 と db-f1-micro で「使わない時はほぼ無料」にした設計が崩れる（予算 $300 で 12/1 まで維持する要件）。
+3. **時間とリスク** — サブネット・コネクタ容量・ルーティングの設定と障害モードが増える。
+
+VPC が必要になるのは、Cloud SQL をプライベート IP のみにする / 固定 egress IP が要る / VPC 内の他リソースに繋ぐ場合。今回はいずれも該当せず、Cloud SQL は **authorized networks を空**にすることで「外から直接繋がらない」状態を VPC なしで実現している。
 
 | サービス | 公開 | 実行SAのロール | 持つ秘密 | 呼べる主体 |
 |---|---|---|---|---|
