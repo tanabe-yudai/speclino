@@ -6,6 +6,18 @@ GCP プロジェクトの作成から、Cloud Run への初回デプロイまで
 前提: `gcloud` が `13311633+tanabe-yudai@users.noreply.github.com` で認証済み、課金アカウント `XXXXXX-XXXXXX-XXXXXX`
 （T-NET、OPEN）、Terraform v1.12 以上。
 
+**先に ADC の quota project を設定する**（bootstrap の apply 後、プロジェクトができてから）:
+
+```sh
+gcloud auth application-default set-quota-project example-project
+```
+
+`gcloud auth application-default login` で作る ADC には quota project が付かない。
+`billingbudgets` と `identitytoolkit` はリクエストに quota project を要求するため、未設定だと
+Google 既定の共有プロジェクト（`projects/764086051850`）が使われ、**プロジェクト側で API を
+有効化していても** `SERVICE_DISABLED` で失敗する。Cloud Run や IAM は要求しないので、
+この 2 つだけが落ちる。
+
 ## 1. bootstrap（プロジェクト・API・tfstate バケット）
 
 作るもの: プロジェクト `example-project`、API 18 個、GCS バケット `example-project-tfstate`。
@@ -115,11 +127,18 @@ terraform plan -out=tfplan && terraform apply tfplan
 apply で消える）。Cloud SQL を作った後は `database_url` と `cloudsql_instance` も tfvars に
 足して apply する。
 
-### Identity Platform が失敗する場合
+### 予算 / Identity Platform が 403 SERVICE_DISABLED で失敗する場合
 
-`google_identity_platform_config` は、プロジェクトで Identity Platform が一度も初期化されて
-いないと失敗することがある。その場合は
-<https://console.cloud.google.com/customer-identity> を一度開いて有効化し、apply をやり直す。
+ADC の quota project が未設定（上の「前提」を参照）。設定して plan からやり直す:
+
+```sh
+gcloud auth application-default set-quota-project example-project
+terraform plan -out=tfplan && terraform apply tfplan   # 失敗した分だけ作られる
+```
+
+それでも `google_identity_platform_config` が失敗する場合は、プロジェクトで Identity Platform
+が一度も初期化されていない可能性がある。<https://console.cloud.google.com/customer-identity>
+を一度開いて有効化してから apply をやり直す。
 
 ## 3. 秘密の投入（Terraform の state には載せない）
 
