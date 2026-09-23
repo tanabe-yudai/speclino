@@ -129,12 +129,30 @@ apply で消える）。Cloud SQL を作った後は `database_url` と `cloudsq
 
 ### 予算 / Identity Platform が 403 SERVICE_DISABLED で失敗する場合
 
-ADC の quota project が未設定（上の「前提」を参照）。設定して plan からやり直す:
+ADC の quota project が未設定（上の「前提」を参照）。**ADC への設定だけでは足りず**、
+provider 側でも `user_project_override = true` が要る（`versions.tf` に設定済み。これが無いと
+provider は `X-Goog-User-Project` ヘッダを送らない）。
 
 ```sh
 gcloud auth application-default set-quota-project example-project
 terraform plan -out=tfplan && terraform apply tfplan   # 失敗した分だけ作られる
 ```
+
+### 予算が 400 invalid argument で失敗する場合
+
+**予算の通貨は課金アカウントの通貨と一致していないといけない。** 確認:
+
+```sh
+curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  https://cloudbilling.googleapis.com/v1/billingAccounts/XXXXXX-XXXXXX-XXXXXX
+# → "currencyCode": "JPY"
+```
+
+T-NET は JPY なので `budget_currency_code = "JPY"` / `budget_amount = "45000"`（≒ $300）が既定。
+別の課金アカウントを使うときは tfvars で合わせる。
+
+なお、通知チャネルを指定しない場合に `all_updates_rule` を空で送るのも同じ 400 になるため、
+`budget.tf` ではブロックごと省略している（既定の課金管理者宛メールが使われる）。
 
 それでも `google_identity_platform_config` が失敗する場合は、プロジェクトで Identity Platform
 が一度も初期化されていない可能性がある。<https://console.cloud.google.com/customer-identity>

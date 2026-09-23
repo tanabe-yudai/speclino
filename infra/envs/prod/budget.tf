@@ -1,4 +1,5 @@
-# 予算 $300 に対し 17% / 33% / 67%（≒ $50 / $100 / $200）で通知する。
+# 予算（既定 45,000 円 ≒ $300）に対し 17% / 33% / 67% / 100% で通知する。
+# 通貨は課金アカウントの通貨と一致させる必要がある（variables.tf の budget_currency_code）。
 #
 # 注意: billingbudgets API の書き込みには、このプロジェクトの IAM 権限だけでなく
 # 課金アカウント側のロール（roles/billing.costsManager や billing account 単位の
@@ -14,8 +15,8 @@ resource "google_billing_budget" "prod" {
 
   amount {
     specified_amount {
-      currency_code = "USD"
-      units         = "300"
+      currency_code = var.budget_currency_code
+      units         = var.budget_amount
     }
   }
 
@@ -33,10 +34,17 @@ resource "google_billing_budget" "prod" {
     spend_basis       = "CURRENT_SPEND"
   }
 
-  all_updates_rule {
-    monitoring_notification_channels = var.budget_notification_channels
-    # 通知チャネルを明示指定した場合のみ、既定の課金管理者宛メール通知を止める。
-    disable_default_iam_recipients = length(var.budget_notification_channels) > 0
+  # 通知チャネルを指定したときだけ all_updates_rule を置く。
+  # 中身が空（チャネルなし・pubsub なし・disable_default_iam_recipients = false）の
+  # all_updates_rule は API が 400 invalid argument で拒否する。
+  # ブロックごと省略すると既定の通知（課金アカウント管理者宛メール）が使われる。
+  dynamic "all_updates_rule" {
+    for_each = length(var.budget_notification_channels) > 0 ? [1] : []
+    content {
+      monitoring_notification_channels = var.budget_notification_channels
+      # チャネルを明示したので、既定の課金管理者宛メールは止める。
+      disable_default_iam_recipients = true
+    }
   }
 }
 

@@ -94,3 +94,24 @@ variable "cloudsql_instance" {
   type        = string
   default     = ""
 }
+
+variable "budget_currency_code" {
+  description = <<-EOT
+    予算の通貨。**課金アカウントの通貨と一致していないと API が 400 を返す**。
+    確認方法:
+      curl -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+        https://cloudbilling.googleapis.com/v1/billingAccounts/<課金アカウントID>
+    の `currencyCode`。T-NET（XXXXXX-XXXXXX-XXXXXX）は JPY。
+  EOT
+  type        = string
+  default     = "JPY"
+}
+
+variable "budget_amount" {
+  description = <<-EOT
+    予算額（budget_currency_code の単位、小数なし）。
+    既定 45000 円 ≒ クーポン $300 相当（1 ドル 150 円換算）。
+  EOT
+  type        = string
+  default     = "45000"
+}

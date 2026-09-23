@@ -12,6 +12,11 @@ billing_account = "XXXXXX-XXXXXX-XXXXXX"
 
 github_repository = "tanabe-yudai/spec-lino"
 
+# 予算の通貨は課金アカウントの通貨と一致させる（違うと 400 invalid argument）。
+# T-NET（XXXXXX-XXXXXX-XXXXXX）は JPY。
+# budget_currency_code = "JPY"
+# budget_amount        = "45000"   # ≒ $300
+
 # 任意: 予算・監視アラートの通知先（google_monitoring_notification_channel の完全リソース名）
 # budget_notification_channels     = ["projects/example-project/notificationChannels/xxxx"]
 # monitoring_notification_channels = ["projects/example-project/notificationChannels/xxxx"]
