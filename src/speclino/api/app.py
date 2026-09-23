@@ -49,8 +49,10 @@ def create_app(settings: Settings, state: AppState | None = None) -> FastAPI:
     app = FastAPI(title="SpecLino", lifespan=lifespan, responses=error_responses(422))
     install_error_handlers(app)
 
-    @app.get("/healthz")
-    def healthz() -> dict[str, str]:
+    # `/healthz` は使えない: Cloud Run の Google Frontend が横取りし、コンテナまで届かない
+    # （他のパスは届く。ログにもリクエストが残らない）。
+    @app.get("/health")
+    def health() -> dict[str, str]:
         return {"status": "ok", "role": settings.role}
 
     if settings.role in ("web", "all"):

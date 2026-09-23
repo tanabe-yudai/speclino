@@ -188,7 +188,7 @@ async def test_manual_start_and_healthz(
     client: tuple[httpx.AsyncClient, str, str, str, str, LocalCodeHost],
 ) -> None:
     c, repo, base, head, _, _ = client
-    assert (await c.get("/healthz")).json()["status"] == "ok"
+    assert (await c.get("/health")).json()["status"] == "ok"
     res = await c.post(
         "/api/review-runs",
         json={"repo_full_name": repo, "head_sha": head, "base_sha": base},

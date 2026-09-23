@@ -22,10 +22,10 @@ fail() { echo "NG: $*" >&2; exit 1; }
 ok() { echo "OK: $*"; }
 
 # 1) ヘルスチェック
-body=$(curl -sf --max-time 30 "$WEB_URL/healthz") || fail "/healthz に到達できない"
-[[ "$body" == *'"status":"ok"'* ]] || fail "/healthz が ok を返さない: $body"
+body=$(curl -sf --max-time 30 "$WEB_URL/health") || fail "/health に到達できない"
+[[ "$body" == *'"status":"ok"'* ]] || fail "/health が ok を返さない: $body"
 [[ "$body" == *'"role":"web"'* ]] || fail "role が web ではない: $body"
-ok "/healthz ($body)"
+ok "/health ($body)"
 
 # 2) SPA とディープリンク
 [[ "$(curl -so /dev/null -w '%{http_code}' "$WEB_URL/")" == "200" ]] || fail "SPA が返らない"

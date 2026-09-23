@@ -545,9 +545,9 @@
         ]
       }
     },
-    "/healthz": {
+    "/health": {
       "get": {
-        "operationId": "healthz_healthz_get",
+        "operationId": "health_health_get",
         "responses": {
           "200": {
             "content": {
@@ -556,7 +556,7 @@
                   "additionalProperties": {
                     "type": "string"
                   },
-                  "title": "Response Healthz Healthz Get",
+                  "title": "Response Health Health Get",
                   "type": "object"
                 }
               }
@@ -574,7 +574,7 @@
             "description": "Unprocessable Entity"
           }
         },
-        "summary": "Healthz"
+        "summary": "Health"
       }
     },
     "/internal/tasks/run": {

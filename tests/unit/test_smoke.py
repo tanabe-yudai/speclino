@@ -17,11 +17,11 @@ def test_import_and_version() -> None:
 
 
 @pytest.mark.asyncio
-async def test_healthz() -> None:
+async def test_health() -> None:
     app = create_app(Settings())
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/healthz")
+        response = await client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "role": "all"}
 
@@ -51,7 +51,7 @@ async def test_error_responses_use_error_response_shape() -> None:
         validation = await client.post("/internal/tasks/run", json={"run_id": "not-a-uuid"})
         bad_path = await client.get("/api/review-runs/not-a-uuid/artifacts/x.json")
         unknown_route = await client.get("/api/no-such-route")
-        wrong_method = await client.delete("/healthz")
+        wrong_method = await client.delete("/health")
     assert validation.status_code == 422
     assert validation.json()["error"]["code"] == "validation_error"
     assert bad_path.status_code == 422 and "error" in bad_path.json()
