@@ -53,3 +53,9 @@ jobs:
       - uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PR へのコメントと要約の投稿には pull-requests / issues の write が要るが、
+          # 規約 CI-001 は読取り専用の権限しか許さない。検出結果はジョブのログと
+          # 終了コードで分かるので、API を叩く付加機能は切る（403 で失敗しなくなる）。
+          GITLEAKS_ENABLE_COMMENTS: "false"
+          GITLEAKS_ENABLE_SUMMARY: "false"
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
