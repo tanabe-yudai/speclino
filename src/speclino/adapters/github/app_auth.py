@@ -30,6 +30,7 @@ class GitHubAppAuth:
     app_id: int
     private_key_pem: str
     _cache: dict[int, _CachedToken] = field(default_factory=dict, init=False, repr=False)
+    _installations: dict[str, int] = field(default_factory=dict, init=False, repr=False)
 
     def app_jwt(self, now: int | None = None) -> str:
         """App 認証用 JWT（RS256）を発行する。"""
@@ -40,6 +41,29 @@ class GitHubAppAuth:
             "iss": str(self.app_id),
         }
         return jwt.encode(payload, self.private_key_pem, algorithm="RS256")
+
+    async def installation_id_for_repo(
+        self, repo: str, http: httpx.AsyncClient, base_url: str
+    ) -> int:
+        """`owner/name` からその App のインストール ID を引く（App JWT で認証）。
+
+        webhook 由来でない run（手動開始・MCP・再実行）は payload から installation_id を
+        受け取れないため、リポジトリから解決する。再インストールで ID が変わっても追従する。
+        """
+        cached = self._installations.get(repo)
+        if cached is not None:
+            return cached
+        response = await http.get(
+            f"{base_url}/repos/{repo}/installation",
+            headers={
+                "Authorization": f"Bearer {self.app_jwt()}",
+                "Accept": "application/vnd.github+json",
+            },
+        )
+        response.raise_for_status()
+        installation_id = int(response.json()["id"])
+        self._installations[repo] = installation_id
+        return installation_id
 
     async def installation_token(
         self, installation_id: int, http: httpx.AsyncClient, base_url: str

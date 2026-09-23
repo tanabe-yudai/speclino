@@ -258,3 +258,58 @@ async def test_fetch_snapshot_follows_redirect_and_extracts(tmp_path: Path) -> N
     assert result == dest / "acme-widgets-abc1234"
     assert (result / "README.md").read_text(encoding="utf-8") == "hello world"
     assert (result / "src" / "app.py").read_text(encoding="utf-8") == "print('hi')\n"
+
+
+@dataclass
+class _ResolvingAuth:
+    """installation_id=0 のとき、リポジトリからインストールを解決する経路を確かめる。"""
+
+    resolved: list[str]
+    used: list[int]
+
+    async def installation_id_for_repo(
+        self, repo: str, http: httpx.AsyncClient, base_url: str
+    ) -> int:
+        self.resolved.append(repo)
+        return 99
+
+    async def installation_token(
+        self, installation_id: int, http: httpx.AsyncClient, base_url: str
+    ) -> str:
+        self.used.append(installation_id)
+        return "resolved-token"
+
+
+@respx.mock
+async def test_installation_is_resolved_from_the_repository_when_unset() -> None:
+    """webhook 由来でない run（手動開始・MCP・再実行）は installation_id を持たない。"""
+    auth = _ResolvingAuth(resolved=[], used=[])
+    client = GitHubClient(
+        auth=auth,  # type: ignore[arg-type]
+        installation_id=0,
+        http=httpx.AsyncClient(),
+        base_url=BASE_URL,
+    )
+    route = respx.post(f"{BASE_URL}/repos/o/r/check-runs").mock(
+        return_value=httpx.Response(201, json={"id": 7})
+    )
+    assert await client.create_check("o/r", "sha", "SpecLino / gate", None, None) == 7
+    assert auth.resolved == ["o/r"] and auth.used == [99]
+    assert route.calls.last.request.headers["Authorization"] == "Bearer resolved-token"
+
+
+@respx.mock
+async def test_explicit_installation_is_used_without_resolving() -> None:
+    """webhook 由来の run は payload の installation_id をそのまま使う（余計な API を呼ばない）。"""
+    auth = _ResolvingAuth(resolved=[], used=[])
+    client = GitHubClient(
+        auth=auth,  # type: ignore[arg-type]
+        installation_id=42,
+        http=httpx.AsyncClient(),
+        base_url=BASE_URL,
+    )
+    respx.post(f"{BASE_URL}/repos/o/r/check-runs").mock(
+        return_value=httpx.Response(201, json={"id": 1})
+    )
+    await client.create_check("o/r", "sha", "n", None, None)
+    assert auth.resolved == [] and auth.used == [42]

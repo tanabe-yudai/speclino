@@ -28,7 +28,12 @@ def _should_retry(status_code: int) -> bool:
 
 @dataclass
 class GitHubClient:
-    """CodeHost を実装する。`auth` と `installation_id` で対象インストールを認証する。"""
+    """CodeHost を実装する。`auth` と対象リポジトリのインストールで認証する。
+
+    `installation_id` が 0（未指定）のときは、呼び出しごとにリポジトリから解決する。
+    webhook 由来の run は payload の ID を渡せるが、手動開始・MCP・再実行では payload が
+    無いため、この解決が要る。
+    """
 
     auth: GitHubAppAuth
     installation_id: int
@@ -38,8 +43,14 @@ class GitHubClient:
     def __post_init__(self) -> None:
         self._sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
 
-    async def _headers(self) -> dict[str, str]:
-        token = await self.auth.installation_token(self.installation_id, self.http, self.base_url)
+    async def _installation_for(self, repo: str) -> int:
+        if self.installation_id:
+            return self.installation_id
+        return await self.auth.installation_id_for_repo(repo, self.http, self.base_url)
+
+    async def _headers(self, repo: str) -> dict[str, str]:
+        installation_id = await self._installation_for(repo)
+        token = await self.auth.installation_token(installation_id, self.http, self.base_url)
         return {
             "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github+json",
@@ -50,10 +61,11 @@ class GitHubClient:
         method: str,
         url: str,
         *,
+        repo: str,
         json_body: object | None = None,
         follow_redirects: bool = False,
     ) -> httpx.Response:
-        headers = await self._headers()
+        headers = await self._headers(repo)
         response: httpx.Response | None = None
         for attempt in range(_MAX_RETRIES + 1):
             response = await self.http.request(
@@ -86,7 +98,7 @@ class GitHubClient:
         if external_id is not None:
             body["external_id"] = external_id
         response = await self._request(
-            "POST", f"{self.base_url}/repos/{repo}/check-runs", json_body=body
+            "POST", f"{self.base_url}/repos/{repo}/check-runs", repo=repo, json_body=body
         )
         return int(response.json()["id"])
 
@@ -118,12 +130,13 @@ class GitHubClient:
             }
             if conclusion is not None:
                 body["conclusion"] = conclusion
-            await self._request("PATCH", url, json_body=body)
+            await self._request("PATCH", url, repo=repo, json_body=body)
 
     async def post_comment(self, repo: str, issue_number: int, body: str) -> int:
         response = await self._request(
             "POST",
             f"{self.base_url}/repos/{repo}/issues/{issue_number}/comments",
+            repo=repo,
             json_body={"body": body},
         )
         return int(response.json()["id"])
@@ -132,6 +145,7 @@ class GitHubClient:
         response = await self._request(
             "GET",
             f"{self.base_url}/repos/{repo}/tarball/{sha}",
+            repo=repo,
             follow_redirects=True,
         )
         dest_dir.mkdir(parents=True, exist_ok=True)
