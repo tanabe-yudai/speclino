@@ -59,7 +59,7 @@ from speclino.services.check_pipeline import (
     write_result,
 )
 from speclino.services.cost_guard import CostGuard
-from speclino.services.investigation import investigate
+from speclino.services.investigation import InvestigationResult, investigate
 from speclino.services.obligation_diff import effective_spec
 from speclino.services.run_freshness import should_publish
 from speclino.spec import load_spec_ir
@@ -251,9 +251,26 @@ class ReviewRunService:
                     cost_ok = (True, "")
                     if self.cost_guard is not None:
                         cost_ok = await self.cost_guard.can_start(datetime.now(UTC).date())
-                    inv = await investigate(
-                        ctx, self.config.permissions, self.config.model, cost_ok
-                    )
+                    # エージェントの失敗で run 全体を落とさない。証拠が増えないだけで、
+                    # 未解決は未解決のまま残りゲートが失敗する（design の「最悪でも
+                    # 証拠不足 → 未検証 → ゲート失敗」）。LLM の 429/5xx や
+                    # ネットワーク障害はここで吸収する。
+                    try:
+                        inv = await investigate(
+                            ctx, self.config.permissions, self.config.model, cost_ok
+                        )
+                    except Exception as e:  # noqa: BLE001 - 証拠収集の失敗は判定に影響させない
+                        inv = InvestigationResult(
+                            started=False,
+                            findings=findings,
+                            reason=f"エージェントを実行できなかった: {type(e).__name__}: {e}",
+                            events=[
+                                {
+                                    "type": "agent.error",
+                                    "payload": {"error": f"{type(e).__name__}: {e}"[:500]},
+                                }
+                            ],
+                        )
                     agent_events = inv.events
                     questions = inv.questions
                     if inv.started:

@@ -198,3 +198,61 @@ async def test_superseded_run_is_not_published(
         assert old_run.exec_state == "superseded" and old_run.check_run_id is None
         assert new_run.exec_state == "completed" and new_run.check_run_id is not None
     assert all(c["head_sha"] == head2 for c in host.checks.values())
+
+
+async def test_agent_failure_does_not_fail_the_run(
+    engine: AsyncEngine, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """証拠収集が落ちても run は完了し、未解決のままゲートが失敗する。
+
+    design の「乗っ取られた場合でも最悪の結果は証拠不足 → 未検証 → ゲート失敗」を、
+    エージェントの実行障害にも適用する。本番では Vertex AI の 429 で run 全体が
+    `failed` になり、判定結果が一切表示されなかった。
+    """
+
+    def _explode(*args: object, **kwargs: object) -> object:
+        raise RuntimeError("429 RESOURCE_EXHAUSTED")
+
+    monkeypatch.setattr("speclino.services.review_run_service.investigate", _explode)
+
+    repo = f"e2e/agent-fail-{uuid.uuid4().hex[:8]}"
+    # 対応外のループで UNKNOWN を作り、エージェントを起動させる
+    root = tmp_path / "repo"
+    base, _head, _head2 = make_demo_repo(root)
+    # head2 は Spec IR から要求を消した版なので、仕様は base のものに戻してから
+    # ループを入れる（消えた要求に対する UNKNOWN は出ないため）
+    git(root, "checkout", base, "--", "specs")
+    svc = root / "examples" / "orders" / "app" / "service.py"
+    svc.write_text(
+        svc.read_text().replace(
+            "    if user.is_admin:\n        inventory.restore(order.items)\n",
+            "    for item in order.items:\n        inventory.restore(item)\n",
+        )
+    )
+    git(root, "commit", "-qam", "head3: loop")
+    head3 = git(root, "rev-parse", "HEAD")
+
+    host = LocalCodeHost(repos={repo: root})
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    holder: dict[str, ReviewRunService] = {}
+    queue = InProcessQueue(lambda rid: holder["svc"].execute(rid), immediate=True)
+    service = ReviewRunService(
+        factory,
+        host,
+        queue,
+        FileSystemBlobStore(tmp_path / "blobs"),
+        ReviewRunConfig(agent_enabled=True),
+    )
+    holder["svc"] = service
+    run_id = await service.create_run(
+        repo_full_name=repo, head_sha=head3, base_sha=base, pr_number=1, trigger="test"
+    )
+    async with factory() as session:
+        run = await ReviewRunRepository(session).get(run_id)
+        assert run is not None
+        assert run.exec_state == "completed", "エージェントの失敗で run を落とさない"
+        assert run.gate_status == "fail", "未解決が残るのでゲートは失敗"
+        events = await RunEventRepository(session).list_for_run(run_id)
+        findings = await FindingRepository(session).list_for_run(run_id)
+    assert any(e.type == "agent.error" for e in events), "失敗はイベントに残す"
+    assert any(f.payload["verdict"] == "UNKNOWN" for f in findings), "判定は表示できる"
