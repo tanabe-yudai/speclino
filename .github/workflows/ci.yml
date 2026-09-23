@@ -4,6 +4,9 @@ on: [push, pull_request]
 
 permissions:
   contents: read
+  # gitleaks は PR のコミット一覧（GET /repos/.../pulls/{n}/commits）を読んで差分を絞る。
+  # 読取りだけなので規約 CI-001（書込み権限の禁止）には反しない。
+  pull-requests: read
 
 jobs:
   python:
