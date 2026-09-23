@@ -21,10 +21,14 @@ Webhook URL はトンネルで頻繁に変わり、秘密鍵も手元に置く�
 | --- | --- | --- |
 | Checks | Read and write | `SpecLino / gate` の Check Run 作成・更新 |
 | Contents | Read-only | base / head のスナップショット取得 |
+| Issues | Read-only | **`issue_comment` イベントを受け取るために必要**（Pull requests 権限だけでは選択肢に出ない）。コメントの投稿は PR に対して行うので Pull requests の write で足り、Issues は read で十分 |
 | Pull requests | Read and write | 質問・承認待ちのコメント投稿 |
 | Metadata | Read-only | 必須（自動で付く） |
 
 **Subscribe to events**: `Pull request`、`Issue comment`、`Check run`、`Check suite`。
+
+> イベントの選択肢は**選んだ権限で絞り込まれる**。先に権限を設定して保存しないと、
+> Check run / Check suite（Checks 権限）と Issue comment（Issues 権限）は一覧に現れない。
 
 実装が処理するのは次だけ（それ以外は 200 を返して無視する）:
 

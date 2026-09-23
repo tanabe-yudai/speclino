@@ -197,8 +197,13 @@ echo "MCP_TOKEN=$MCP_TOKEN"        # エディタの MCP 設定に使う。控�
 | Webhook URL | `https://speclino-web-6h5m3svkja-an.a.run.app/webhooks/github` |
 | Webhook secret | 上で作った `$WEBHOOK_SECRET` |
 
-権限: Checks = Read and write / Contents = Read-only / Pull requests = Read and write /
-Metadata = Read-only。イベント: Pull request・Issue comment・Check run・Check suite。
+権限: Checks = Read and write / Contents = Read-only / **Issues = Read-only** /
+Pull requests = Read and write / Metadata = Read-only。
+イベント: Pull request・Issue comment・Check run・Check suite。
+
+> **先に権限を設定して保存する**。イベントの選択肢は選んだ権限で絞り込まれるため、
+> Checks を設定するまで Check run / Check suite は、Issues を設定するまで Issue comment は
+> 一覧に出てこない。
 
 作成後のページで:
 
