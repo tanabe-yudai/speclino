@@ -6,6 +6,19 @@ GCP プロジェクトの作成から、Cloud Run への初回デプロイまで
 前提: `gcloud` が `13311633+tanabe-yudai@users.noreply.github.com` で認証済み、課金アカウント `XXXXXX-XXXXXX-XXXXXX`
 （T-NET、OPEN）、Terraform v1.12 以上。
 
+## どこで実行するか
+
+各手順の先頭に `cd` を書いてある。**手順 1・2 だけ Terraform のディレクトリ**で、
+残りはリポジトリ直下（`docker build .` が Dockerfile を見つけるため）。
+
+```sh
+export REPO=/Users/tanabe_yudai/workspace/project/github/spec-lino
+export P=example-project                 # プロジェクト ID
+export REGION=asia-northeast1
+```
+
+シェルを開き直したらこの 3 つを設定し直す（以降の手順は `$P` / `$REGION` を使う）。
+
 **先に ADC の quota project を設定する**（bootstrap の apply 後、プロジェクトができてから）:
 
 ```sh
@@ -24,7 +37,7 @@ Google 既定の共有プロジェクト（`projects/764086051850`）が使わ�
 **この時点では課金が発生するリソースは無い。**
 
 ```sh
-cd infra/bootstrap
+cd "$REPO/infra/bootstrap"
 terraform init
 
 # plan を固定してから中身を確認する
@@ -47,7 +60,7 @@ bootstrap は tfstate バケット自体を作るため、**初回はローカ�
 移しておくと、手元の state を失っても復旧でき、別のマシンからも操作できる。
 
 ```sh
-cd infra/bootstrap
+cd "$REPO/infra/bootstrap"
 cp backend.tf.migrate backend.tf          # backend "gcs" {} を有効化する
 terraform init -migrate-state \
   -backend-config="bucket=example-project-tfstate" \
@@ -76,7 +89,7 @@ prod の state は bootstrap が作った GCS バケットに置く（`gs://exam
 versioning 有効）。`tfvars` を用意する:
 
 ```sh
-cd ../envs/prod
+cd "$REPO/infra/envs/prod"
 cp terraform.tfvars.example terraform.tfvars
 # project_id / billing_account / github_repository を確認する
 ```
@@ -160,10 +173,12 @@ T-NET は JPY なので `budget_currency_code = "JPY"` / `budget_amount = "45000
 
 ## 3. 秘密の投入（Terraform の state には載せない）
 
+どこで実行してもよい（`--project` で明示している）。秘密鍵のパスだけ実際の場所に合わせる。
+
 ```sh
-P=example-project
 # GitHub App（本番用）の秘密鍵と Webhook secret
-gcloud secrets versions add github-app-private-key --data-file=./speclino.pem --project=$P
+gcloud secrets versions add github-app-private-key \
+  --data-file="$HOME/Downloads/speclino.2026-xx-xx.private-key.pem" --project=$P
 printf '%s' "$(openssl rand -hex 32)" | \
   gcloud secrets versions add github-webhook-secret --data-file=- --project=$P
 printf '%s' "$(openssl rand -hex 32)" | \
@@ -177,9 +192,11 @@ Webhook secret と MCP トークンは控えておく（GitHub App の設定と�
 
 ## 4. Cloud SQL（S26）
 
+どこで実行してもよい。
+
 ```sh
 gcloud sql instances create speclino-db \
-  --project=$P --region=asia-northeast1 \
+  --project=$P --region=$REGION \
   --database-version=POSTGRES_16 --edition=ENTERPRISE \
   --tier=db-f1-micro --storage-size=10GB --no-backup
 gcloud sql databases create speclino --instance=speclino-db --project=$P
@@ -201,9 +218,12 @@ gcloud sql users create speclino --instance=speclino-db --project=$P --password=
 埋め込むので、実行時の環境変数では効かない。コンソール → Identity Platform →
 「アプリケーションの設定の詳細」から apiKey と authDomain を控える。
 
+**リポジトリ直下で実行する**（`docker build .` が Dockerfile を読むため）。
+
 ```sh
-gcloud auth configure-docker asia-northeast1-docker.pkg.dev
-IMAGE=asia-northeast1-docker.pkg.dev/$P/speclino/speclino:$(git rev-parse --short HEAD)
+cd "$REPO"
+gcloud auth configure-docker $REGION-docker.pkg.dev
+IMAGE=$REGION-docker.pkg.dev/$P/speclino/speclino:$(git rev-parse --short HEAD)
 docker build --platform linux/amd64 -t $IMAGE \
   --build-arg VITE_FIREBASE_API_KEY=<apiKey> \
   --build-arg VITE_FIREBASE_AUTH_DOMAIN=$P.firebaseapp.com \
@@ -212,7 +232,7 @@ docker build --platform linux/amd64 -t $IMAGE \
 docker push $IMAGE
 
 for S in web worker; do
-  gcloud run services update speclino-$S --project=$P --region=asia-northeast1 --image=$IMAGE
+  gcloud run services update speclino-$S --project=$P --region=$REGION --image=$IMAGE
 done
 ```
 
@@ -249,9 +269,12 @@ web には GitHub App の秘密鍵を渡さない（`LazyCodeHost` により web
 
 ## 7. マイグレーションとテストアカウント
 
+**リポジトリ直下で実行する**（alembic の設定を読むため）。
+
 ```sh
+cd "$REPO"
 # Cloud SQL Auth Proxy でローカルから流す
-cloud-sql-proxy $P:asia-northeast1:speclino-db &
+cloud-sql-proxy $P:$REGION:speclino-db &
 SPECLINO_DATABASE_URL="postgresql+asyncpg://speclino:<pw>@localhost:5432/speclino" \
   uv run alembic upgrade head
 
@@ -264,7 +287,10 @@ gcloud identity platform tenants list --project=$P   # 省略可（テナント�
 
 ## 8. 動作確認
 
+**リポジトリ直下で実行する**。
+
 ```sh
+cd "$REPO"
 scripts/smoke_prod.sh                       # ヘルス / SPA / 401 / webhook 署名 / MCP Bearer
 open "$WEB_URL"                             # ログイン画面 → テストアカウントで入る
 ```
@@ -284,7 +310,7 @@ SPECLINO_SMOKE_EMAIL=<email> SPECLINO_SMOKE_PASSWORD=<password> \
 ## 片付け（12/1 以降）
 
 ```sh
-cd infra/envs/prod && terraform destroy
+cd "$REPO/infra/envs/prod" && terraform destroy
 gcloud sql instances delete speclino-db --project=$P
 # プロジェクト自体は deletion_policy=PREVENT。消すときは bootstrap の main.tf を編集してから
 ```
