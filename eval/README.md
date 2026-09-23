@@ -33,7 +33,7 @@ expected:
 
 ### 見る指標
 
-- **誤った VERIFIED = 0**（CI で強制）。解析できなかったものを「適合」と言うのが最悪の失敗
+- **誤った VERIFIED = 0**。解析できなかったものを「適合」と言うのが最悪の失敗
 - 既知違反の検出率 / UNKNOWN 率 / 要確認率 / 反例の再現率
 - Z3 と有限ドメイン総当たりの照合（`conformance/finite_check.py`）
 - 「要求数 / 承認済み / 対応範囲 / 判定済み / 未解析」の併記（一致率だけを見せない）
@@ -41,7 +41,9 @@ expected:
 ## holdout/ — 調整に使わない 3 ケース
 
 golden に合わせ込んで過学習していないかを確かめるために取り分けてある。
-`make eval` の対象外で、必要なときに明示的に回す:
+golden の調整中はこれを見ないことが条件なので `make eval` からは外してあるが、
+放置して腐らないよう [tests/unit/eval/test_golden.py](../tests/unit/eval/test_golden.py) では回している。
+手元で見るときは:
 
 ```sh
 uv run python -m speclino.eval.runner eval/holdout/cancel_order --mode source

@@ -58,22 +58,6 @@ jobs:
       - run: uv run alembic upgrade head
       - run: make test
 
-  eval:
-    name: eval (detection quality report)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-backend
-      # 判定品質の合否（27/27・誤った VERIFIED 0・有限ドメイン検算）は
-      # tests/unit/eval/test_golden.py が assert しており test (backend) で落ちる。
-      # このジョブの役目は、混同行列と指標を**人が読める形**で残すこと。
-      - run: make eval
-      - uses: actions/upload-artifact@v4
-        with:
-          name: detection-quality-report
-          path: build/eval/*.md
-          retention-days: 30
-
   self-check:
     name: self-check (cli, no agent)
     runs-on: ubuntu-latest
