@@ -171,24 +171,70 @@ T-NET は JPY なので `budget_currency_code = "JPY"` / `budget_amount = "45000
 が一度も初期化されていない可能性がある。<https://console.cloud.google.com/customer-identity>
 を一度開いて有効化してから apply をやり直す。
 
-## 3. 秘密の投入（Terraform の state には載せない）
+## 3. 本番 GitHub App の作成と秘密の投入
 
-どこで実行してもよい（`--project` で明示している）。秘密鍵のパスだけ実際の場所に合わせる。
+### 3-1. 先に値を作って控える
+
+Webhook secret は **GitHub App と Secret Manager の両方に同じ値**を入れるので、先に作って
+手元に出しておく。
 
 ```sh
-# GitHub App（本番用）の秘密鍵と Webhook secret
-gcloud secrets versions add github-app-private-key \
-  --data-file="$HOME/Downloads/speclino.2026-xx-xx.private-key.pem" --project=$P
-printf '%s' "$(openssl rand -hex 32)" | \
+export WEBHOOK_SECRET="$(openssl rand -hex 32)"
+export MCP_TOKEN="$(openssl rand -hex 32)"
+echo "WEBHOOK_SECRET=$WEBHOOK_SECRET"
+echo "MCP_TOKEN=$MCP_TOKEN"        # エディタの MCP 設定に使う。控えておく
+```
+
+### 3-2. GitHub App を作る（秘密鍵はここで生成される）
+
+<https://github.com/settings/apps/new> で作る。詳細と権限は
+[github-app-setup.md](github-app-setup.md) を参照。本番用の値:
+
+| 項目 | 値 |
+| --- | --- |
+| GitHub App name | `SpecLino` |
+| Homepage URL | `https://github.com/tanabe-yudai/spec-lino` |
+| Webhook URL | `https://speclino-web-6h5m3svkja-an.a.run.app/webhooks/github` |
+| Webhook secret | 上で作った `$WEBHOOK_SECRET` |
+
+権限: Checks = Read and write / Contents = Read-only / Pull requests = Read and write /
+Metadata = Read-only。イベント: Pull request・Issue comment・Check run・Check suite。
+
+作成後のページで:
+
+1. **App ID** を控える（`SPECLINO_GITHUB_APP_ID` に使う）
+2. 下の方の **Private keys → Generate a private key** を押す
+   → `speclino.2026-xx-xx.private-key.pem` が**ダウンロードされる**（GitHub 側には二度と
+   表示されないので、無くしたら作り直す）
+3. **Install App** → 対象リポジトリだけを選んでインストール
+
+### 3-3. Secret Manager へ入れる
+
+```sh
+PEM="$HOME/Downloads/speclino.2026-xx-xx.private-key.pem"   # 実際のファイル名に置き換える
+gcloud secrets versions add github-app-private-key --data-file="$PEM" --project=$P
+
+printf '%s' "$WEBHOOK_SECRET" | \
   gcloud secrets versions add github-webhook-secret --data-file=- --project=$P
-printf '%s' "$(openssl rand -hex 32)" | \
+printf '%s' "$MCP_TOKEN" | \
   gcloud secrets versions add mcp-token --data-file=- --project=$P
 printf '%s' "$(openssl rand -hex 32)" | \
   gcloud secrets versions add session-secret --data-file=- --project=$P
+
+gcloud secrets list --project=$P     # 4 つあること
 ```
 
-Webhook secret と MCP トークンは控えておく（GitHub App の設定と、エディタの MCP 設定に使う）。
-秘密鍵は worker の SA だけが読める（`secrets.tf` の `secret_accessors`）。
+投入したらローカルの `.pem` は消してよい（`rm "$PEM"`）。リポジトリには置かない
+（`*.pem` は `.gitignore` 済み）。秘密鍵は worker の SA だけが読める（`secrets.tf`）。
+
+App ID は秘密ではないので tfvars に書く（環境変数は Terraform が持つ。`gcloud` で足すと
+次の apply で消える）:
+
+```sh
+cd "$REPO/infra/envs/prod"
+echo 'github_app_id = "<App ID>"' >> terraform.tfvars
+terraform plan -out=tfplan && terraform apply tfplan
+```
 
 ## 4. Cloud SQL（S26）
 
@@ -255,6 +301,7 @@ GitHub Actions から自動デプロイする場合は、リポジトリ変数�
 | `worker_url` | `terraform output worker_url` | 2 回目の apply |
 | `database_url` | Cloud SQL の接続 URL | Cloud SQL 作成後 |
 | `cloudsql_instance` | `<project>:<region>:speclino-db` | Cloud SQL 作成後 |
+| `github_app_id` | 本番 GitHub App の App ID | App 作成後 |
 
 秘密（GitHub App 秘密鍵・Webhook secret・MCP トークン）だけは Secret Manager から渡す:
 

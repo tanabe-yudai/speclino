@@ -57,7 +57,10 @@ locals {
     SPECLINO_FIREBASE_PROJECT_ID = var.project_id
   })
 
-  worker_env = var.database_url == "" ? {} : { SPECLINO_DATABASE_URL = var.database_url }
+  worker_env = merge(
+    var.database_url == "" ? {} : { SPECLINO_DATABASE_URL = var.database_url },
+    var.github_app_id == "" ? {} : { SPECLINO_GITHUB_APP_ID = var.github_app_id },
+  )
 
   service_env = {
     web     = merge(local.common_env, local.web_env, local.public_url_env)

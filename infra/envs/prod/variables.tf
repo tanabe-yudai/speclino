@@ -115,3 +115,12 @@ variable "budget_amount" {
   type        = string
   default     = "45000"
 }
+
+variable "github_app_id" {
+  description = <<-EOT
+    本番 GitHub App の App ID（秘密ではない。秘密鍵は Secret Manager 経由）。
+    App を作ってから tfvars に書く。空のあいだ worker は GitHub を呼べない。
+  EOT
+  type        = string
+  default     = ""
+}
