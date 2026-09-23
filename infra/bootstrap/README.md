@@ -1,8 +1,13 @@
 # infra/bootstrap
 
 SpecLino 専用の GCP プロジェクトを新規作成し、基盤 API の有効化と tfstate 用 GCS バケットを用意する。
-state はこのディレクトリ自身に対してはローカル管理（`terraform.tfstate` をこのディレクトリ内に保持）。
-`infra/envs/prod` はここで作った GCS バケットを backend にする。
+
+state は**初回だけローカル**（`terraform.tfstate`）。tfstate バケット自体をここで作るため、
+最初からそこには置けないという鶏卵問題への対処。apply 後に `backend.tf.migrate` を
+`backend.tf` にコピーして `terraform init -migrate-state` すれば、作ったバケットへ移せる
+（手順は `guides/deploy-runbook.md`「bootstrap の state を GCS へ移す」）。
+
+`infra/envs/prod` は最初からこのバケットを backend にする（prefix は `envs/prod`）。
 
 ## 前提
 

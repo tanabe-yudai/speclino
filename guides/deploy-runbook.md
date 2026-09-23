@@ -28,10 +28,35 @@ terraform output state_bucket                        # → example-project-tfsta
 > プロジェクト ID が既に使われていると `already exists` で失敗する。その場合は
 > `-var project_id=example-project-<接尾辞>` にして、以降の手順でも同じ値を使う。
 
-> **bootstrap の state はローカル**（`infra/bootstrap/terraform.tfstate`）。tfstate バケット
-> 自体をここで作るため、そこには置けない。失うと作成済みのプロジェクトとバケットを Terraform
-> が管理できなくなる（`terraform import` で復旧は可能）。`.gitignore` 済みなので Git には
-> 入らない。消さないこと。
+### bootstrap の state を GCS へ移す
+
+bootstrap は tfstate バケット自体を作るため、**初回はローカル state**
+（`infra/bootstrap/terraform.tfstate`）で apply する。バケットができた後に、その中へ移す。
+移しておくと、手元の state を失っても復旧でき、別のマシンからも操作できる。
+
+```sh
+cd infra/bootstrap
+cp backend.tf.migrate backend.tf          # backend "gcs" {} を有効化する
+terraform init -migrate-state \
+  -backend-config="bucket=example-project-tfstate" \
+  -backend-config="prefix=bootstrap"
+# → 「Do you want to copy existing state to the new backend?」に yes
+
+terraform plan -var project_id=example-project -var billing_account=XXXXXX-XXXXXX-XXXXXX
+# → "No changes." なら移行できている
+```
+
+移行後は `terraform.tfstate` がローカルに残るが、中身は空（`terraform.tfstate.backup` に
+移行前の内容が残る）。以降は `terraform init -backend-config=...` だけでよい。
+
+**移行したら `backend.tf` をコミットする**。コミットしないと、別のマシンやクリーンな
+チェックアウトで backend が設定されず、気付かないままローカル state で操作してしまう。
+（逆に、まだ bootstrap を apply していない環境でこのファイルがあると init が失敗するので、
+バケットを作るまでは `backend.tf.migrate` のままにしておく。）
+
+> 移行しない場合は `infra/bootstrap/terraform.tfstate` を消さないこと。失うと作成済みの
+> プロジェクトとバケットを Terraform が管理できなくなる（`terraform import` で復旧は可能）。
+> `.gitignore` 済みなので Git には入らない。
 
 ## 2. prod（Cloud Run・Tasks・Secret・WIF・Identity Platform・予算）
 
