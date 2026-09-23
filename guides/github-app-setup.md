@@ -10,7 +10,7 @@ Webhook URL はトンネルで頻繁に変わり、秘密鍵も手元に置く�
 | 項目 | 開発用 | 本番用 |
 | --- | --- | --- |
 | GitHub App name | `SpecLino (dev)` | `SpecLino` |
-| Homepage URL | リポジトリ URL | リポジトリ URL |
+| Homepage URL（必須） | リポジトリ URL | web サービスの URL（App ページに公開表示されるため、private リポジトリの URL は避ける） |
 | Webhook URL | `https://<トンネル>/webhooks/github` | `https://<Cloud Run web>/webhooks/github` |
 | Webhook secret | 任意の乱数（`openssl rand -hex 32`） | Secret Manager に保存した値 |
 | Where can this be installed | Only on this account | Only on this account |

@@ -193,7 +193,7 @@ echo "MCP_TOKEN=$MCP_TOKEN"        # エディタの MCP 設定に使う。控�
 | 項目 | 値 |
 | --- | --- |
 | GitHub App name | `SpecLino` |
-| Homepage URL | `https://github.com/tanabe-yudai/spec-lino` |
+| Homepage URL | `https://speclino-web-6h5m3svkja-an.a.run.app`（必須。App のページに公開表示される。リポジトリは提出まで private なので web URL にしておく） |
 | Webhook URL | `https://speclino-web-6h5m3svkja-an.a.run.app/webhooks/github` |
 | Webhook secret | 上で作った `$WEBHOOK_SECRET` |
 
