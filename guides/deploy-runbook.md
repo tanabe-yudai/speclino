@@ -243,22 +243,64 @@ terraform plan -out=tfplan && terraform apply tfplan
 
 ## 4. Cloud SQL（S26）
 
-どこで実行してもよい。
+**クーポンの登録を先に済ませる**（ここから実際の課金が始まる。Cloud Run と違い停止しないので
+起動している間ずっと課金される。登録期限 10/20）。どこで実行してもよい。
 
 ```sh
+export DB_PASSWORD="$(openssl rand -hex 24)"
+
 gcloud sql instances create speclino-db \
   --project=$P --region=$REGION \
   --database-version=POSTGRES_16 --edition=ENTERPRISE \
-  --tier=db-f1-micro --storage-size=10GB --no-backup
+  --tier=db-f1-micro --storage-size=10GB --storage-type=HDD \
+  --no-backup --availability-type=zonal
+
+# RUNNABLE になるまで待つ（5〜10 分）。PENDING_CREATE のまま続けると下の 2 つが失敗する
+until [ "$(gcloud sql instances describe speclino-db --project=$P --format='value(state)')" = RUNNABLE ]
+do sleep 20; done
+
 gcloud sql databases create speclino --instance=speclino-db --project=$P
-gcloud sql users create speclino --instance=speclino-db --project=$P --password="$(openssl rand -hex 24)"
+gcloud sql users create speclino --instance=speclino-db --project=$P --password="$DB_PASSWORD"
+
+# 平文接続を禁止し、12/1 まで維持する要件のため削除保護を入れる
+gcloud sql instances patch speclino-db --project=$P \
+  --ssl-mode=ENCRYPTED_ONLY --deletion-protection --quiet
+
+gcloud sql instances describe speclino-db --project=$P --format='value(connectionName)'
 ```
 
-**クーポンの登録はここで行う**（Cloud SQL が最も費用を使う。登録期限 10/20）。
+### ネットワークの考え方
 
-接続は Cloud Run の Unix ソケット経由:
-`postgresql+asyncpg://speclino:<pw>@/speclino?host=/cloudsql/<接続名>`。
-接続名は `gcloud sql instances describe speclino-db --format='value(connectionName)'`。
+パブリック IP は付くが、**authorized networks は空（全 IP 拒否）**なので直接は繋がらない。
+Cloud Run は `/cloudsql/<接続名>` の Unix ソケット（Cloud SQL コネクタ）で繋ぎ、これは
+authorized networks とは別経路で **IAM（`roles/cloudsql.client`）+ 一時証明書**により認可される。
+`cloudsql.client` を持つのは web / worker の SA だけ。
+
+パブリック IP を外すにはプライベート IP が要り、そのためには VPC + プライベートサービス
+アクセス + Serverless VPC コネクタ（アイドルでも月 $8〜）が必要になる。design の
+「VPC / NAT は作らない」に従い、**authorized networks を空に保つ**ことで代替している。
+
+> Cloud SQL に Security Group に相当するものは無い。ネットワーク層は authorized networks、
+> 認可は IAM、認証は DB ユーザーのパスワードという 3 層で守る。
+
+### 接続 URL を Secret Manager に入れる
+
+パスワードを含むので tfvars には書かない（Terraform の state に載るため）。
+
+```sh
+CONN=$(gcloud sql instances describe speclino-db --project=$P --format='value(connectionName)')
+printf '%s' "postgresql+asyncpg://speclino:${DB_PASSWORD}@/speclino?host=/cloudsql/${CONN}" | \
+  gcloud secrets versions add database-url --data-file=- --project=$P
+```
+
+全ての秘密に値が入ったら、`mount_secrets = true` にして apply する（値の無い秘密を参照すると
+リビジョンが起動しないため、投入が済んでから有効化する）:
+
+```sh
+cd "$REPO/infra/envs/prod"
+echo 'mount_secrets = true' >> terraform.tfvars
+terraform plan -out=tfplan && terraform apply tfplan
+```
 
 ## 5. イメージのビルドとデプロイ
 
