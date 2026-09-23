@@ -267,7 +267,19 @@ UNKNOWN にしないようにしている（例: ループが在庫復元しか�
 適合に書き換えず「例外付き通過」として別記する。
 
 このリポジトリ自身が [.github/workflows/ci.yml](.github/workflows/ci.yml) で必須運用している
-（**自己検証**）。
+（**自己検証**）。同じ判定が 2 つの経路で出るが、役割が違う:
+
+| | `self-check (cli, no agent)` | `SpecLino / gate` |
+| --- | --- | --- |
+| どこで | GitHub Actions の CLI | 本番 Cloud Run |
+| base との意味差分 | なし | あり |
+| エージェント | **使わない**（決定的解析だけ） | 未解決があれば起動 |
+| 必要なもの | リポジトリだけ | GCP・DB・GitHub App |
+| 出力 | 終了コード | Check・行注釈・PR コメント・UI・成果物 |
+
+CLI 側を残しているのは、**GCP を畳んだ後でも / clone した人の手元でも自己検証が回る**ことと、
+**LLM を一切使わずに違反を検出できる**（エージェントは証拠集めだけという設計の裏付け）を
+示すため。
 
 GitHub App を作って実 PR に接続し、必須チェックにするまでの手順は
 [guides/github-app-setup.md](guides/github-app-setup.md)、GCP への初回デプロイは

@@ -59,24 +59,34 @@ jobs:
       - run: make test
 
   eval:
-    name: eval (detection quality)
+    name: eval (detection quality report)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-backend
-      # 答えの分かっている 27 ケース（eval/golden）で判定品質を測る。
-      # 検出できるはずの違反を見落とす／解析できないものを適合と言う（誤った VERIFIED）が
-      # 1 件でもあれば失敗する。eval/holdout は調整に使わない別題材
+      # 判定品質の合否（27/27・誤った VERIFIED 0・有限ドメイン検算）は
+      # tests/unit/eval/test_golden.py が assert しており test (backend) で落ちる。
+      # このジョブの役目は、混同行列と指標を**人が読める形**で残すこと。
       - run: make eval
+      - uses: actions/upload-artifact@v4
+        with:
+          name: detection-quality-report
+          path: build/eval/*.md
+          retention-days: 30
 
   self-check:
-    name: self-check (speclino on itself)
+    name: self-check (cli, no agent)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-backend
       # SpecLino 自身の仕様（SPEC-TOOL-001 / SPEC-GATE-001 / SPEC-RUN-001）と規約
-      # （MAKE-001 / SPEC-FMT-001 / CI-001 / API-ERR-001）。未検証も失敗にする
+      # （MAKE-001 / SPEC-FMT-001 / CI-001 / API-ERR-001）を、**CLI だけで**検査する。
+      #
+      # PR に出る `SpecLino / gate` は同じ判定を本番（Cloud Run）で出すが、あちらは
+      # GCP・DB・GitHub App が生きていることに依存し、エージェントと base 差分も含む。
+      # こちらはリポジトリだけで完結するので、GCP を畳んだ後や clone した人の手元でも動き、
+      # 「LLM を使わずに決定的解析だけで違反を検出できる」ことの裏付けにもなる。
       - run: >-
           uv run speclino check --repo . --head WORKTREE --out build/self-check
           --fail-on VIOLATED --fail-on UNKNOWN --fail-on REVIEW --blocking
