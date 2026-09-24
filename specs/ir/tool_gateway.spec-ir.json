@@ -1,13 +1,13 @@
 {
   "approvals": [
     {
-      "approved_at": "2026-09-22T00:00:00Z",
+      "approved_at": "2026-09-23T00:00:00Z",
       "approver": "tanabe-yudai",
       "evidence_url": null,
       "id": "speclino-self-v1",
       "ir_content_hash": "sha256:93498427479e594e1ff544efb2312123ebc1b3b4e1144678eb7ca21e381d8f4f",
       "source": "manual",
-      "spec_content_hash": "sha256:98aa4026fff25e2e911f5847236eeff9ff2796fc8cbe1c822006dab64ec904bb"
+      "spec_content_hash": "sha256:88dc040b2f64bfb8d4c792f28d444a5d8d3a1ecce45a2bfbd3f858f72ca4479f"
     }
   ],
   "behavior_id": "tool_gateway_invoke",
