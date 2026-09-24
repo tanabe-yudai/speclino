@@ -116,6 +116,7 @@ make setup          # uv sync + npm ci
 make db-up          # ローカル PostgreSQL（docker compose）
 make db-migrate     # alembic upgrade head
 make test           # 単体 + 統合（統合は SPECLINO_DATABASE_URL が要る）
+make selfcheck      # SpecLino を自分自身に当てる（下の「自己検証」を参照）
 ```
 
 ## 1 件の検査を実行する
@@ -342,7 +343,7 @@ CI-001（pull_request トリガー・必須ステップ・読取り専用権限�
 ```sh
 make lint            # ruff（静的検査・書式）
 make typecheck       # mypy strict
-make check           # lint + typecheck + test をまとめて
+make check           # lint + typecheck + test + selfcheck をまとめて
 make eval            # Golden 評価
 make dev             # FastAPI（http://localhost:8080）
 cd web && npm run dev

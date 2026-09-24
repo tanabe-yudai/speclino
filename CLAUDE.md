@@ -22,8 +22,9 @@
 
 ## コマンド
 
-- `make setup` / `make lint`（ruff）/ `make typecheck`（mypy）/ `make test` / `make eval` / `make check`（lint+typecheck+test）/ `make format`
-- CI のジョブは**検査の段階**で分ける（lint / typecheck / test / eval / self-check / web の lint・typecheck・build / secrets）。言語でまとめない
+- `make setup` / `make lint`（ruff）/ `make typecheck`（mypy）/ `make test` / `make selfcheck` / `make eval` / `make check`（lint+typecheck+test+selfcheck）/ `make format`
+- CI のジョブは**検査の段階**で分ける（lint / typecheck / test / self-check / web の lint・typecheck・build / secrets）。言語でまとめない
+- **`make test` と `make selfcheck` を混ぜない**。`test` は振る舞いと検出能力のテスト（デモブランチでも緑であるべき）、`selfcheck` は「今のリポジトリが自分の仕様に適合しているか」（デモブランチでは落ちるのが正しい）。後者は `@pytest.mark.selfcheck` を付け、`tests/fixtures/selfcheck/` の凍結コピーとの使い分けは同ディレクトリの README を読む
 - `make db-up && make db-migrate`（ローカル PostgreSQL）
 - `uv run speclino check --repo . --base main --head HEAD --out build/review`（`--code-ir <file>` で手書き Code IR を直接入力）
 - `make dev`（FastAPI、`SPECLINO_ROLE=all`）、`cd web && npm run dev`
