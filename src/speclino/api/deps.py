@@ -193,7 +193,9 @@ def build_state(settings: Settings) -> AppState:
         queue=queue,
         blobs=blobs,
         config=ReviewRunConfig(
-            permissions=AgentPermissions(),
+            # 隔離実行の当てが無いのに test_run を許可しても sandbox_unavailable を返すだけなので、
+            # サンドボックスが設定されているときだけ許可する（S38）。
+            permissions=AgentPermissions(test_run_enabled=settings.sandbox_kind != "disabled"),
             model=settings.agent_model,
             details_url_base=f"{settings.public_url.rstrip('/')}/runs",
             agent_enabled=settings.agent_enabled,

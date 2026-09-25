@@ -5,7 +5,7 @@
       "approver": "tanabe-yudai",
       "evidence_url": null,
       "id": "speclino-self-v1",
-      "ir_content_hash": "sha256:93498427479e594e1ff544efb2312123ebc1b3b4e1144678eb7ca21e381d8f4f",
+      "ir_content_hash": "sha256:b6bfb5984c35054574aa891e02a50c9eab09ddde232090edf7b53eefba9d619b",
       "source": "manual",
       "spec_content_hash": "sha256:88dc040b2f64bfb8d4c792f28d444a5d8d3a1ecce45a2bfbd3f858f72ca4479f"
     }
@@ -47,7 +47,10 @@
           "symbol": null
         }
       ],
-      "tests": [],
+      "tests": [
+        "tests/agent/test_gateway.py::test_not_permitted_is_denied_before_execution_and_audited",
+        "tests/agent/test_gateway.py::test_honeypot_is_denied_and_flagged_as_injection"
+      ],
       "title": null
     },
     {
@@ -85,7 +88,9 @@
           "symbol": null
         }
       ],
-      "tests": [],
+      "tests": [
+        "tests/agent/test_gateway.py::test_not_permitted_is_denied_before_execution_and_audited"
+      ],
       "title": null
     },
     {
@@ -170,7 +175,9 @@
           "symbol": null
         }
       ],
-      "tests": [],
+      "tests": [
+        "tests/agent/test_gateway.py::test_permitted_executes_exactly_once_with_audit"
+      ],
       "title": null
     },
     {

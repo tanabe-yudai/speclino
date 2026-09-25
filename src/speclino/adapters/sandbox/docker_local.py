@@ -70,7 +70,10 @@ class DockerSandbox:
                 "-v",
                 f"{out}:/work/out:rw",
                 "-e",
-                "PYTHONPATH=/work/head",
+                # head/ 直下（examples/... のような相対 import 用）と head/src（src レイアウトの
+                # パッケージ用）の両方を通す。site-packages より先に来るので、インストール済みの
+                # 実装ではなく head の実装が import される。
+                "PYTHONPATH=/work/head:/work/head/src",
                 "-e",
                 "PYTHONSAFEPATH=1",
                 "-w",
