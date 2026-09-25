@@ -130,13 +130,18 @@ class CodeIR(IRModel):
 class ReachabilityDigest(IRModel):
     """到達関数群のソースハッシュ（S41c 増分解析）。`analysis.reachability` の戻り値。
 
-    behavior の入口から静的にたどれる関数群のソースを正規化して連結したハッシュ。base と
-    head でこれが一致すれば（かつ入力の同一性も一致すれば）Code IR の再解析を省ける。
+    behavior の入口から静的にたどれる関数群と、それを含むモジュール群の import 推移閉包
+    （解析器がモジュールを読む経路は import 経由しかない）を正規化して連結したハッシュ。
+    base と head でこれが一致すれば（かつ入力の同一性も一致すれば）Code IR の再解析を省ける。
     """
 
     source_hash: str = Field(min_length=1, description="sha256:... 形式")
     functions: list[str] = Field(
         default_factory=list, description="到達した関数の完全修飾名（ソート済み）"
+    )
+    modules: list[str] = Field(
+        default_factory=list,
+        description="ハッシュに含めたモジュールの完全修飾名（ソート済み、import の推移閉包）",
     )
     unresolved_calls: list[str] = Field(
         default_factory=list,

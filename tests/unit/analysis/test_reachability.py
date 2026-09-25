@@ -162,6 +162,67 @@ def test_hash_changes_when_only_an_unrelated_import_changes(tmp_path: Path) -> N
     assert digest_a.source_hash != digest_b.source_hash
 
 
+def test_hash_changes_when_an_imported_but_not_called_module_changes(tmp_path: Path) -> None:
+    """呼出しグラフには現れない（属性参照・型としてだけ使う）import 先が変わってもハッシュが
+    変わる。
+
+    `examples/orders/app/models.py` の `OrderStatus.PENDING` を `WAITING` に改名する実例
+    （呼び出す関数は1つも変わらないのに `RepoIndex.enum_values()` 経由の属性参照が解決
+    できなくなる）と同種の穴の最小再現。
+    """
+    a, b = tmp_path / "a", tmp_path / "b"
+    for root in (a, b):
+        _write(
+            root,
+            "pkg/mod.py",
+            """
+            from pkg.values import LIMIT
+
+
+            def entry(x: int) -> int:
+                return x + LIMIT
+            """,
+        )
+    _write(a, "pkg/values.py", "LIMIT = 1\n")
+    _write(b, "pkg/values.py", "LIMIT = 2\n")
+
+    bindings = _bindings("pkg.mod.entry")
+    digest_a = reachable_source_hash(a, "b1", bindings, source_roots=(".",))
+    digest_b = reachable_source_hash(b, "b1", bindings, source_roots=(".",))
+    # entry のソース・到達関数集合は同一（LIMIT の値だけが違う）
+    assert digest_a.functions == digest_b.functions == ["pkg.mod.entry"]
+    assert "pkg.values" in digest_a.modules
+    assert digest_a.source_hash != digest_b.source_hash
+
+
+def test_relative_import_and_init_reexport_are_followed(tmp_path: Path) -> None:
+    """相対 import（`from .sub import X`）と `__init__.py` 経由の再エクスポートも推移的に
+    たどり、直接 import されていない末端モジュールの変更もハッシュに反映する。"""
+    a, b = tmp_path / "a", tmp_path / "b"
+    for root in (a, b):
+        _write(root, "pkg/__init__.py", "")
+        _write(
+            root,
+            "pkg/mod.py",
+            """
+            from .sub import THING  # 相対 import。sub/__init__.py 経由の再エクスポート
+
+
+            def entry(x: int) -> int:
+                return x
+            """,
+        )
+        _write(root, "pkg/sub/__init__.py", "from .inner import THING\n")
+    _write(a, "pkg/sub/inner.py", "THING = 1\n")
+    _write(b, "pkg/sub/inner.py", "THING = 2\n")  # mod.py も sub/__init__.py も変えていない
+
+    bindings = _bindings("pkg.mod.entry")
+    digest_a = reachable_source_hash(a, "b1", bindings, source_roots=(".",))
+    digest_b = reachable_source_hash(b, "b1", bindings, source_roots=(".",))
+    assert {"pkg.sub", "pkg.sub.inner"} <= set(digest_a.modules)
+    assert digest_a.source_hash != digest_b.source_hash
+
+
 def test_unresolved_dynamic_call_text_is_recorded_and_changes_hash(tmp_path: Path) -> None:
     a, b = tmp_path / "a", tmp_path / "b"
     _write(

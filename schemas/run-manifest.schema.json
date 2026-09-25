@@ -73,7 +73,7 @@
     },
     "ReachabilityDigest": {
       "additionalProperties": false,
-      "description": "到達関数群のソースハッシュ（S41c 増分解析）。`analysis.reachability` の戻り値。\n\nbehavior の入口から静的にたどれる関数群のソースを正規化して連結したハッシュ。base と\nhead でこれが一致すれば（かつ入力の同一性も一致すれば）Code IR の再解析を省ける。",
+      "description": "到達関数群のソースハッシュ（S41c 増分解析）。`analysis.reachability` の戻り値。\n\nbehavior の入口から静的にたどれる関数群と、それを含むモジュール群の import 推移閉包\n（解析器がモジュールを読む経路は import 経由しかない）を正規化して連結したハッシュ。\nbase と head でこれが一致すれば（かつ入力の同一性も一致すれば）Code IR の再解析を省ける。",
       "properties": {
         "source_hash": {
           "description": "sha256:... 形式",
@@ -87,6 +87,14 @@
             "type": "string"
           },
           "title": "Functions",
+          "type": "array"
+        },
+        "modules": {
+          "description": "ハッシュに含めたモジュールの完全修飾名（ソート済み、import の推移閉包）",
+          "items": {
+            "type": "string"
+          },
+          "title": "Modules",
           "type": "array"
         },
         "unresolved_calls": {

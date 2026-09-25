@@ -281,6 +281,49 @@ def test_incremental_reanalyzes_when_only_an_import_binding_changes(tmp_path: Pa
     assert "UNKNOWN" in verdicts_with_base.values()
 
 
+def test_incremental_reanalyzes_when_an_imported_module_changes(tmp_path: Path) -> None:
+    """呼出しグラフに現れない import 先（列挙型の定義）が変わっても再利用しない。
+
+    `service.py` は1文字も変えず、`app/models.py` の `OrderStatus.PENDING` を `WAITING`
+    へ改名するだけ。`cancel_order` はどの関数も呼び出し先を変えていないので、旧実装（関数の
+    呼出しグラフだけを到達性とする実装）は到達ハッシュを一致させ、base の
+    （`PENDING` が解決できていた頃の）VERIFIED_IN_SCOPE をそのまま再利用してしまっていた。
+    実際には `order.status != OrderStatus.PENDING` の属性参照が解決できなくなり、
+    R-CANCEL-02 に依存する要求が UNKNOWN になる（bugfix: import の推移閉包をたどる）。
+    """
+    base = _orders_copy(tmp_path / "base", mutate=False)
+    head = _orders_copy(tmp_path / "head", mutate=False)
+    models = head / "app" / "models.py"
+    src = models.read_text()
+    assert '    PENDING = "PENDING"\n' in src
+    models.write_text(src.replace('    PENDING = "PENDING"\n', '    WAITING = "PENDING"\n'))
+
+    with_base = run_check(
+        CheckRequest(
+            repo_root=tmp_path / "head",
+            head_sha="head-sha",
+            base_sha="base-sha",
+            project_dir=head,
+            base_root=tmp_path / "base",
+            base_project_dir=base,
+            run_id="fixed",
+        )
+    )
+    [analysis] = with_base.manifest.analysis
+    assert analysis.reused_from_base is False
+    assert "examples.orders.app.models" in analysis.reachability.modules
+
+    head_only = run_check(
+        CheckRequest(
+            repo_root=tmp_path / "head", head_sha="head-sha", project_dir=head, run_id="fixed"
+        )
+    )
+    verdicts_with_base = {f.requirement_id: f.verdict for f in with_base.findings.findings}
+    verdicts_head_only = {f.requirement_id: f.verdict for f in head_only.findings.findings}
+    assert verdicts_with_base == verdicts_head_only
+    assert "UNKNOWN" in verdicts_with_base.values()
+
+
 def test_incremental_does_not_reuse_when_spec_ir_changes(tmp_path: Path) -> None:
     """コードは同じでも仕様（Spec IR の rules）が変われば inputs_hash が変わり再利用しない。"""
     base = _orders_copy(tmp_path / "base", mutate=False)
