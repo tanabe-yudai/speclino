@@ -72,6 +72,9 @@ def _render_overview(
         lines.append(f"- ゲート: **{GATE_STATUS_LABELS[gate.status]}** — {gate.reason}")
     else:
         lines.append("- ゲート: 未計算")
+    if manifest.analysis:
+        reused = sum(1 for a in manifest.analysis if a.reused_from_base)
+        lines.append(f"- 再利用: {reused} / {len(manifest.analysis)} behavior（S41c 増分解析）")
     lines.append(f"- 確認範囲: {'; '.join(scopes) if scopes else '（記録なし）'}")
     lines.append(f"- 仮定: {'; '.join(assumptions) if assumptions else '（記録なし）'}")
     return "\n".join(lines)
