@@ -30,6 +30,80 @@
       "title": "AnalysisLimits",
       "type": "object"
     },
+    "BehaviorAnalysis": {
+      "additionalProperties": false,
+      "description": "増分解析（S41c）の記録。再利用は「解析していない」ことなので必ず記録して隠さない。",
+      "properties": {
+        "behavior_id": {
+          "minLength": 1,
+          "title": "Behavior Id",
+          "type": "string"
+        },
+        "reachability": {
+          "$ref": "#/$defs/ReachabilityDigest",
+          "description": "到達関数群のソースハッシュ（未解決呼出しも含め隠さず記録する）"
+        },
+        "inputs_hash": {
+          "description": "仕様・domain・bindings・contracts の内容ハッシュ",
+          "minLength": 1,
+          "title": "Inputs Hash",
+          "type": "string"
+        },
+        "reused_from_base": {
+          "description": "base の Code IR を再利用したか",
+          "title": "Reused From Base",
+          "type": "boolean"
+        },
+        "reason": {
+          "description": "再利用した／しなかった理由（人が読める説明）",
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "behavior_id",
+        "reachability",
+        "inputs_hash",
+        "reused_from_base",
+        "reason"
+      ],
+      "title": "BehaviorAnalysis",
+      "type": "object"
+    },
+    "ReachabilityDigest": {
+      "additionalProperties": false,
+      "description": "到達関数群のソースハッシュ（S41c 増分解析）。`analysis.reachability` の戻り値。\n\nbehavior の入口から静的にたどれる関数群のソースを正規化して連結したハッシュ。base と\nhead でこれが一致すれば（かつ入力の同一性も一致すれば）Code IR の再解析を省ける。",
+      "properties": {
+        "source_hash": {
+          "description": "sha256:... 形式",
+          "minLength": 1,
+          "title": "Source Hash",
+          "type": "string"
+        },
+        "functions": {
+          "description": "到達した関数の完全修飾名（ソート済み）",
+          "items": {
+            "type": "string"
+          },
+          "title": "Functions",
+          "type": "array"
+        },
+        "unresolved_calls": {
+          "description": "静的に解決できなかった呼出し式（self.xxx 等）。変わればハッシュも変わる",
+          "items": {
+            "type": "string"
+          },
+          "title": "Unresolved Calls",
+          "type": "array"
+        }
+      },
+      "required": [
+        "source_hash"
+      ],
+      "title": "ReachabilityDigest",
+      "type": "object"
+    },
     "RunInputs": {
       "additionalProperties": false,
       "properties": {
@@ -239,6 +313,14 @@
       ],
       "title": "Mode",
       "type": "string"
+    },
+    "analysis": {
+      "description": "behavior ごとの増分解析の記録（S41c）",
+      "items": {
+        "$ref": "#/$defs/BehaviorAnalysis"
+      },
+      "title": "Analysis",
+      "type": "array"
     }
   },
   "required": [

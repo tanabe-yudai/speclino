@@ -167,3 +167,113 @@ def test_base_without_spec_is_reported_not_fatal(tmp_path: Path) -> None:
     assert res.semantic_diff is not None and not res.semantic_diff.base_available
     assert "domain.yaml が無い" in (res.semantic_diff.base_error or "")
     assert {d.status for d in res.semantic_diff.findings} == {"added"}
+
+
+# ---------------------------------------------------------------- S41c 増分解析
+
+
+def test_incremental_reuses_when_base_and_head_are_identical(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = _orders_copy(tmp_path / "base", mutate=False)
+    head = _orders_copy(tmp_path / "head", mutate=False)
+    req = CheckRequest(
+        repo_root=tmp_path / "head",
+        head_sha="head-sha",
+        base_sha="base-sha",
+        project_dir=head,
+        base_root=tmp_path / "base",
+        base_project_dir=base,
+        run_id="fixed",
+    )
+
+    with_reuse = run_check(req)
+    [analysis] = with_reuse.manifest.analysis
+    assert analysis.behavior_id == "cancel_order"
+    assert analysis.reused_from_base is True
+    assert analysis.reason == "reachable と inputs が base と一致"
+    assert analysis.reachability.functions  # 到達関数が manifest に残る（隠さない）
+
+    # 「reused を強制オフにした結果と比較」: _decide_reuse だけを常に不再利用にして比較する
+    # （base_root 自体は付けたままにして、意味差分・base_head_status 付与は両方で同じにする）
+    import speclino.services.check_pipeline as check_pipeline_module
+
+    monkeypatch.setattr(
+        check_pipeline_module, "_decide_reuse", lambda *a, **k: (False, "forced-off-for-test")
+    )
+    without_reuse = run_check(req)
+    assert without_reuse.manifest.analysis[0].reused_from_base is False
+
+    # 決定性: 再利用の有無で findings が完全一致する（finding id を含む）
+    assert with_reuse.findings.model_dump(mode="json") == without_reuse.findings.model_dump(
+        mode="json"
+    )
+
+
+def test_incremental_reanalyzes_when_reachable_function_body_changes(tmp_path: Path) -> None:
+    base = _orders_copy(tmp_path / "base", mutate=False)
+    head = _orders_copy(tmp_path / "head", mutate=True)  # service.py の cancel_order を変更
+
+    res = run_check(
+        CheckRequest(
+            repo_root=tmp_path / "head",
+            head_sha="head-sha",
+            base_sha="base-sha",
+            project_dir=head,
+            base_root=tmp_path / "base",
+            base_project_dir=base,
+            run_id="fixed",
+        )
+    )
+    [analysis] = res.manifest.analysis
+    assert analysis.reused_from_base is False
+    assert analysis.reason == "reachable ハッシュが base と不一致"
+
+
+def test_incremental_does_not_reuse_when_spec_ir_changes(tmp_path: Path) -> None:
+    """コードは同じでも仕様（Spec IR の rules）が変われば inputs_hash が変わり再利用しない。"""
+    base = _orders_copy(tmp_path / "base", mutate=False)
+    head = _orders_copy(tmp_path / "head", mutate=False)
+    ir_path = head / "specs" / "ir" / "cancel_order.spec-ir.json"
+    data = json.loads(ir_path.read_text())
+    data["rules"][0]["title"] = "仕様側だけの変更（テスト用）"
+    ir_path.write_text(json.dumps(data))
+
+    res = run_check(
+        CheckRequest(
+            repo_root=tmp_path / "head",
+            head_sha="head-sha",
+            base_sha="base-sha",
+            project_dir=head,
+            base_root=tmp_path / "base",
+            base_project_dir=base,
+            run_id="fixed",
+        )
+    )
+    [analysis] = res.manifest.analysis
+    assert analysis.reused_from_base is False
+    assert analysis.reason == "inputs ハッシュが base と不一致"
+
+
+def test_incremental_does_not_reuse_with_code_ir_override(tmp_path: Path) -> None:
+    base = _orders_copy(tmp_path / "base", mutate=False)
+    head = _orders_copy(tmp_path / "head", mutate=False)
+    override = tmp_path / "code-ir.json"
+    override.write_text(co.RESTORE_ADMIN_ONLY.model_dump_json())
+
+    res = run_check(
+        CheckRequest(
+            repo_root=tmp_path / "head",
+            head_sha="head-sha",
+            base_sha="base-sha",
+            project_dir=head,
+            base_root=tmp_path / "base",
+            base_project_dir=base,
+            code_ir_override=override,
+            run_id="fixed",
+        )
+    )
+    [analysis] = res.manifest.analysis
+    assert analysis.reused_from_base is False
+    assert analysis.reason == "override"
+    assert res.code_irs[0].origin == "handwritten"

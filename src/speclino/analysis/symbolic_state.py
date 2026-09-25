@@ -23,7 +23,7 @@ from speclino.domain.expr import (
     const,
     ref,
 )
-from speclino.frontend.python.index import ModuleInfo, RepoIndex
+from speclino.frontend.python.index import ModuleInfo, RepoIndex, attribute_chain
 
 
 @dataclass(frozen=True)
@@ -99,14 +99,7 @@ class ExprBuilder:
 
     # ---------------------------------------------------------------- helpers
     def attribute_chain(self, node: ast.expr) -> list[str] | None:
-        parts: list[str] = []
-        while isinstance(node, ast.Attribute):
-            parts.append(node.attr)
-            node = node.value
-        if isinstance(node, ast.Name):
-            parts.append(node.id)
-            return list(reversed(parts))
-        return None
+        return attribute_chain(node)
 
     def callee_qualname(self, func: ast.expr, frame: Frame) -> str | None:
         """呼出し先のシンボル。モジュール名で解決できれば完全修飾名、入口引数（self 等）を根に

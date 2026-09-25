@@ -1,0 +1,179 @@
+"""analysis.reachability: 到達関数群のソースハッシュ（S41c）の単体試験。
+
+一時ディレクトリに小さな Python パッケージを書き、静的な直接呼出しの推移閉包が正しく
+たどれること、コメント・空白の差でハッシュが変わらないこと、関数本体の変更や解決できない
+呼出し式の変更でハッシュが変わることを確認する。
+"""
+
+from __future__ import annotations
+
+import textwrap
+from pathlib import Path
+
+from speclino.analysis.reachability import reachable_source_hash
+from speclino.domain.bindings import BehaviorBinding, Bindings
+
+
+def _bindings(entrypoint: str) -> Bindings:
+    return Bindings(behaviors={"b1": BehaviorBinding(entrypoint=entrypoint)})
+
+
+def _write(root: Path, relpath: str, source: str) -> None:
+    path = root / relpath
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(textwrap.dedent(source), encoding="utf-8")
+
+
+def test_reachable_set_is_transitive_closure_of_direct_calls(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "pkg/mod.py",
+        """
+        def entry(x: int) -> int:
+            return helper1(x)
+
+
+        def helper1(x: int) -> int:
+            return helper2(x) + 1
+
+
+        def helper2(x: int) -> int:
+            return x * 2
+        """,
+    )
+    digest = reachable_source_hash(tmp_path, "b1", _bindings("pkg.mod.entry"), source_roots=(".",))
+    assert digest.functions == ["pkg.mod.entry", "pkg.mod.helper1", "pkg.mod.helper2"]
+    assert digest.unresolved_calls == []
+    assert digest.source_hash.startswith("sha256:")
+
+
+def test_hash_unchanged_by_comments_and_whitespace(tmp_path: Path) -> None:
+    a, b = tmp_path / "a", tmp_path / "b"
+    _write(
+        a,
+        "pkg/mod.py",
+        """
+        def entry(x: int) -> int:
+            return helper1(x)
+
+
+        def helper1(x: int) -> int:
+            return x + 1
+        """,
+    )
+    _write(
+        b,
+        "pkg/mod.py",
+        '''
+        """モジュールの docstring（コメント）。"""
+
+
+        def entry(x: int) -> int:
+            # ここでヘルパーを呼ぶ
+            return helper1(x)
+
+
+
+        def helper1(x: int) -> int:
+
+            return x + 1  # 1 を足す
+        ''',
+    )
+    bindings = _bindings("pkg.mod.entry")
+    digest_a = reachable_source_hash(a, "b1", bindings, source_roots=(".",))
+    digest_b = reachable_source_hash(b, "b1", bindings, source_roots=(".",))
+    assert digest_a.source_hash == digest_b.source_hash
+    assert digest_a.functions == digest_b.functions
+
+
+def test_hash_changes_when_function_body_changes(tmp_path: Path) -> None:
+    a, b = tmp_path / "a", tmp_path / "b"
+    _write(
+        a,
+        "pkg/mod.py",
+        """
+        def entry(x: int) -> int:
+            return helper1(x)
+
+
+        def helper1(x: int) -> int:
+            return x * 2
+        """,
+    )
+    _write(
+        b,
+        "pkg/mod.py",
+        """
+        def entry(x: int) -> int:
+            return helper1(x)
+
+
+        def helper1(x: int) -> int:
+            return x * 3
+        """,
+    )
+    bindings = _bindings("pkg.mod.entry")
+    digest_a = reachable_source_hash(a, "b1", bindings, source_roots=(".",))
+    digest_b = reachable_source_hash(b, "b1", bindings, source_roots=(".",))
+    assert digest_a.source_hash != digest_b.source_hash
+    assert digest_a.functions == digest_b.functions  # 到達集合自体は同じ
+
+
+def test_unresolved_dynamic_call_text_is_recorded_and_changes_hash(tmp_path: Path) -> None:
+    a, b = tmp_path / "a", tmp_path / "b"
+    _write(
+        a,
+        "pkg/mod.py",
+        """
+        class Entry:
+            def run(self, x: int) -> int:
+                return self.registry.execute(x)
+        """,
+    )
+    _write(
+        b,
+        "pkg/mod.py",
+        """
+        class Entry:
+            def run(self, x: int) -> int:
+                return self.registry.execute(x + 1)
+        """,
+    )
+    bindings = _bindings("pkg.mod.Entry.run")
+    digest_a = reachable_source_hash(a, "b1", bindings, source_roots=(".",))
+    digest_b = reachable_source_hash(b, "b1", bindings, source_roots=(".",))
+    assert digest_a.unresolved_calls == ["self.registry.execute(x)"]
+    assert digest_b.unresolved_calls == ["self.registry.execute(x + 1)"]
+    assert digest_a.source_hash != digest_b.source_hash
+
+
+def test_mutual_recursion_does_not_loop_forever(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "pkg/mod.py",
+        """
+        def entry(x: int) -> int:
+            return a(x)
+
+
+        def a(x: int) -> int:
+            if x <= 0:
+                return 0
+            return b(x - 1)
+
+
+        def b(x: int) -> int:
+            return a(x)
+        """,
+    )
+    digest = reachable_source_hash(tmp_path, "b1", _bindings("pkg.mod.entry"), source_roots=(".",))
+    assert digest.functions == ["pkg.mod.a", "pkg.mod.b", "pkg.mod.entry"]
+
+
+def test_unknown_entrypoint_is_reported_not_raised(tmp_path: Path) -> None:
+    _write(tmp_path, "pkg/mod.py", "def other() -> None:\n    pass\n")
+    digest = reachable_source_hash(
+        tmp_path, "b1", _bindings("pkg.mod.missing"), source_roots=(".",)
+    )
+    assert digest.functions == []
+    assert digest.unresolved_calls == ["<entrypoint を解決できない: pkg.mod.missing>"]
