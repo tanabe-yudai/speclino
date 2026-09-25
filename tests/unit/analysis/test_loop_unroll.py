@@ -263,3 +263,92 @@ def test_module_level_range_shadow_prevents_unroll(tmp_path: Path) -> None:
     assert success.unknown_causes[0].code == "unsupported_syntax"
     assert "組込みと確定できない" in success.unknown_causes[0].detail
     assert verdicts(code)["R-CANCEL-04"][0] == "UNKNOWN"
+
+
+# --------------------------------------------- codex 再レビュー (#50) の指摘（2 回目）
+
+
+def test_range_shadow_inside_nested_if_prevents_unroll(tmp_path: Path) -> None:
+    """モジュール直下の単純な文だけでなく、ネストした if の中の再束縛も見つける
+    （if True: の中の range = ... は最上位の文だけを見ていると見落とす）。
+    """
+    mutant = (
+        CORRECT_SERVICE.replace(
+            "    inventory.restore(order.items)\n",
+            "    for _ in range(1):\n        inventory.restore(order.items)\n",
+        )
+        + "\nif True:\n    range = lambda n: ()\n"
+    )
+    code = analyze(tmp_path, mutant)
+    success = code.paths[2]
+    assert success.precision == "incomplete"
+    assert "組込みと確定できない" in success.unknown_causes[0].detail
+    assert verdicts(code)["R-CANCEL-04"][0] == "UNKNOWN"
+
+
+def test_range_shadow_via_tuple_unpacking_prevents_unroll(tmp_path: Path) -> None:
+    """タプル分解の代入先に range が含まれていても再束縛とみなす
+    （target.id だけを見ていると range, other = ... を見落とす）。
+    """
+    mutant = (
+        CORRECT_SERVICE.replace(
+            "    inventory.restore(order.items)\n",
+            "    for _ in range(1):\n        inventory.restore(order.items)\n",
+        )
+        + "\nrange, other = (lambda n: ()), 0\n"
+    )
+    code = analyze(tmp_path, mutant)
+    success = code.paths[2]
+    assert success.precision == "incomplete"
+    assert "組込みと確定できない" in success.unknown_causes[0].detail
+
+
+def test_temp_variable_cannot_collide_with_user_local(tmp_path: Path) -> None:
+    """退避用の一時変数は Python の識別子として書けない名前にするため、ユーザーコードの
+    変数（たまたま以前の実装が使っていた命名パターンと同じ名前でも）と衝突しない。
+    衝突すると退避代入がユーザー変数を上書きし、後続で読んだ値が変わってしまう。
+    """
+    mutant = CORRECT_SERVICE.replace(
+        "    inventory.restore(order.items)\n",
+        "    _speclino_unroll_0_0 = AuditAction.CANCEL_ORDER\n"
+        "    for item in (order.items,):\n"
+        "        inventory.restore(item)\n",
+    ).replace(
+        "    audit.record(user.id, AuditAction.CANCEL_ORDER)\n",
+        "    audit.record(user.id, _speclino_unroll_0_0)\n",
+    )
+    code = analyze(tmp_path, mutant)
+    success = code.paths[2]
+    assert success.precision == "exact_in_model"
+    audit_event = next(e for e in success.events if e.operation == "audit_record_command")
+    assert audit_event.arguments["action"].model_dump() == {
+        "op": "const",
+        "type": "AuditAction",
+        "value": "CANCEL_ORDER",
+    }
+
+
+def test_element_call_result_used_in_condition_does_not_crash(tmp_path: Path) -> None:
+    """展開後、要素が呼出しの結果をループ変数経由で if の条件に使うと、以前は
+    Unresolved.code（"call_result"、UnknownCause.code に無い値）がそのまま _unknown に渡り、
+    pydantic の検証で例外になって解析全体が失敗していた。例外にならず、その経路を
+    UNKNOWN として打ち切ることを確認する。
+    """
+    mutant = CORRECT_SERVICE.replace(
+        "    inventory.restore(order.items)\n",
+        "    for x in (inventory.restore(order.items),):\n        if x:\n            pass\n",
+    )
+    code = analyze(tmp_path, mutant)  # 例外にならないこと自体がこのテストの主目的
+    assert verdicts(code)["R-CANCEL-04"][0] == "UNKNOWN"
+
+
+def test_call_result_used_in_condition_without_loop_does_not_crash(tmp_path: Path) -> None:
+    """ループを経ない ``x = call(); if x: ...`` でも同じ問題が起きる（展開とは独立の、
+    既存の _assign の穴）。例外にならず UNKNOWN として経路を打ち切ることを確認する。
+    """
+    mutant = CORRECT_SERVICE.replace(
+        "    inventory.restore(order.items)\n",
+        "    x = inventory.restore(order.items)\n    if x:\n        pass\n",
+    )
+    code = analyze(tmp_path, mutant)  # 例外にならないこと自体がこのテストの主目的
+    assert verdicts(code)["R-CANCEL-04"][0] == "UNKNOWN"

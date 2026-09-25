@@ -11,6 +11,7 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass, field, replace
 from pathlib import Path as FsPath
+from typing import cast, get_args
 
 from speclino.analysis.limits import DEFAULT_LIMITS
 from speclino.analysis.structural import OPAQUE_STMTS, OUTCOME_CHANNEL, RegionScanner
@@ -31,6 +32,7 @@ from speclino.domain.code_ir import (
     Path,
     StateUpdate,
     UnknownCause,
+    UnknownCode,
 )
 from speclino.domain.common import SnapshotRef, SourceRef
 from speclino.domain.domain_spec import DomainSpec
@@ -51,6 +53,27 @@ ANALYZER_VERSION = "0.1.0"
 # 数件程度の反復は展開できる一方、上限を超えたら展開せず既存の安全網（unsupported_syntax による
 # UNKNOWN、展開後に経路数が増え過ぎた場合は limit_paths による UNKNOWN）に委ねる。
 UNROLL_MAX_ITERATIONS = 8
+
+# 展開時に要素式を退避する一時変数の名前の型。``$`` と ``.`` は Python の識別子に使えない
+# 文字なので、対象コード（ast.parse を通った時点で識別子として妥当）のどんな変数名とも
+# 原理的に衝突しない。{seq} は展開（for 文）ごとの通し番号、{i} は要素の位置。
+_UNROLL_TEMP_NAME = "$unroll{seq}.{i}"
+
+_VALID_UNKNOWN_CODES = frozenset(get_args(UnknownCode))
+
+
+def _safe_unknown_code(code: str) -> UnknownCode:
+    """UnknownCause.code に渡す前に、正当な値に丸める。
+
+    Unresolved.code（symbolic_state.py）は自由な str で、UnknownCause.code（pydantic の
+    Literal）の値集合と一致する保証が無い（例: _assign が呼出し結果のローカルに付ける
+    "unresolved_call" 以外の内部専用の印）。丸めずに UnknownCause(code=...) へ渡すと
+    pydantic の検証で例外になり、解析全体が失敗する。値が不明なら安全側の
+    unsupported_syntax に倒し、「解析できないものを違反と表示しない」を守る。
+    """
+    if code in _VALID_UNKNOWN_CODES:
+        return cast(UnknownCode, code)
+    return "unsupported_syntax"
 
 
 class PathLimitExceeded(Exception):
@@ -120,33 +143,48 @@ def _has_break_or_continue(body: list[ast.stmt]) -> bool:
     return False
 
 
-def _module_may_rebind(mod: ModuleInfo, name: str) -> bool:
-    """モジュールの最上位が name を再束縛し得るか（分からなければ True、安全側）。
+_BUILTINS_MODULE_NAMES = ("builtins", "__builtins__")
 
-    ``def range`` / ``class range`` / ``range = ...`` / ``import ... as range`` /
-    ``from ... import range``（相対 import 含む）で最上位の name が再束縛され得る。
-    ``from x import *`` は何を束縛するか静的に分からないので、無条件に True（再束縛し得る）
-    とする。RepoIndex.module() が返す ModuleInfo.imports / functions / classes は
-    絶対 import しか見ておらず用途に合わないため、ここでは最上位の文を直接見る。
+
+def _module_may_rebind(mod: ModuleInfo, name: str) -> bool:
+    """モジュールのどこか（最上位に限らず、if/try/with/for/関数・クラス本体の中も含む）で
+    name が再束縛され得るか。分からなければ True（安全側）。
+
+    Python の AST では、代入先・for のターゲット・with の as・タプル/リストへの分解・複合代入・
+    海象演算子の代入先は、ネストの深さや構文の種類によらず常に ``ast.Name(ctx=Store)`` になる。
+    これを ``ast.walk`` で拾うだけでほとんどの再束縛パターンをまとめて検出できる。加えて
+    import 系（相対・ワイルドカード含む）、global/nonlocal 宣言、属性への代入
+    （例 ``builtins.range = ...``）、そして ``builtins``/``__builtins__`` への参照が
+    1 つでもあれば（``setattr(builtins, "range", ...)`` 等を個別に判定せずまとめて拒否する
+    ため）再束縛し得るとみなす。
     """
-    for node in mod.tree.body:
-        imported = isinstance(node, ast.Import) and any(
-            (a.asname or a.name.split(".")[0]) == name for a in node.names
+    for node in ast.walk(mod.tree):
+        rebinds = (
+            (isinstance(node, ast.Name) and node.id == name and isinstance(node.ctx, ast.Store))
+            or (isinstance(node, ast.Name) and node.id in _BUILTINS_MODULE_NAMES)
+            or (
+                isinstance(node, ast.Attribute)
+                and node.attr == name
+                and isinstance(node.ctx, ast.Store)
+            )
+            or (
+                isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+                and node.name == name
+            )
+            or (
+                isinstance(node, ast.Import)
+                and any((a.asname or a.name.split(".")[0]) == name for a in node.names)
+            )
+            or (
+                isinstance(node, ast.ImportFrom)
+                and (
+                    any(a.name == "*" for a in node.names)
+                    or any((a.asname or a.name) == name for a in node.names)
+                )
+            )
+            or (isinstance(node, ast.Global | ast.Nonlocal) and name in node.names)
         )
-        imported_from = isinstance(node, ast.ImportFrom) and (
-            any(a.name == "*" for a in node.names)
-            or any((a.asname or a.name) == name for a in node.names)
-        )
-        defined = isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) and (
-            node.name == name
-        )
-        assigned = isinstance(node, ast.Assign) and any(
-            isinstance(t, ast.Name) and t.id == name for t in node.targets
-        )
-        ann_or_aug_assigned = isinstance(node, ast.AnnAssign | ast.AugAssign) and (
-            isinstance(node.target, ast.Name) and node.target.id == name
-        )
-        if imported or imported_from or defined or assigned or ann_or_aug_assigned:
+        if rebinds:
             return True
     return False
 
@@ -156,7 +194,7 @@ def _for_elements(it: ast.expr, frame: Frame) -> list[ast.expr] | str:
 
     range(定数) は要素（ast.Constant）を作る前に長さを展開上限と比べる。解析対象コードに
     range(10**9) のような巨大な引数があっても、展開を諦める判定の前に巨大な list を作らない
-    ようにするため。range が組込みだと確定できない（対象モジュールの最上位で再定義され得る）
+    ようにするため。range が組込みだと確定できない（対象モジュールのどこかで再定義され得る）
     ときは展開しない。
     """
     if isinstance(it, ast.Tuple | ast.List):
@@ -170,7 +208,7 @@ def _for_elements(it: ast.expr, frame: Frame) -> list[ast.expr] | str:
         and "range" not in frame.locals
     ):
         if _module_may_rebind(frame.module, "range"):
-            return "range が組込みと確定できない（モジュール最上位で再定義され得る）"
+            return "range が組込みと確定できない（モジュールのどこかで再定義され得る）"
         if it.keywords or any(isinstance(a, ast.Starred) for a in it.args):
             return "range の引数の形が対応外（キーワード引数・展開）"
         if not (1 <= len(it.args) <= 2):
@@ -383,7 +421,10 @@ class PathAnalyzer:
         （``x = _t0; *body; x = _t1; *body; ...; *orelse``）。body の実行前に退避を終えるので、
         body が要素式の参照先を書き換えても後続要素は元の値のまま、要素式が副作用を持つ呼出しでも
         1 回だけ・ループより前に実行される（body が途中で return / raise しても後続要素の
-        呼出しが失われない）。要素の式は評価しない（解釈は _assign → ExprBuilder.to_expr に
+        呼出しが失われない）。一時変数名（_UNROLL_TEMP_NAME）は Python の識別子として書けない
+        文字（``$`` ``.``）を含むため、対象コードのどんな変数名とも原理的に衝突しない
+        （対象コードの識別子は ast.parse を通った時点で妥当な Python 識別子であることが
+        保証されている）。要素の式は評価しない（解釈は _assign → ExprBuilder.to_expr に
         委ねる）。展開できないときは理由付きで None を返し、呼出し元は従来どおり
         unsupported_stmt / 構造解析に任せる。展開回数は d.unroll_used（この経路でここまでに
         消費した分）に対して数える。
@@ -403,7 +444,7 @@ class PathAnalyzer:
         d.unroll_used += len(elements)
         seq = self._unroll_seq
         self._unroll_seq += 1
-        temp_names = [f"_speclino_unroll_{seq}_{i}" for i in range(len(elements))]
+        temp_names = [_UNROLL_TEMP_NAME.format(seq=seq, i=i) for i in range(len(elements))]
         built: list[ast.stmt] = [
             _make_assign(stmt, tmp, elt) for tmp, elt in zip(temp_names, elements, strict=True)
         ]
@@ -448,8 +489,12 @@ class PathAnalyzer:
                     frame.locals[target.id] = d.state.value(pure_var)
                     return None
                 ended = self._call(value_node, fn, frame, d, depth, rest)
+                # code は UnknownCode の正当な値にする（_unknown 経由で UnknownCause.code に
+                # そのまま渡り得るため。例えばこの変数を後で if の条件に使うと、その時点の
+                # cond.code がそのまま _unknown へ渡る）。_return はこの印を「値は追えないが
+                # サービス層の戻り値として経路は完全」の判定に使う（下記参照）
                 frame.locals[target.id] = Unresolved(
-                    "call_result", f"呼出し結果: {ast.unparse(value_node)}", value_node.lineno
+                    "unresolved_call", f"呼出し結果: {ast.unparse(value_node)}", value_node.lineno
                 )
                 return ended
             value = self.builder.to_expr(value_node, frame, d.state)
@@ -684,8 +729,8 @@ class PathAnalyzer:
             d.outcome = Outcome(kind="unresolved", source_ref=src)
             return
         value = self.builder.to_expr(stmt.value, frame, d.state)
-        if isinstance(value, Unresolved) and value.code == "call_result":
-            # サービス層の戻り値（呼出し結果）。値は持たないが経路は完全
+        if isinstance(value, Unresolved) and value.code == "unresolved_call":
+            # サービス層の戻り値（呼出し結果、_assign が付けた印）。値は持たないが経路は完全
             d.outcome = Outcome(kind="return", source_ref=src)
             return
         if isinstance(value, Unresolved):
@@ -708,7 +753,7 @@ class PathAnalyzer:
     ) -> None:
         d.unknowns.append(
             UnknownCause(
-                code=code,  # type: ignore[arg-type,unused-ignore]
+                code=_safe_unknown_code(code),
                 detail=detail,
                 source_ref=self._src(fn, lineno),
                 may_affect=may_affect,
@@ -772,8 +817,8 @@ class PathAnalyzer:
             limits=self.limits,
             paths=[],
             unknown_causes=[
-                UnknownCause(  # type: ignore[arg-type,unused-ignore]
-                    code=code,
+                UnknownCause(
+                    code=_safe_unknown_code(code),
                     detail=detail,
                     source_ref=self._src(fn, fn.line_start) if fn else None,
                 )
