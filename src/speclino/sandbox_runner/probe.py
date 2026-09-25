@@ -125,6 +125,69 @@ def selftest_tar() -> dict[str, Any]:
         shutil.rmtree(work, ignore_errors=True)
 
 
+# --mount の書式は help に載っていないので、ありそうな書き方を一度に試して当たりを探す。
+# デプロイが 1 回数分かかるため、仮説を小分けにせずまとめて確かめる。
+MOUNT_SYNTAXES: tuple[tuple[str, str], ...] = (
+    ("colon", "{src}:/work"),
+    ("colon_rw", "{src}:/work:rw"),
+    ("src_dst", "src={src},dst=/work"),
+    ("bind", "type=bind,src={src},dst=/work"),
+    ("same_path", "{src}"),
+)
+
+
+@router.get("/selftest/mount")
+def selftest_mount() -> dict[str, Any]:
+    """`--mount` の書式候補を順に試し、サンドボックス内からファイルが見えたものを報告する。"""
+    if not SANDBOX_CLI.is_file():
+        return {"result": "cli_not_found"}
+    python = shutil.which("python3") or shutil.which("python")
+    if python is None:
+        return {"result": "no_python_in_parent"}
+
+    work = Path(tempfile.mkdtemp(prefix="speclino-mountprobe-"))
+    attempts: list[dict[str, Any]] = []
+    try:
+        (work / "in.txt").write_text("hello sandbox\n")
+        for name, template in MOUNT_SYNTAXES:
+            mount = template.format(src=work)
+            # マウント先が候補ごとに変わるので、両方の置き場所を見に行く。
+            script = (
+                "import pathlib;"
+                "cands=[pathlib.Path('/work/in.txt'),pathlib.Path(%r)/'in.txt'];"
+                "hit=[str(c) for c in cands if c.is_file()];"
+                "print('FOUND',hit)" % str(work)
+            )
+            cmd = [
+                str(SANDBOX_CLI),
+                "do",
+                "--write",
+                "--mount",
+                mount,
+                "--",
+                python,
+                "-c",
+                script,
+            ]
+            record: dict[str, Any] = {"name": name, "mount": mount}
+            try:
+                proc = subprocess.run(  # noqa: S603 - 候補は固定。外部入力を受け取らない
+                    cmd, capture_output=True, timeout=30, check=False
+                )
+            except (subprocess.TimeoutExpired, OSError) as e:
+                record["error"] = str(e)
+                attempts.append(record)
+                continue
+            out = (proc.stdout + proc.stderr).decode(errors="replace")
+            record["exit_code"] = proc.returncode
+            record["output"] = out[-500:]
+            record["visible"] = "FOUND ['" in out
+            attempts.append(record)
+        return {"result": "ran", "host_dir": str(work), "attempts": attempts}
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 @router.get("/selftest/help")
 def selftest_help() -> dict[str, Any]:
     """CLI 自身の使い方を取り出す。フラグの意味を推測で試さないための一次情報。"""
