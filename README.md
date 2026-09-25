@@ -332,6 +332,14 @@ CI-001（pull_request トリガー・必須ステップ・読取り専用権限�
 
 - **対応する Python は部分集合**（if/elif/else、早期 return、認識済み raise、単純な代入と属性
   参照、and/or/not、比較、整数加減算、静的な直接呼出し）。それ以外は UNKNOWN として報告する
+- ループは**要素数が静的に分かる `for`**（タプル／リストのリテラル、`range(定数)`、合計 8 回まで、
+  `break`/`continue` なし）だけを展開して解析する。要素は Python と同じくループ前に評価し、
+  `range` はモジュールで再定義され得るときは組込みと確定できないので展開しない。それ以外の
+  `for`/`while` は UNKNOWN（S29 の構造解析で、触れないチャネルは巻き込まない）
+- base を指定した検査では、到達する関数群を含むモジュール全体と仕様側入力（Spec IR・domain・
+  bindings・contracts）のハッシュが base と一致する behavior の経路解析を省き、base の Code IR を
+  再利用する（判定は必ず再実行する）。**再利用したことは run-manifest の `analysis` に残す**。
+  この規模のリポジトリでは時間短縮は測定誤差の範囲で、効果が出るのは呼出しグラフが深い実コード
 - フレームワークの応答は明示アダプター経由（FastAPI の `HTTPException(status_code=定数)` と
   `Response(status_code=定数)`）
 - 「DB に永続化された」「並行実行で壊れない」は観測範囲外。コマンドの呼出しまでを検査する
