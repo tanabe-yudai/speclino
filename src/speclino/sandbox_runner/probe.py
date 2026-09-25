@@ -125,4 +125,22 @@ def selftest_tar() -> dict[str, Any]:
         shutil.rmtree(work, ignore_errors=True)
 
 
+@router.get("/selftest/help")
+def selftest_help() -> dict[str, Any]:
+    """CLI 自身の使い方を取り出す。フラグの意味を推測で試さないための一次情報。"""
+    if not SANDBOX_CLI.is_file():
+        return {"result": "cli_not_found"}
+    out: dict[str, Any] = {"result": "ran"}
+    for key, args in (("root", ["--help"]), ("do", ["do", "--help"]), ("run", ["run", "--help"])):
+        try:
+            proc = subprocess.run(  # noqa: S603 - 固定コマンド。外部入力を受け取らない
+                [str(SANDBOX_CLI), *args], capture_output=True, timeout=30, check=False
+            )
+        except (subprocess.TimeoutExpired, OSError) as e:
+            out[key] = f"error: {e}"
+            continue
+        out[key] = (proc.stdout + proc.stderr).decode(errors="replace")[:6000]
+    return out
+
+
 __all__ = ["router"]
