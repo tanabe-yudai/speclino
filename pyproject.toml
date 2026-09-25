@@ -30,6 +30,9 @@ dependencies = [
 speclino = "speclino.cli:app"
 
 [dependency-groups]
+# sandbox ロールが隔離実行に使う最小限。Cloud Run sandboxes は親コンテナの / を
+# rootfs にするため（--rootfs の既定が "/"）、テスト実行に要るものは本番イメージに含める。
+sandbox = ["pytest"]
 dev = [
   "ruff",
   "mypy",

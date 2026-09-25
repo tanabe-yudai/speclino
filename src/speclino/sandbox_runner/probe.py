@@ -188,6 +188,88 @@ def selftest_mount() -> dict[str, Any]:
         shutil.rmtree(work, ignore_errors=True)
 
 
+MOUNT = "type=bind,src={src},dst={dst}"  # --mount の書式（selftest/mount で特定）
+
+PROBE_MODULE = "def add(a, b):\n    return a - b  # わざと間違える\n"
+PROBE_TEST = (
+    "import socket\n"
+    "from mod import add\n"
+    "\n"
+    "def test_add_is_wrong():\n"
+    "    assert add(1, 2) == 3\n"
+    "\n"
+    "def test_network_is_blocked():\n"
+    "    socket.setdefaulttimeout(5)\n"
+    "    socket.create_connection(('example.com', 80))\n"
+)
+
+
+@router.get("/selftest/pytest")
+def selftest_pytest() -> dict[str, Any]:
+    """本実装と同じ形で 1 回走らせ、設計が成立するかを確かめる。
+
+    見たいのは 3 点。junit がホスト側の bind mount に出るか／pytest が動くか／
+    ネットワークが遮断されているか（遮断されていればネットワークのテストが失敗する）。
+    """
+    if not SANDBOX_CLI.is_file():
+        return {"result": "cli_not_found"}
+    python = shutil.which("python3") or shutil.which("python")
+    if python is None:
+        return {"result": "no_python_in_parent"}
+
+    work = Path(tempfile.mkdtemp(prefix="speclino-pytestprobe-"))
+    try:
+        head, tests, out = work / "head", work / "tests", work / "out"
+        for d in (head, tests, out):
+            d.mkdir()
+        (head / "mod.py").write_text(PROBE_MODULE)
+        (tests / "test_probe.py").write_text(PROBE_TEST)
+
+        cmd = [
+            str(SANDBOX_CLI),
+            "do",
+            "--write",
+            "--mount",
+            MOUNT.format(src=head, dst="/work/head"),
+            "--mount",
+            MOUNT.format(src=tests, dst="/work/tests"),
+            "--mount",
+            MOUNT.format(src=out, dst="/work/out"),
+            "--workdir",
+            "/work/tests",
+            "-e",
+            "PYTHONPATH=/work/head",
+            "-e",
+            "PYTHONSAFEPATH=1",
+            "--",
+            python,
+            "-m",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            "--junitxml=/work/out/junit.xml",
+            "-q",
+            "/work/tests/test_probe.py",
+        ]
+        facts: dict[str, Any] = {}
+        try:
+            proc = subprocess.run(  # noqa: S603 - 固定の題材。外部入力を受け取らない
+                cmd, capture_output=True, timeout=PROBE_TIMEOUT_S, check=False
+            )
+        except subprocess.TimeoutExpired:
+            return {"result": "timeout"}
+        facts["result"] = "ran"
+        facts["exit_code"] = proc.returncode
+        facts["stdout"] = (proc.stdout + proc.stderr).decode(errors="replace")[-3000:]
+        junit = out / "junit.xml"
+        facts["junit_on_host"] = junit.is_file()
+        if junit.is_file():
+            facts["junit"] = junit.read_text()[:3000]
+        return facts
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 @router.get("/selftest/help")
 def selftest_help() -> dict[str, Any]:
     """CLI 自身の使い方を取り出す。フラグの意味を推測で試さないための一次情報。"""

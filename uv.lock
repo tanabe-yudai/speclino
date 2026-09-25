@@ -1282,6 +1282,9 @@ dev = [
     { name = "types-jsonschema" },
     { name = "types-pyyaml" },
 ]
+sandbox = [
+    { name = "pytest" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -1316,6 +1319,7 @@ dev = [
     { name = "types-jsonschema" },
     { name = "types-pyyaml" },
 ]
+sandbox = [{ name = "pytest" }]
 
 [[package]]
 name = "sqlalchemy"

@@ -21,7 +21,9 @@ WORKDIR /app
 
 COPY pyproject.toml uv.lock README.md ./
 COPY src/ ./src/
-RUN uv sync --frozen --no-dev
+# sandbox グループ（pytest）も入れる。Cloud Run sandboxes は親コンテナの / を rootfs に
+# するため、隔離実行に要るものはこのイメージに含まれている必要がある（S38）。
+RUN uv sync --frozen --no-dev --group sandbox
 
 COPY --from=web-build /web/dist /app/web/dist
 
