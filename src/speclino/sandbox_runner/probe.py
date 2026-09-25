@@ -11,6 +11,8 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tarfile
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +62,67 @@ def selftest() -> dict[str, Any]:
     facts["stdout"] = proc.stdout.decode(errors="replace")[-2000:]
     facts["stderr"] = proc.stderr.decode(errors="replace")[-2000:]
     return facts
+
+
+# 本実装が成り立つ条件は 3 つ: tar でファイルを持ち込める / 中で python が動く /
+# 変更したファイルを tar で回収できる。これも固定の手順で 1 度に確かめる。
+TAR_PROBE_SCRIPT = (
+    "import pathlib;"
+    "p=pathlib.Path('/work/in.txt');"
+    "pathlib.Path('/work/out.txt').write_text(p.read_text().upper())"
+)
+
+
+@router.get("/selftest/tar")
+def selftest_tar() -> dict[str, Any]:
+    """tar の往復と、サンドボックス内の python の有無を確かめる。固定の内容しか扱わない。"""
+    if not SANDBOX_CLI.is_file():
+        return {"result": "cli_not_found"}
+    python = shutil.which("python3") or shutil.which("python")
+    if python is None:
+        return {"result": "no_python_in_parent"}
+
+    work = Path(tempfile.mkdtemp(prefix="speclino-tarprobe-"))
+    facts: dict[str, Any] = {"python": python}
+    try:
+        payload = work / "work"
+        payload.mkdir()
+        (payload / "in.txt").write_text("hello sandbox\n")
+        in_tar, out_tar = work / "in.tar", work / "out.tar"
+        with tarfile.open(in_tar, "w") as tar:
+            tar.add(payload, arcname="work")
+
+        cmd = [
+            str(SANDBOX_CLI),
+            "do",
+            "--write",
+            f"--import-tar={in_tar}",
+            f"--export-tar={out_tar}",
+            "--",
+            python,
+            "-c",
+            TAR_PROBE_SCRIPT,
+        ]
+        try:
+            proc = subprocess.run(  # noqa: S603 - 固定コマンド。外部入力を受け取らない
+                cmd, capture_output=True, timeout=PROBE_TIMEOUT_S, check=False
+            )
+        except subprocess.TimeoutExpired:
+            facts["result"] = "timeout"
+            return facts
+        facts["exit_code"] = proc.returncode
+        facts["stdout"] = proc.stdout.decode(errors="replace")[-2000:]
+        facts["stderr"] = proc.stderr.decode(errors="replace")[-2000:]
+        facts["export_tar_exists"] = out_tar.is_file()
+        if out_tar.is_file():
+            with tarfile.open(out_tar) as tar:
+                names = tar.getnames()
+            facts["export_members"] = names[:50]
+            facts["found_out_txt"] = any(n.endswith("out.txt") for n in names)
+        facts["result"] = "ran"
+        return facts
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 __all__ = ["router"]
