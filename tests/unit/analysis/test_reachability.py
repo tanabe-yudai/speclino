@@ -64,8 +64,9 @@ def test_hash_unchanged_by_comments_and_whitespace(tmp_path: Path) -> None:
     _write(
         b,
         "pkg/mod.py",
-        '''
-        """モジュールの docstring（コメント）。"""
+        """
+        # このモジュールについてのコメント（docstring ではない。docstring は AST に残るので
+        # ハッシュに影響してよく、ここでは対象外にする）
 
 
         def entry(x: int) -> int:
@@ -77,7 +78,7 @@ def test_hash_unchanged_by_comments_and_whitespace(tmp_path: Path) -> None:
         def helper1(x: int) -> int:
 
             return x + 1  # 1 を足す
-        ''',
+        """,
     )
     bindings = _bindings("pkg.mod.entry")
     digest_a = reachable_source_hash(a, "b1", bindings, source_roots=(".",))
@@ -117,6 +118,48 @@ def test_hash_changes_when_function_body_changes(tmp_path: Path) -> None:
     digest_b = reachable_source_hash(b, "b1", bindings, source_roots=(".",))
     assert digest_a.source_hash != digest_b.source_hash
     assert digest_a.functions == digest_b.functions  # 到達集合自体は同じ
+
+
+def test_hash_changes_when_only_an_unrelated_import_changes(tmp_path: Path) -> None:
+    """関数本体の文字列は同一でも、その関数外の環境（import 束縛）が変わればハッシュも変わる。
+
+    S41c の最初の実装は関数本体だけをハッシュにしており、この差を見落とした（実例:
+    `from fastapi import Response` を `from builtins import print as Response` に変えても
+    `Response(status_code=204)` という呼出し文自体のテキストは1文字も変わらない。呼出し先は
+    どちらも repo 内で解決できない外部シンボルなので、旧実装では unresolved_calls の文字列
+    「Response(x)」も両者で同一になり、ハッシュが一致してしまっていた）。
+    モジュール全体（import 行を含む）をハッシュに含めることで防ぐ。
+    """
+    a, b = tmp_path / "a", tmp_path / "b"
+    _write(
+        a,
+        "pkg/mod.py",
+        """
+        from pkg.external_a import Response
+
+
+        def entry(x: int) -> int:
+            return Response(x)
+        """,
+    )
+    _write(
+        b,
+        "pkg/mod.py",
+        """
+        from pkg.external_b import Response
+
+
+        def entry(x: int) -> int:
+            return Response(x)
+        """,
+    )
+    bindings = _bindings("pkg.mod.entry")
+    digest_a = reachable_source_hash(a, "b1", bindings, source_roots=(".",))
+    digest_b = reachable_source_hash(b, "b1", bindings, source_roots=(".",))
+    # entry 自体の呼出し文は同一（呼出し先の解決だけが import 経由で変わる）ことを確認する
+    assert digest_a.unresolved_calls == digest_b.unresolved_calls == ["Response(x)"]
+    assert digest_a.functions == digest_b.functions == ["pkg.mod.entry"]
+    assert digest_a.source_hash != digest_b.source_hash
 
 
 def test_unresolved_dynamic_call_text_is_recorded_and_changes_hash(tmp_path: Path) -> None:
