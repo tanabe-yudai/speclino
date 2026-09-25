@@ -154,9 +154,9 @@ def selftest_mount() -> dict[str, Any]:
             # マウント先が候補ごとに変わるので、両方の置き場所を見に行く。
             script = (
                 "import pathlib;"
-                "cands=[pathlib.Path('/work/in.txt'),pathlib.Path(%r)/'in.txt'];"
+                f"cands=[pathlib.Path('/work/in.txt'),pathlib.Path({str(work)!r})/'in.txt'];"
                 "hit=[str(c) for c in cands if c.is_file()];"
-                "print('FOUND',hit)" % str(work)
+                "print('FOUND',hit)"
             )
             cmd = [
                 str(SANDBOX_CLI),
