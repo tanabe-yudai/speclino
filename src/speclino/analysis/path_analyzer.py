@@ -718,11 +718,17 @@ class PathAnalyzer:
             d.outcome = Outcome(kind="unresolved", source_ref=src)
             return
         value = self.builder.to_expr(stmt.value, frame, d.state)
-        if isinstance(value, Unresolved) and value.analyzed_call:
-            # サービス層の戻り値（_assign が _call を通して副作用を記録済みの呼出し結果）。
-            # 値は持たないが経路は完全。code の値では判別しない（symbolic_state.Unresolved
-            # 参照）: 式の中の未解析の呼出し（例 f(x) == 0 の f(x)）は同じ code でも
-            # analyzed_call=False なので、ここでは一致せず下の一般 UNKNOWN 経路に落ちる
+        if (
+            isinstance(value, Unresolved)
+            and value.analyzed_call
+            and isinstance(stmt.value, ast.Name)
+        ):
+            # サービス層の戻り値（_assign が _call を通して副作用を記録済みの呼出し結果）を
+            # **そのまま** 返す場合だけ、値は持たないが経路は完全とみなす。
+            # `return x` 以外（`return x == g()` のような複合式）は、to_expr が左辺の
+            # Unresolved をそのまま返してフラグが伝播することがあり、右辺の呼出し g() が
+            # 解析されないまま「解析済み」扱いになる（codex レビュー指摘）。複合式は
+            # 未解析の部分式を含み得るので、下の一般 UNKNOWN 経路に落とす。
             d.outcome = Outcome(kind="return", source_ref=src)
             return
         if isinstance(value, Unresolved):

@@ -377,6 +377,38 @@ def test_call_inside_compare_is_not_mistaken_for_analyzed_call_result(tmp_path: 
     assert v["R-CANCEL-04"][0] == "UNKNOWN", v
 
 
+def test_analyzed_call_flag_is_trusted_only_for_bare_name_return(tmp_path: Path) -> None:
+    """analyzed_call の印は `return x`（解析済みの呼出し結果をそのまま返す）でだけ信用する。
+
+    `return x == g()` のような複合式では、to_expr が左辺の Unresolved をそのまま返して印が
+    伝播することがあり、右辺の g() が解析されないまま経路が「完全」扱いになっていた
+    （codex 軽量レビュー指摘。実行時は restore が 2 回なのに 1 回として VERIFIED）。
+    複合式は未解析の部分式を含み得るので UNKNOWN に落とす。`return x` は従来どおり通る。
+    """
+    compound = (
+        CORRECT_SERVICE.replace(
+            "    inventory.restore(order.items)\n", "    extra_restore(order)\n"
+        )
+        + "\n\ndef extra_restore(order):\n"
+        "    x = inventory.restore(order.items)\n"
+        "    return x == inventory.restore(order.items)\n"
+    )
+    (tmp_path / "compound").mkdir()
+    assert verdicts(analyze(tmp_path / "compound", compound))["R-CANCEL-04"][0] == "UNKNOWN"
+
+    bare = (
+        CORRECT_SERVICE.replace(
+            "    inventory.restore(order.items)\n", "    extra_restore(order)\n"
+        )
+        + "\n\ndef extra_restore(order):\n    x = inventory.restore(order.items)\n    return x\n"
+    )
+    (tmp_path / "bare").mkdir()
+    assert verdicts(analyze(tmp_path / "bare", bare))["R-CANCEL-04"] == (
+        "VERIFIED_IN_SCOPE",
+        "conformant",
+    )
+
+
 def test_range_shadow_via_match_capture_prevents_unroll(tmp_path: Path) -> None:
     """match のキャプチャ名（MatchAs.name）による再束縛も見つける。キャプチャ名は
     Name(ctx=Store) にならず MatchAs.name という文字列フィールドに入るので、Name ノードだけを
