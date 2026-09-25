@@ -352,3 +352,66 @@ def test_call_result_used_in_condition_without_loop_does_not_crash(tmp_path: Pat
     )
     code = analyze(tmp_path, mutant)  # 例外にならないこと自体がこのテストの主目的
     assert verdicts(code)["R-CANCEL-04"][0] == "UNKNOWN"
+
+
+# --------------------------------------------- codex 再レビュー (#50) の指摘（3 回目）
+
+
+def test_call_inside_compare_is_not_mistaken_for_analyzed_call_result(tmp_path: Path) -> None:
+    """比較式の中の呼出しは _call を通らない（イベントが記録されない）。以前は前回の修正
+    （Unresolved.code を "unresolved_call" に統一）が退行を生んでいた: _return が code
+    だけを見て「_assign が解析済みの呼出し結果に付けた印」と誤認し、比較式の中の
+    未解析の呼出し（実行時は 2 回目の restore）を無かったことにして経路を「完全」扱い
+    していた。analyzed_call フラグで区別するようになったので、この経路は UNKNOWN に
+    なる（少なくとも誤った VERIFIED にはならない）。
+    """
+    mutant = (
+        CORRECT_SERVICE.replace(
+            "    inventory.restore(order.items)\n",
+            "    inventory.restore(order.items)\n    extra_restore(order)\n",
+        )
+        + "\n\ndef extra_restore(order):\n    return inventory.restore(order.items) == 0\n"
+    )
+    code = analyze(tmp_path, mutant)
+    v = verdicts(code)
+    assert v["R-CANCEL-04"][0] == "UNKNOWN", v
+
+
+def test_range_shadow_via_match_capture_prevents_unroll(tmp_path: Path) -> None:
+    """match のキャプチャ名（MatchAs.name）による再束縛も見つける。キャプチャ名は
+    Name(ctx=Store) にならず MatchAs.name という文字列フィールドに入るので、Name ノードだけを
+    見ていると素通りする。
+    """
+    mutant = (
+        CORRECT_SERVICE.replace(
+            "    inventory.restore(order.items)\n",
+            "    for _ in range(1):\n        inventory.restore(order.items)\n",
+        )
+        + "\nmatch (lambda n: ()):\n    case range:\n        pass\n"
+    )
+    code = analyze(tmp_path, mutant)
+    success = code.paths[2]
+    assert success.precision == "incomplete"
+    assert "組込みと確定できない" in success.unknown_causes[0].detail
+
+
+def test_skipped_loop_target_becomes_unresolved(tmp_path: Path) -> None:
+    """展開を諦めて読み飛ばした for のターゲットは未解決化される。読み飛ばす前の
+    ループ変数の値が残ったままだと、その後の条件式が実行時とずれた値で判定されてしまう
+    （読み飛ばした 2 つ目の for は本来 x を上書きするが、展開できないので実際の値は
+    分からないはず）。読み飛ばし後に x を参照した経路が UNKNOWN になることを確認する。
+    """
+    too_many = ", ".join(["0"] * (UNROLL_MAX_ITERATIONS + 1))
+    mutant = CORRECT_SERVICE.replace(
+        "    inventory.restore(order.items)\n",
+        "    for x in (1,):\n"
+        "        pass\n"
+        f"    for x in ({too_many}):\n"
+        "        pass\n"
+        "    if x == 1:\n"
+        "        inventory.restore(order.items)\n",
+    )
+    code = analyze(tmp_path, mutant)
+    success = code.paths[2]
+    assert success.precision == "incomplete"
+    assert verdicts(code)["R-CANCEL-04"][0] == "UNKNOWN"

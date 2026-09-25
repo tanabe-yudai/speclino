@@ -14,7 +14,12 @@ from pathlib import Path as FsPath
 from typing import cast, get_args
 
 from speclino.analysis.limits import DEFAULT_LIMITS
-from speclino.analysis.structural import OPAQUE_STMTS, OUTCOME_CHANNEL, RegionScanner
+from speclino.analysis.structural import (
+    OPAQUE_STMTS,
+    OUTCOME_CHANNEL,
+    RegionScanner,
+    binding_candidates,
+)
 from speclino.analysis.symbolic_state import (
     ExprBuilder,
     Frame,
@@ -147,44 +152,22 @@ _BUILTINS_MODULE_NAMES = ("builtins", "__builtins__")
 
 
 def _module_may_rebind(mod: ModuleInfo, name: str) -> bool:
-    """モジュールのどこか（最上位に限らず、if/try/with/for/関数・クラス本体の中も含む）で
-    name が再束縛され得るか。分からなければ True（安全側）。
+    """モジュールのどこか（最上位に限らず、if/try/with/for/関数・クラス・match 本体の中も
+    含む）で name が再束縛され得るか。分からなければ True（安全側）。
 
-    Python の AST では、代入先・for のターゲット・with の as・タプル/リストへの分解・複合代入・
-    海象演算子の代入先は、ネストの深さや構文の種類によらず常に ``ast.Name(ctx=Store)`` になる。
-    これを ``ast.walk`` で拾うだけでほとんどの再束縛パターンをまとめて検出できる。加えて
-    import 系（相対・ワイルドカード含む）、global/nonlocal 宣言、属性への代入
-    （例 ``builtins.range = ...``）、そして ``builtins``/``__builtins__`` への参照が
-    1 つでもあれば（``setattr(builtins, "range", ...)`` 等を個別に判定せずまとめて拒否する
-    ため）再束縛し得るとみなす。
+    束縛の構文を1つずつ列挙しない（MatchAs のキャプチャのような Name ノードにならない特殊な
+    形も見落とさないため）。``binding_candidates``（structural.py、S29 の RegionScanner と
+    共有）が ast.iter_fields で全フィールドを汎用に見て、識別子を束縛し得る文字列を返す。
+    ``from x import *`` はどの名前を束縛するか静的に分からないので無条件に対象とし、
+    ``builtins``/``__builtins__`` への参照は setattr 等で外から書き換えられ得るため
+    1 つでもあれば無条件に対象とする（この 2 つは「name と一致するか」では判定できない）。
     """
     for node in ast.walk(mod.tree):
-        rebinds = (
-            (isinstance(node, ast.Name) and node.id == name and isinstance(node.ctx, ast.Store))
-            or (isinstance(node, ast.Name) and node.id in _BUILTINS_MODULE_NAMES)
-            or (
-                isinstance(node, ast.Attribute)
-                and node.attr == name
-                and isinstance(node.ctx, ast.Store)
-            )
-            or (
-                isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
-                and node.name == name
-            )
-            or (
-                isinstance(node, ast.Import)
-                and any((a.asname or a.name.split(".")[0]) == name for a in node.names)
-            )
-            or (
-                isinstance(node, ast.ImportFrom)
-                and (
-                    any(a.name == "*" for a in node.names)
-                    or any((a.asname or a.name) == name for a in node.names)
-                )
-            )
-            or (isinstance(node, ast.Global | ast.Nonlocal) and name in node.names)
-        )
-        if rebinds:
+        if isinstance(node, ast.alias) and node.name == "*":
+            return True
+        if isinstance(node, ast.Name) and node.id in _BUILTINS_MODULE_NAMES:
+            return True
+        if name in binding_candidates(node):
             return True
     return False
 
@@ -491,10 +474,16 @@ class PathAnalyzer:
                 ended = self._call(value_node, fn, frame, d, depth, rest)
                 # code は UnknownCode の正当な値にする（_unknown 経由で UnknownCause.code に
                 # そのまま渡り得るため。例えばこの変数を後で if の条件に使うと、その時点の
-                # cond.code がそのまま _unknown へ渡る）。_return はこの印を「値は追えないが
-                # サービス層の戻り値として経路は完全」の判定に使う（下記参照）
+                # cond.code がそのまま _unknown へ渡る）。analyzed_call=True は「_call を通して
+                # 副作用（イベント・展開）を記録し終えた」印（_return がこれを見て「値は追えない
+                # がサービス層の戻り値として経路は完全」と判定する。下記参照）。式の中の未解析の
+                # 呼出し（ExprBuilder.to_expr の ast.Call() 分岐）は同じ code を使うが
+                # analyzed_call は False のまま、というのが両者を区別する唯一の手段
                 frame.locals[target.id] = Unresolved(
-                    "unresolved_call", f"呼出し結果: {ast.unparse(value_node)}", value_node.lineno
+                    "unresolved_call",
+                    f"呼出し結果: {ast.unparse(value_node)}",
+                    value_node.lineno,
+                    analyzed_call=True,
                 )
                 return ended
             value = self.builder.to_expr(value_node, frame, d.state)
@@ -729,8 +718,11 @@ class PathAnalyzer:
             d.outcome = Outcome(kind="unresolved", source_ref=src)
             return
         value = self.builder.to_expr(stmt.value, frame, d.state)
-        if isinstance(value, Unresolved) and value.code == "unresolved_call":
-            # サービス層の戻り値（呼出し結果、_assign が付けた印）。値は持たないが経路は完全
+        if isinstance(value, Unresolved) and value.analyzed_call:
+            # サービス層の戻り値（_assign が _call を通して副作用を記録済みの呼出し結果）。
+            # 値は持たないが経路は完全。code の値では判別しない（symbolic_state.Unresolved
+            # 参照）: 式の中の未解析の呼出し（例 f(x) == 0 の f(x)）は同じ code でも
+            # analyzed_call=False なので、ここでは一致せず下の一般 UNKNOWN 経路に落ちる
             d.outcome = Outcome(kind="return", source_ref=src)
             return
         if isinstance(value, Unresolved):

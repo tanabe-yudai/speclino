@@ -33,6 +33,11 @@ class Unresolved:
     code: str  # unresolved_attribute | unsupported_syntax | unresolved_call
     detail: str
     lineno: int
+    analyzed_call: bool = False
+    """path_analyzer._assign が呼出し（_call）を通して副作用（イベント・展開）を記録した後に
+    結果のローカルへ付ける印。code の値では判別しない（式の中の未解析の呼出し
+    ``to_expr`` の ``ast.Call()`` 分岐も同じ "unresolved_call" を使うため、code だけでは
+    「解析済みの呼出しの戻り値」と「解析していない呼出し」を区別できない）。"""
 
 
 @dataclass(frozen=True)

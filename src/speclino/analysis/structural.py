@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 from speclino.analysis.symbolic_state import ExprBuilder, Frame, RootAlias, SymState
@@ -34,6 +35,32 @@ OPAQUE_STMTS: tuple[type[ast.stmt], ...] = (
     ast.AsyncWith,
 )
 OUTCOME_CHANNEL = "outcome"
+
+
+def binding_candidates(node: ast.AST) -> Iterator[str]:
+    """node 自身（子要素は見ない。呼出し側が ast.walk で再帰する）が識別子を束縛し得るなら、
+    その文字列を列挙する（S41b / S29）。
+
+    束縛の構文を1つずつ列挙しない: Python の AST では、識別子を束縛し得る文法要素
+    （代入先、for/with/match の対象、関数・クラスの名前、import の別名、global/nonlocal
+    宣言、except の名前など）は形が様々でも、必ずどこかの文字列フィールド（または文字列の
+    リストのフィールド）に識別子文字列を持つ。ast.iter_fields でこれを汎用に拾えば、
+    MatchAs のキャプチャのように Name ノードにならない特殊な形も含め、まとめて検出できる。
+    Attribute.attr（例 obj.range）のような単なる属性参照も含めて保守的に拾う（安全側）。
+    Name(ctx=Load).id（単なる参照）と Constant.value（文字列リテラル。本文中に対象の語が
+    出てくるだけの場合）は束縛ではないので除外する。
+    """
+    if isinstance(node, ast.Name):
+        if not isinstance(node.ctx, ast.Load):
+            yield node.id
+        return
+    if isinstance(node, ast.Constant):
+        return
+    for _, value in ast.iter_fields(node):
+        if isinstance(value, str):
+            yield value
+        elif isinstance(value, list):
+            yield from (v for v in value if isinstance(v, str))
 
 
 @dataclass
@@ -88,29 +115,37 @@ class RegionScanner:
                     if not nested:
                         scope.channels.add(OUTCOME_CHANNEL)
                 elif isinstance(sub, ast.Assign | ast.AnnAssign | ast.AugAssign):
-                    self._scan_assign(sub, frame, state, scope, nested)
+                    self._scan_attribute_writes(sub, frame, state, scope)
                 elif isinstance(sub, ast.Call):
                     if not self._scan_call(sub, frame, state, scope, depth):
                         return False
                 elif isinstance(sub, ast.Yield | ast.YieldFrom | ast.Await | ast.Global):
                     return False
+                if not nested:
+                    # 領域が束縛し得るローカル名を汎用に拾う（for/with/内包表記/match/
+                    # NamedExpr 等、構文の形を列挙しない。S41b: 展開を諦めて読み飛ばした
+                    # for/while 自身のターゲットもここで拾われる）。読み飛ばし後に
+                    # frame.locals から未解決化するための候補集合であり、多少広めに拾っても
+                    # （例えば属性名を局所変数と誤認しても）安全側に倒れるだけで健全性は保つ
+                    scope.assigned_locals.update(binding_candidates(sub))
         return True
 
-    def _scan_assign(
+    def _scan_attribute_writes(
         self,
         node: ast.Assign | ast.AnnAssign | ast.AugAssign,
         frame: Frame,
         state: SymState,
         scope: RegionScope,
-        nested: bool,
     ) -> None:
+        """代入先が束縛済み属性（例 order.status）なら write:<var> チャネルに加える。
+
+        ローカル名の収集（assigned_locals）は _scan_stmts の汎用パス（binding_candidates）が
+        担うので、ここでは属性への書込みだけを見る。
+        """
         targets = node.targets if isinstance(node, ast.Assign) else [node.target]
         for target in targets:
             for leaf in ast.walk(target):
-                if isinstance(leaf, ast.Name):
-                    if not nested:
-                        scope.assigned_locals.add(leaf.id)
-                elif isinstance(leaf, ast.Attribute):
+                if isinstance(leaf, ast.Attribute):
                     chain = self.builder.attribute_chain(leaf)
                     if chain is None:
                         continue
@@ -161,4 +196,10 @@ def _keyword(call: ast.Call, name: str) -> ast.expr | None:
     return None
 
 
-__all__ = ["OPAQUE_STMTS", "OUTCOME_CHANNEL", "RegionScanner", "RegionScope"]
+__all__ = [
+    "OPAQUE_STMTS",
+    "OUTCOME_CHANNEL",
+    "RegionScanner",
+    "RegionScope",
+    "binding_candidates",
+]
