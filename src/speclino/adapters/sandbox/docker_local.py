@@ -35,7 +35,7 @@ class DockerSandbox:
         out.mkdir()
         try:
             shutil.copytree(head_root, work / "head", symlinks=False)
-            mapping = _copy_declared_tests(base_tests_root, work / "tests", test_ids)
+            mapping = copy_declared_tests(base_tests_root, work / "tests", test_ids)
             if not mapping:
                 return SandboxResult(2, None, "宣言済みテストが base に無い", False, "docker_local")
             (work / "tests" / "pytest.ini").write_text(PYTEST_INI)  # 設定は SpecLino 側で固定
@@ -99,15 +99,7 @@ class DockerSandbox:
             junit_path = out / "junit.xml"
             junit = junit_path.read_text() if junit_path.exists() else None
             if junit is not None:
-                # 平坦化したファイル名を元の ID に戻す（file 属性と classname の両方）
-                for orig, flat in mapping.items():
-                    flat_file = flat.split("::", 1)[0]
-                    orig_file = orig.split("::", 1)[0]
-                    orig_mod = orig_file.removesuffix(".py").replace("/", ".")
-                    junit = junit.replace(f'file="{flat_file}"', f'file="{orig_file}"')
-                    junit = junit.replace(
-                        f'classname="{flat_file.removesuffix(".py")}"', f'classname="{orig_mod}"'
-                    )
+                junit = rewrite_junit_test_ids(junit, mapping)
             return SandboxResult(
                 code, junit, stdout.decode(errors="replace")[-2000:], timed_out, "docker_local"
             )
@@ -115,12 +107,14 @@ class DockerSandbox:
             shutil.rmtree(work, ignore_errors=True)
 
 
-def _copy_declared_tests(base_root: Path, dest: Path, test_ids: list[str]) -> dict[str, str]:
+def copy_declared_tests(base_root: Path, dest: Path, test_ids: list[str]) -> dict[str, str]:
     """base から宣言済みテストを **平坦な名前** で写し、元 ID → サンドボックス内 ID の対応を返す。
 
     テストをパッケージ階層のまま置くと、pytest がその階層から `examples` 等の名前空間パッケージを
     先に登録し、head ではなく base（テスト側）の実装を import してしまう。平坦化してモジュール名の
     衝突を無くす。conftest.py は最も近い祖先のものだけを写す（複数あれば最初のもの）。
+
+    docker_local / cloud_run_sandbox の両方で使う（テストと実装を別ディレクトリに置く構成は同じ）。
     """
     dest.mkdir(parents=True, exist_ok=True)
     mapping: dict[str, str] = {}
@@ -142,3 +136,19 @@ def _copy_declared_tests(base_root: Path, dest: Path, test_ids: list[str]) -> di
                     conftest_done = True
                     break
     return mapping
+
+
+def rewrite_junit_test_ids(junit: str, mapping: dict[str, str]) -> str:
+    """junit の中の平坦化したファイル名を元の ID に戻す（file 属性と classname の両方）。"""
+    for orig, flat in mapping.items():
+        flat_file = flat.split("::", 1)[0]
+        orig_file = orig.split("::", 1)[0]
+        orig_mod = orig_file.removesuffix(".py").replace("/", ".")
+        junit = junit.replace(f'file="{flat_file}"', f'file="{orig_file}"')
+        junit = junit.replace(
+            f'classname="{flat_file.removesuffix(".py")}"', f'classname="{orig_mod}"'
+        )
+    return junit
+
+
+__all__ = ["DockerSandbox", "copy_declared_tests", "rewrite_junit_test_ids"]

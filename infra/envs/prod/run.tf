@@ -64,7 +64,17 @@ locals {
     SPECLINO_FIREBASE_PROJECT_ID = var.project_id
   })
 
-  worker_env = var.github_app_id == "" ? {} : { SPECLINO_GITHUB_APP_ID = var.github_app_id }
+  worker_github_env = var.github_app_id == "" ? {} : { SPECLINO_GITHUB_APP_ID = var.github_app_id }
+
+  # sandbox_url が空のあいだ worker は隔離実行を無効のままにする（S38）。
+  # sandbox サービス自身の uri を参照すると同一リソース内の循環になるため、worker_url と
+  # 同じく変数で受け取り 2 回目の apply で解決する。
+  worker_sandbox_env = var.sandbox_url == "" ? {} : {
+    SPECLINO_SANDBOX_KIND = "cloud_run"
+    SPECLINO_SANDBOX_URL  = var.sandbox_url
+  }
+
+  worker_env = merge(local.worker_github_env, local.worker_sandbox_env)
 
   service_env = {
     web     = merge(local.common_env, local.web_env, local.public_url_env)

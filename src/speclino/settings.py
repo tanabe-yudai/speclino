@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     code_host_kind: Literal["github", "local"] = "github"
     local_repos: dict[str, Path] = {}  # code_host_kind=local のとき repo_full_name → パス
 
+    # サンドボックス（test_run、S31/S38）: docker はローカル、cloud_run は本番の Cloud Run sandboxes
+    sandbox_kind: Literal["disabled", "docker", "cloud_run"] = "disabled"
+    sandbox_url: str = ""  # sandbox_kind=cloud_run のとき sandbox ロールのサービス URL
+
     # Cloud Tasks（S26）: queue_kind=cloud_tasks で使う。未設定だと build_state が落ちる
     cloud_tasks_project: str | None = None
     cloud_tasks_location: str | None = None

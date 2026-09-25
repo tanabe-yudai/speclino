@@ -78,6 +78,17 @@ variable "worker_url" {
   default     = ""
 }
 
+variable "sandbox_url" {
+  description = <<-EOT
+    sandbox サービスの URL。worker が隔離実行を依頼する宛先になる（S38）。
+    worker_url と同じ理由（同一リソースの別インスタンスを参照すると循環になる）で
+    変数で受け取り、`terraform output sandbox_url` の値を tfvars に書いて 2 回目の apply で反映する。
+    空のあいだ worker は隔離実行を無効（DisabledSandbox）のままにする。
+  EOT
+  type        = string
+  default     = ""
+}
+
 variable "mount_secrets" {
   description = <<-EOT
     Secret Manager の値を Cloud Run の環境変数として参照するか（`secrets.tf` の secret_env）。

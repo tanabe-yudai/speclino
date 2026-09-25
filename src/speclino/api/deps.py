@@ -15,6 +15,9 @@ from speclino.adapters.github.client import GitHubClient
 from speclino.adapters.localgit.local_code_host import LocalCodeHost
 from speclino.adapters.queue.cloud_tasks import CloudTasksQueue
 from speclino.adapters.queue.inprocess import InProcessQueue
+from speclino.adapters.sandbox.cloud_run_sandbox import CloudRunSandbox
+from speclino.adapters.sandbox.disabled import DisabledSandbox
+from speclino.adapters.sandbox.docker_local import DockerSandbox
 from speclino.adapters.storage.fs import FileSystemBlobStore
 from speclino.adapters.storage.gcs import GcsBlobStore
 from speclino.agent.permissions import AgentPermissions
@@ -22,6 +25,7 @@ from speclino.db.repositories.cost_ledger import CostLedgerRepository
 from speclino.db.session import make_engine, make_session_factory
 from speclino.ports.blob_store import BlobStore
 from speclino.ports.code_host import CodeHost
+from speclino.ports.sandbox import Sandbox
 from speclino.ports.task_queue import TaskQueue
 from speclino.services.cost_guard import CostGuard, CostLedger
 from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
@@ -78,6 +82,16 @@ def build_code_host(settings: Settings, installation_id: int | None = None) -> C
         httpx.AsyncClient(timeout=30.0),
         base_url=settings.github_api_base,
     )
+
+
+def build_sandbox(settings: Settings) -> Sandbox:
+    if settings.sandbox_kind == "docker":
+        return DockerSandbox()
+    if settings.sandbox_kind == "cloud_run":
+        if not settings.sandbox_url:
+            raise RuntimeError("cloud_run サンドボックスの設定が無い（SPECLINO_SANDBOX_URL）")
+        return CloudRunSandbox(sandbox_url=settings.sandbox_url)
+    return DisabledSandbox()
 
 
 class LazyCodeHost:
@@ -183,6 +197,7 @@ def build_state(settings: Settings) -> AppState:
             model=settings.agent_model,
             details_url_base=f"{settings.public_url.rstrip('/')}/runs",
             agent_enabled=settings.agent_enabled,
+            sandbox=build_sandbox(settings),
         ),
         cost_guard=CostGuard(ledger, Decimal(str(settings.daily_cost_limit_usd))),
     )
