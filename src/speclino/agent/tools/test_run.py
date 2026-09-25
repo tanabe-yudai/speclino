@@ -2,9 +2,15 @@
 
 - 実行できるのは Rule.tests に宣言されたテスト ID だけ（任意のコマンドは受けない）
 - テスト・設定は base 由来、実装は head 由来（PoC 16 章 / codex 指摘 #3）
-- assertion 失敗 → VIOLATED（observed_counterexample）。全て成功 → VERIFIED_IN_SCOPE
-  （動的・実行経路の範囲、test_observation=OBSERVED）。
+- assertion 失敗 → VIOLATED（observed_counterexample）
+- 全て成功 → **判定は変えない**。test_observation=OBSERVED を別軸に記録するだけ
 - error / skipped / timeout / ID 不在は判定を変えない
+
+成功を信じない理由（ハッカソン計画「動的証拠の信頼境界」）: テストは head の実装を同じ
+プロセスで動かすため、未信頼側が観測そのものを偽造できる。実際、head に `pytest.py` を置けば
+`PYTHONPATH=/work/head` により `python -m pytest` がそれを実行し、本物のテストを走らせずに
+成功した junit を書ける（`PYTHONSAFEPATH=1` では防げない）。偽の失敗はゲートを厳しくする
+だけなので受け入れてよいが、偽の成功は違反を適合に変えてしまうので採らない。
 """
 
 from __future__ import annotations
@@ -108,19 +114,20 @@ def test_run(ctx: InvestigationContext, args: dict[str, Any]) -> dict[str, Any]:
         )
         verdict_note = "VIOLATED"
     else:
+        # 成功は別軸に記録するだけで verdict を上書きしない（冒頭の docstring 参照）。
         updated = current.model_copy(
             update={
-                "verdict": "VERIFIED_IN_SCOPE",
-                "category": "conformant",
-                "severity": "info",
-                "message": f"宣言済みテストが成功した: {', '.join(rule.tests)}",
                 "evidence_refs": [*current.evidence_refs, *rule.tests],
                 "test_observation": "OBSERVED",
                 "analysis_scope": "動的（実行した入力・経路の範囲に限る。全経路の適合ではない）",
-                "next_steps": [],
+                "next_steps": [
+                    *current.next_steps,
+                    "宣言済みテストは成功したが、観測は判定を上書きしない"
+                    "（head の実装と同じプロセスで動くため成功を偽造しうる）",
+                ],
             }
         )
-        verdict_note = "VERIFIED_IN_SCOPE"
+        verdict_note = "unchanged"
     ctx.findings = _recount(
         ctx.findings.model_copy(
             update={

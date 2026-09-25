@@ -125,17 +125,24 @@ async def test_failed_declared_test_yields_observed_violation(tmp_path: Path) ->
     assert f.counterexample is not None and f.counterexample.kind == "observed"
 
 
-async def test_passing_declared_tests_yield_dynamic_verified(tmp_path: Path) -> None:
+async def test_passing_declared_tests_do_not_upgrade_the_verdict(tmp_path: Path) -> None:
+    """成功は別軸に記録するだけ。head の実装と同じプロセスで動く以上、成功は偽造しうる。
+
+    head に `pytest.py` を置けば `PYTHONPATH=/work/head` により本物のテストを走らせずに
+    成功した junit を書けるため、これを信じると違反を適合に変えられてしまう。
+    """
     ScriptedLlm.reset()
     passed = JUNIT.replace("<failure message=\"assert [] == [('sku-1',)]\">x</failure>", "")
     ctx = unresolved_ctx(tmp_path, FakeSandbox(passed, []))
+    before = next(f for f in ctx.findings.findings if f.requirement_id == "R-CANCEL-04").verdict
     await investigate(
         ctx,
         AgentPermissions(test_run_enabled=True),
         ScriptedLlm(steps=[[call("test_run", rule_id="R-CANCEL-04")], [text("done")]]),
     )
     f = next(f for f in ctx.findings.findings if f.requirement_id == "R-CANCEL-04")
-    assert (f.verdict, f.test_observation) == ("VERIFIED_IN_SCOPE", "OBSERVED")
+    assert f.verdict == before, "成功した観測で判定を上書きしてはいけない"
+    assert f.test_observation == "OBSERVED"
     assert "経路の範囲" in (f.analysis_scope or "")
 
 
