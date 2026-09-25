@@ -1,0 +1,37 @@
+id: 28_constant_loop_conformant
+title: 定数回ループで契約済み操作を呼ぶ（適合）
+description: >-
+  在庫復元を `for _ in range(1): inventory.restore(order.items)`、監査記録を
+  `for action in (AuditAction.CANCEL_ORDER,): audit.record(user.id, action)` で呼ぶ（S41b:
+  range(定数) とタプルリテラルの両方の定数回反復展開）。path_analyzer は純粋な AST 書き換えで
+  `_ = 0; inventory.restore(order.items)` /
+  `action = AuditAction.CANCEL_ORDER; audit.record(user.id, action)` に展開するため、
+  01_correct と同じ 1 回ずつの呼出しになり、全要求が VERIFIED_IN_SCOPE になる。
+expected:
+  R-CANCEL-01:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-02:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-03:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-04:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-05:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-06:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07a:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07b:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07c:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant

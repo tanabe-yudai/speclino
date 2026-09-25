@@ -9,7 +9,7 @@ Path を列挙する。早期 return より後を実行済みにしない。呼�
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path as FsPath
 
 from speclino.analysis.limits import DEFAULT_LIMITS
@@ -44,6 +44,14 @@ from speclino.frontend.python.subset import Unsupported, function_decorators, un
 
 ANALYZER_VERSION = "0.1.0"
 
+# 定数回反復として展開できる要素数の上限（S41b）。ネストした展開も含め、1 つの経路（Draft）で
+# ここまでに消費した展開回数の累積で数える（Draft.unroll_used。if で分岐した枝ごとに独立に
+# 数えるので、無関係な枝の展開が互いの予算を奪わない）。PoC 9.3 の初期上限（経路数 64/256、
+# 呼出し深さ 2/4）と同じく保守的な初期値とし、監査イベントの列挙や固定件数のアイテム処理など
+# 数件程度の反復は展開できる一方、上限を超えたら展開せず既存の安全網（unsupported_syntax による
+# UNKNOWN、展開後に経路数が増え過ぎた場合は limit_paths による UNKNOWN）に委ねる。
+UNROLL_MAX_ITERATIONS = 8
+
 
 class PathLimitExceeded(Exception):
     pass
@@ -59,6 +67,7 @@ class Draft:
     events: list[Event] = field(default_factory=list)
     unknowns: list[UnknownCause] = field(default_factory=list)
     lines: list[int] = field(default_factory=list)
+    unroll_used: int = 0  # S41b: この経路でここまでに消費した定数回ループの展開回数
     ended: str = "fallthrough"
     outcome: Outcome | None = None
     return_value: Expr | None = None
@@ -71,7 +80,90 @@ class Draft:
             list(self.events),
             list(self.unknowns),
             list(self.lines),
+            self.unroll_used,
         )
+
+
+@dataclass(frozen=True)
+class _UnrollOutcome:
+    """for の展開結果。``stmts`` が None なら展開できない（``reason`` に理由）。"""
+
+    stmts: list[ast.stmt] | None
+    reason: str = ""
+
+
+def _has_break_or_continue(body: list[ast.stmt]) -> bool:
+    """body（ネストした for/while/AsyncFor 自身のスコープは除く）に break/continue があるか。
+
+    break/continue は最も内側の for/while に属するので、ネストしたループの本体には再帰しない。
+    if / try / with の中は同じループのスコープなので再帰する。それ以外の対応外構文（match 等）の
+    中は再帰しないが、展開後にその構文自体が unsupported_stmt で打ち切られるので健全性には
+    影響しない。
+    """
+    for stmt in body:
+        if isinstance(stmt, ast.Break | ast.Continue):
+            return True
+        if isinstance(stmt, ast.If):
+            if _has_break_or_continue(stmt.body) or _has_break_or_continue(stmt.orelse):
+                return True
+        elif isinstance(stmt, ast.Try):
+            if (
+                _has_break_or_continue(stmt.body)
+                or _has_break_or_continue(stmt.orelse)
+                or _has_break_or_continue(stmt.finalbody)
+                or any(_has_break_or_continue(h.body) for h in stmt.handlers)
+            ):
+                return True
+        elif isinstance(stmt, ast.With | ast.AsyncWith) and _has_break_or_continue(stmt.body):
+            return True
+        # For / AsyncFor / While はそれ自身のスコープなので再帰しない
+    return False
+
+
+def _for_elements(it: ast.expr, frame: Frame) -> list[ast.expr] | str:
+    """反復要素を式の列として返す（要素は評価しない）。展開できなければ理由を返す。
+
+    range(定数) は要素（ast.Constant）を作る前に長さを展開上限と比べる。解析対象コードに
+    range(10**9) のような巨大な引数があっても、展開を諦める判定の前に巨大な list を作らない
+    ようにするため。
+    """
+    if isinstance(it, ast.Tuple | ast.List):
+        if any(isinstance(e, ast.Starred) for e in it.elts):
+            return "要素に展開（*）がある"
+        return list(it.elts)
+    if (
+        isinstance(it, ast.Call)
+        and isinstance(it.func, ast.Name)
+        and it.func.id == "range"
+        and "range" not in frame.locals
+    ):
+        if it.keywords or any(isinstance(a, ast.Starred) for a in it.args):
+            return "range の引数の形が対応外（キーワード引数・展開）"
+        if not (1 <= len(it.args) <= 2):
+            return "range の引数の形が対応外（step 指定など）"
+        values: list[int] = []
+        for a in it.args:
+            if not (
+                isinstance(a, ast.Constant)
+                and isinstance(a.value, int)
+                and not isinstance(a.value, bool)
+            ):
+                return "range の引数が定数 int でない"
+            values.append(a.value)
+        start, stop = (0, values[0]) if len(values) == 1 else (values[0], values[1])
+        if start < 0 or stop < 0:
+            return "range の引数に負の値がある"
+        if stop - start > UNROLL_MAX_ITERATIONS:
+            return f"range の要素数が展開上限（{UNROLL_MAX_ITERATIONS}）を超える"
+        return [ast.Constant(value=n) for n in range(start, stop)]
+    return "要素数が静的に分からない反復（タプル/リストのリテラルでも range(定数) でもない）"
+
+
+def _make_loop_assign(stmt: ast.For, target: ast.Name, value: ast.expr) -> ast.Assign:
+    assign = ast.Assign(targets=[ast.Name(id=target.id, ctx=ast.Store())], value=value)
+    ast.copy_location(assign, stmt)
+    ast.fix_missing_locations(assign)
+    return assign
 
 
 class PathAnalyzer:
@@ -156,8 +248,21 @@ class PathAnalyzer:
         while i < len(stmts):
             stmt = stmts[i]
             rest = stmts[i + 1 :]
+            unroll_reason: str | None = None
+            if isinstance(stmt, ast.For):
+                outcome = self._try_unroll_for(stmt, frame, d)
+                if outcome.stmts is not None:
+                    # 純粋な AST 書き換え: x = e1; *body; x = e2; *body; ...; *orelse に差し替えて
+                    # 同じ i から続ける（解析器に新しい意味論は足さない）
+                    stmts = stmts[:i] + outcome.stmts + rest
+                    continue
+                unroll_reason = outcome.reason
+            elif isinstance(stmt, ast.While):
+                unroll_reason = "while は定数回の反復として展開できない"
             d.lines.append(stmt.lineno)
             if (u := unsupported_stmt(stmt)) is not None:
+                if unroll_reason:
+                    u = replace(u, detail=f"{u.detail}（展開できない: {unroll_reason}）")
                 if self._skip_opaque_region(stmt, u, fn, frame, d):
                     i += 1
                     continue
@@ -231,6 +336,35 @@ class PathAnalyzer:
                 u.lineno,
             )
         return True
+
+    # ------------------------------------------------------------ loop unroll
+    def _try_unroll_for(self, stmt: ast.For, frame: Frame, d: Draft) -> _UnrollOutcome:
+        """定数回の for を展開できるか判定し、できれば置き換え後の文の列を返す（S41b）。
+
+        ``x = e1; *body; x = e2; *body; ...; x = en; *body; *orelse`` へ純粋に書き換えるだけで、
+        要素の式は評価しない（解釈は _assign → ExprBuilder.to_expr に委ねる）。展開できない
+        ときは理由付きで None を返し、呼出し元は従来どおり unsupported_stmt / 構造解析に任せる。
+        展開回数は d.unroll_used（この経路でここまでに消費した分）に対して数える。
+        """
+        if not isinstance(stmt.target, ast.Name):
+            return _UnrollOutcome(None, "target がタプル分解など単純な変数名でない")
+        target = stmt.target
+        if _has_break_or_continue(stmt.body):
+            return _UnrollOutcome(None, "本体に break/continue がある")
+        elements = _for_elements(stmt.iter, frame)
+        if isinstance(elements, str):
+            return _UnrollOutcome(None, elements)
+        if d.unroll_used + len(elements) > UNROLL_MAX_ITERATIONS:
+            return _UnrollOutcome(
+                None, f"展開回数の上限（{UNROLL_MAX_ITERATIONS}）をネスト分含めて超える"
+            )
+        d.unroll_used += len(elements)
+        built: list[ast.stmt] = []
+        for elt in elements:
+            built.append(_make_loop_assign(stmt, target, elt))
+            built.extend(stmt.body)
+        built.extend(stmt.orelse)
+        return _UnrollOutcome(built)
 
     def _finish(self, d: Draft) -> Draft:
         self._path_count += 1
@@ -437,7 +571,13 @@ class PathAnalyzer:
             else:
                 cframe.locals[p] = self.builder.to_expr(node, frame, d.state)
         sub = Draft(
-            list(d.conds), d.state, list(d.updates), list(d.events), list(d.unknowns), list(d.lines)
+            list(d.conds),
+            d.state,
+            list(d.updates),
+            list(d.events),
+            list(d.unknowns),
+            list(d.lines),
+            d.unroll_used,
         )
         results = self._explore(list(callee.node.body), callee, cframe, sub, depth + 1)
         ended: list[Draft] = []
@@ -446,7 +586,7 @@ class PathAnalyzer:
                 ended.append(r)
                 continue
             # return / fallthrough: 呼出し元へ戻り、残りの文を続ける
-            cont = Draft(r.conds, r.state, r.updates, r.events, r.unknowns, r.lines)
+            cont = Draft(r.conds, r.state, r.updates, r.events, r.unknowns, r.lines, r.unroll_used)
             ended.extend(self._explore(list(rest), fn, frame.copy(), cont, depth))
         return ended
 

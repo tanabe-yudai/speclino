@@ -19,10 +19,10 @@ HOLDOUT = ROOT / "eval" / "holdout" / "cancel_order"
 @pytest.mark.parametrize("mode", ["handwritten", "source"])
 def test_golden_cases_match(mode: str) -> None:
     report = run_golden(GOLDEN, mode)  # type: ignore[arg-type]
-    assert len(report.cases) == 27
+    assert len(report.cases) == 29
     assert report.all_match, [(c.id, c.mismatches, c.counterexample_detail) for c in report.cases]
     assert report.false_verified == 0
-    assert report.counterexample_matches == report.counterexample_total == 15
+    assert report.counterexample_matches == report.counterexample_total == 16
     # 有限ドメイン検算（S35）: Z3 が VERIFIED / VIOLATED と断定した要求は総当たりでも同じ結論
     assert report.finite_check_disagreements == 0 and report.finite_check_agreements > 150
     md = render_markdown(report)
