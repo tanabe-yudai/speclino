@@ -66,7 +66,14 @@ jobs:
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
         run: |
+          # speclino-sandbox は Terraform の enable_sandbox が true のときだけ存在する（S38）。
+          # 無いものを更新しようとして deploy 全体を落とさないよう、存在するものだけ更新する。
           for SERVICE in speclino-web speclino-worker speclino-sandbox; do
+            if ! gcloud run services describe "${SERVICE}" \
+                 --project="${GCP_PROJECT_ID}" --region="${REGION}" >/dev/null 2>&1; then
+              echo "${SERVICE} は存在しないので飛ばす"
+              continue
+            fi
             gcloud run services update "${SERVICE}" \
               --project="${GCP_PROJECT_ID}" \
               --region="${REGION}" \

@@ -17,6 +17,7 @@ from speclino.api.deps import AppState, build_state
 from speclino.api.errors import error_responses, install_error_handlers
 from speclino.api.routes import review_runs, tasks, webhooks
 from speclino.mcp_server.server import MCP_PATH, mount_mcp
+from speclino.sandbox_runner import probe as sandbox_probe
 from speclino.settings import Settings
 
 WEB_DIST = Path(__file__).resolve().parents[3] / "web" / "dist"
@@ -60,6 +61,10 @@ def create_app(settings: Settings, state: AppState | None = None) -> FastAPI:
         app.include_router(review_runs.router)
     if settings.role in ("worker", "all"):
         app.include_router(tasks.router)
+    # sandbox ロールは Cloud Run sandboxes の疎通確認だけを持つ（S38）。
+    # 呼べるのは worker SA のみ（Cloud Run の IAM で制限）。
+    if settings.role == "sandbox":
+        app.include_router(sandbox_probe.router)
     if mcp_app is not None:
         app.router.routes.append(Route(MCP_PATH, endpoint=mcp_app, name="mcp"))
     # 静的配信の mount は "/" 配下を全て受けるので、全ルーターの後に置く（先に置くと
