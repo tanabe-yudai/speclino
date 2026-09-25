@@ -39,7 +39,7 @@ from speclino.frontend.python.adapters.fastapi_outcome import (
     outcome_of_raise,
     outcome_of_return_call,
 )
-from speclino.frontend.python.index import FunctionInfo, RepoIndex, SymbolNotFound
+from speclino.frontend.python.index import FunctionInfo, ModuleInfo, RepoIndex, SymbolNotFound
 from speclino.frontend.python.subset import Unsupported, function_decorators, unsupported_stmt
 
 ANALYZER_VERSION = "0.1.0"
@@ -120,12 +120,44 @@ def _has_break_or_continue(body: list[ast.stmt]) -> bool:
     return False
 
 
+def _module_may_rebind(mod: ModuleInfo, name: str) -> bool:
+    """モジュールの最上位が name を再束縛し得るか（分からなければ True、安全側）。
+
+    ``def range`` / ``class range`` / ``range = ...`` / ``import ... as range`` /
+    ``from ... import range``（相対 import 含む）で最上位の name が再束縛され得る。
+    ``from x import *`` は何を束縛するか静的に分からないので、無条件に True（再束縛し得る）
+    とする。RepoIndex.module() が返す ModuleInfo.imports / functions / classes は
+    絶対 import しか見ておらず用途に合わないため、ここでは最上位の文を直接見る。
+    """
+    for node in mod.tree.body:
+        imported = isinstance(node, ast.Import) and any(
+            (a.asname or a.name.split(".")[0]) == name for a in node.names
+        )
+        imported_from = isinstance(node, ast.ImportFrom) and (
+            any(a.name == "*" for a in node.names)
+            or any((a.asname or a.name) == name for a in node.names)
+        )
+        defined = isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) and (
+            node.name == name
+        )
+        assigned = isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == name for t in node.targets
+        )
+        ann_or_aug_assigned = isinstance(node, ast.AnnAssign | ast.AugAssign) and (
+            isinstance(node.target, ast.Name) and node.target.id == name
+        )
+        if imported or imported_from or defined or assigned or ann_or_aug_assigned:
+            return True
+    return False
+
+
 def _for_elements(it: ast.expr, frame: Frame) -> list[ast.expr] | str:
     """反復要素を式の列として返す（要素は評価しない）。展開できなければ理由を返す。
 
     range(定数) は要素（ast.Constant）を作る前に長さを展開上限と比べる。解析対象コードに
     range(10**9) のような巨大な引数があっても、展開を諦める判定の前に巨大な list を作らない
-    ようにするため。
+    ようにするため。range が組込みだと確定できない（対象モジュールの最上位で再定義され得る）
+    ときは展開しない。
     """
     if isinstance(it, ast.Tuple | ast.List):
         if any(isinstance(e, ast.Starred) for e in it.elts):
@@ -137,6 +169,8 @@ def _for_elements(it: ast.expr, frame: Frame) -> list[ast.expr] | str:
         and it.func.id == "range"
         and "range" not in frame.locals
     ):
+        if _module_may_rebind(frame.module, "range"):
+            return "range が組込みと確定できない（モジュール最上位で再定義され得る）"
         if it.keywords or any(isinstance(a, ast.Starred) for a in it.args):
             return "range の引数の形が対応外（キーワード引数・展開）"
         if not (1 <= len(it.args) <= 2):
@@ -159,8 +193,9 @@ def _for_elements(it: ast.expr, frame: Frame) -> list[ast.expr] | str:
     return "要素数が静的に分からない反復（タプル/リストのリテラルでも range(定数) でもない）"
 
 
-def _make_loop_assign(stmt: ast.For, target: ast.Name, value: ast.expr) -> ast.Assign:
-    assign = ast.Assign(targets=[ast.Name(id=target.id, ctx=ast.Store())], value=value)
+def _make_assign(stmt: ast.For, name: str, value: ast.expr) -> ast.Assign:
+    """``name = value`` を合成する。位置情報は元の for からコピーする。"""
+    assign = ast.Assign(targets=[ast.Name(id=name, ctx=ast.Store())], value=value)
     ast.copy_location(assign, stmt)
     ast.fix_missing_locations(assign)
     return assign
@@ -186,6 +221,7 @@ class PathAnalyzer:
         self._op_by_symbol = {ob.symbol: (op_id, ob) for op_id, ob in bindings.operations.items()}
         self._known_pure = set(bindings.known_pure)
         self._path_count = 0
+        self._unroll_seq = 0  # S41b: 展開ごとに振る通し番号（退避用の一時変数名の衝突回避）
         self.scanner = RegionScanner(
             self.builder,
             index,
@@ -217,6 +253,7 @@ class PathAnalyzer:
         for arg in fn.node.args.args:
             frame.locals[arg.arg] = RootAlias(arg.arg)
         self._path_count = 0
+        self._unroll_seq = 0
         start = Draft([], SymState(self.domain, binding))
         try:
             drafts = self._explore(list(fn.node.body), fn, frame, start, depth=0)
@@ -341,10 +378,15 @@ class PathAnalyzer:
     def _try_unroll_for(self, stmt: ast.For, frame: Frame, d: Draft) -> _UnrollOutcome:
         """定数回の for を展開できるか判定し、できれば置き換え後の文の列を返す（S41b）。
 
-        ``x = e1; *body; x = e2; *body; ...; x = en; *body; *orelse`` へ純粋に書き換えるだけで、
-        要素の式は評価しない（解釈は _assign → ExprBuilder.to_expr に委ねる）。展開できない
-        ときは理由付きで None を返し、呼出し元は従来どおり unsupported_stmt / 構造解析に任せる。
-        展開回数は d.unroll_used（この経路でここまでに消費した分）に対して数える。
+        Python は反復の全要素をループ開始前に評価する。これを保つため、要素式はまず一時変数へ
+        退避してから（``_t0 = e1; _t1 = e2; ...``）ループ変数に束縛する
+        （``x = _t0; *body; x = _t1; *body; ...; *orelse``）。body の実行前に退避を終えるので、
+        body が要素式の参照先を書き換えても後続要素は元の値のまま、要素式が副作用を持つ呼出しでも
+        1 回だけ・ループより前に実行される（body が途中で return / raise しても後続要素の
+        呼出しが失われない）。要素の式は評価しない（解釈は _assign → ExprBuilder.to_expr に
+        委ねる）。展開できないときは理由付きで None を返し、呼出し元は従来どおり
+        unsupported_stmt / 構造解析に任せる。展開回数は d.unroll_used（この経路でここまでに
+        消費した分）に対して数える。
         """
         if not isinstance(stmt.target, ast.Name):
             return _UnrollOutcome(None, "target がタプル分解など単純な変数名でない")
@@ -359,9 +401,14 @@ class PathAnalyzer:
                 None, f"展開回数の上限（{UNROLL_MAX_ITERATIONS}）をネスト分含めて超える"
             )
         d.unroll_used += len(elements)
-        built: list[ast.stmt] = []
-        for elt in elements:
-            built.append(_make_loop_assign(stmt, target, elt))
+        seq = self._unroll_seq
+        self._unroll_seq += 1
+        temp_names = [f"_speclino_unroll_{seq}_{i}" for i in range(len(elements))]
+        built: list[ast.stmt] = [
+            _make_assign(stmt, tmp, elt) for tmp, elt in zip(temp_names, elements, strict=True)
+        ]
+        for tmp in temp_names:
+            built.append(_make_assign(stmt, target.id, ast.Name(id=tmp, ctx=ast.Load())))
             built.extend(stmt.body)
         built.extend(stmt.orelse)
         return _UnrollOutcome(built)

@@ -202,3 +202,64 @@ def test_range_with_huge_magnitude_is_rejected_without_materializing_it(tmp_path
     success = code.paths[2]
     assert success.precision == "incomplete"
     assert "上限" in success.unknown_causes[0].detail
+
+
+# ------------------------------------------------------- codex フルレビュー (#50) の指摘
+
+
+def test_elements_are_evaluated_before_the_loop_not_after_body_mutation(tmp_path: Path) -> None:
+    """Python は反復の全要素をループ開始前に評価する。要素式を退避せず
+    ``x=e1;*body;x=e2;*body`` と書き換えると、body が変数を書き換えた後に e2 を評価してしまい
+    回数がずれる。ここでは実際の Python は 2 要素とも「ループ開始前の x（0）」に束縛されるので
+    x==1 は一度も成立せず、inventory.restore は 0 回しか呼ばれない
+    （``if x == 1`` は展開後にそのまま if として解析されるので、この経路自体は 2 通りの分岐
+    （if の then/else）×2 回のイテレーションに枝分かれするが、x==1 が真になる枝はどれも
+    ガードが充足不能。退避が無いと 2 回目の要素評価が body の ``x = 1`` 更新後になり、
+    充足可能な枝で誤って 1 回・VERIFIED_IN_SCOPE になっていた）。
+    """
+    mutant = CORRECT_SERVICE.replace(
+        "    inventory.restore(order.items)\n",
+        "    x = 0\n"
+        "    for x in (0, x):\n"
+        "        if x == 1:\n"
+        "            inventory.restore(order.items)\n"
+        "        x = 1\n",
+    )
+    code = analyze(tmp_path, mutant)
+    assert all(p.precision == "exact_in_model" for p in code.paths), [
+        (p.path_id, [u.detail for u in p.unknown_causes]) for p in code.paths
+    ]
+    assert verdicts(code)["R-CANCEL-04"] == ("VIOLATED", "missing_effect")
+
+
+def test_side_effecting_element_call_is_recorded_once_even_if_body_ends_the_path(
+    tmp_path: Path,
+) -> None:
+    """要素式の呼出しは退避の段階で（ループより前に）1 回だけ記録される。body が最初の
+    繰り返しで即座に経路を終えても、後続要素の呼出しイベントが取りこぼされない。
+    """
+    mutant = CORRECT_SERVICE.replace(
+        "    inventory.restore(order.items)\n",
+        "    for x in (0, inventory.restore(order.items)):\n"
+        "        raise HTTPException(status_code=500)\n",
+    )
+    code = analyze(tmp_path, mutant)
+    guarded = code.paths[2]
+    assert [e.operation_or_target for e in guarded.events].count("inventory_restore_command") == 1
+
+
+def test_module_level_range_shadow_prevents_unroll(tmp_path: Path) -> None:
+    """対象モジュールの最上位で range を再定義していたら、組込みと確定できないので展開しない。"""
+    mutant = (
+        CORRECT_SERVICE.replace(
+            "    inventory.restore(order.items)\n",
+            "    for _ in range(1):\n        inventory.restore(order.items)\n",
+        )
+        + "\n\ndef range(n):\n    return ()\n"
+    )
+    code = analyze(tmp_path, mutant)
+    success = code.paths[2]
+    assert success.precision == "incomplete"
+    assert success.unknown_causes[0].code == "unsupported_syntax"
+    assert "組込みと確定できない" in success.unknown_causes[0].detail
+    assert verdicts(code)["R-CANCEL-04"][0] == "UNKNOWN"
