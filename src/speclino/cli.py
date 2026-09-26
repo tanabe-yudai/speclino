@@ -18,7 +18,10 @@ from speclino.domain.finding import Verdict
 from speclino.services import CheckInputError, CheckRequest, run_check, write_result
 
 app = typer.Typer(name="speclino", help="仕様–実装の意味差分レビュー基盤 CLI")
+policy_app = typer.Typer(name="policy", help="チーム規約（改訂・承認・監査）の管理（S42）")
+app.add_typer(policy_app, name="policy")
 DEFAULT_SCHEMAS_DIR = Path("schemas")
+DEFAULT_POLICY_SEED_SOURCE = Path(".speclino/policy/speclino-core.yaml")
 
 _VERDICTS: tuple[Verdict, ...] = ("VERIFIED_IN_SCOPE", "VIOLATED", "UNKNOWN", "REVIEW")
 
@@ -252,3 +255,49 @@ def spec_extract(
         err=True,
     )
     raise typer.Exit(code=2 if result.errors else 0)
+
+
+@policy_app.command("seed")
+def policy_seed(
+    team: Annotated[str, typer.Option("--team", help="チーム識別子（当面は GitHub の owner）")],
+    source: Annotated[
+        Path, typer.Option("--from", help="取り込む規約パッケージ YAML")
+    ] = DEFAULT_POLICY_SEED_SOURCE,
+) -> None:
+    """既存の規約パッケージ（`.speclino/policy/*.yaml`）を team の最初の改訂として取り込む。
+
+    author / approver は両方 "seed"（人の承認ではなく既存ファイルの移行のため）。
+    下書き作成→承認と同じ経路を通すので、audit_events に policy.draft / policy.approve
+    の両方が残る。DB 接続は `SPECLINO_DATABASE_URL`（`Settings.database_url`）を使う。
+    """
+    import asyncio
+
+    import yaml
+
+    from speclino.db.session import make_engine, make_session_factory
+    from speclino.domain.policy import PolicyPackage, PolicyRevision
+    from speclino.services.policy_governance import seed_from_package
+    from speclino.settings import Settings
+
+    try:
+        raw = yaml.safe_load(source.read_text(encoding="utf-8"))
+        package = PolicyPackage.model_validate(raw)
+    except (OSError, ValidationError, ValueError) as e:
+        typer.echo(f"入力不正: {e}", err=True)
+        raise typer.Exit(code=2) from e
+
+    async def _run() -> PolicyRevision:
+        settings = Settings()
+        engine = make_engine(settings)
+        try:
+            session_factory = make_session_factory(engine)
+            async with session_factory() as session, session.begin():
+                return await seed_from_package(session, team=team, package=package)
+        finally:
+            await engine.dispose()
+
+    revision = asyncio.run(_run())
+    typer.echo(
+        f"{team}@{revision.revision} を {revision.status} として取り込んだ"
+        f"（rules={len(revision.package.rules)}）"
+    )

@@ -6,6 +6,7 @@ from speclino.db.repositories.approvals import ApprovalRepository
 from speclino.db.repositories.audit import AuditRepository
 from speclino.db.repositories.cost_ledger import CostLedgerRepository
 from speclino.db.repositories.findings import FindingRepository
+from speclino.db.repositories.policy_revisions import PolicyRevisionRepository
 from speclino.db.repositories.projects import ProjectRepository
 from speclino.db.repositories.questions import QuestionRepository
 from speclino.db.repositories.review_runs import ReviewRunRepository
@@ -17,6 +18,7 @@ __all__ = [
     "AuditRepository",
     "CostLedgerRepository",
     "FindingRepository",
+    "PolicyRevisionRepository",
     "ProjectRepository",
     "QuestionRepository",
     "ReviewRunRepository",
