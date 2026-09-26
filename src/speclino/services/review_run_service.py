@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -42,6 +43,7 @@ from speclino.db.repositories import (
 )
 from speclino.domain.code_ir import AnalysisLimits
 from speclino.domain.finding import Finding, Findings
+from speclino.domain.policy import PolicyRevision
 from speclino.domain.run import ExecState, GateStatus
 from speclino.domain.semantic_diff import SemanticDiff
 from speclino.domain.spec_ir import ApprovalRecord, RuleLevel, SpecIR
@@ -82,6 +84,10 @@ class ReviewRunConfig:
     details_url_base: str | None = None  # 例 https://speclino.example/runs
     agent_enabled: bool = True
     sandbox: Sandbox | None = None  # test_run（無ければツールを出さない）
+    # S42: run の実行前に active なチーム規約改訂を取る。DB アクセスはこの service に
+    # 直書きせず、呼び出し可能なものとして注入する（実体は api/deps.py が DB から渡す）。
+    # None なら従来どおりチーム規約を適用しない（.speclino/policy/ だけを実行する）
+    resolve_team_policy: Callable[[str], Awaitable[PolicyRevision | None]] | None = None
 
 
 @dataclass
@@ -221,6 +227,11 @@ class ReviewRunService:
                     else None
                 )
                 overrides, extra = _reconcile_specs(base_root, head_root, server_approvals)
+                team_policy: PolicyRevision | None = None
+                if self.config.resolve_team_policy is not None:
+                    # S42: チームの識別子は repo_full_name（owner/repo）の owner 部分
+                    team = repo_full_name.split("/", 1)[0]
+                    team_policy = await self.config.resolve_team_policy(team)
                 req = CheckRequest(
                     repo_root=head_root,
                     head_sha=head_sha,
@@ -233,6 +244,7 @@ class ReviewRunService:
                     extra_findings=tuple(extra),
                     bindings_patch=bindings_patch or None,
                     base_root=base_root,
+                    team_policy=team_policy,
                 )
                 with span("speclino.check", head=head_sha):
                     result = run_check(req)

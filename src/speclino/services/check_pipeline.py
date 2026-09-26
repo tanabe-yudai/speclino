@@ -60,7 +60,7 @@ from speclino.domain.code_ir import Path as CodePath
 from speclino.domain.common import SnapshotRef, SourceRef
 from speclino.domain.domain_spec import DomainSpec
 from speclino.domain.finding import CoverageCounts, Finding, Findings, Verdict, VerdictCounts
-from speclino.domain.policy import PolicyExceptions, PolicyPackage
+from speclino.domain.policy import PolicyExceptions, PolicyPackage, PolicyRevision
 from speclino.domain.run import BehaviorAnalysis, RunInputs, RunManifest, RunVersions
 from speclino.domain.semantic_diff import SemanticDiff
 from speclino.domain.spec_ir import RuleLevel, SpecIR
@@ -118,6 +118,10 @@ class CheckRequest:
     # Findings と突き合わせて意味差分（新規 / 既存 / 解消 / 判定不能化）を作る
     base_root: Path | None = None
     base_project_dir: Path | None = None
+    # S42: 適用するチーム規約の改訂（DB から取るのは呼び出し側の責務。このモジュールは
+    # データとして受け取るだけで、DB には依存しない）。None なら従来どおりプロジェクト
+    # 固有の .speclino/policy/*.yaml だけを実行する
+    team_policy: PolicyRevision | None = None
 
     @property
     def resolved_project_dir(self) -> Path:
@@ -270,7 +274,7 @@ def run_check(req: CheckRequest) -> CheckResult:
     ]
     combined = _merge_findings(findings_parts, run_id)
 
-    policy_findings, policy_levels, policy_texts = _run_policies(project_dir)
+    policy_findings, policy_levels, policy_texts = _run_policies(project_dir, req.team_policy)
     combined = _with_extra_findings(combined, [*policy_findings, *req.extra_findings])
 
     # S28: base の判定と Finding 同士を突き合わせる（head を base 仕様に照合しない）
@@ -320,6 +324,8 @@ def run_check(req: CheckRequest) -> CheckResult:
         fail_on=list(fail_on),
         mode=req.mode,
         analysis=analysis_records,
+        policy_team=req.team_policy.team if req.team_policy is not None else None,
+        policy_revision=req.team_policy.revision if req.team_policy is not None else None,
     )
 
     return CheckResult(
@@ -657,12 +663,17 @@ def _load_exceptions(project_dir: Path) -> PolicyExceptions:
     return load_policy_exceptions(yaml.safe_load(exceptions_path.read_text(encoding="utf-8")) or {})
 
 
-def _run_policies(project_dir: Path) -> tuple[list[Finding], dict[str, RuleLevel], list[str]]:
-    """`.speclino/policy/*.yaml` があれば VerifierRegistry で実行する。無ければ何もしない。"""
-    policy_dir = project_dir / ".speclino" / "policy"
-    if not policy_dir.is_dir():
-        return [], {}, []
+def _run_policies(
+    project_dir: Path, team_policy: PolicyRevision | None
+) -> tuple[list[Finding], dict[str, RuleLevel], list[str]]:
+    """チーム規約（`team_policy.package`）と `.speclino/policy/*.yaml`（プロジェクト固有の
+    追加規約）の両方を VerifierRegistry で実行する。
 
+    チーム規約を先に評価し、プロジェクト固有を後に足す（design/2026-09-26-team-policies-and-dx.md
+    3章）。同じ rule id が両方にあるときはチーム規約を優先し、プロジェクト側の同 id ルールは
+    実行しない（チーム規約を無効化できない、という設計）。無視した事実は `texts`
+    （`policy_hash` の入力）に注記として残す。
+    """
     exceptions = _load_exceptions(project_dir)
     snapshot = DirectorySnapshot(root=project_dir)
     registry = _policy_registry()
@@ -670,13 +681,38 @@ def _run_policies(project_dir: Path) -> tuple[list[Finding], dict[str, RuleLevel
     findings: list[Finding] = []
     levels: dict[str, RuleLevel] = {}
     texts: list[str] = []
-    policy_files = sorted({*policy_dir.glob("*.yaml"), *policy_dir.glob("*.yml")})
-    for path in policy_files:
-        text = path.read_text(encoding="utf-8")
-        texts.append(text)
-        package = PolicyPackage.model_validate(yaml.safe_load(text))
+    team_rule_ids: set[str] = set()
+
+    if team_policy is not None:
+        team_rule_ids = {rule.id for rule in team_policy.package.rules}
+        texts.append(
+            f"team:{team_policy.team}#{team_policy.revision}:"
+            + team_policy.package.model_dump_json()
+        )
         # DirectorySnapshot は frozen dataclass のため snapshot_id が読取り専用になり、
         # Snapshot Protocol（可変属性を要求）との構造的互換性チェックで mypy が誤検知する。
+        team_findings = registry.run_package(
+            team_policy.package, exceptions, cast(Snapshot, snapshot)
+        )
+        findings.extend(team_findings)
+        levels.update(_policy_levels(team_policy.package, team_findings))
+
+    policy_dir = project_dir / ".speclino" / "policy"
+    policy_files = (
+        sorted({*policy_dir.glob("*.yaml"), *policy_dir.glob("*.yml")})
+        if policy_dir.is_dir()
+        else []
+    )
+    for path in policy_files:
+        text = path.read_text(encoding="utf-8")
+        package = PolicyPackage.model_validate(yaml.safe_load(text))
+        overridden = sorted(rule.id for rule in package.rules if rule.id in team_rule_ids)
+        if overridden:
+            texts.append(f"# {path.name}: チーム規約が優先するため無視: {', '.join(overridden)}")
+        package = package.model_copy(
+            update={"rules": [r for r in package.rules if r.id not in team_rule_ids]}
+        )
+        texts.append(text)
         package_findings = registry.run_package(package, exceptions, cast(Snapshot, snapshot))
         findings.extend(package_findings)
         levels.update(_policy_levels(package, package_findings))

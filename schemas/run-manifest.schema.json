@@ -329,6 +329,32 @@
       },
       "title": "Analysis",
       "type": "array"
+    },
+    "policy_team": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "適用したチーム規約の team 識別子（S42）",
+      "title": "Policy Team"
+    },
+    "policy_revision": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "適用したチーム規約の改訂番号（S42）。replay はこの改訂で再評価する",
+      "title": "Policy Revision"
     }
   },
   "required": [

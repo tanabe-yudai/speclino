@@ -200,6 +200,8 @@ def build_state(settings: Settings) -> AppState:
             details_url_base=f"{settings.public_url.rstrip('/')}/runs",
             agent_enabled=settings.agent_enabled,
             sandbox=build_sandbox(settings),
+            # S42: チーム規約の DB 解決の配線は統合時に行う（別担当が db/ を実装中）
+            resolve_team_policy=None,
         ),
         cost_guard=CostGuard(ledger, Decimal(str(settings.daily_cost_limit_usd))),
     )
