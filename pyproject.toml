@@ -77,7 +77,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
   "live: 実LLMを呼ぶ（CI除外）",
-  "spec(id): SpecLino 自身の仕様IDに対応するテスト",
+  "spec(id): 要求 id を振る舞いとして検証するテスト（Spec IR の tests に宣言する。SPEC-TEST-001 が突き合わせる）",
   "integration: 実DBが必要な統合テスト（SPECLINO_DATABASE_URL 未設定なら skip）",
   "selfcheck: SpecLino を現在のリポジトリ自身に当てる検証。デモブランチでは落ちるのが正しい",
 ]

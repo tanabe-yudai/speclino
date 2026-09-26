@@ -33,6 +33,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy import (
     Enum as SAEnum,
@@ -41,6 +42,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from speclino.domain.finding import Verdict
+from speclino.domain.policy import PolicyRevisionStatus
 from speclino.domain.run import ExecState, GateStatus
 
 # DB 固有の Enum（domain 側に対応する Literal がまだ無いもの）。
@@ -305,6 +307,65 @@ class WebhookDelivery(Base):
     event: Mapped[str] = mapped_column(String, nullable=False)
     action: Mapped[str | None] = mapped_column(String, nullable=True)
     handled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class TeamRecord(Base):
+    """`teams`: チーム単位の統治設定（統治の穴修正、design/2026-09-26-team-policies-and-dx.md）。
+
+    承認者の許可集合はここに持つ。`policy_revisions`（改訂）には持たせない。改訂の中に
+    承認者リストを入れると、改訂を作る人（author）が自分を承認者に足せてしまうため、
+    改訂とは別のチーム単位の受け皿に分離する（`services/policy_governance.py` の `approve`
+    が検証に使う）。
+    """
+
+    __tablename__ = "teams"
+
+    team: Mapped[str] = mapped_column(String, primary_key=True)
+    approvers: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class PolicyRevisionRecord(Base):
+    """`policy_revisions`: チーム規約の 1 改訂（S42、design/2026-09-26-team-policies-and-dx.md）。
+
+    `policy_rules` という別テーブルには正規化しない。ルールは常に改訂単位でまとめて
+    読む・比較する（`active_revision` は改訂全体を返し、run-manifest も改訂番号ごと
+    まとめて replay する）ため、行に分けても JOIN や個別更新の利点が生きない。
+    `PolicyPackage`（pydantic）をそのまま JSONB に入れるほうが domain と DB の型が
+    1つに保てる（`review_runs.manifest` も同じ理由で構造化 JSON を JSONB に入れている）。
+
+    `status` の一意性は 2 段: (team, revision) は UNIQUE、かつ team ごとに
+    status='active' な行は最大 1 つ（部分一意インデックス）。
+    """
+
+    __tablename__ = "policy_revisions"
+    __table_args__ = (
+        UniqueConstraint("team", "revision", name="uq_policy_revisions_team_revision"),
+        Index(
+            "uq_policy_revisions_team_active",
+            "team",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    team: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[PolicyRevisionStatus] = mapped_column(
+        SAEnum(*get_args(PolicyRevisionStatus), name="policy_revision_status", native_enum=True),
+        nullable=False,
+    )
+    package: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    author: Mapped[str] = mapped_column(String, nullable=False)
+    approver: Mapped[str | None] = mapped_column(String, nullable=True)
+    note: Mapped[str] = mapped_column(String, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class CostLedgerEntry(Base):

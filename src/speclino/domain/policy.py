@@ -39,7 +39,15 @@ class PolicyVerifierRef(IRModel):
 
 
 class PolicyRule(IRModel):
-    id: str = Field(min_length=1, description="安定した規約 ID（例 MAKE-001）")
+    id: str = Field(
+        min_length=1,
+        # コロンを禁じる: 規約 Finding の requirement_id は `<rule>:<path>` の 2 段で、
+        # 例外の照合（conformance/exceptions.py の _rule_of / _path_of）が最初のコロンで
+        # 分解する。ID 自身がコロンを含むと切り詰められ、「規約が見つからない＝免除可」に
+        # 化けて exceptions_allowed=False を回避できてしまう（codex レビューで実測）。
+        pattern=r"^[^:]+$",
+        description="安定した規約 ID（例 MAKE-001）。コロンは使えない",
+    )
     version: str = Field(min_length=1)
     level: PolicyLevel
     title: str = Field(min_length=1)

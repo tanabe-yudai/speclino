@@ -5,8 +5,16 @@ import shutil
 from pathlib import Path
 
 import pytest
+import yaml
 
 from speclino.analysis.limits import DEFAULT_LIMITS
+from speclino.domain.policy import (
+    PolicyApplicability,
+    PolicyPackage,
+    PolicyRevision,
+    PolicyRule,
+    PolicyVerifierRef,
+)
 from speclino.services.check_pipeline import (
     CheckInputError,
     CheckRequest,
@@ -80,7 +88,13 @@ def test_self_repository_check_passes_including_policies() -> None:
     ids = {f.requirement_id for f in res.findings.findings}
     assert {"R-TOOL-01", "R-TOOL-02", "MAKE-001"} <= ids
     assert any(i.startswith("SPEC-FMT-001:") for i in ids)
-    assert res.gate.status == "pass", [(f.requirement_id, f.verdict) for f in res.gate.blocking]
+    # 例外（.speclino/exceptions.yaml）で免除された VIOLATED があると pass_with_exceptions に
+    # なる。免除は適合に書き換えず別記する設計（AC-009）なので、どちらも「通過」として扱う。
+    # 落としてよいのは必須ルールの非成立が残る場合だけ。
+    assert res.gate.status in ("pass", "pass_with_exceptions"), [
+        (f.requirement_id, f.verdict) for f in res.gate.blocking
+    ]
+    assert not res.gate.blocking
 
 
 def test_artifacts_are_deterministic_modulo_run_metadata(tmp_path: Path) -> None:
@@ -371,3 +385,95 @@ def test_incremental_does_not_reuse_with_code_ir_override(tmp_path: Path) -> Non
     assert analysis.reused_from_base is False
     assert analysis.reason == "override"
     assert res.code_irs[0].origin == "handwritten"
+
+
+# ---------------------------------------------------------------- S42 チーム規約と例外の穴
+
+
+def _team_revision(*, exceptions_allowed: bool, revision: int = 1) -> PolicyRevision:
+    rule = PolicyRule(
+        id="MAKE-001",
+        version="1.0.0",
+        level="mandatory",
+        title="Makefile の標準ターゲット",
+        text="setup/test/lint を持つこと",
+        applies_to=PolicyApplicability(paths=["Makefile"]),
+        verifier=PolicyVerifierRef(id="makefile.required_targets", version="1.0.0"),
+        on_missing_input="violation",
+        exceptions_allowed=exceptions_allowed,
+    )
+    package = PolicyPackage(
+        id="team-core", version="1.0.0", status="active", owner="acme", rules=[rule]
+    )
+    return PolicyRevision(
+        team="acme",
+        revision=revision,
+        status="active",
+        package=package,
+        author="tanabe-yudai",
+        approver="approver-x",
+    )
+
+
+def _write_project_exceptions(project: Path, *, rule: str = "MAKE-001") -> None:
+    """対象リポジトリ側（PR の head）の .speclino/exceptions.yaml に期限内の例外を書く。"""
+    (project / ".speclino" / "exceptions.yaml").write_text(
+        yaml.dump(
+            {
+                "schema_version": "0.1",
+                "exceptions": [
+                    {
+                        "id": "EXC-1",
+                        "rule": rule,
+                        "target": {"paths": ["**"]},
+                        "reason": "Makefile はまだ無い",
+                        "approver": "tanabe-yudai",
+                        "expires_on": "2099-01-01",
+                        "alternative": "後で追加する",
+                    }
+                ],
+            }
+        )
+    )
+
+
+def test_team_mandatory_rule_cannot_be_waived_when_exceptions_not_allowed(tmp_path: Path) -> None:
+    """codex が実測した穴1: mandatory + exceptions_allowed=False のチーム規約は、
+    プロジェクト側の .speclino/exceptions.yaml に期限内の例外があっても免除しない
+    （ゲートは fail のまま。免除禁止の判断が承認者の権限で回避できてはならない）。"""
+    project = _orders_copy(tmp_path / "proj", mutate=False)
+    _write_project_exceptions(project)
+    res = run_check(
+        CheckRequest(
+            repo_root=tmp_path / "proj",
+            head_sha="WORKTREE",
+            project_dir=project,
+            team_policy=_team_revision(exceptions_allowed=False),
+            run_id="r",
+        )
+    )
+    f = next(f for f in res.findings.findings if f.requirement_id == "MAKE-001")
+    assert f.verdict == "VIOLATED"
+    assert res.gate.status == "fail"
+    # 免除が拒否された事実が next_steps に残る（黙って無視しない）
+    assert any("exceptions_allowed=false" in s for s in f.next_steps)
+    assert (res.manifest.policy_team, res.manifest.policy_revision) == ("acme", 1)
+    assert res.manifest.inputs.team_policy_hash is not None
+
+
+def test_team_mandatory_rule_waived_when_exceptions_allowed(tmp_path: Path) -> None:
+    """exceptions_allowed=True（既定）なら従来どおり免除され、pass_with_exceptions になる。"""
+    project = _orders_copy(tmp_path / "proj", mutate=False)
+    _write_project_exceptions(project)
+    res = run_check(
+        CheckRequest(
+            repo_root=tmp_path / "proj",
+            head_sha="WORKTREE",
+            project_dir=project,
+            team_policy=_team_revision(exceptions_allowed=True),
+            run_id="r",
+        )
+    )
+    f = next(f for f in res.findings.findings if f.requirement_id == "MAKE-001")
+    assert f.verdict == "VIOLATED" and f.next_steps == []
+    assert res.gate.status == "pass_with_exceptions"

@@ -18,7 +18,10 @@ from speclino.domain.finding import Verdict
 from speclino.services import CheckInputError, CheckRequest, run_check, write_result
 
 app = typer.Typer(name="speclino", help="仕様–実装の意味差分レビュー基盤 CLI")
+policy_app = typer.Typer(name="policy", help="チーム規約（改訂・承認・監査）の管理（S42）")
+app.add_typer(policy_app, name="policy")
 DEFAULT_SCHEMAS_DIR = Path("schemas")
+DEFAULT_POLICY_SEED_SOURCE = Path(".speclino/policy/speclino-core.yaml")
 
 _VERDICTS: tuple[Verdict, ...] = ("VERIFIED_IN_SCOPE", "VIOLATED", "UNKNOWN", "REVIEW")
 
@@ -173,12 +176,28 @@ if __name__ == "__main__":
 @app.command()
 def replay(
     run_dir: Annotated[Path, typer.Argument(help="成果物ディレクトリ（run-manifest.json 等）")],
+    no_policy_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-policy-check",
+            help=(
+                "チーム規約の改訂検査を明示的に飛ばす（CLI は DB 接続を持たないため、"
+                "run-manifest がチーム規約の改訂を記録している場合は既定で失敗する）"
+            ),
+        ),
+    ] = False,
 ) -> None:
-    """凍結した IR から判定を再評価し、保存された結果と一致するか確認する（AC-013）。"""
+    """凍結した IR から判定を再評価し、保存された結果と一致するか確認する（AC-013）。
+
+    run-manifest がチーム規約の改訂（`policy_revision`）を記録している run は、CLI 単体では
+    DB に接続できず改訂を解決できないため既定で失敗する（規約が変わっても過去の判定が
+    再現できることを検証できないまま「一致」を名乗らせないため）。`--no-policy-check` を
+    付けるとその検査だけを明示的に飛ばして再評価する。
+    """
     from speclino.services.replay_service import replay as _replay
 
     try:
-        res = _replay(run_dir)
+        res = _replay(run_dir, require_policy_check=not no_policy_check)
     except (OSError, ValueError) as e:
         typer.echo(f"入力不正: {e}", err=True)
         raise typer.Exit(code=2) from e
@@ -252,3 +271,54 @@ def spec_extract(
         err=True,
     )
     raise typer.Exit(code=2 if result.errors else 0)
+
+
+@policy_app.command("seed")
+def policy_seed(
+    team: Annotated[str, typer.Option("--team", help="チーム識別子（当面は GitHub の owner）")],
+    source: Annotated[
+        Path, typer.Option("--from", help="取り込む規約パッケージ YAML")
+    ] = DEFAULT_POLICY_SEED_SOURCE,
+) -> None:
+    """既存の規約パッケージ（`.speclino/policy/*.yaml`）を team の最初の改訂として取り込む。
+
+    author / approver は両方 "seed"（人の承認ではなく既存ファイルの移行のため）。
+    下書き作成→承認と同じ経路を通すので、audit_events に policy.draft / policy.approve
+    の両方が残る。DB 接続は `SPECLINO_DATABASE_URL`（`Settings.database_url`）を使う。
+    """
+    import asyncio
+
+    import yaml
+
+    from speclino.db.session import make_engine, make_session_factory
+    from speclino.domain.policy import PolicyPackage, PolicyRevision
+    from speclino.services.policy_governance import seed_from_package
+    from speclino.settings import Settings
+
+    try:
+        raw = yaml.safe_load(source.read_text(encoding="utf-8"))
+        package = PolicyPackage.model_validate(raw)
+    except (OSError, ValidationError, ValueError) as e:
+        typer.echo(f"入力不正: {e}", err=True)
+        raise typer.Exit(code=2) from e
+
+    async def _run() -> PolicyRevision:
+        settings = Settings()
+        engine = make_engine(settings)
+        try:
+            session_factory = make_session_factory(engine)
+            async with session_factory() as session, session.begin():
+                return await seed_from_package(session, team=team, package=package)
+        finally:
+            await engine.dispose()
+
+    try:
+        revision = asyncio.run(_run())
+    except ValueError as e:
+        # 既に改訂があるチームへの seed 拒否など（seed_from_package が投げる）。
+        typer.echo(f"seed を拒否した: {e}", err=True)
+        raise typer.Exit(code=2) from e
+    typer.echo(
+        f"{team}@{revision.revision} を {revision.status} として取り込んだ"
+        f"（rules={len(revision.package.rules)}）"
+    )

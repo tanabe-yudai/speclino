@@ -44,7 +44,11 @@ from speclino.analysis.limits import DEFAULT_LIMITS, clamp
 from speclino.analysis.path_analyzer import ANALYZER_VERSION, analyze_repo
 from speclino.analysis.reachability import reachable_source_hash
 from speclino.conformance.engine import ENGINE_VERSION, EngineConfig, EngineInputError, evaluate
-from speclino.conformance.exceptions import waived_ids
+from speclino.conformance.exceptions import (
+    RejectedWaiver,
+    rejected_exceptions_for,
+    waived_ids,
+)
 from speclino.conformance.gate import DEFAULT_FAIL_ON, GatePolicy, GateResult, aggregate_gate
 from speclino.conformance.semantic_diff import DiffSide, annotate_findings, semantic_diff
 from speclino.domain.bindings import Bindings, OperationContract
@@ -60,7 +64,7 @@ from speclino.domain.code_ir import Path as CodePath
 from speclino.domain.common import SnapshotRef, SourceRef
 from speclino.domain.domain_spec import DomainSpec
 from speclino.domain.finding import CoverageCounts, Finding, Findings, Verdict, VerdictCounts
-from speclino.domain.policy import PolicyExceptions, PolicyPackage
+from speclino.domain.policy import PolicyExceptions, PolicyPackage, PolicyRevision, PolicyRule
 from speclino.domain.run import BehaviorAnalysis, RunInputs, RunManifest, RunVersions
 from speclino.domain.semantic_diff import SemanticDiff
 from speclino.domain.spec_ir import RuleLevel, SpecIR
@@ -83,6 +87,7 @@ from speclino.verifiers.make_targets import MakeTargetsVerifier
 from speclino.verifiers.registry import VerifierRegistry
 from speclino.verifiers.snapshot import DirectorySnapshot
 from speclino.verifiers.spec_format import SpecFormatVerifier
+from speclino.verifiers.spec_tests import SpecTestsVerifier
 
 Mode = Literal["advisory", "blocking"]
 
@@ -118,6 +123,10 @@ class CheckRequest:
     # Findings と突き合わせて意味差分（新規 / 既存 / 解消 / 判定不能化）を作る
     base_root: Path | None = None
     base_project_dir: Path | None = None
+    # S42: 適用するチーム規約の改訂。DB から取るのは呼び出し側（配線の層）の責務で、
+    # このモジュールはデータとして受け取るだけで DB には依存しない。None なら従来どおり
+    # プロジェクト固有の .speclino/policy/*.yaml だけを実行する
+    team_policy: PolicyRevision | None = None
 
     @property
     def resolved_project_dir(self) -> Path:
@@ -134,6 +143,11 @@ class CheckResult:
     gate: GateResult
     validation: list[ValidationReport]
     policy_findings: list[Finding]
+    # ゲートを決めた入力。エージェントの証拠で Findings が変わった後に再計算するとき、
+    # 同じ level と免除で判定するために持ち回る（別の場所で作り直すと、規約の level が
+    # 仕様側に上書きされる・免除が消えるといったずれが起きる。codex レビュー指摘）。
+    gate_levels: dict[str, RuleLevel] = field(default_factory=dict)
+    waived_finding_ids: frozenset[str] = field(default_factory=frozenset)
     artifacts: dict[str, Path] | None = None
     domain: DomainSpec | None = None
     bindings: Bindings | None = None
@@ -270,8 +284,8 @@ def run_check(req: CheckRequest) -> CheckResult:
     ]
     combined = _merge_findings(findings_parts, run_id)
 
-    policy_findings, policy_levels, policy_texts = _run_policies(project_dir)
-    combined = _with_extra_findings(combined, [*policy_findings, *req.extra_findings])
+    policy_result = _run_policies(project_dir, req.team_policy)
+    combined = _with_extra_findings(combined, [*policy_result.findings, *req.extra_findings])
 
     # S28: base の判定と Finding 同士を突き合わせる（head を base 仕様に照合しない）
     diff: SemanticDiff | None = None
@@ -287,12 +301,17 @@ def run_check(req: CheckRequest) -> CheckResult:
         combined = annotate_findings(combined, diff)
 
     levels: dict[str, RuleLevel] = {rule.id: rule.level for spec in spec_irs for rule in spec.rules}
-    levels.update(policy_levels)
+    levels.update(policy_result.levels)
 
     fail_on = req.fail_on or DEFAULT_FAIL_ON
-    # 例外（免除）: 有効期限内で対象が一致する VIOLATED だけ。適合には書き換えず別記する（AC-009）
+    # 例外（免除）: 有効期限内で対象が一致する VIOLATED だけ。適合には書き換えず別記する（AC-009）。
+    # exceptions_allowed=False のルール（チーム規約 + プロジェクト固有の規約の両方）は
+    # policy_result.rules_by_id に載っているので、対象・期限が一致していても免除しない。
     exceptions = _load_exceptions(project_dir)
-    waived = waived_ids(combined, exceptions, req.today or date.today())
+    today = req.today or date.today()
+    waived = waived_ids(combined, exceptions, today, policy_result.rules_by_id)
+    rejected = rejected_exceptions_for(combined, exceptions, today, policy_result.rules_by_id)
+    combined = _annotate_rejected_waivers(combined, rejected)
     gate = aggregate_gate(combined, levels, GatePolicy(fail_on=fail_on, mode=req.mode), waived)
 
     manifest = RunManifest(
@@ -307,7 +326,8 @@ def run_check(req: CheckRequest) -> CheckResult:
             bindings_hash=bindings_hash,
             domain_hash=domain_hash,
             contracts_hash=contracts_hash,
-            policy_hash=_combined_hash(policy_texts),
+            policy_hash=_combined_hash(policy_result.texts),
+            team_policy_hash=policy_result.team_policy_hash,
             code_ir_hash=content_hash(override_text) if override_text is not None else None,
         ),
         versions=RunVersions(
@@ -319,6 +339,8 @@ def run_check(req: CheckRequest) -> CheckResult:
         limits=limits,
         fail_on=list(fail_on),
         mode=req.mode,
+        policy_team=req.team_policy.team if req.team_policy is not None else None,
+        policy_revision=req.team_policy.revision if req.team_policy is not None else None,
         analysis=analysis_records,
     )
 
@@ -329,7 +351,9 @@ def run_check(req: CheckRequest) -> CheckResult:
         findings=combined,
         gate=gate,
         validation=validations,
-        policy_findings=policy_findings,
+        policy_findings=policy_result.findings,
+        gate_levels=levels,
+        waived_finding_ids=waived,
         domain=domain,
         bindings=bindings,
         contracts=contracts,
@@ -633,6 +657,7 @@ def _policy_registry() -> VerifierRegistry:
     registry = VerifierRegistry()
     registry.register(MakeTargetsVerifier())
     registry.register(SpecFormatVerifier())
+    registry.register(SpecTestsVerifier())
     registry.register(CiRequiredVerifier())
     registry.register(ApiErrorFormatVerifier())
     return registry
@@ -657,12 +682,41 @@ def _load_exceptions(project_dir: Path) -> PolicyExceptions:
     return load_policy_exceptions(yaml.safe_load(exceptions_path.read_text(encoding="utf-8")) or {})
 
 
-def _run_policies(project_dir: Path) -> tuple[list[Finding], dict[str, RuleLevel], list[str]]:
-    """`.speclino/policy/*.yaml` があれば VerifierRegistry で実行する。無ければ何もしない。"""
-    policy_dir = project_dir / ".speclino" / "policy"
-    if not policy_dir.is_dir():
-        return [], {}, []
+def policy_package_hash(package: PolicyPackage) -> str:
+    """規約パッケージの内容だけから決定的なハッシュを作る（S42）。
 
+    `_run_policies` がチーム規約から `RunInputs.team_policy_hash` を作るのに使い、
+    `replay_service` は DB から解決した改訂に対して同じ関数を呼んで manifest の値と比較する。
+    対象リポジトリのスナップショットが無くても再現できることが目的なので、`package` 単体
+    （team / revision を含まない）から計算する。
+    """
+    canonical = json.dumps(
+        package.model_dump(mode="json"), sort_keys=True, ensure_ascii=False, separators=(",", ":")
+    )
+    return content_hash(canonical)
+
+
+@dataclass
+class _PolicyRunResult:
+    findings: list[Finding]
+    levels: dict[str, RuleLevel]
+    texts: list[str]
+    # 規約 ID → PolicyRule（チーム規約 ∪ プロジェクト固有。同じ ID はチーム規約が優先）。
+    # 例外（免除）が exceptions_allowed を尊重できるように conformance 層へ渡す
+    rules_by_id: dict[str, PolicyRule]
+    # チーム規約の package だけから作ったハッシュ。team_policy が無ければ None
+    team_policy_hash: str | None
+
+
+def _run_policies(project_dir: Path, team_policy: PolicyRevision | None) -> _PolicyRunResult:
+    """チーム規約（`team_policy.package`）と `.speclino/policy/*.yaml`（プロジェクト固有の
+    追加規約）の両方を VerifierRegistry で実行する。
+
+    チーム規約を先に評価し、プロジェクト固有を後に足す（design/2026-09-26-team-policies-and-dx.md
+    3章）。同じ rule id が両方にあるときはチーム規約を優先し、プロジェクト側の同 id ルールは
+    実行しない（チーム規約を無効化できない、という設計）。無視した事実は `texts`
+    （`policy_hash` の入力）に注記として残す。
+    """
     exceptions = _load_exceptions(project_dir)
     snapshot = DirectorySnapshot(root=project_dir)
     registry = _policy_registry()
@@ -670,17 +724,59 @@ def _run_policies(project_dir: Path) -> tuple[list[Finding], dict[str, RuleLevel
     findings: list[Finding] = []
     levels: dict[str, RuleLevel] = {}
     texts: list[str] = []
-    policy_files = sorted({*policy_dir.glob("*.yaml"), *policy_dir.glob("*.yml")})
-    for path in policy_files:
-        text = path.read_text(encoding="utf-8")
-        texts.append(text)
-        package = PolicyPackage.model_validate(yaml.safe_load(text))
+    rules_by_id: dict[str, PolicyRule] = {}
+    team_policy_hash: str | None = None
+
+    if team_policy is not None:
+        team_policy_hash = policy_package_hash(team_policy.package)
+        texts.append(f"team:{team_policy.team}#{team_policy.revision}:{team_policy_hash}")
         # DirectorySnapshot は frozen dataclass のため snapshot_id が読取り専用になり、
         # Snapshot Protocol（可変属性を要求）との構造的互換性チェックで mypy が誤検知する。
+        team_findings = registry.run_package(
+            team_policy.package, exceptions, cast(Snapshot, snapshot)
+        )
+        findings.extend(team_findings)
+        levels.update(_policy_levels(team_policy.package, team_findings))
+        rules_by_id.update({rule.id: rule for rule in team_policy.package.rules})
+
+    policy_dir = project_dir / ".speclino" / "policy"
+    policy_files = (
+        sorted({*policy_dir.glob("*.yaml"), *policy_dir.glob("*.yml")})
+        if policy_dir.is_dir()
+        else []
+    )
+    for path in policy_files:
+        text = path.read_text(encoding="utf-8")
+        package = PolicyPackage.model_validate(yaml.safe_load(text))
+        overridden = sorted(rule.id for rule in package.rules if rule.id in rules_by_id)
+        if overridden:
+            texts.append(f"# {path.name}: チーム規約が優先するため無視: {', '.join(overridden)}")
+        package = package.model_copy(
+            update={"rules": [r for r in package.rules if r.id not in rules_by_id]}
+        )
+        texts.append(text)
         package_findings = registry.run_package(package, exceptions, cast(Snapshot, snapshot))
         findings.extend(package_findings)
         levels.update(_policy_levels(package, package_findings))
-    return findings, levels, texts
+        rules_by_id.update({rule.id: rule for rule in package.rules})
+    return _PolicyRunResult(findings, levels, texts, rules_by_id, team_policy_hash)
+
+
+def _annotate_rejected_waivers(findings: Findings, rejected: list[RejectedWaiver]) -> Findings:
+    """免除が拒否された事実を Finding.next_steps に残す（黙って無視しない）。"""
+    if not rejected:
+        return findings
+    notes: dict[str, list[str]] = {}
+    for r in rejected:
+        notes.setdefault(r.finding_id, []).append(
+            f"例外 {r.exception_id} は適用されない: 規約 {r.rule} は免除を許可していない"
+            "（exceptions_allowed=false）。この規約自体を満たす必要がある"
+        )
+    updated = [
+        f.model_copy(update={"next_steps": [*f.next_steps, *notes[f.id]]}) if f.id in notes else f
+        for f in findings.findings
+    ]
+    return findings.model_copy(update={"findings": updated})
 
 
 __all__ = [
@@ -688,6 +784,7 @@ __all__ = [
     "CheckRequest",
     "CheckResult",
     "Mode",
+    "policy_package_hash",
     "rediff",
     "run_check",
     "write_result",
