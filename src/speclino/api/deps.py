@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -22,7 +23,9 @@ from speclino.adapters.storage.fs import FileSystemBlobStore
 from speclino.adapters.storage.gcs import GcsBlobStore
 from speclino.agent.permissions import AgentPermissions
 from speclino.db.repositories.cost_ledger import CostLedgerRepository
+from speclino.db.repositories.policy_revisions import PolicyRevisionRepository
 from speclino.db.session import make_engine, make_session_factory
+from speclino.domain.policy import PolicyRevision
 from speclino.ports.blob_store import BlobStore
 from speclino.ports.code_host import CodeHost
 from speclino.ports.sandbox import Sandbox
@@ -65,6 +68,22 @@ class _SessionLedger:
     async def total_for_day(self, day):  # type: ignore[no-untyped-def]
         async with self.factory() as s:
             return await CostLedgerRepository(s).total_for_day(day)
+
+
+def make_team_policy_resolver(
+    factory: async_sessionmaker[AsyncSession],
+) -> Callable[[str], Awaitable[PolicyRevision | None]]:
+    """チームの active な規約改訂を DB から引く関数を作る（S42）。
+
+    `services/check_pipeline.py` は DB に依存させない（CLI が DB 無しで動く必要がある）ため、
+    規約はデータとして渡す。DB から取るのはここ＝配線の層の仕事。
+    """
+
+    async def resolve(team: str) -> PolicyRevision | None:
+        async with factory() as session:
+            return await PolicyRevisionRepository(session).active_revision(team)
+
+    return resolve
 
 
 def build_code_host(settings: Settings, installation_id: int | None = None) -> CodeHost:
@@ -200,8 +219,7 @@ def build_state(settings: Settings) -> AppState:
             details_url_base=f"{settings.public_url.rstrip('/')}/runs",
             agent_enabled=settings.agent_enabled,
             sandbox=build_sandbox(settings),
-            # S42: チーム規約の DB 解決の配線は統合時に行う（別担当が db/ を実装中）
-            resolve_team_policy=None,
+            resolve_team_policy=make_team_policy_resolver(factory),
         ),
         cost_guard=CostGuard(ledger, Decimal(str(settings.daily_cost_limit_usd))),
     )
