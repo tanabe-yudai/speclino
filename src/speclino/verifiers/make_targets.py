@@ -272,7 +272,7 @@ class MakeTargetsVerifier:
     version = VERIFIER_VERSION
 
     def run(self, rule: PolicyRule, snapshot: Snapshot) -> list[Finding]:
-        params = rule.verifier.params
+        params = rule.verifier_ref.params
         targets: list[str] = list(params.get("targets", _DEFAULT_TARGETS))
         trivial: list[str] = list(params.get("trivial", _DEFAULT_TRIVIAL))
 
@@ -306,7 +306,7 @@ class MakeTargetsVerifier:
         finding = Finding(
             id=f"policy:{rule.id}:{makefile_path}",
             requirement_id=rule.id,
-            behavior_id=f"policy:{rule.verifier.id}",
+            behavior_id=f"policy:{rule.verifier_ref.id}",
             verdict=verdict,
             category=category,
             severity="high" if rule.level == "mandatory" else "medium",

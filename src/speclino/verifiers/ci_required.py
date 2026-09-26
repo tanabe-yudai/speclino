@@ -281,7 +281,7 @@ class CiRequiredVerifier:
     version = VERIFIER_VERSION
 
     def run(self, rule: PolicyRule, snapshot: Snapshot) -> list[Finding]:
-        params = rule.verifier.params
+        params = rule.verifier_ref.params
         paths = sorted({p for pattern in rule.applies_to.paths for p in snapshot.glob(pattern)})
         return [self._check_file(rule, snapshot, path, params) for path in paths]
 
@@ -311,7 +311,7 @@ class CiRequiredVerifier:
         return Finding(
             id=f"policy:{requirement_id}",
             requirement_id=requirement_id,
-            behavior_id=f"policy:{rule.verifier.id}",
+            behavior_id=f"policy:{rule.verifier_ref.id}",
             verdict=verdict,
             category=category,
             severity=self._severity(rule),
@@ -333,7 +333,7 @@ class CiRequiredVerifier:
         return Finding(
             id=f"policy:{requirement_id}",
             requirement_id=requirement_id,
-            behavior_id=f"policy:{rule.verifier.id}",
+            behavior_id=f"policy:{rule.verifier_ref.id}",
             verdict="UNKNOWN",
             category="unsupported_analysis",
             severity=self._severity(rule),

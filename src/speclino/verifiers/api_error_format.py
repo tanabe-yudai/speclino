@@ -120,7 +120,7 @@ class ApiErrorFormatVerifier:
     version = VERIFIER_VERSION
 
     def run(self, rule: PolicyRule, snapshot: Snapshot) -> list[Finding]:
-        params = rule.verifier.params
+        params = rule.verifier_ref.params
         openapi_path: str = params.get("openapi_path", "openapi.json")
         error_schema: str = params.get("error_schema", _DEFAULT_ERROR_SCHEMA)
         api_glob: str = params.get("api_glob", "src/speclino/api/**/*.py")
@@ -144,7 +144,7 @@ class ApiErrorFormatVerifier:
             return Finding(
                 id=f"policy:{requirement_id}",
                 requirement_id=requirement_id,
-                behavior_id=f"policy:{rule.verifier.id}",
+                behavior_id=f"policy:{rule.verifier_ref.id}",
                 verdict="UNKNOWN",
                 category="unsupported_analysis",
                 severity=severity,
@@ -158,7 +158,7 @@ class ApiErrorFormatVerifier:
             return Finding(
                 id=f"policy:{requirement_id}",
                 requirement_id=requirement_id,
-                behavior_id=f"policy:{rule.verifier.id}",
+                behavior_id=f"policy:{rule.verifier_ref.id}",
                 verdict="UNKNOWN",
                 category="unsupported_analysis",
                 severity=severity,
@@ -170,7 +170,7 @@ class ApiErrorFormatVerifier:
             return Finding(
                 id=f"policy:{requirement_id}",
                 requirement_id=requirement_id,
-                behavior_id=f"policy:{rule.verifier.id}",
+                behavior_id=f"policy:{rule.verifier_ref.id}",
                 verdict="UNKNOWN",
                 category="unsupported_analysis",
                 severity=severity,
@@ -186,7 +186,7 @@ class ApiErrorFormatVerifier:
             return Finding(
                 id=f"policy:{requirement_id}",
                 requirement_id=requirement_id,
-                behavior_id=f"policy:{rule.verifier.id}",
+                behavior_id=f"policy:{rule.verifier_ref.id}",
                 verdict="VIOLATED",
                 category="constraint_mismatch",
                 severity=severity,
@@ -201,7 +201,7 @@ class ApiErrorFormatVerifier:
         return Finding(
             id=f"policy:{requirement_id}",
             requirement_id=requirement_id,
-            behavior_id=f"policy:{rule.verifier.id}",
+            behavior_id=f"policy:{rule.verifier_ref.id}",
             verdict="VERIFIED_IN_SCOPE",
             category="conformant",
             severity=severity,
@@ -225,7 +225,7 @@ class ApiErrorFormatVerifier:
             return Finding(
                 id=f"policy:{requirement_id}",
                 requirement_id=requirement_id,
-                behavior_id=f"policy:{rule.verifier.id}",
+                behavior_id=f"policy:{rule.verifier_ref.id}",
                 verdict="UNKNOWN",
                 category="unsupported_analysis",
                 severity=severity,
@@ -242,7 +242,7 @@ class ApiErrorFormatVerifier:
             return Finding(
                 id=f"policy:{requirement_id}",
                 requirement_id=requirement_id,
-                behavior_id=f"policy:{rule.verifier.id}",
+                behavior_id=f"policy:{rule.verifier_ref.id}",
                 verdict="VIOLATED",
                 category="forbidden_effect",
                 severity=severity,
@@ -258,7 +258,7 @@ class ApiErrorFormatVerifier:
         return Finding(
             id=f"policy:{requirement_id}",
             requirement_id=requirement_id,
-            behavior_id=f"policy:{rule.verifier.id}",
+            behavior_id=f"policy:{rule.verifier_ref.id}",
             verdict="VERIFIED_IN_SCOPE",
             category="conformant",
             severity=severity,

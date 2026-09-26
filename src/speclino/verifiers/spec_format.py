@@ -80,7 +80,7 @@ class SpecFormatVerifier:
     version = VERIFIER_VERSION
 
     def run(self, rule: PolicyRule, snapshot: Snapshot) -> list[Finding]:
-        params = rule.verifier.params
+        params = rule.verifier_ref.params
         id_pattern = re.compile(params["id_pattern"])
         required_sections: list[str] = list(params.get("required_sections", []))
 
@@ -138,7 +138,7 @@ class SpecFormatVerifier:
         return Finding(
             id=f"policy:{rule.id}:{path}",
             requirement_id=f"{rule.id}:{path}",
-            behavior_id=f"policy:{rule.verifier.id}",
+            behavior_id=f"policy:{rule.verifier_ref.id}",
             verdict=verdict,
             category=category,
             severity="high" if rule.level == "mandatory" else "medium",

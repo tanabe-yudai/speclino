@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from speclino.domain.common import SCHEMA_VERSION, IRModel
 
@@ -46,11 +46,41 @@ class PolicyRule(IRModel):
     text: str = Field(min_length=1)
     applies_to: PolicyApplicability
     source: PolicySource | None = None
-    verifier: PolicyVerifierRef
+    verifier: PolicyVerifierRef | None = Field(
+        default=None,
+        description=(
+            "検証器の参照。None は「機械検証されていない（助言のみ）」を表す（S42）。"
+            "散文の制約をまず advisory として登録し、検証器を書けたものから mandatory に上げる"
+        ),
+    )
     on_missing_input: OnMissingInput = Field(
         description="applies_to が対象を1つも見つけられないときの扱い"
     )
     exceptions_allowed: bool = True
+
+    @property
+    def verifier_ref(self) -> PolicyVerifierRef:
+        """検証器つきのルールとしての参照。
+
+        検証器の無いルール（助言のみ）は `VerifierRegistry._run_rule` が先に弾くので、
+        検査器の中でここに来ることはない。不変条件を各検査器に散らさず 1 か所で保証する。
+        """
+        if self.verifier is None:
+            raise ValueError(f"{self.id}: 検証器の無いルールを検査器に渡した")
+        return self.verifier
+
+    @model_validator(mode="after")
+    def _mandatory_needs_a_verifier(self) -> PolicyRule:
+        """必須ルールは機械検証できることを要求する。
+
+        検証器の無い規約を mandatory にするとゲートを落とす根拠が人の判断になり、
+        「判定は決定的な検査器だけが行う」という前提が崩れる。
+        """
+        if self.level == "mandatory" and self.verifier is None:
+            raise ValueError(
+                f"{self.id}: mandatory なルールには verifier が必要（助言なら advisory に）"
+            )
+        return self
 
 
 class PolicyPackage(IRModel):
@@ -81,3 +111,44 @@ class PolicyException(IRModel):
 class PolicyExceptions(IRModel):
     schema_version: Literal["0.1"] = SCHEMA_VERSION
     exceptions: list[PolicyException] = Field(default_factory=list)
+
+
+# --------------------------------------------------------------- チーム規約の改訂（S42）
+# 規約はプロジェクト固有ではなくチーム固有なので、正本を対象リポジトリの Git ではなく
+# SpecLino が持つ（design/2026-09-26-team-policies-and-dx.md）。Git に置く代わりに
+# バージョン・レビュー・監査・再現性の 4 つをこちら側で満たす。
+
+PolicyRevisionStatus = Literal["draft", "active", "superseded"]
+
+
+class PolicyRevision(IRModel):
+    """チーム規約の 1 改訂。不変・連番で、承認されるまで有効にならない。
+
+    `package` が規約の中身（既存の PolicyPackage をそのまま使う）。改訂は上書きせず、
+    新しい番号で積む。run-manifest には適用した `revision` を記録し、`replay` は
+    その改訂で再評価する（UI で規約を変えても過去の判定は変わらない）。
+    """
+
+    team: str = Field(min_length=1, description="チームの識別子（当面は GitHub の owner）")
+    revision: int = Field(ge=1, description="チーム内で連番。改訂は不変")
+    status: PolicyRevisionStatus
+    package: PolicyPackage
+    author: str = Field(min_length=1)
+    approver: str | None = Field(default=None, description="承認者。draft のうちは None")
+    note: str = Field(default="", description="この改訂で何を変えたか")
+
+
+__all__ = [
+    "OnMissingInput",
+    "PolicyApplicability",
+    "PolicyException",
+    "PolicyExceptionTarget",
+    "PolicyExceptions",
+    "PolicyLevel",
+    "PolicyPackage",
+    "PolicyRevision",
+    "PolicyRevisionStatus",
+    "PolicyRule",
+    "PolicySource",
+    "PolicyVerifierRef",
+]

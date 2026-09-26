@@ -24,7 +24,7 @@ def _missing_input_finding(rule: PolicyRule, snapshot: Snapshot) -> Finding | No
     return Finding(
         id=f"policy:{rule.id}:missing_input",
         requirement_id=rule.id,
-        behavior_id=f"policy:{rule.verifier.id}",
+        behavior_id=f"policy:{rule.verifier.id if rule.verifier else rule.id}",
         verdict=verdict,
         category=category,
         severity="high" if rule.level == "mandatory" else "medium",
@@ -59,6 +59,11 @@ class VerifierRegistry:
         return findings
 
     def _run_rule(self, rule: PolicyRule, snapshot: Snapshot) -> list[Finding]:
+        if rule.verifier is None:
+            # 機械検証されていない助言ルール（S42）。判定を作らない。
+            # 「人が見て判断する」を Finding にすると、根拠の無い verdict を足すことになる。
+            # UI は改訂のデータからこのルールを「未検証」として表示する。
+            return []
         if not _has_any_match(rule.applies_to.paths, snapshot):
             missing = _missing_input_finding(rule, snapshot)
             return [missing] if missing is not None else []
