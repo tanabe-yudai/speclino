@@ -9,9 +9,10 @@ import pytest
 from typer.testing import CliRunner
 
 from speclino.cli import app
+from speclino.domain.finding import Finding, Findings
 from speclino.domain.policy import PolicyRevision
 from speclino.services.check_pipeline import run_check, write_result
-from speclino.services.replay_service import replay
+from speclino.services.replay_service import _check_policy_findings_against, replay
 from tests.fixtures import cancel_order as co
 from tests.unit.services.test_check_pipeline import (
     mandatory_rule,
@@ -92,3 +93,52 @@ def test_replay_fails_when_recorded_revision_cannot_be_resolved(tmp_path: Path) 
 
     cli = CliRunner().invoke(app, ["replay", str(out)])
     assert cli.exit_code == 0  # CLI は resolve_revision を渡さないので従来どおり再評価する
+
+
+# ------------------------------ S42: 改訂と保存済み規約 Finding の整合
+
+
+def _policy_finding(rid: str, severity: str, behavior_id: str = "policy:make_targets") -> Finding:
+    return Finding(
+        id=f"policy:{rid}:x",
+        requirement_id=rid,
+        behavior_id=behavior_id,
+        verdict="VIOLATED",
+        category="missing_effect",
+        severity=severity,  # type: ignore[arg-type]
+        message="m",
+        claim_scope="persisted_state",
+    )
+
+
+def test_saved_policy_findings_must_match_the_resolved_revision() -> None:
+    """検証器は再実行できない（スナップショットが無い）が、改訂との整合は確かめられる。
+
+    manifest が別の改訂を指していれば、保存された Finding の severity が改訂の level と
+    食い違う。これを黙って通すと「規約を変えても過去の判定は変わらない」が空手形になる。
+    """
+    revision = team_revision(rules=[mandatory_rule("MAKE-001", ["Makefile"])])
+    rule_id = revision.package.rules[0].id
+
+    # 整合している（mandatory → high）
+    _check_policy_findings_against(revision, Findings(findings=[_policy_finding(rule_id, "high")]))
+
+    # 食い違う（mandatory なのに medium）
+    with pytest.raises(ValueError, match="整合しない"):
+        _check_policy_findings_against(
+            revision, Findings(findings=[_policy_finding(rule_id, "medium")])
+        )
+
+
+def test_project_local_and_non_policy_findings_are_not_checked() -> None:
+    """改訂に無い id はプロジェクト固有の追加規約なので照合しない。規約以外も無関係。"""
+    revision = team_revision(rules=[mandatory_rule("MAKE-001", ["Makefile"])])
+    _check_policy_findings_against(
+        revision,
+        Findings(
+            findings=[
+                _policy_finding("TEAM-999", "medium"),
+                _policy_finding("R-CANCEL-04", "medium", behavior_id="cancel_order"),
+            ]
+        ),
+    )
