@@ -37,15 +37,24 @@ class TeamRepository:
         await self._session.flush()
 
     async def ensure_and_lock(self, team: str) -> None:
-        """team 行が無ければ作り、行ロックを取る（seed の排他用）。
+        """team 行が無ければ作り、行ロックを取る（改訂操作全体の排他用）。
 
         `INSERT ... ON CONFLICT DO NOTHING` は行の存在を保証するだけで、衝突した場合に
         その行のロックを保持し続けない。続けて `SELECT ... FOR UPDATE` することで、この
         呼び出し以降このトランザクションが commit/rollback するまで、同じ team に対する
-        `ensure_and_lock` を直列化する（2つの seed が同時に「まだ改訂が無い」と判定して
-        両方進んでしまうのを防ぐ）。呼び出し側は 1 トランザクションの中でロック取得の
-        直後に「改訂が既にあるか」を確認し、そのまま同じトランザクションで
-        作成まで終える必要がある。
+        `ensure_and_lock` を直列化する。
+
+        呼び出し元は `services/policy_governance.py` の `seed_from_package` /
+        `create_draft` / `_approve`（`approve` の実装本体）の3つ全て（統治の穴修正
+        #2, #4）。当初は「2つの seed が同時に『まだ改訂が無い』と判定して両方進んで
+        しまう」のを防ぐためだけに導入したが、それだけでは seed と通常の下書き作成→承認
+        の間のレースは塞げなかった（seed が「改訂0件」を確認した直後に、ロックを取らない
+        通常経路が割り込んで承認済みの改訂を作ってしまい、seed がそれを superseded に
+        できてしまう）ため、`create_draft` / `_approve` もここを呼ぶようにして、team 単位
+        のあらゆる改訂操作をこの1つの行ロックで直列化している。呼び出し側は 1 トランザク
+        ションの中でロック取得の直後に必要な確認・書き込みを行い、そのまま同じ
+        トランザクションで完了させる必要がある（ロックの取得順序はチーム行→改訂行に
+        統一し、デッドロックを避ける）。
         """
         insert_stmt = (
             pg_insert(TeamRecord)
