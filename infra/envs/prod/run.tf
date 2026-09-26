@@ -4,23 +4,40 @@
 # を使うため、provider を google-beta に揃えている（for_each の1リソース内では
 # provider を条件分岐できないため。google-beta は GA リソースの上位互換）。
 locals {
+  # timeout / concurrency も役割ごとに決める。
+  # パイプライン全体15分 < Cloud Run timeout 20分 < Cloud Tasks dispatch deadline 25分
+  # （design の「時間と冪等性」）なので web / worker は 1200s。
   cloud_run_services = {
     web = {
-      cpu    = "1"
-      memory = "1Gi"
+      cpu         = "1"
+      memory      = "1Gi"
+      timeout     = "1200s"
+      concurrency = 80
     }
     worker = {
-      cpu    = "1"
-      memory = "2Gi"
+      cpu         = "1"
+      memory      = "2Gi"
+      timeout     = "1200s"
+      concurrency = 80
     }
   }
 
   # Preview 機能（Cloud Run sandboxes）を使う sandbox サービスは opt-in。
   # 初回 apply で web/worker まで巻き込んで失敗しないよう、既定では作らない。
+  #
+  # sandbox は未信頼コードを動かす。Cloud Run sandboxes はサンドボックス単位の CPU・メモリ
+  # 上限を指定できず親コンテナと資源を共有するため（S38）、親の側で締めて影響範囲を限る:
+  #   concurrency = 1  1 インスタンスで同時に 1 実行だけ。未信頼コードが資源を食い潰しても
+  #                    同じコンテナで動く別の run を巻き込まない。**これが一番効く**
+  #   memory 512Mi     ローカル Docker の --memory 512m と揃える（両環境の保証を比較可能にする）
+  #   timeout 300s     test_run の TIMEOUT_S = 120s に対して十分な余裕。1200s だと、止まらない
+  #                    サンドボックスが 20 分インスタンスを占有しうる
   sandbox_service = var.enable_sandbox ? {
     sandbox = {
-      cpu    = "1"
-      memory = "1Gi"
+      cpu         = "1"
+      memory      = "512Mi"
+      timeout     = "300s"
+      concurrency = 1
     }
   } : {}
 
@@ -105,9 +122,8 @@ resource "google_cloud_run_v2_service" "services" {
   template {
     service_account = google_service_account.this[each.key].email
 
-    # パイプライン全体15分 < Cloud Run timeout 20分 < Cloud Tasks dispatch deadline 25分
-    # （design の「時間と冪等性」）に合わせて 1200s。
-    timeout = "1200s"
+    timeout                          = each.value.timeout
+    max_instance_request_concurrency = each.value.concurrency
 
     scaling {
       min_instance_count = 0
