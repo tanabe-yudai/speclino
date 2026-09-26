@@ -30,7 +30,19 @@ async def create_draft(
     author: str,
     note: str = "",
 ) -> PolicyRevision:
-    """draft 改訂を作り、`audit_events` に `policy.draft` を残す。"""
+    """draft 改訂を作り、`audit_events` に `policy.draft` を残す。
+
+    統治の穴修正 #4: `seed_from_package` とここ（および `approve`）の間にも排他が要る。
+    `seed_from_package` は「チーム行をロック → 改訂が0件か確認 → 挿入」を1トランザクション
+    で行うが、この関数がチーム行をロックしなければ、seed が確認を終えた直後に別の
+    トランザクションでここが割り込んで draft 作成→承認まで完了させてしまい、seed が
+    （古い「0件」を前提のまま）resume してその改訂を superseded にできてしまう
+    （承認者検証をバイパスする seed が、承認を経た改訂を上書きする）。そのため、この関数も
+    `TeamRepository.ensure_and_lock` でチーム行をロックしてから進む（すべての改訂操作を
+    同じ行ロックで直列化する）。ロックの取得順序は `seed_from_package` と揃えてチーム行→
+    改訂行に統一し、デッドロックを避ける。
+    """
+    await TeamRepository(session).ensure_and_lock(team)
     revision = await PolicyRevisionRepository(session).create_draft(
         team=team, package=package, author=author, note=note
     )
@@ -84,7 +96,12 @@ async def _approve(
     """`approve` の実装本体。`enforce_approvers=False` は `seed_from_package` 専用
     （人の承認ではなく既存ファイルの移行のため、チームの承認者集合の検証を通さない）。
     公開 API からは `enforce_approvers=False` を選べない（`approve` は常に True で呼ぶ）。
+
+    統治の穴修正 #4: `create_draft` と同じ理由で、ここも `seed_from_package` と排他する
+    必要がある。承認者検証・改訂行の更新より前にチーム行をロックする
+    （ロックの取得順序をチーム行→改訂行に統一し、デッドロックを避ける）。
     """
+    await TeamRepository(session).ensure_and_lock(team)
     if enforce_approvers:
         approvers = set(await TeamRepository(session).list_approvers(team))
         if approver not in approvers:
@@ -119,6 +136,14 @@ async def seed_from_package(
     `TeamRepository.ensure_and_lock` でチームの行ロックを取ってから改訂の有無を確認する
     （行ロックを取った時点でこのトランザクションが commit/rollback するまで、同じ team に
     対する他の `ensure_and_lock` はブロックされる）。
+
+    統治の穴修正 #4: 上記の排他は元々 seed 同士（2つの `seed_from_package`）にしか
+    効いていなかった。`create_draft` / `approve`（`_approve`）が今ではここと同じ
+    `ensure_and_lock` を呼ぶため、通常の下書き作成→承認との間もこの行ロックで直列化
+    される。これにより、この関数が「改訂0件」を確認してから内部で `create_draft` /
+    `_approve` を呼び終えて commit するまでの間、他のトランザクションが同じ team に
+    対して draft 作成や承認を割り込ませることはできない（詳細は `create_draft` の
+    docstring 参照）。
     """
     teams = TeamRepository(session)
     await teams.ensure_and_lock(team)

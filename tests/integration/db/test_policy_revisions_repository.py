@@ -394,6 +394,105 @@ async def test_concurrent_approve_second_transaction_fails_and_does_not_overwrit
         await engine.dispose()
 
 
+async def test_seed_fails_when_it_races_with_create_draft_and_approve() -> None:
+    """穴 #4: seed が「チーム行をロック→改訂0件を確認」した直後に、ロックを取らない
+    通常経路（`create_draft` → `approve`）が割り込んで承認済みの改訂を作ってしまい、
+    seed がその改訂を superseded にできてしまうレースの回帰試験。
+
+    `create_draft` / `approve`（内部の `_approve`）も `TeamRepository.ensure_and_lock`
+    でチーム行をロックするようになったので、通常経路がチーム行のロックを保持している
+    間、seed 側の `ensure_and_lock` は DB レベルでブロックされる。通常経路が commit
+    してから初めて seed の `exists_for_team` 確認が走るため、seed は「改訂が既にある」
+    ことを正しく検知して `ValueError` で失敗し、通常経路で作られた改訂が active のまま
+    残る（承認を経ていない seed が承認済みの改訂を上書きすることはない）。
+
+    実際に DB レベルのロック競合を起こすため、通常経路（session_a）を先に走らせて
+    approve まで終えた状態で commit せずに一時停止し、seed（session_b）にチーム行の
+    ロック取得を試みさせて DB 側でブロックさせてから、通常経路を commit させて
+    再開させる（`test_concurrent_approve_second_transaction_fails_and_does_not_overwrite_approver`
+    と同じ、`asyncio.Event` で2セッションを同期する書き方に倣う）。
+    """
+    assert _DATABASE_URL is not None
+    team = f"seed-race-{uuid.uuid4().hex[:8]}"
+    engine = create_async_engine(_DATABASE_URL)
+    session_a: AsyncSession | None = None
+    session_b: AsyncSession | None = None
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        session_factory = async_sessionmaker(bind=engine, expire_on_commit=False)
+
+        async with session_factory() as setup, setup.begin():
+            await TeamRepository(setup).set_approvers(team, ["bob"])
+
+        session_a = session_factory()
+        session_b = session_factory()
+        b_started = asyncio.Event()
+        a_may_commit = asyncio.Event()
+        outcome: dict[str, str] = {}
+
+        async def run_normal_path() -> None:
+            assert session_a is not None
+            async with session_a.begin():
+                draft = await policy_governance.create_draft(
+                    session_a, team=team, package=_package(), author="alice"
+                )
+                await policy_governance.approve(
+                    session_a, team=team, revision=draft.revision, approver="bob"
+                )
+                b_started.set()
+                # まだコミットしない: seed が同じチーム行のロックを取ろうとして
+                # DB 側でブロックされるのを待つ。
+                await a_may_commit.wait()
+            # ここで `async with` を正常終了して commit する。
+
+        async def run_seed() -> None:
+            assert session_b is not None
+            await b_started.wait()
+            try:
+                async with session_b.begin():
+                    await policy_governance.seed_from_package(
+                        session_b, team=team, package=_package("R-SEED")
+                    )
+                outcome["result"] = "unexpected_success"
+            except ValueError as e:
+                outcome["result"] = str(e)
+
+        async def coordinator() -> None:
+            await b_started.wait()
+            # seed の ensure_and_lock が実際に DB 側でブロックされる状態に確実に
+            # 入るまで少し待ってから、通常経路のコミットを許可する。
+            await asyncio.sleep(0.3)
+            a_may_commit.set()
+
+        await asyncio.wait_for(
+            asyncio.gather(run_normal_path(), run_seed(), coordinator()), timeout=10
+        )
+
+        assert "seed は初期化専用" in outcome["result"]
+
+        async with session_factory() as check:
+            active = await PolicyRevisionRepository(check).active_revision(team)
+        assert active is not None
+        assert active.author == "alice"
+        assert active.approver == "bob"  # seed に上書きされていない
+        assert active.package.rules[0].id == "R-1"  # R-SEED（seed 側）に置き換わっていない
+    finally:
+        if session_a is not None:
+            await session_a.close()
+        if session_b is not None:
+            await session_b.close()
+        async with engine.begin() as conn:
+            await conn.execute(
+                AuditEvent.__table__.delete().where(AuditEvent.target.like(f"{team}@%"))
+            )
+            await conn.execute(
+                PolicyRevisionRecord.__table__.delete().where(PolicyRevisionRecord.team == team)
+            )
+            await conn.execute(TeamRecord.__table__.delete().where(TeamRecord.team == team))
+        await engine.dispose()
+
+
 async def test_denied_audit_survives_the_callers_rollback(_schema_ready: None) -> None:
     """拒否の監査は呼び出し側の rollback で消えてはいけない。
 
