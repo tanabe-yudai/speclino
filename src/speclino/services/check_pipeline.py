@@ -143,6 +143,11 @@ class CheckResult:
     gate: GateResult
     validation: list[ValidationReport]
     policy_findings: list[Finding]
+    # ゲートを決めた入力。エージェントの証拠で Findings が変わった後に再計算するとき、
+    # 同じ level と免除で判定するために持ち回る（別の場所で作り直すと、規約の level が
+    # 仕様側に上書きされる・免除が消えるといったずれが起きる。codex レビュー指摘）。
+    gate_levels: dict[str, RuleLevel] = field(default_factory=dict)
+    waived_finding_ids: frozenset[str] = field(default_factory=frozenset)
     artifacts: dict[str, Path] | None = None
     domain: DomainSpec | None = None
     bindings: Bindings | None = None
@@ -347,6 +352,8 @@ def run_check(req: CheckRequest) -> CheckResult:
         gate=gate,
         validation=validations,
         policy_findings=policy_result.findings,
+        gate_levels=levels,
+        waived_finding_ids=waived,
         domain=domain,
         bindings=bindings,
         contracts=contracts,

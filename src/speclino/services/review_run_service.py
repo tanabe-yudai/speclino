@@ -46,7 +46,7 @@ from speclino.domain.finding import Finding, Findings
 from speclino.domain.policy import PolicyRevision
 from speclino.domain.run import ExecState, GateStatus
 from speclino.domain.semantic_diff import SemanticDiff
-from speclino.domain.spec_ir import ApprovalRecord, RuleLevel, SpecIR
+from speclino.domain.spec_ir import ApprovalRecord, SpecIR
 from speclino.ports.blob_store import BlobStore
 from speclino.ports.code_host import CodeHost
 from speclino.ports.sandbox import Sandbox
@@ -563,10 +563,20 @@ def _merge_non_behavior_findings(original: Findings, updated: Findings) -> Findi
 
 
 def _regate(findings: Findings, result: CheckResult, fail_on: tuple[str, ...]) -> GateResult:
-    levels: dict[str, RuleLevel] = {r.id: r.level for s in result.spec_irs for r in s.rules}
-    for f in result.policy_findings:
-        levels.setdefault(f.requirement_id, "mandatory")
-    return aggregate_gate(findings, levels, GatePolicy(fail_on=tuple(fail_on), mode="blocking"))  # type: ignore[arg-type]
+    """エージェントの証拠で Findings が変わった後にゲートを取り直す。
+
+    level と免除は `run_check` が決めたものをそのまま使う（`CheckResult.gate_levels` /
+    `waived_finding_ids`）。ここで作り直すと 2 か所の計算がずれる: 以前は仕様側の level を
+    先に入れて規約を `setdefault` していたため、PR で同じ ID の advisory な要求を足すだけで
+    チーム規約の mandatory を advisory に落とせた（承認も不要）。免除も渡していなかったので、
+    エージェントが動いた run では例外が効かなくなっていた（どちらも codex レビューで実測）。
+    """
+    return aggregate_gate(
+        findings,
+        result.gate_levels,
+        GatePolicy(fail_on=tuple(fail_on), mode="blocking"),  # type: ignore[arg-type]
+        result.waived_finding_ids,
+    )
 
 
 def _model_name(model: str | BaseLlm) -> str:
