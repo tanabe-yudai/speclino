@@ -15,6 +15,7 @@ from sqlalchemy import Enum as SAEnum
 
 from speclino.db.models import Base
 from speclino.domain.finding import Verdict
+from speclino.domain.policy import PolicyRevisionStatus
 from speclino.domain.run import ExecState, GateStatus
 
 EXPECTED_TABLES = {
@@ -29,6 +30,7 @@ EXPECTED_TABLES = {
     "audit_events",
     "webhook_deliveries",
     "cost_ledger",
+    "policy_revisions",
 }
 
 
@@ -64,3 +66,17 @@ def test_unique_seq_constraints_present() -> None:
     run_event_constraints = {c.name for c in Base.metadata.tables["run_events"].constraints}
     assert "uq_tool_executions_run_seq" in tool_exec_constraints
     assert "uq_run_events_run_seq" in run_event_constraints
+
+
+def test_policy_revision_status_enum_matches_domain_literal() -> None:
+    assert _enum_values("policy_revisions", "status") == set(get_args(PolicyRevisionStatus))
+
+
+def test_policy_revisions_has_team_revision_unique_constraint() -> None:
+    constraints = {c.name for c in Base.metadata.tables["policy_revisions"].constraints}
+    assert "uq_policy_revisions_team_revision" in constraints
+
+
+def test_policy_revisions_has_partial_unique_active_index() -> None:
+    index_names = {ix.name for ix in Base.metadata.tables["policy_revisions"].indexes}
+    assert "uq_policy_revisions_team_active" in index_names
