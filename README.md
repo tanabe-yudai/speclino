@@ -97,10 +97,9 @@ flowchart LR
 
 （画像版: [architecture.png](design/architecture.png) / [pipeline.png](design/pipeline.png)）
 
-図は本番構成（Terraform が定義する目標）。現時点でコードに配線済みなのは web / worker の
-FastAPI、in-process キュー、ローカル FS の成果物ストア、Docker サンドボックスまでで、
-**Cloud Tasks・GCS・Cloud Run sandbox への切替は S26（本番デプロイ）で有効にする**
-（`SPECLINO_QUEUE_KIND` / `SPECLINO_BLOB_KIND` で選ぶ設計）。
+図は本番構成で、**すべて配線済み・稼働中**（Cloud Tasks / GCS / Cloud SQL / Cloud Run
+sandboxes）。ローカルでは同じコードが in-process キュー・ローカル FS・Docker サンドボックスに
+切り替わる（`SPECLINO_QUEUE_KIND` / `SPECLINO_BLOB_KIND` / `SPECLINO_SANDBOX_KIND` で選ぶ）。
 
 エージェントが判定を上書きできないのは、(a) 判定を書くツールが存在しない (b) 検査器は型付きの
 Spec IR / Code IR / Evidence しか受け取らず、それを作るのは決定的なモジュールだけ (c) LLM の
