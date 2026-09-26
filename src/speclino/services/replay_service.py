@@ -2,11 +2,21 @@
 
 LLM を再実行する再抽出とは区別する。再評価は決定的なので、同じ入力から同じ判定が出るはず。
 規約 Finding はスナップショットが必要なので再評価せず、保存済みの値をそのまま比較対象から除く。
+
+S42: manifest に `policy_revision` が記録されているとき（チーム規約を適用した run）、
+`resolve_revision` が渡されていればその改訂を解決し、`check_pipeline.policy_package_hash` と
+同じ手順で再計算したハッシュが manifest の `team_policy_hash` と一致するか確かめる。ルール集合が
+入れ替わった改訂（極端には空の改訂）に差し替えても、ハッシュが変われば必ず検出できる
+（「ルール ID が改訂に無いから対象外」という抜け道を作らない）。`policy_revision` があるのに
+`resolve_revision` が渡されていないときは、黙って規約なしで再評価すると過去の判定と一致しない
+理由が分からなくなるため、既定では失敗にする。CLI は DB 接続を持たないため
+`require_policy_check=False`（`--no-policy-check`）で明示的に飛ばす経路を用意する。
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -14,8 +24,10 @@ from speclino.conformance.engine import EngineConfig, evaluate
 from speclino.domain.code_ir import CodeIR
 from speclino.domain.domain_spec import DomainSpec
 from speclino.domain.finding import Findings
+from speclino.domain.policy import PolicyRevision
 from speclino.domain.run import RunManifest
 from speclino.domain.spec_ir import SpecIR
+from speclino.services.check_pipeline import policy_package_hash
 
 
 @dataclass
@@ -28,8 +40,13 @@ class ReplayResult:
     replayed: Findings | None = None
 
 
-def replay(run_dir: Path) -> ReplayResult:
+def replay(
+    run_dir: Path,
+    resolve_revision: Callable[[str, int], PolicyRevision | None] | None = None,
+    require_policy_check: bool = True,
+) -> ReplayResult:
     manifest = RunManifest.model_validate(json.loads((run_dir / "run-manifest.json").read_text()))
+    _verify_team_policy(manifest, resolve_revision, require_policy_check)
     spec = SpecIR.model_validate(json.loads((run_dir / "spec-ir.json").read_text()))
     code_path = run_dir / "code-ir.json"
     if not code_path.exists():
@@ -63,3 +80,52 @@ def replay(run_dir: Path) -> ReplayResult:
     return ReplayResult(
         manifest.run_id, spec.behavior_id, not diffs, len(fresh.findings), diffs, fresh
     )
+
+
+def _verify_team_policy(
+    manifest: RunManifest,
+    resolve_revision: Callable[[str, int], PolicyRevision | None] | None,
+    require_policy_check: bool,
+) -> None:
+    """manifest が適用したチーム規約の改訂を検査する（S42）。
+
+    `policy_hash` の照合を主にする: 解決した改訂から `policy_package_hash` で同じ手順の
+    ハッシュを再計算し、manifest の `team_policy_hash` と一致するか見る。ルール集合が
+    入れ替わっていても（改訂が空でも）ハッシュは変わるので検出できる（「改訂に無い ID の
+    Finding は対象外」という抜け道を作らない）。
+
+    `policy_revision` が記録されているのに `resolve_revision` が渡されていない場合、黙って
+    規約なしで再評価すると過去の判定と一致しない理由が分からなくなるため、既定
+    （`require_policy_check=True`）では失敗させる。`require_policy_check=False` を渡した
+    ときだけ明示的に飛ばす（CLI の `--no-policy-check` はここに落ちる）。
+    """
+    if manifest.policy_revision is None:
+        return
+    if manifest.policy_team is None:
+        raise ValueError(
+            f"run-manifest に policy_revision={manifest.policy_revision} があるが "
+            "policy_team が無い（manifest が壊れている）"
+        )
+    if resolve_revision is None:
+        if require_policy_check:
+            raise ValueError(
+                "この run はチーム規約の改訂"
+                f"（team={manifest.policy_team} revision={manifest.policy_revision}）を適用して"
+                "いる。replay でチーム規約を検証するには resolve_revision（DB 接続）が要る。"
+                "CLI からは --no-policy-check で明示的に飛ばせる（規約なしで再評価する）"
+            )
+        return
+    revision = resolve_revision(manifest.policy_team, manifest.policy_revision)
+    if revision is None:
+        raise ValueError(
+            "適用したチーム規約の改訂を解決できない: "
+            f"team={manifest.policy_team} revision={manifest.policy_revision}"
+        )
+    expected = manifest.inputs.team_policy_hash
+    actual = policy_package_hash(revision.package)
+    if expected != actual:
+        raise ValueError(
+            "チーム規約のハッシュが一致しない（記録時と改訂の内容が異なる）: "
+            f"team={manifest.policy_team} revision={manifest.policy_revision} "
+            f"manifest={expected} 再計算={actual}"
+        )

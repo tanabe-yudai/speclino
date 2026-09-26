@@ -173,12 +173,28 @@ if __name__ == "__main__":
 @app.command()
 def replay(
     run_dir: Annotated[Path, typer.Argument(help="成果物ディレクトリ（run-manifest.json 等）")],
+    no_policy_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-policy-check",
+            help=(
+                "チーム規約の改訂検査を明示的に飛ばす（CLI は DB 接続を持たないため、"
+                "run-manifest がチーム規約の改訂を記録している場合は既定で失敗する）"
+            ),
+        ),
+    ] = False,
 ) -> None:
-    """凍結した IR から判定を再評価し、保存された結果と一致するか確認する（AC-013）。"""
+    """凍結した IR から判定を再評価し、保存された結果と一致するか確認する（AC-013）。
+
+    run-manifest がチーム規約の改訂（`policy_revision`）を記録している run は、CLI 単体では
+    DB に接続できず改訂を解決できないため既定で失敗する（規約が変わっても過去の判定が
+    再現できることを検証できないまま「一致」を名乗らせないため）。`--no-policy-check` を
+    付けるとその検査だけを明示的に飛ばして再評価する。
+    """
     from speclino.services.replay_service import replay as _replay
 
     try:
-        res = _replay(run_dir)
+        res = _replay(run_dir, require_policy_check=not no_policy_check)
     except (OSError, ValueError) as e:
         typer.echo(f"入力不正: {e}", err=True)
         raise typer.Exit(code=2) from e
