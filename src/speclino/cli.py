@@ -296,7 +296,12 @@ def policy_seed(
         finally:
             await engine.dispose()
 
-    revision = asyncio.run(_run())
+    try:
+        revision = asyncio.run(_run())
+    except ValueError as e:
+        # 既に改訂があるチームへの seed 拒否など（seed_from_package が投げる）。
+        typer.echo(f"seed を拒否した: {e}", err=True)
+        raise typer.Exit(code=2) from e
     typer.echo(
         f"{team}@{revision.revision} を {revision.status} として取り込んだ"
         f"（rules={len(revision.package.rules)}）"

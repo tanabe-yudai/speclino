@@ -11,6 +11,7 @@ from speclino.db.repositories.projects import ProjectRepository
 from speclino.db.repositories.questions import QuestionRepository
 from speclino.db.repositories.review_runs import ReviewRunRepository
 from speclino.db.repositories.run_events import RunEventRepository
+from speclino.db.repositories.teams import TeamRepository
 from speclino.db.repositories.webhook_deliveries import WebhookDeliveryRepository
 
 __all__ = [
@@ -23,5 +24,6 @@ __all__ = [
     "QuestionRepository",
     "ReviewRunRepository",
     "RunEventRepository",
+    "TeamRepository",
     "WebhookDeliveryRepository",
 ]

@@ -31,6 +31,7 @@ EXPECTED_TABLES = {
     "webhook_deliveries",
     "cost_ledger",
     "policy_revisions",
+    "teams",
 }
 
 

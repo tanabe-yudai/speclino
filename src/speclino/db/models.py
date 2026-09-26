@@ -309,6 +309,24 @@ class WebhookDelivery(Base):
     handled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
+class TeamRecord(Base):
+    """`teams`: チーム単位の統治設定（統治の穴修正、design/2026-09-26-team-policies-and-dx.md）。
+
+    承認者の許可集合はここに持つ。`policy_revisions`（改訂）には持たせない。改訂の中に
+    承認者リストを入れると、改訂を作る人（author）が自分を承認者に足せてしまうため、
+    改訂とは別のチーム単位の受け皿に分離する（`services/policy_governance.py` の `approve`
+    が検証に使う）。
+    """
+
+    __tablename__ = "teams"
+
+    team: Mapped[str] = mapped_column(String, primary_key=True)
+    approvers: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class PolicyRevisionRecord(Base):
     """`policy_revisions`: チーム規約の 1 改訂（S42、design/2026-09-26-team-policies-and-dx.md）。
 
