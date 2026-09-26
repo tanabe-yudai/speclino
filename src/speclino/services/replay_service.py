@@ -1,16 +1,16 @@
 """replay（AC-013 / NFR-002）: 凍結した IR・ドメインから判定を再評価し、保存された結果と比較する。
 
 LLM を再実行する再抽出とは区別する。再評価は決定的なので、同じ入力から同じ判定が出るはず。
-規約 Finding はスナップショット（対象リポジトリのファイル）が必要だが、run 成果物には
-凍結した IR しか残さないため再評価はせず、保存済みの値をそのまま比較対象から除く（S11）。
+規約 Finding はスナップショットが必要なので再評価せず、保存済みの値をそのまま比較対象から除く。
 
-S42: manifest に `policy_revision` が記録されているとき、`resolve_revision` が渡されていれば
-その改訂を解決できることを確認する（解決できなければ失敗させる）。これは「規約が変わっても
-過去の判定の再現性を保証する」という設計（design/2026-09-26-team-policies-and-dx.md）の
-最小限の保証で、規約 Finding 自体の再評価（実際の検証器の再実行）はスナップショットが無いため
-まだ行わない。代わりに、保存された規約 Finding がその改訂のルール集合と整合しているか
-（改訂に無いルールの Finding が無いか、level と severity が食い違っていないか）を確かめる。
-`resolve_revision` を渡さなければ従来どおり規約を考慮せず再評価する。
+S42: manifest に `policy_revision` が記録されているとき（チーム規約を適用した run）、
+`resolve_revision` が渡されていればその改訂を解決し、`check_pipeline.policy_package_hash` と
+同じ手順で再計算したハッシュが manifest の `team_policy_hash` と一致するか確かめる。ルール集合が
+入れ替わった改訂（極端には空の改訂）に差し替えても、ハッシュが変われば必ず検出できる
+（「ルール ID が改訂に無いから対象外」という抜け道を作らない）。`policy_revision` があるのに
+`resolve_revision` が渡されていないときは、黙って規約なしで再評価すると過去の判定と一致しない
+理由が分からなくなるため、既定では失敗にする。CLI は DB 接続を持たないため
+`require_policy_check=False`（`--no-policy-check`）で明示的に飛ばす経路を用意する。
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ from speclino.domain.finding import Findings
 from speclino.domain.policy import PolicyRevision
 from speclino.domain.run import RunManifest
 from speclino.domain.spec_ir import SpecIR
+from speclino.services.check_pipeline import policy_package_hash
 
 
 @dataclass
@@ -42,11 +43,10 @@ class ReplayResult:
 def replay(
     run_dir: Path,
     resolve_revision: Callable[[str, int], PolicyRevision | None] | None = None,
+    require_policy_check: bool = True,
 ) -> ReplayResult:
     manifest = RunManifest.model_validate(json.loads((run_dir / "run-manifest.json").read_text()))
-    revision: PolicyRevision | None = None
-    if manifest.policy_revision is not None and resolve_revision is not None:
-        revision = _resolve_or_fail(manifest, resolve_revision)
+    revision = _verify_team_policy(manifest, resolve_revision, require_policy_check)
     spec = SpecIR.model_validate(json.loads((run_dir / "spec-ir.json").read_text()))
     code_path = run_dir / "code-ir.json"
     if not code_path.exists():
@@ -84,47 +84,72 @@ def replay(
     )
 
 
-def _resolve_or_fail(
-    manifest: RunManifest, resolve_revision: Callable[[str, int], PolicyRevision | None]
-) -> PolicyRevision:
-    """記録された改訂が解決できることを確認する。黙って規約なしで再評価すると、過去の
-    判定と一致しない理由が分からなくなるため、解決できないときは失敗させる。
+def _verify_team_policy(
+    manifest: RunManifest,
+    resolve_revision: Callable[[str, int], PolicyRevision | None] | None,
+    require_policy_check: bool,
+) -> PolicyRevision | None:
+    """manifest が適用したチーム規約の改訂を検査する（S42）。
+
+    `policy_hash` の照合を主にする: 解決した改訂から `policy_package_hash` で同じ手順の
+    ハッシュを再計算し、manifest の `team_policy_hash` と一致するか見る。ルール集合が
+    入れ替わっていても（改訂が空でも）ハッシュは変わるので検出できる（「改訂に無い ID の
+    Finding は対象外」という抜け道を作らない）。
+
+    `policy_revision` が記録されているのに `resolve_revision` が渡されていない場合、黙って
+    規約なしで再評価すると過去の判定と一致しない理由が分からなくなるため、既定
+    （`require_policy_check=True`）では失敗させる。`require_policy_check=False` を渡した
+    ときだけ明示的に飛ばす（CLI の `--no-policy-check` はここに落ちる）。
     """
-    assert manifest.policy_revision is not None
+    if manifest.policy_revision is None:
+        return None
     if manifest.policy_team is None:
         raise ValueError(
             f"run-manifest に policy_revision={manifest.policy_revision} があるが "
-            "policy_team が無い"
+            "policy_team が無い（manifest が壊れている）"
         )
+    if resolve_revision is None:
+        if require_policy_check:
+            raise ValueError(
+                "この run はチーム規約の改訂"
+                f"（team={manifest.policy_team} revision={manifest.policy_revision}）を適用して"
+                "いる。replay でチーム規約を検証するには resolve_revision（DB 接続）が要る。"
+                "CLI からは --no-policy-check で明示的に飛ばせる（規約なしで再評価する）"
+            )
+        return None
     revision = resolve_revision(manifest.policy_team, manifest.policy_revision)
     if revision is None:
         raise ValueError(
             "適用したチーム規約の改訂を解決できない: "
             f"team={manifest.policy_team} revision={manifest.policy_revision}"
         )
+    expected = manifest.inputs.team_policy_hash
+    actual = policy_package_hash(revision.package)
+    if expected != actual:
+        raise ValueError(
+            "チーム規約のハッシュが一致しない（記録時と改訂の内容が異なる）: "
+            f"team={manifest.policy_team} revision={manifest.policy_revision} "
+            f"manifest={expected} 再計算={actual}"
+        )
     return revision
 
 
 def _check_policy_findings_against(revision: PolicyRevision, saved: Findings) -> None:
-    """保存された規約 Finding が、解決した改訂のルール集合に収まっているか確かめる。
+    """保存された規約 Finding が、解決した改訂のルール集合と整合するか確かめる（補助）。
 
-    検証器の再実行はできない（成果物に対象リポジトリのスナップショットを残していないため）。
-    それでも「manifest が指す改訂に無いルールの Finding が保存されている」ことは検出できる。
-    これは manifest が別の改訂を指している、または改訂の内容が入れ替わったことを意味するので、
-    黙って通すと「規約を変えても過去の判定は変わらない」という保証が空手形になる。
+    主な保証は `_verify_team_policy` のハッシュ照合（ルール集合が入れ替われば必ず検出する）。
+    こちらは「level と severity が食い違う」という別方向のずれを見る補助的な検査で、
+    ハッシュが一致していても保存結果の側が壊れている場合に気づける。
 
-    プロジェクト固有の追加規約（`.speclino/policy/`）由来の Finding は改訂に無くて当然なので、
-    照合の対象にしない。区別できるのはチーム改訂に同じ id があるかどうかだけなので、
-    ここでは「改訂に載っている id の Finding」だけを見る向きで検査する。
+    規約 Finding の `requirement_id` は `<rule>:<path>` の 2 段なので、ルール ID は先頭の
+    区切りまでを取る（`conformance/exceptions.py` の `_rule_of` と同じ規約）。完全一致で
+    引くと実際の Finding が 1 件も一致せず検査が空回りする（codex レビュー指摘）。
     """
     rule_levels = {rule.id: rule.level for rule in revision.package.rules}
     mismatched: list[str] = []
     for f in saved.findings:
         if not f.behavior_id.startswith("policy:"):
             continue
-        # 規約 Finding の requirement_id は `<rule>:<path>` の 2 段。完全一致で引くと
-        # 実際の Finding が 1 件も一致せず検査が空回りする（codex レビュー指摘）。
-        # ルール ID の取り出し方は conformance/exceptions.py の `_rule_of` と同じ規約。
         level = rule_levels.get(f.requirement_id.split(":", 1)[0])
         if level is None:
             continue  # プロジェクト固有の追加規約。改訂に無くて当然

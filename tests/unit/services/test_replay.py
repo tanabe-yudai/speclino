@@ -9,16 +9,11 @@ import pytest
 from typer.testing import CliRunner
 
 from speclino.cli import app
-from speclino.domain.finding import Finding, Findings
 from speclino.domain.policy import PolicyRevision
 from speclino.services.check_pipeline import run_check, write_result
-from speclino.services.replay_service import _check_policy_findings_against, replay
+from speclino.services.replay_service import replay
 from tests.fixtures import cancel_order as co
-from tests.unit.services.test_check_pipeline import (
-    mandatory_rule,
-    orders_request,
-    team_revision,
-)
+from tests.unit.services.test_check_pipeline import _team_revision, orders_request
 
 
 def test_replay_reproduces_saved_findings(tmp_path: Path) -> None:
@@ -47,101 +42,79 @@ def test_replay_detects_tampered_findings(tmp_path: Path) -> None:
     assert cli.exit_code == 1 and "不一致" in cli.output
 
 
-# ---------------------------------------------------------------- S42 チーム規約の改訂で再評価
+# ---------------------------------------------------------------- S42 チーム規約の改訂照合
 
 
-def _write_run_with_team_policy(tmp_path: Path, revision: PolicyRevision) -> Path:
-    override = tmp_path / "code-ir.json"
-    override.write_text(co.RESTORE_ADMIN_ONLY.model_dump_json())
+def _run_with_team_policy(tmp_path: Path) -> Path:
     out = tmp_path / "out"
-    req = orders_request(code_ir_override=override, run_id="r1", team_policy=revision)
-    write_result(run_check(req), out)
+    revision = _team_revision(exceptions_allowed=True)
+    write_result(run_check(orders_request(team_policy=revision, run_id="r1")), out)
     return out
 
 
-def test_replay_without_resolve_revision_ignores_recorded_policy(tmp_path: Path) -> None:
-    """resolve_revision を渡さなければ、従来どおり規約を考慮せず再評価する。"""
-    revision = team_revision([mandatory_rule("TEAM-001", ["team-only/*.never"])])
-    out = _write_run_with_team_policy(tmp_path, revision)
-    res = replay(out)
-    assert res.identical and res.differences == []
+def test_replay_fails_when_policy_revision_recorded_but_no_resolver(tmp_path: Path) -> None:
+    """codex 実測: CLI は `replay(run_dir)` としか呼ばないため resolver が渡らず、改訂の検査が
+    一切走らなかった穴。既定では resolver 無し・改訂ありは失敗させる。"""
+    out = _run_with_team_policy(tmp_path)
+    with pytest.raises(ValueError, match="resolve_revision"):
+        replay(out)
 
 
-def test_replay_resolves_recorded_revision_and_matches(tmp_path: Path) -> None:
-    """resolve_revision が同じ改訂を返せば、再評価は保存結果と一致する。"""
-    revision = team_revision([mandatory_rule("TEAM-001", ["team-only/*.never"])])
-    out = _write_run_with_team_policy(tmp_path, revision)
+def test_replay_no_policy_check_skips_team_policy_verification(tmp_path: Path) -> None:
+    """`require_policy_check=False`（CLI の --no-policy-check）は明示的に飛ばせる。"""
+    out = _run_with_team_policy(tmp_path)
+    res = replay(out, require_policy_check=False)
+    assert res.identical
 
-    calls: list[tuple[str, int]] = []
+
+def test_replay_fails_when_revision_cannot_be_resolved(tmp_path: Path) -> None:
+    """manifest の policy_revision が存在しない改訂を指す（例: 999999 に書き換え）と失敗する。"""
+    out = _run_with_team_policy(tmp_path)
+
+    def resolve(_team: str, _revision: int) -> PolicyRevision | None:
+        return None
+
+    with pytest.raises(ValueError, match="解決できない"):
+        replay(out, resolve_revision=resolve)
+
+
+def test_replay_detects_revision_with_empty_rules_via_policy_hash(tmp_path: Path) -> None:
+    """codex 実測: resolver を渡しても、ルールが空の別改訂に差し替えると旧チェック
+    （ルール ID の突き合わせ）は全 Finding を「プロジェクト固有」扱いにして見逃していた。
+    policy_hash の照合はルール集合の入れ替え（空の改訂も含む）を必ず検出する。"""
+    out = _run_with_team_policy(tmp_path)
+    original = _team_revision(exceptions_allowed=True)
+    swapped = original.model_copy(
+        update={"package": original.package.model_copy(update={"rules": []})}
+    )
+
+    def resolve(_team: str, _revision: int) -> PolicyRevision | None:
+        return swapped
+
+    with pytest.raises(ValueError, match="ハッシュが一致しない"):
+        replay(out, resolve_revision=resolve)
+
+
+def test_replay_succeeds_when_resolved_revision_matches(tmp_path: Path) -> None:
+    """正しい改訂を解決できれば policy_hash が一致し、通常の再評価がそのまま進む。"""
+    out = tmp_path / "out"
+    revision = _team_revision(exceptions_allowed=True)
+    write_result(run_check(orders_request(team_policy=revision, run_id="r1")), out)
 
     def resolve(team: str, rev: int) -> PolicyRevision | None:
-        calls.append((team, rev))
+        assert (team, rev) == ("acme", 1)
         return revision
 
     res = replay(out, resolve_revision=resolve)
-    assert res.identical and res.differences == []
-    assert calls == [("acme", 1)]
+    assert res.identical
 
 
-def test_replay_fails_when_recorded_revision_cannot_be_resolved(tmp_path: Path) -> None:
-    """黙って規約なしで再評価すると過去の判定と一致しない理由が分からなくなるため、失敗させる。"""
-    revision = team_revision([mandatory_rule("TEAM-001", ["team-only/*.never"])])
-    out = _write_run_with_team_policy(tmp_path, revision)
-
-    with pytest.raises(ValueError, match="解決できない"):
-        replay(out, resolve_revision=lambda team, rev: None)
-
+def test_cli_replay_requires_no_policy_check_flag_for_team_policy_runs(tmp_path: Path) -> None:
+    """CLI は DB に接続できないため resolver を渡せない。改訂ありの run は既定で失敗し、
+    --no-policy-check を付けたときだけ明示的に飛ばして再評価する。"""
+    out = _run_with_team_policy(tmp_path)
     cli = CliRunner().invoke(app, ["replay", str(out)])
-    assert cli.exit_code == 0  # CLI は resolve_revision を渡さないので従来どおり再評価する
+    assert cli.exit_code == 2 and "resolve_revision" in cli.output
 
-
-# ------------------------------ S42: 改訂と保存済み規約 Finding の整合
-
-
-def _policy_finding(rid: str, severity: str, behavior_id: str = "policy:make_targets") -> Finding:
-    """rid は実際の検査器と同じ `<rule>:<path>` 形式で渡すこと（ベア ID で試すと検査が
-    空回りしていても気づけない。codex レビューで実際にそれを見逃していた）。"""
-    return Finding(
-        id=f"policy:{rid}:x",
-        requirement_id=rid,
-        behavior_id=behavior_id,
-        verdict="VIOLATED",
-        category="missing_effect",
-        severity=severity,  # type: ignore[arg-type]
-        message="m",
-        claim_scope="persisted_state",
-    )
-
-
-def test_saved_policy_findings_must_match_the_resolved_revision() -> None:
-    """検証器は再実行できない（スナップショットが無い）が、改訂との整合は確かめられる。
-
-    manifest が別の改訂を指していれば、保存された Finding の severity が改訂の level と
-    食い違う。これを黙って通すと「規約を変えても過去の判定は変わらない」が空手形になる。
-    """
-    revision = team_revision(rules=[mandatory_rule("MAKE-001", ["Makefile"])])
-    rule_id = revision.package.rules[0].id
-
-    # 整合している（mandatory → high）
-    real_id = f"{rule_id}:Makefile"  # 実際の検査器が作る形式
-    _check_policy_findings_against(revision, Findings(findings=[_policy_finding(real_id, "high")]))
-
-    # 食い違う（mandatory なのに medium）
-    with pytest.raises(ValueError, match="整合しない"):
-        _check_policy_findings_against(
-            revision, Findings(findings=[_policy_finding(real_id, "medium")])
-        )
-
-
-def test_project_local_and_non_policy_findings_are_not_checked() -> None:
-    """改訂に無い id はプロジェクト固有の追加規約なので照合しない。規約以外も無関係。"""
-    revision = team_revision(rules=[mandatory_rule("MAKE-001", ["Makefile"])])
-    _check_policy_findings_against(
-        revision,
-        Findings(
-            findings=[
-                _policy_finding("TEAM-999", "medium"),
-                _policy_finding("R-CANCEL-04", "medium", behavior_id="cancel_order"),
-            ]
-        ),
-    )
+    cli2 = CliRunner().invoke(app, ["replay", str(out), "--no-policy-check"])
+    assert cli2.exit_code == 0 and "一致" in cli2.output

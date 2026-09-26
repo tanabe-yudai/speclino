@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+import yaml
 
 from speclino.analysis.limits import DEFAULT_LIMITS
 from speclino.domain.policy import (
@@ -17,7 +18,6 @@ from speclino.domain.policy import (
 from speclino.services.check_pipeline import (
     CheckInputError,
     CheckRequest,
-    _run_policies,
     run_check,
     write_result,
 )
@@ -387,152 +387,93 @@ def test_incremental_does_not_reuse_with_code_ir_override(tmp_path: Path) -> Non
     assert res.code_irs[0].origin == "handwritten"
 
 
-# ---------------------------------------------------------------- S42 チーム規約
+# ---------------------------------------------------------------- S42 チーム規約と例外の穴
 
 
-def mandatory_rule(
-    id: str, paths: list[str], *, verifier_id: str = "makefile.required_targets"
-) -> PolicyRule:
-    """`applies_to` に一致する対象が無い前提のルール（missing_input 経路だけを使う）。"""
-    return PolicyRule(
-        id=id,
+def _team_revision(*, exceptions_allowed: bool, revision: int = 1) -> PolicyRevision:
+    rule = PolicyRule(
+        id="MAKE-001",
         version="1.0.0",
         level="mandatory",
-        title=id,
-        text=id,
-        applies_to=PolicyApplicability(paths=paths, languages=[]),
-        verifier=PolicyVerifierRef(id=verifier_id, version="1.0.0", params={}),
-        on_missing_input="unknown",
-        exceptions_allowed=True,
-    )
-
-
-def advisory_rule_without_verifier(id: str, paths: list[str]) -> PolicyRule:
-    return PolicyRule(
-        id=id,
-        version="1.0.0",
-        level="advisory",
-        title=id,
-        text=id,
-        applies_to=PolicyApplicability(paths=paths, languages=[]),
-        verifier=None,
+        title="Makefile の標準ターゲット",
+        text="setup/test/lint を持つこと",
+        applies_to=PolicyApplicability(paths=["Makefile"]),
+        verifier=PolicyVerifierRef(id="makefile.required_targets", version="1.0.0"),
         on_missing_input="violation",
-        exceptions_allowed=True,
+        exceptions_allowed=exceptions_allowed,
     )
-
-
-def team_revision(
-    rules: list[PolicyRule], *, team: str = "acme", revision: int = 1
-) -> PolicyRevision:
     package = PolicyPackage(
-        schema_version="0.1",
-        id="team-pkg",
-        version="1.0.0",
-        status="active",
-        owner="team",
-        rules=rules,
+        id="team-core", version="1.0.0", status="active", owner="acme", rules=[rule]
     )
     return PolicyRevision(
-        team=team,
+        team="acme",
         revision=revision,
         status="active",
         package=package,
-        author="alice",
-        approver="bob",
-        note="test",
+        author="tanabe-yudai",
+        approver="approver-x",
     )
 
 
-def test_team_policy_runs_without_project_speclino_policy_dir() -> None:
-    """examples/orders には .speclino/policy/ が無いが、team_policy だけで検査が走る。"""
-    revision = team_revision([mandatory_rule("TEAM-001", ["team-only/*.never"])])
-    res = run_check(orders_request(run_id="r-team-only", team_policy=revision))
-    by_id = {f.requirement_id: f for f in res.policy_findings}
-    assert by_id["TEAM-001"].verdict == "UNKNOWN"
-    assert res.manifest.policy_team == "acme"
-    assert res.manifest.policy_revision == 1
-
-
-def test_manifest_has_no_policy_revision_without_team_policy() -> None:
-    res = run_check(orders_request(run_id="r-no-team-policy"))
-    assert res.manifest.policy_team is None
-    assert res.manifest.policy_revision is None
-
-
-def test_team_policy_advisory_rule_without_verifier_makes_no_finding() -> None:
-    """検証器の無いルール（助言のみ）は根拠の無い verdict を作らない。"""
-    revision = team_revision([advisory_rule_without_verifier("TEAM-ADV-001", ["specs/*.md"])])
-    res = run_check(orders_request(run_id="r-advisory", team_policy=revision))
-    assert not any(f.requirement_id == "TEAM-ADV-001" for f in res.policy_findings)
-
-
-_PROJECT_POLICY_YAML = """\
-schema_version: "0.1"
-id: proj-extra
-version: "1.0.0"
-status: active
-owner: tester
-rules:
-  - id: TEAM-001
-    version: "1.0.0"
-    level: mandatory
-    title: overridden by team policy
-    text: この定義はチーム規約に上書きされるはず
-    applies_to:
-      paths: ["specs/*.md"]
-      languages: []
-    verifier:
-      id: does.not.exist
-      version: "1.0.0"
-      params: {}
-    on_missing_input: violation
-    exceptions_allowed: true
-  - id: PROJ-001
-    version: "1.0.0"
-    level: mandatory
-    title: project only
-    text: プロジェクト固有の追加規約
-    applies_to:
-      paths: ["team-only/*.never"]
-      languages: []
-    verifier:
-      id: makefile.required_targets
-      version: "1.0.0"
-      params: {}
-    on_missing_input: unknown
-    exceptions_allowed: true
-"""
-
-
-def _project_with_local_policy(tmp_path: Path) -> Path:
-    project = tmp_path / "proj"
-    shutil.copytree(ORDERS / ".speclino", project / ".speclino")
-    shutil.copytree(ORDERS / "specs", project / "specs")
-    policy_dir = project / ".speclino" / "policy"
-    policy_dir.mkdir()
-    (policy_dir / "local.yaml").write_text(_PROJECT_POLICY_YAML, encoding="utf-8")
-    return project
-
-
-def test_team_policy_takes_precedence_over_same_id_project_rule(tmp_path: Path) -> None:
-    """同じ rule id が両方にあれば、チーム規約を優先しプロジェクト側は無視する。
-
-    プロジェクト側の TEAM-001 は未登録の検証器 `does.not.exist` を参照している。無視されずに
-    実行されれば `VerifierRegistry` が LookupError を投げるので、例外が出ないこと自体が
-    「プロジェクト側が実行されていない」ことの証拠になる。
-    """
-    project = _project_with_local_policy(tmp_path)
-    # 一致する対象（specs/*.md）を用意し、チーム側の TEAM-001 が実際に評価されることを確認する
-    revision = team_revision(
-        [mandatory_rule("TEAM-001", ["specs/*.md"], verifier_id="makefile.required_targets")]
+def _write_project_exceptions(project: Path, *, rule: str = "MAKE-001") -> None:
+    """対象リポジトリ側（PR の head）の .speclino/exceptions.yaml に期限内の例外を書く。"""
+    (project / ".speclino" / "exceptions.yaml").write_text(
+        yaml.dump(
+            {
+                "schema_version": "0.1",
+                "exceptions": [
+                    {
+                        "id": "EXC-1",
+                        "rule": rule,
+                        "target": {"paths": ["**"]},
+                        "reason": "Makefile はまだ無い",
+                        "approver": "tanabe-yudai",
+                        "expires_on": "2099-01-01",
+                        "alternative": "後で追加する",
+                    }
+                ],
+            }
+        )
     )
 
-    res = run_check(orders_request(project_dir=project, team_policy=revision, run_id="r-both"))
 
-    ids = [f.requirement_id for f in res.policy_findings]
-    assert ids.count("TEAM-001") == 1  # プロジェクト側の重複が無い
-    assert "PROJ-001" in ids  # プロジェクト固有の別ルールは実行される
+def test_team_mandatory_rule_cannot_be_waived_when_exceptions_not_allowed(tmp_path: Path) -> None:
+    """codex が実測した穴1: mandatory + exceptions_allowed=False のチーム規約は、
+    プロジェクト側の .speclino/exceptions.yaml に期限内の例外があっても免除しない
+    （ゲートは fail のまま。免除禁止の判断が承認者の権限で回避できてはならない）。"""
+    project = _orders_copy(tmp_path / "proj", mutate=False)
+    _write_project_exceptions(project)
+    res = run_check(
+        CheckRequest(
+            repo_root=tmp_path / "proj",
+            head_sha="WORKTREE",
+            project_dir=project,
+            team_policy=_team_revision(exceptions_allowed=False),
+            run_id="r",
+        )
+    )
+    f = next(f for f in res.findings.findings if f.requirement_id == "MAKE-001")
+    assert f.verdict == "VIOLATED"
+    assert res.gate.status == "fail"
+    # 免除が拒否された事実が next_steps に残る（黙って無視しない）
+    assert any("exceptions_allowed=false" in s for s in f.next_steps)
+    assert (res.manifest.policy_team, res.manifest.policy_revision) == ("acme", 1)
+    assert res.manifest.inputs.team_policy_hash is not None
 
-    findings, levels, texts = _run_policies(project, revision)
-    assert any("TEAM-001" in t and "無視" in t for t in texts), texts
-    assert [f.requirement_id for f in findings].count("TEAM-001") == 1
+
+def test_team_mandatory_rule_waived_when_exceptions_allowed(tmp_path: Path) -> None:
+    """exceptions_allowed=True（既定）なら従来どおり免除され、pass_with_exceptions になる。"""
+    project = _orders_copy(tmp_path / "proj", mutate=False)
+    _write_project_exceptions(project)
+    res = run_check(
+        CheckRequest(
+            repo_root=tmp_path / "proj",
+            head_sha="WORKTREE",
+            project_dir=project,
+            team_policy=_team_revision(exceptions_allowed=True),
+            run_id="r",
+        )
+    )
+    f = next(f for f in res.findings.findings if f.requirement_id == "MAKE-001")
+    assert f.verdict == "VIOLATED" and f.next_steps == []
+    assert res.gate.status == "pass_with_exceptions"

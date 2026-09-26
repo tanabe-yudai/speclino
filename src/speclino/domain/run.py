@@ -26,6 +26,14 @@ class RunInputs(IRModel):
     domain_hash: str | None = None
     contracts_hash: str | None = None
     policy_hash: str | None = None
+    team_policy_hash: str | None = Field(
+        default=None,
+        description=(
+            "適用したチーム規約（PolicyRevision.package）だけから作ったハッシュ（S42）。"
+            "プロジェクト固有の .speclino/policy/*.yaml を含む policy_hash とは別に持ち、"
+            "replay がチーム規約の改訂だけを対象リポジトリ無しで再現・照合できるようにする"
+        ),
+    )
     code_ir_hash: str | None = Field(default=None, description="--code-ir 入力時のハッシュ")
 
 
@@ -68,5 +76,5 @@ class RunManifest(IRModel):
     )
     policy_revision: int | None = Field(
         default=None,
-        description="適用したチーム規約の改訂番号（S42）。replay はこの改訂で再評価する",
+        description="適用したチーム規約の改訂番号（S42）。replay はこの改訂を解決して照合する",
     )

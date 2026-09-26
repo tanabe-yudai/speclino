@@ -216,6 +216,19 @@
           "default": null,
           "title": "Policy Hash"
         },
+        "team_policy_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "適用したチーム規約（PolicyRevision.package）だけから作ったハッシュ（S42）。プロジェクト固有の .speclino/policy/*.yaml を含む policy_hash とは別に持ち、replay がチーム規約の改訂だけを対象リポジトリ無しで再現・照合できるようにする",
+          "title": "Team Policy Hash"
+        },
         "code_ir_hash": {
           "anyOf": [
             {
@@ -353,7 +366,7 @@
         }
       ],
       "default": null,
-      "description": "適用したチーム規約の改訂番号（S42）。replay はこの改訂で再評価する",
+      "description": "適用したチーム規約の改訂番号（S42）。replay はこの改訂を解決して照合する",
       "title": "Policy Revision"
     }
   },
