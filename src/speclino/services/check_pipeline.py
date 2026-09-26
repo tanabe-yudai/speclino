@@ -83,6 +83,7 @@ from speclino.verifiers.make_targets import MakeTargetsVerifier
 from speclino.verifiers.registry import VerifierRegistry
 from speclino.verifiers.snapshot import DirectorySnapshot
 from speclino.verifiers.spec_format import SpecFormatVerifier
+from speclino.verifiers.spec_tests import SpecTestsVerifier
 
 Mode = Literal["advisory", "blocking"]
 
@@ -635,6 +636,7 @@ def _policy_registry() -> VerifierRegistry:
     registry.register(SpecFormatVerifier())
     registry.register(CiRequiredVerifier())
     registry.register(ApiErrorFormatVerifier())
+    registry.register(SpecTestsVerifier())
     return registry
 
 
