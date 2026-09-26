@@ -7,6 +7,7 @@ from speclino.domain.code_ir import (
     Event,
     Outcome,
     Path,
+    ReachabilityDigest,
     StateUpdate,
     UnknownCause,
 )
@@ -30,7 +31,14 @@ from speclino.domain.finding import (
     Verdict,
     VerdictCounts,
 )
-from speclino.domain.run import ExecState, GateStatus, RunInputs, RunManifest, RunVersions
+from speclino.domain.run import (
+    BehaviorAnalysis,
+    ExecState,
+    GateStatus,
+    RunInputs,
+    RunManifest,
+    RunVersions,
+)
 from speclino.domain.spec_ir import (
     ApprovalRecord,
     Assertion,
@@ -47,6 +55,7 @@ __all__ = [
     "AnalysisLimits",
     "ApprovalRecord",
     "Assertion",
+    "BehaviorAnalysis",
     "BehaviorBinding",
     "Binary",
     "Bindings",
@@ -74,6 +83,7 @@ __all__ = [
     "Outcome",
     "Path",
     "Precision",
+    "ReachabilityDigest",
     "Ref",
     "Rule",
     "RunInputs",

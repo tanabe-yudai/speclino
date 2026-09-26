@@ -23,7 +23,7 @@ from speclino.domain.expr import (
     const,
     ref,
 )
-from speclino.frontend.python.index import ModuleInfo, RepoIndex
+from speclino.frontend.python.index import ModuleInfo, RepoIndex, attribute_chain
 
 
 @dataclass(frozen=True)
@@ -33,6 +33,11 @@ class Unresolved:
     code: str  # unresolved_attribute | unsupported_syntax | unresolved_call
     detail: str
     lineno: int
+    analyzed_call: bool = False
+    """path_analyzer._assign が呼出し（_call）を通して副作用（イベント・展開）を記録した後に
+    結果のローカルへ付ける印。code の値では判別しない（式の中の未解析の呼出し
+    ``to_expr`` の ``ast.Call()`` 分岐も同じ "unresolved_call" を使うため、code だけでは
+    「解析済みの呼出しの戻り値」と「解析していない呼出し」を区別できない）。"""
 
 
 @dataclass(frozen=True)
@@ -99,14 +104,7 @@ class ExprBuilder:
 
     # ---------------------------------------------------------------- helpers
     def attribute_chain(self, node: ast.expr) -> list[str] | None:
-        parts: list[str] = []
-        while isinstance(node, ast.Attribute):
-            parts.append(node.attr)
-            node = node.value
-        if isinstance(node, ast.Name):
-            parts.append(node.id)
-            return list(reversed(parts))
-        return None
+        return attribute_chain(node)
 
     def callee_qualname(self, func: ast.expr, frame: Frame) -> str | None:
         """呼出し先のシンボル。モジュール名で解決できれば完全修飾名、入口引数（self 等）を根に

@@ -1,0 +1,38 @@
+id: 29_constant_loop_violation
+title: range(定数) ループで在庫復元を 2 回呼ぶ（違反）
+description: >-
+  `for _ in range(2): inventory.restore(order.items)` で在庫復元コマンドを成功経路で 2 回呼ぶ
+  （S41b: range(定数) の展開）。展開後は 08_restore_twice と同じ Code IR になり、R-CANCEL-04 のみ
+  cardinality_mismatch。
+expected:
+  R-CANCEL-01:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-02:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-03:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-04:
+    verdict: VIOLATED
+    category: cardinality_mismatch
+  R-CANCEL-05:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-06:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07a:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07b:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+  R-CANCEL-07c:
+    verdict: VERIFIED_IN_SCOPE
+    category: conformant
+counterexample_must_include:
+  R-CANCEL-04:
+    path_id: p3_success
+    assignments: {}

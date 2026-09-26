@@ -9,11 +9,17 @@ Path を列挙する。早期 return より後を実行済みにしない。呼�
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path as FsPath
+from typing import cast, get_args
 
 from speclino.analysis.limits import DEFAULT_LIMITS
-from speclino.analysis.structural import OPAQUE_STMTS, OUTCOME_CHANNEL, RegionScanner
+from speclino.analysis.structural import (
+    OPAQUE_STMTS,
+    OUTCOME_CHANNEL,
+    RegionScanner,
+    binding_candidates,
+)
 from speclino.analysis.symbolic_state import (
     ExprBuilder,
     Frame,
@@ -31,6 +37,7 @@ from speclino.domain.code_ir import (
     Path,
     StateUpdate,
     UnknownCause,
+    UnknownCode,
 )
 from speclino.domain.common import SnapshotRef, SourceRef
 from speclino.domain.domain_spec import DomainSpec
@@ -39,10 +46,39 @@ from speclino.frontend.python.adapters.fastapi_outcome import (
     outcome_of_raise,
     outcome_of_return_call,
 )
-from speclino.frontend.python.index import FunctionInfo, RepoIndex, SymbolNotFound
+from speclino.frontend.python.index import FunctionInfo, ModuleInfo, RepoIndex, SymbolNotFound
 from speclino.frontend.python.subset import Unsupported, function_decorators, unsupported_stmt
 
 ANALYZER_VERSION = "0.1.0"
+
+# 定数回反復として展開できる要素数の上限（S41b）。ネストした展開も含め、1 つの経路（Draft）で
+# ここまでに消費した展開回数の累積で数える（Draft.unroll_used。if で分岐した枝ごとに独立に
+# 数えるので、無関係な枝の展開が互いの予算を奪わない）。PoC 9.3 の初期上限（経路数 64/256、
+# 呼出し深さ 2/4）と同じく保守的な初期値とし、監査イベントの列挙や固定件数のアイテム処理など
+# 数件程度の反復は展開できる一方、上限を超えたら展開せず既存の安全網（unsupported_syntax による
+# UNKNOWN、展開後に経路数が増え過ぎた場合は limit_paths による UNKNOWN）に委ねる。
+UNROLL_MAX_ITERATIONS = 8
+
+# 展開時に要素式を退避する一時変数の名前の型。``$`` と ``.`` は Python の識別子に使えない
+# 文字なので、対象コード（ast.parse を通った時点で識別子として妥当）のどんな変数名とも
+# 原理的に衝突しない。{seq} は展開（for 文）ごとの通し番号、{i} は要素の位置。
+_UNROLL_TEMP_NAME = "$unroll{seq}.{i}"
+
+_VALID_UNKNOWN_CODES = frozenset(get_args(UnknownCode))
+
+
+def _safe_unknown_code(code: str) -> UnknownCode:
+    """UnknownCause.code に渡す前に、正当な値に丸める。
+
+    Unresolved.code（symbolic_state.py）は自由な str で、UnknownCause.code（pydantic の
+    Literal）の値集合と一致する保証が無い（例: _assign が呼出し結果のローカルに付ける
+    "unresolved_call" 以外の内部専用の印）。丸めずに UnknownCause(code=...) へ渡すと
+    pydantic の検証で例外になり、解析全体が失敗する。値が不明なら安全側の
+    unsupported_syntax に倒し、「解析できないものを違反と表示しない」を守る。
+    """
+    if code in _VALID_UNKNOWN_CODES:
+        return cast(UnknownCode, code)
+    return "unsupported_syntax"
 
 
 class PathLimitExceeded(Exception):
@@ -59,6 +95,7 @@ class Draft:
     events: list[Event] = field(default_factory=list)
     unknowns: list[UnknownCause] = field(default_factory=list)
     lines: list[int] = field(default_factory=list)
+    unroll_used: int = 0  # S41b: この経路でここまでに消費した定数回ループの展開回数
     ended: str = "fallthrough"
     outcome: Outcome | None = None
     return_value: Expr | None = None
@@ -71,7 +108,118 @@ class Draft:
             list(self.events),
             list(self.unknowns),
             list(self.lines),
+            self.unroll_used,
         )
+
+
+@dataclass(frozen=True)
+class _UnrollOutcome:
+    """for の展開結果。``stmts`` が None なら展開できない（``reason`` に理由）。"""
+
+    stmts: list[ast.stmt] | None
+    reason: str = ""
+
+
+def _has_break_or_continue(body: list[ast.stmt]) -> bool:
+    """body（ネストした for/while/AsyncFor 自身のスコープは除く）に break/continue があるか。
+
+    break/continue は最も内側の for/while に属するので、ネストしたループの本体には再帰しない。
+    if / try / with の中は同じループのスコープなので再帰する。それ以外の対応外構文（match 等）の
+    中は再帰しないが、展開後にその構文自体が unsupported_stmt で打ち切られるので健全性には
+    影響しない。
+    """
+    for stmt in body:
+        if isinstance(stmt, ast.Break | ast.Continue):
+            return True
+        if isinstance(stmt, ast.If):
+            if _has_break_or_continue(stmt.body) or _has_break_or_continue(stmt.orelse):
+                return True
+        elif isinstance(stmt, ast.Try):
+            if (
+                _has_break_or_continue(stmt.body)
+                or _has_break_or_continue(stmt.orelse)
+                or _has_break_or_continue(stmt.finalbody)
+                or any(_has_break_or_continue(h.body) for h in stmt.handlers)
+            ):
+                return True
+        elif isinstance(stmt, ast.With | ast.AsyncWith) and _has_break_or_continue(stmt.body):
+            return True
+        # For / AsyncFor / While はそれ自身のスコープなので再帰しない
+    return False
+
+
+_BUILTINS_MODULE_NAMES = ("builtins", "__builtins__")
+
+
+def _module_may_rebind(mod: ModuleInfo, name: str) -> bool:
+    """モジュールのどこか（最上位に限らず、if/try/with/for/関数・クラス・match 本体の中も
+    含む）で name が再束縛され得るか。分からなければ True（安全側）。
+
+    束縛の構文を1つずつ列挙しない（MatchAs のキャプチャのような Name ノードにならない特殊な
+    形も見落とさないため）。``binding_candidates``（structural.py、S29 の RegionScanner と
+    共有）が ast.iter_fields で全フィールドを汎用に見て、識別子を束縛し得る文字列を返す。
+    ``from x import *`` はどの名前を束縛するか静的に分からないので無条件に対象とし、
+    ``builtins``/``__builtins__`` への参照は setattr 等で外から書き換えられ得るため
+    1 つでもあれば無条件に対象とする（この 2 つは「name と一致するか」では判定できない）。
+    """
+    for node in ast.walk(mod.tree):
+        if isinstance(node, ast.alias) and node.name == "*":
+            return True
+        if isinstance(node, ast.Name) and node.id in _BUILTINS_MODULE_NAMES:
+            return True
+        if name in binding_candidates(node):
+            return True
+    return False
+
+
+def _for_elements(it: ast.expr, frame: Frame) -> list[ast.expr] | str:
+    """反復要素を式の列として返す（要素は評価しない）。展開できなければ理由を返す。
+
+    range(定数) は要素（ast.Constant）を作る前に長さを展開上限と比べる。解析対象コードに
+    range(10**9) のような巨大な引数があっても、展開を諦める判定の前に巨大な list を作らない
+    ようにするため。range が組込みだと確定できない（対象モジュールのどこかで再定義され得る）
+    ときは展開しない。
+    """
+    if isinstance(it, ast.Tuple | ast.List):
+        if any(isinstance(e, ast.Starred) for e in it.elts):
+            return "要素に展開（*）がある"
+        return list(it.elts)
+    if (
+        isinstance(it, ast.Call)
+        and isinstance(it.func, ast.Name)
+        and it.func.id == "range"
+        and "range" not in frame.locals
+    ):
+        if _module_may_rebind(frame.module, "range"):
+            return "range が組込みと確定できない（モジュールのどこかで再定義され得る）"
+        if it.keywords or any(isinstance(a, ast.Starred) for a in it.args):
+            return "range の引数の形が対応外（キーワード引数・展開）"
+        if not (1 <= len(it.args) <= 2):
+            return "range の引数の形が対応外（step 指定など）"
+        values: list[int] = []
+        for a in it.args:
+            if not (
+                isinstance(a, ast.Constant)
+                and isinstance(a.value, int)
+                and not isinstance(a.value, bool)
+            ):
+                return "range の引数が定数 int でない"
+            values.append(a.value)
+        start, stop = (0, values[0]) if len(values) == 1 else (values[0], values[1])
+        if start < 0 or stop < 0:
+            return "range の引数に負の値がある"
+        if stop - start > UNROLL_MAX_ITERATIONS:
+            return f"range の要素数が展開上限（{UNROLL_MAX_ITERATIONS}）を超える"
+        return [ast.Constant(value=n) for n in range(start, stop)]
+    return "要素数が静的に分からない反復（タプル/リストのリテラルでも range(定数) でもない）"
+
+
+def _make_assign(stmt: ast.For, name: str, value: ast.expr) -> ast.Assign:
+    """``name = value`` を合成する。位置情報は元の for からコピーする。"""
+    assign = ast.Assign(targets=[ast.Name(id=name, ctx=ast.Store())], value=value)
+    ast.copy_location(assign, stmt)
+    ast.fix_missing_locations(assign)
+    return assign
 
 
 class PathAnalyzer:
@@ -94,6 +242,7 @@ class PathAnalyzer:
         self._op_by_symbol = {ob.symbol: (op_id, ob) for op_id, ob in bindings.operations.items()}
         self._known_pure = set(bindings.known_pure)
         self._path_count = 0
+        self._unroll_seq = 0  # S41b: 展開ごとに振る通し番号（退避用の一時変数名の衝突回避）
         self.scanner = RegionScanner(
             self.builder,
             index,
@@ -125,6 +274,7 @@ class PathAnalyzer:
         for arg in fn.node.args.args:
             frame.locals[arg.arg] = RootAlias(arg.arg)
         self._path_count = 0
+        self._unroll_seq = 0
         start = Draft([], SymState(self.domain, binding))
         try:
             drafts = self._explore(list(fn.node.body), fn, frame, start, depth=0)
@@ -156,8 +306,21 @@ class PathAnalyzer:
         while i < len(stmts):
             stmt = stmts[i]
             rest = stmts[i + 1 :]
+            unroll_reason: str | None = None
+            if isinstance(stmt, ast.For):
+                outcome = self._try_unroll_for(stmt, frame, d)
+                if outcome.stmts is not None:
+                    # 純粋な AST 書き換え: x = e1; *body; x = e2; *body; ...; *orelse に差し替えて
+                    # 同じ i から続ける（解析器に新しい意味論は足さない）
+                    stmts = stmts[:i] + outcome.stmts + rest
+                    continue
+                unroll_reason = outcome.reason
+            elif isinstance(stmt, ast.While):
+                unroll_reason = "while は定数回の反復として展開できない"
             d.lines.append(stmt.lineno)
             if (u := unsupported_stmt(stmt)) is not None:
+                if unroll_reason:
+                    u = replace(u, detail=f"{u.detail}（展開できない: {unroll_reason}）")
                 if self._skip_opaque_region(stmt, u, fn, frame, d):
                     i += 1
                     continue
@@ -232,6 +395,48 @@ class PathAnalyzer:
             )
         return True
 
+    # ------------------------------------------------------------ loop unroll
+    def _try_unroll_for(self, stmt: ast.For, frame: Frame, d: Draft) -> _UnrollOutcome:
+        """定数回の for を展開できるか判定し、できれば置き換え後の文の列を返す（S41b）。
+
+        Python は反復の全要素をループ開始前に評価する。これを保つため、要素式はまず一時変数へ
+        退避してから（``_t0 = e1; _t1 = e2; ...``）ループ変数に束縛する
+        （``x = _t0; *body; x = _t1; *body; ...; *orelse``）。body の実行前に退避を終えるので、
+        body が要素式の参照先を書き換えても後続要素は元の値のまま、要素式が副作用を持つ呼出しでも
+        1 回だけ・ループより前に実行される（body が途中で return / raise しても後続要素の
+        呼出しが失われない）。一時変数名（_UNROLL_TEMP_NAME）は Python の識別子として書けない
+        文字（``$`` ``.``）を含むため、対象コードのどんな変数名とも原理的に衝突しない
+        （対象コードの識別子は ast.parse を通った時点で妥当な Python 識別子であることが
+        保証されている）。要素の式は評価しない（解釈は _assign → ExprBuilder.to_expr に
+        委ねる）。展開できないときは理由付きで None を返し、呼出し元は従来どおり
+        unsupported_stmt / 構造解析に任せる。展開回数は d.unroll_used（この経路でここまでに
+        消費した分）に対して数える。
+        """
+        if not isinstance(stmt.target, ast.Name):
+            return _UnrollOutcome(None, "target がタプル分解など単純な変数名でない")
+        target = stmt.target
+        if _has_break_or_continue(stmt.body):
+            return _UnrollOutcome(None, "本体に break/continue がある")
+        elements = _for_elements(stmt.iter, frame)
+        if isinstance(elements, str):
+            return _UnrollOutcome(None, elements)
+        if d.unroll_used + len(elements) > UNROLL_MAX_ITERATIONS:
+            return _UnrollOutcome(
+                None, f"展開回数の上限（{UNROLL_MAX_ITERATIONS}）をネスト分含めて超える"
+            )
+        d.unroll_used += len(elements)
+        seq = self._unroll_seq
+        self._unroll_seq += 1
+        temp_names = [_UNROLL_TEMP_NAME.format(seq=seq, i=i) for i in range(len(elements))]
+        built: list[ast.stmt] = [
+            _make_assign(stmt, tmp, elt) for tmp, elt in zip(temp_names, elements, strict=True)
+        ]
+        for tmp in temp_names:
+            built.append(_make_assign(stmt, target.id, ast.Name(id=tmp, ctx=ast.Load())))
+            built.extend(stmt.body)
+        built.extend(stmt.orelse)
+        return _UnrollOutcome(built)
+
     def _finish(self, d: Draft) -> Draft:
         self._path_count += 1
         if self._path_count > self.limits.max_paths:
@@ -267,8 +472,18 @@ class PathAnalyzer:
                     frame.locals[target.id] = d.state.value(pure_var)
                     return None
                 ended = self._call(value_node, fn, frame, d, depth, rest)
+                # code は UnknownCode の正当な値にする（_unknown 経由で UnknownCause.code に
+                # そのまま渡り得るため。例えばこの変数を後で if の条件に使うと、その時点の
+                # cond.code がそのまま _unknown へ渡る）。analyzed_call=True は「_call を通して
+                # 副作用（イベント・展開）を記録し終えた」印（_return がこれを見て「値は追えない
+                # がサービス層の戻り値として経路は完全」と判定する。下記参照）。式の中の未解析の
+                # 呼出し（ExprBuilder.to_expr の ast.Call() 分岐）は同じ code を使うが
+                # analyzed_call は False のまま、というのが両者を区別する唯一の手段
                 frame.locals[target.id] = Unresolved(
-                    "call_result", f"呼出し結果: {ast.unparse(value_node)}", value_node.lineno
+                    "unresolved_call",
+                    f"呼出し結果: {ast.unparse(value_node)}",
+                    value_node.lineno,
+                    analyzed_call=True,
                 )
                 return ended
             value = self.builder.to_expr(value_node, frame, d.state)
@@ -437,7 +652,13 @@ class PathAnalyzer:
             else:
                 cframe.locals[p] = self.builder.to_expr(node, frame, d.state)
         sub = Draft(
-            list(d.conds), d.state, list(d.updates), list(d.events), list(d.unknowns), list(d.lines)
+            list(d.conds),
+            d.state,
+            list(d.updates),
+            list(d.events),
+            list(d.unknowns),
+            list(d.lines),
+            d.unroll_used,
         )
         results = self._explore(list(callee.node.body), callee, cframe, sub, depth + 1)
         ended: list[Draft] = []
@@ -446,7 +667,7 @@ class PathAnalyzer:
                 ended.append(r)
                 continue
             # return / fallthrough: 呼出し元へ戻り、残りの文を続ける
-            cont = Draft(r.conds, r.state, r.updates, r.events, r.unknowns, r.lines)
+            cont = Draft(r.conds, r.state, r.updates, r.events, r.unknowns, r.lines, r.unroll_used)
             ended.extend(self._explore(list(rest), fn, frame.copy(), cont, depth))
         return ended
 
@@ -497,8 +718,17 @@ class PathAnalyzer:
             d.outcome = Outcome(kind="unresolved", source_ref=src)
             return
         value = self.builder.to_expr(stmt.value, frame, d.state)
-        if isinstance(value, Unresolved) and value.code == "call_result":
-            # サービス層の戻り値（呼出し結果）。値は持たないが経路は完全
+        if (
+            isinstance(value, Unresolved)
+            and value.analyzed_call
+            and isinstance(stmt.value, ast.Name)
+        ):
+            # サービス層の戻り値（_assign が _call を通して副作用を記録済みの呼出し結果）を
+            # **そのまま** 返す場合だけ、値は持たないが経路は完全とみなす。
+            # `return x` 以外（`return x == g()` のような複合式）は、to_expr が左辺の
+            # Unresolved をそのまま返してフラグが伝播することがあり、右辺の呼出し g() が
+            # 解析されないまま「解析済み」扱いになる（codex レビュー指摘）。複合式は
+            # 未解析の部分式を含み得るので、下の一般 UNKNOWN 経路に落とす。
             d.outcome = Outcome(kind="return", source_ref=src)
             return
         if isinstance(value, Unresolved):
@@ -521,7 +751,7 @@ class PathAnalyzer:
     ) -> None:
         d.unknowns.append(
             UnknownCause(
-                code=code,  # type: ignore[arg-type,unused-ignore]
+                code=_safe_unknown_code(code),
                 detail=detail,
                 source_ref=self._src(fn, lineno),
                 may_affect=may_affect,
@@ -585,8 +815,8 @@ class PathAnalyzer:
             limits=self.limits,
             paths=[],
             unknown_causes=[
-                UnknownCause(  # type: ignore[arg-type,unused-ignore]
-                    code=code,
+                UnknownCause(
+                    code=_safe_unknown_code(code),
                     detail=detail,
                     source_ref=self._src(fn, fn.line_start) if fn else None,
                 )

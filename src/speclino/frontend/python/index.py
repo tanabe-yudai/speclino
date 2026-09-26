@@ -14,6 +14,21 @@ class SymbolNotFound(LookupError):
     pass
 
 
+def attribute_chain(node: ast.expr) -> list[str] | None:
+    """`a.b.c` を `["a", "b", "c"]` にする。根が名前でなければ None（動的な式）。
+
+    `symbolic_state.ExprBuilder` と `analysis.reachability` が同じ判定基準で使う。
+    """
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+        return list(reversed(parts))
+    return None
+
+
 @dataclass(frozen=True)
 class FunctionInfo:
     qualname: str  # 完全修飾（pkg.mod.func または pkg.mod.Cls.method）

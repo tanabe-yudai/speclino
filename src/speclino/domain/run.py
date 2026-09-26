@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from speclino.domain.code_ir import AnalysisLimits
+from speclino.domain.code_ir import AnalysisLimits, ReachabilityDigest
 from speclino.domain.common import SCHEMA_VERSION, IRModel
 
 GateStatus = Literal["pass", "pass_with_exceptions", "fail"]
@@ -37,6 +37,20 @@ class RunVersions(IRModel):
     settings_hash: str | None = None
 
 
+class BehaviorAnalysis(IRModel):
+    """増分解析（S41c）の記録。再利用は「解析していない」ことなので必ず記録して隠さない。"""
+
+    behavior_id: str = Field(min_length=1)
+    reachability: ReachabilityDigest = Field(
+        description="到達関数群のソースハッシュ（未解決呼出しも含め隠さず記録する）"
+    )
+    inputs_hash: str = Field(
+        min_length=1, description="仕様・domain・bindings・contracts の内容ハッシュ"
+    )
+    reused_from_base: bool = Field(description="base の Code IR を再利用したか")
+    reason: str = Field(min_length=1, description="再利用した／しなかった理由（人が読める説明）")
+
+
 class RunManifest(IRModel):
     schema_version: Literal["0.1"] = SCHEMA_VERSION
     run_id: str = Field(min_length=1)
@@ -46,3 +60,6 @@ class RunManifest(IRModel):
     limits: AnalysisLimits
     fail_on: list[str] = Field(default_factory=list, description="ゲート失敗にする verdict")
     mode: Literal["advisory", "blocking"] = "advisory"
+    analysis: list[BehaviorAnalysis] = Field(
+        default_factory=list, description="behavior ごとの増分解析の記録（S41c）"
+    )
