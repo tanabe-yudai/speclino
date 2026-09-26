@@ -229,3 +229,38 @@ def test_selfcheck_fixtures_match_live_source() -> None:
         "fixture が古い。意図した変更なら tests/fixtures/selfcheck/ を現物からコピーし直す: "
         + ", ".join(stale)
     )
+
+
+@pytest.mark.selfcheck
+def test_top_level_spec_content_hash_matches_the_markdown() -> None:
+    """`SpecIR.spec_content_hash`（トップレベル）が現在の Markdown と一致すること。
+
+    `approvals[].spec_content_hash` と同じ意味の値が 2 か所にあり、片方だけ更新して
+    ずれていた（本番でだけ E_SPEC_HASH_MISMATCH になって発覚）。ローカルの検証は
+    approvals 側しか見ないが、worker は base 由来の承認を合成するときにトップレベルを
+    読むため、両方が一致していないと本番で必ず失敗する。
+    """
+    from speclino.spec.loader import content_hash
+
+    mismatched: list[str] = []
+    for ir_path in sorted((REPO / "specs" / "ir").glob("*.spec-ir.json")):
+        spec = load_spec_ir(ir_path)
+        ids = {
+            r.requirement_id for rule in spec.rules for r in rule.source_refs if r.requirement_id
+        }
+        md = next(
+            (
+                p
+                for p in sorted((REPO / "specs").glob("*.md"))
+                if any(i in p.read_text(encoding="utf-8") for i in ids)
+            ),
+            None,
+        )
+        if md is None or spec.spec_content_hash is None:
+            continue
+        expected = content_hash(md.read_text(encoding="utf-8"))
+        if spec.spec_content_hash != expected:
+            mismatched.append(f"{ir_path.name}: 記録 {spec.spec_content_hash} ≠ 実体 {expected}")
+    assert not mismatched, "仕様本文のハッシュがずれている（再承認が要る）: " + "; ".join(
+        mismatched
+    )
