@@ -122,7 +122,10 @@ def _check_policy_findings_against(revision: PolicyRevision, saved: Findings) ->
     for f in saved.findings:
         if not f.behavior_id.startswith("policy:"):
             continue
-        level = rule_levels.get(f.requirement_id)
+        # 規約 Finding の requirement_id は `<rule>:<path>` の 2 段。完全一致で引くと
+        # 実際の Finding が 1 件も一致せず検査が空回りする（codex レビュー指摘）。
+        # ルール ID の取り出し方は conformance/exceptions.py の `_rule_of` と同じ規約。
+        level = rule_levels.get(f.requirement_id.split(":", 1)[0])
         if level is None:
             continue  # プロジェクト固有の追加規約。改訂に無くて当然
         expected = "high" if level == "mandatory" else "medium"

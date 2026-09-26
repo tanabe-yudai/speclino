@@ -99,6 +99,8 @@ def test_replay_fails_when_recorded_revision_cannot_be_resolved(tmp_path: Path) 
 
 
 def _policy_finding(rid: str, severity: str, behavior_id: str = "policy:make_targets") -> Finding:
+    """rid は実際の検査器と同じ `<rule>:<path>` 形式で渡すこと（ベア ID で試すと検査が
+    空回りしていても気づけない。codex レビューで実際にそれを見逃していた）。"""
     return Finding(
         id=f"policy:{rid}:x",
         requirement_id=rid,
@@ -121,12 +123,13 @@ def test_saved_policy_findings_must_match_the_resolved_revision() -> None:
     rule_id = revision.package.rules[0].id
 
     # 整合している（mandatory → high）
-    _check_policy_findings_against(revision, Findings(findings=[_policy_finding(rule_id, "high")]))
+    real_id = f"{rule_id}:Makefile"  # 実際の検査器が作る形式
+    _check_policy_findings_against(revision, Findings(findings=[_policy_finding(real_id, "high")]))
 
     # 食い違う（mandatory なのに medium）
     with pytest.raises(ValueError, match="整合しない"):
         _check_policy_findings_against(
-            revision, Findings(findings=[_policy_finding(rule_id, "medium")])
+            revision, Findings(findings=[_policy_finding(real_id, "medium")])
         )
 
 
