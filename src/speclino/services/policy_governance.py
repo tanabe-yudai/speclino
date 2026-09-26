@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from speclino.db.repositories.audit import AuditRepository
 from speclino.db.repositories.policy_revisions import PolicyRevisionRepository
@@ -50,6 +50,7 @@ async def approve(
     team: str,
     revision: int,
     approver: str,
+    audit_factory: async_sessionmaker[AsyncSession] | None = None,
 ) -> PolicyRevision:
     """draft 改訂を承認し、`audit_events` に `policy.approve` を残す。
 
@@ -62,7 +63,12 @@ async def approve(
     バイパスする内部専用の経路を使う（下記 `_approve` 参照）。
     """
     return await _approve(
-        session, team=team, revision=revision, approver=approver, enforce_approvers=True
+        session,
+        team=team,
+        revision=revision,
+        approver=approver,
+        enforce_approvers=True,
+        audit_factory=audit_factory,
     )
 
 
@@ -73,6 +79,7 @@ async def _approve(
     revision: int,
     approver: str,
     enforce_approvers: bool,
+    audit_factory: async_sessionmaker[AsyncSession] | None = None,
 ) -> PolicyRevision:
     """`approve` の実装本体。`enforce_approvers=False` は `seed_from_package` 専用
     （人の承認ではなく既存ファイルの移行のため、チームの承認者集合の検証を通さない）。
@@ -81,13 +88,7 @@ async def _approve(
     if enforce_approvers:
         approvers = set(await TeamRepository(session).list_approvers(team))
         if approver not in approvers:
-            await AuditRepository(session).record(
-                actor=approver,
-                action="policy.approve",
-                target=f"{team}@{revision}",
-                decision="denied",
-                detail={"reason": "not_an_approver"},
-            )
+            await _record_denial(session, audit_factory, team, revision, approver)
             raise PermissionError(f"{approver} は {team} の承認者ではない")
 
     approved = await PolicyRevisionRepository(session).approve(
@@ -143,3 +144,33 @@ async def seed_from_package(
 
 
 __all__ = ["SEED_ACTOR", "approve", "create_draft", "seed_from_package"]
+
+
+async def _record_denial(
+    session: AsyncSession,
+    audit_factory: async_sessionmaker[AsyncSession] | None,
+    team: str,
+    revision: int,
+    approver: str,
+) -> None:
+    """承認の拒否を監査に残す。**呼び出し側の rollback で消えないようにする**。
+
+    拒否は例外で返すので、呼び出し側が rollback するのが自然。同じセッションに書くと
+    「誰が承認を試みて拒否されたか」という監査の本体が一緒に消えてしまう（監査として
+    成立しない）。`audit_factory` があれば独立したトランザクションで確定させる。
+
+    渡されないときは同じセッションに best-effort で書く（テストなど、呼び出し側が
+    commit する構成のため）。本番の経路（CLI / API）は必ず factory を渡すこと。
+    """
+    record = {
+        "actor": approver,
+        "action": "policy.approve",
+        "target": f"{team}@{revision}",
+        "decision": "denied",
+        "detail": {"reason": "not_an_approver"},
+    }
+    if audit_factory is None:
+        await AuditRepository(session).record(**record)  # type: ignore[arg-type]
+        return
+    async with audit_factory() as audit_session, audit_session.begin():
+        await AuditRepository(audit_session).record(**record)  # type: ignore[arg-type]

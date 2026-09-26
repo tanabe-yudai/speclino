@@ -18,7 +18,7 @@ import yaml
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from speclino.db.models import AuditEvent, Base
+from speclino.db.models import AuditEvent, Base, PolicyRevisionRecord, TeamRecord
 from speclino.db.repositories.policy_revisions import PolicyRevisionRepository
 from speclino.db.repositories.teams import TeamRepository
 from speclino.domain.policy import PolicyApplicability, PolicyPackage, PolicyRule
@@ -391,4 +391,65 @@ async def test_concurrent_approve_second_transaction_fails_and_does_not_overwrit
                 .delete()
                 .where(Base.metadata.tables["policy_revisions"].c.team == team)
             )
+        await engine.dispose()
+
+
+async def test_denied_audit_survives_the_callers_rollback(_schema_ready: None) -> None:
+    """拒否の監査は呼び出し側の rollback で消えてはいけない。
+
+    承認の拒否は例外で返すので、呼び出し側が rollback するのが自然。同じセッションに
+    書いていると「誰が承認を試みて拒否されたか」という監査の本体が一緒に消え、監査として
+    成立しない（統合時の実測で発覚）。`audit_factory` を渡すと独立したトランザクションで
+    確定する。
+
+    このフィクスチャの `session` は接続ごと rollback するため、独立コミットの確認には
+    別の engine を使い、後始末で消す。
+    """
+    assert _DATABASE_URL is not None
+    team = f"rollback-audit-{uuid.uuid4().hex[:8]}"
+    engine = create_async_engine(_DATABASE_URL)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with factory() as s:
+            await TeamRepository(s).set_approvers(team, ["alice"])
+            await s.commit()
+            revision = await PolicyRevisionRepository(s).create_draft(
+                team=team, package=_package(), author="mallory"
+            )
+            await s.commit()
+            with pytest.raises(PermissionError):
+                await policy_governance.approve(
+                    s,
+                    team=team,
+                    revision=revision.revision,
+                    approver="mallory",
+                    audit_factory=factory,
+                )
+            await s.rollback()  # 呼び出し側が自然に行う後始末
+
+        async with factory() as s:
+            denied = (
+                (
+                    await s.execute(
+                        select(AuditEvent).where(
+                            AuditEvent.target == f"{team}@{revision.revision}",
+                            AuditEvent.decision == "denied",
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(denied) == 1, "rollback で拒否の監査が消えている"
+            assert denied[0].actor == "mallory"
+    finally:
+        async with factory() as s:
+            await s.execute(
+                AuditEvent.__table__.delete().where(AuditEvent.target.like(f"{team}@%"))
+            )
+            await s.execute(
+                PolicyRevisionRecord.__table__.delete().where(PolicyRevisionRecord.team == team)
+            )
+            await s.execute(TeamRecord.__table__.delete().where(TeamRecord.team == team))
+            await s.commit()
         await engine.dispose()
