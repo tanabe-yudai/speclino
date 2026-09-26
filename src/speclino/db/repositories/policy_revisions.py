@@ -7,7 +7,9 @@
 
 from __future__ import annotations
 
-from sqlalchemy import func, select, update
+from typing import Any, cast
+
+from sqlalchemy import CursorResult, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -64,6 +66,12 @@ class PolicyRevisionRepository:
         rows = (await self._session.execute(stmt)).scalars().all()
         return [_to_domain(row) for row in rows]
 
+    async def exists_for_team(self, team: str) -> bool:
+        """team に改訂が1件でもあるか（seed の排他判定用。パッケージ全体は読まない）。"""
+        stmt = select(PolicyRevisionRecord.id).where(PolicyRevisionRecord.team == team).limit(1)
+        row = (await self._session.execute(stmt)).first()
+        return row is not None
+
     async def create_draft(
         self,
         *,
@@ -116,6 +124,21 @@ class PolicyRevisionRepository:
         2つの UPDATE は同じ `session` 上で commit を挟まずに実行するため、呼び出し側が
         1つのトランザクションとして commit/rollback すれば原子的になる（このリポジトリ
         層は他のリポジトリと同様、自分でトランザクション境界を開かない）。
+
+        並行承認への対策（統治の穴修正 #3）: 「SELECT して draft か確認 → UPDATE」という
+        素朴な実装は、2つのトランザクションが同時に同じ行を draft として読んだ場合、
+        片方が承認・commit した後でももう片方が ID だけを条件にした UPDATE で
+        approver / approved_at を上書きできてしまう（TOCTOU）。これを塞ぐため、
+        自分を active にする UPDATE は `WHERE id=... AND status='draft'` を条件に入れ、
+        更新行数で実際に自分が draft→active の遷移を成立させたかを確認する。0 行なら
+        「既に他のトランザクションが承認した（か、そもそも draft でなくなった）」ので
+        ValueError で失敗させる。
+
+        既存 active を superseded にする UPDATE は先に実行するため
+        （`uq_policy_revisions_team_active` 部分一意インデックスの制約上、両方を
+        active のまま重ねられない）、後続の active化 UPDATE が上記の理由で失敗した場合は
+        この superseded 化が「なかったこと」になるよう、呼び出し側が例外時に必ず
+        ロールバックする前提を置く（このメソッドの docstring 冒頭の前提と同じ）。
         """
         stmt = select(PolicyRevisionRecord).where(
             PolicyRevisionRecord.team == team, PolicyRevisionRecord.revision == revision
@@ -131,11 +154,16 @@ class PolicyRevisionRepository:
             .where(PolicyRevisionRecord.team == team, PolicyRevisionRecord.status == "active")
             .values(status="superseded")
         )
-        await self._session.execute(
+        result = await self._session.execute(
             update(PolicyRevisionRecord)
-            .where(PolicyRevisionRecord.id == row.id)
+            .where(PolicyRevisionRecord.id == row.id, PolicyRevisionRecord.status == "draft")
             .values(status="active", approver=approver, approved_at=func.now())
         )
+        if cast(CursorResult[Any], result).rowcount != 1:
+            raise ValueError(
+                f"draft でない改訂は承認できない: {team}@{revision} は既に承認済み、"
+                "または並行する承認で状態が変わった（更新0行）"
+            )
         # bulk UPDATE は ORM の識別マップを更新しないため、明示的に refresh する
         # （tests/integration/db/test_repositories.py の既存の注記と同じ理由）。
         await self._session.flush()
