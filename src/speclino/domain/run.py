@@ -63,3 +63,10 @@ class RunManifest(IRModel):
     analysis: list[BehaviorAnalysis] = Field(
         default_factory=list, description="behavior ごとの増分解析の記録（S41c）"
     )
+    policy_team: str | None = Field(
+        default=None, description="適用したチーム規約の team 識別子（S42）"
+    )
+    policy_revision: int | None = Field(
+        default=None,
+        description="適用したチーム規約の改訂番号（S42）。replay はこの改訂で再評価する",
+    )
