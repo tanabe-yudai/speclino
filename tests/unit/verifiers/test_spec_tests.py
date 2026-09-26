@@ -189,7 +189,10 @@ def test_multiple_markers_on_one_test_are_each_checked(
     # direction1（各 rule.tests）2件 + direction2（マーカー2件）2件 = 4件
     assert len(findings) == 4
     assert {f.verdict for f in findings} == {"VERIFIED_IN_SCOPE"}
-    marker_req_ids = {f.requirement_id.split(":")[1] for f in findings}
+    # requirement_id は "<rule>:<path>" の 2 段（例外の照合が path を glob するため）。
+    # どの要求のマーカーかは Finding.id が持つ。
+    assert {f.requirement_id for f in findings} == {"SPEC-TEST-001:tests/test_demo.py"}
+    marker_req_ids = {f.id.split(":")[3] for f in findings if ":marker:" in f.id}
     assert marker_req_ids == {"R-MULTI-A", "R-MULTI-B"}
 
 

@@ -80,7 +80,13 @@ def test_self_repository_check_passes_including_policies() -> None:
     ids = {f.requirement_id for f in res.findings.findings}
     assert {"R-TOOL-01", "R-TOOL-02", "MAKE-001"} <= ids
     assert any(i.startswith("SPEC-FMT-001:") for i in ids)
-    assert res.gate.status == "pass", [(f.requirement_id, f.verdict) for f in res.gate.blocking]
+    # 例外（.speclino/exceptions.yaml）で免除された VIOLATED があると pass_with_exceptions に
+    # なる。免除は適合に書き換えず別記する設計（AC-009）なので、どちらも「通過」として扱う。
+    # 落としてよいのは必須ルールの非成立が残る場合だけ。
+    assert res.gate.status in ("pass", "pass_with_exceptions"), [
+        (f.requirement_id, f.verdict) for f in res.gate.blocking
+    ]
+    assert not res.gate.blocking
 
 
 def test_artifacts_are_deterministic_modulo_run_metadata(tmp_path: Path) -> None:

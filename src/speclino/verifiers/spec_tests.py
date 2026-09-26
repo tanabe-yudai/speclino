@@ -240,7 +240,10 @@ class SpecTestsVerifier:
         spec_rule: _SpecRule,
         test_id: str,
     ) -> Finding:
-        requirement_id = f"{rule.id}:{spec_rule.rule_id}:{test_id}"
+        # 既存の規約 Finding と同じ "<rule>:<path>" の 2 段にする。3 段にすると
+        # exceptions.yaml の照合（requirement_id の 2 段目を path として glob する）が
+        # 効かず免除できない。どの要求・どのテストかは Finding.id と message が持つ。
+        requirement_id = f"{rule.id}:{test_id.split('::', 1)[0]}"
         parts = test_id.split("::")
         verdict: Verdict
         category: Category
@@ -315,7 +318,7 @@ class SpecTestsVerifier:
         tests_by_rule_id: dict[str, set[str]],
         m: _Marker,
     ) -> Finding:
-        requirement_id = f"{rule.id}:{m.requirement_id}:{m.test.test_id}"
+        requirement_id = f"{rule.id}:{m.test.path}"  # 上と同じ理由で 2 段
         marker_repr = f'@pytest.mark.{marker}("{m.requirement_id}")'
         verdict: Verdict
         category: Category

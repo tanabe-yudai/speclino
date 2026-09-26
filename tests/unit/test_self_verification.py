@@ -53,9 +53,10 @@ def test_spec_ir_is_valid_and_approved_against_current_markdown() -> None:
     assert not report.warnings, [d.model_dump() for d in report.warnings]
 
 
+# `@pytest.mark.spec` は付けない: このマーカーは「その要求を**振る舞いとして**検証するテスト」
+# （Spec IR の tests に宣言して test_run が隔離実行できるもの）を指す。このテストは
+# SpecLino が要求を**静的に**検証できることを確かめるもので、種類が違う（SPEC-TEST-001）。
 @pytest.mark.selfcheck
-@pytest.mark.spec("R-TOOL-01")
-@pytest.mark.spec("R-TOOL-02")
 def test_gateway_invoke_satisfies_spec_tool_001() -> None:
     code = analyze_repo(REPO, "tool_gateway_invoke", DOMAIN, BINDINGS)
     assert [p.outcome.kind for p in code.paths] == ["return", "return", "return"]

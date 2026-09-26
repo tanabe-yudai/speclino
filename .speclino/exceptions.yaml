@@ -1,2 +1,24 @@
 schema_version: "0.1"
-exceptions: []
+exceptions:
+  # R-RUN 系（SPEC-RUN-001）は @pytest.mark.spec が付いているのに Spec IR の tests に
+  # 宣言していない。S38 で意図して見送った判断で、忘れたわけではない:
+  # test_run_freshness.py は speclino.services を import し、その先で z3 まで引くため、
+  # ローカルのサンドボックス用イメージ（docker/sandbox/Dockerfile、依存を手で列挙した
+  # 最小構成）では収集できない。本番（Cloud Run sandboxes、rootfs は本番イメージ）では
+  # 動くが、片方だけ動く状態は食い違いのもとになる。
+  #
+  # SPEC-TEST-001 は advisory なのでゲートは落ちないが、判断を Issue コメントではなく
+  # 機械が読む場所に置く（期限が来れば自動で無効になる）。
+  - id: EX-SPEC-TEST-001-RRUN
+    rule: SPEC-TEST-001
+    target:
+      paths:
+        - tests/unit/services/test_run_freshness.py
+    reason: >-
+      R-RUN 系のテストは speclino.services 経由で z3 まで import するため、ローカルの
+      サンドボックス用イメージで収集できない。本番だけ動く状態を避けるため宣言を見送っている。
+    approver: tanabe-yudai
+    expires_on: 2026-12-01
+    alternative: >-
+      サンドボックス用イメージの依存を本番イメージに揃えるか、speclino.services の import 面を
+      絞って test_run_freshness.py が軽量イメージでも収集できるようにしてから tests に宣言する。
