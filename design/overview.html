@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SpecLino — 概要</title>
+<style>
+  :root { color-scheme: light; }
+  html, body {
+    margin: 0; padding: 0;
+    width: 1600px; height: 900px;
+    background: #ffffff;
+    overflow: hidden;
+  }
+  body {
+    font-family: system-ui, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  }
+  svg text {
+    font-family: system-ui, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  }
+  .mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .visually-hidden {
+    position: absolute; width: 1px; height: 1px;
+    margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+<figure style="margin:0;">
+  <svg width="1600" height="900" viewBox="0 0 1600 900" role="img"
+       aria-label="SpecLinoは承認済み仕様とコードを中間表現に変換し、決定的な検査器Z3が要求ごとにVERIFIED_IN_SCOPE・VIOLATED・UNKNOWN・REVIEWの4値を反例つきで判定し、未解決が残ればゲートで失敗させる。未解決のときだけADKエージェントが証拠を集めるが、判定そのものは書き換えられない。">
+    <defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#14213d"/>
+      </marker>
+      <marker id="arrowGray" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#9aa3b2"/>
+      </marker>
+      <marker id="arrowRed" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#c5221f"/>
+      </marker>
+    </defs>
+
+    <!-- background -->
+    <rect x="0" y="0" width="1600" height="900" fill="#ffffff"/>
+
+    <!-- ===================== HEADER ===================== -->
+    <text x="40" y="46" font-size="28" font-weight="700" fill="#14213d">SpecLino — 仕様とコードの意味差分を、反例つきで示す</text>
+    <text x="40" y="75" font-size="15" fill="#5b6472">仕様（Markdown）とコードを共通語彙の中間表現に変換し、決定的な検査器（Z3）で「どの要求が・どの条件で・どう破られるか」を出す</text>
+    <line x1="40" y1="94" x2="1560" y2="94" stroke="#dde2ea" stroke-width="1.5"/>
+
+    <!-- ===================== BAND B: MAIN PIPELINE ===================== -->
+
+    <!-- INPUT label -->
+    <text x="40" y="122" font-size="12" font-weight="700" fill="#5b6472" letter-spacing="1">入力</text>
+
+    <!-- INPUT 1: spec -->
+    <rect x="40" y="128" width="220" height="58" rx="10" fill="#ffffff" stroke="#c7ccd6" stroke-width="1.5"/>
+    <text x="55" y="152" font-size="13.5" font-weight="700" fill="#14213d">仕様（specs/*.md）</text>
+    <text x="55" y="173" font-size="12.5" fill="#14213d">→ Spec IR</text>
+
+    <!-- INPUT 2: code -->
+    <rect x="40" y="200" width="220" height="104" rx="10" fill="#ffffff" stroke="#c7ccd6" stroke-width="1.5"/>
+    <text x="55" y="222" font-size="13.5" font-weight="700" fill="#14213d">コード（Python）</text>
+    <text x="55" y="242" font-size="12" fill="#14213d">→ path_analyzer</text>
+    <text x="55" y="261" font-size="12" fill="#14213d">→ Code IR</text>
+    <text x="55" y="281" font-size="10.5" fill="#5b6472">経路ごとの条件・状態・</text>
+    <text x="55" y="294" font-size="10.5" fill="#5b6472">呼出しを持つ</text>
+
+    <!-- arrows: input -> checker -->
+    <line x1="260" y1="157" x2="318" y2="210" stroke="#14213d" stroke-width="1.8" marker-end="url(#arrow)"/>
+    <line x1="260" y1="252" x2="318" y2="228" stroke="#14213d" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+    <!-- CHECKER -->
+    <rect x="320" y="120" width="220" height="200" rx="10" fill="#eaf1fd" stroke="#1a73e8" stroke-width="2"/>
+    <text x="336" y="150" font-size="15" font-weight="700" fill="#0b4bb0">決定的な検査器</text>
+    <text x="336" y="171" font-size="12.5" fill="#0b4bb0">（Z3 / SMTソルバー）</text>
+    <text x="336" y="199" font-size="12.5" font-weight="700" fill="#0b4bb0" class="mono">前提 ∧ 経路条件 ∧ ¬期待</text>
+    <text x="336" y="221" font-size="11" fill="#3a4a63">を要求 × 経路ごとに解く</text>
+    <text x="336" y="238" font-size="11" fill="#3a4a63">（充足可能性判定）</text>
+    <text x="336" y="264" font-size="10.5" fill="#5b6472">対応外の構文・契約なき</text>
+    <text x="336" y="278" font-size="10.5" fill="#5b6472">外部呼出しは UNKNOWN へ</text>
+
+    <!-- arrow: checker -> verdicts -->
+    <line x1="540" y1="220" x2="588" y2="223" stroke="#14213d" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+    <!-- VERDICTS panel -->
+    <text x="590" y="103" font-size="12" font-weight="700" fill="#5b6472" letter-spacing="1">判定（要求ごとに4値）</text>
+    <rect x="590" y="110" width="250" height="230" rx="10" fill="#fbfbfd" stroke="#dde2ea" stroke-width="1.5"/>
+
+    <!-- chip: VERIFIED -->
+    <rect x="604" y="124" width="222" height="46" rx="8" fill="#e6f4ea" stroke="#2e7d46" stroke-width="1.4"/>
+    <text x="614" y="143" font-size="12" font-weight="700" fill="#1e6b34" class="mono">VERIFIED_IN_SCOPE</text>
+    <text x="614" y="160" font-size="10" fill="#1e6b34">観測範囲内で全経路が成立</text>
+
+    <!-- chip: VIOLATED -->
+    <rect x="604" y="177" width="222" height="46" rx="8" fill="#fdecea" stroke="#c5221f" stroke-width="1.4"/>
+    <text x="614" y="196" font-size="12" font-weight="700" fill="#b3261e" class="mono">VIOLATED</text>
+    <text x="614" y="213" font-size="10" fill="#b3261e">反例あり（記号 or 実行観測）</text>
+
+    <!-- chip: UNKNOWN -->
+    <rect x="604" y="230" width="222" height="46" rx="8" fill="#fef3e0" stroke="#b06000" stroke-width="1.4"/>
+    <text x="614" y="249" font-size="12" font-weight="700" fill="#8a5300" class="mono">UNKNOWN</text>
+    <text x="614" y="266" font-size="10" fill="#8a5300">解析できない（対応外構文等）</text>
+
+    <!-- chip: REVIEW -->
+    <rect x="604" y="283" width="222" height="46" rx="8" fill="#e8f0fe" stroke="#1a56c4" stroke-width="1.4"/>
+    <text x="614" y="302" font-size="12" font-weight="700" fill="#17469e" class="mono">REVIEW</text>
+    <text x="614" y="319" font-size="10" fill="#17469e">人の確認が必要（未承認解釈等）</text>
+
+    <!-- arrow: verdicts -> gate -->
+    <line x1="840" y1="225" x2="888" y2="225" stroke="#14213d" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+    <!-- GATE -->
+    <rect x="890" y="130" width="210" height="190" rx="10" fill="#f1f3f9" stroke="#14213d" stroke-width="1.8"/>
+    <text x="904" y="158" font-size="15" font-weight="700" fill="#14213d">ゲート</text>
+    <text x="904" y="179" font-size="12.5" font-weight="700" fill="#b3261e">（フェイルクローズ）</text>
+    <text x="904" y="202" font-size="11.5" fill="#14213d">必須要求に</text>
+    <text x="904" y="219" font-size="11.5" fill="#14213d">UNKNOWN／REVIEW</text>
+    <text x="904" y="236" font-size="11.5" fill="#14213d">が1件でも残れば失敗</text>
+    <text x="904" y="260" font-size="10.5" fill="#5b6472">解析できないものを</text>
+    <text x="904" y="274" font-size="10.5" fill="#5b6472">違反とは表示しない</text>
+
+    <!-- arrow: gate -> github -->
+    <line x1="1100" y1="225" x2="1138" y2="225" stroke="#14213d" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+    <!-- GITHUB -->
+    <rect x="1140" y="130" width="230" height="190" rx="10" fill="#f5f7fa" stroke="#c7ccd6" stroke-width="1.5"/>
+    <text x="1156" y="158" font-size="15" font-weight="700" fill="#14213d">GitHub</text>
+    <text x="1156" y="182" font-size="12.5" fill="#14213d">Check 実行結果</text>
+    <text x="1156" y="202" font-size="11" fill="#5b6472">（pass / fail）</text>
+    <text x="1156" y="228" font-size="12.5" fill="#14213d">PR コメント</text>
+    <text x="1156" y="248" font-size="11" fill="#5b6472">（反例つき Finding）</text>
+
+    <!-- ===================== BAND C: COUNTEREXAMPLE + AGENT ===================== -->
+
+    <!-- trigger arrow: gate area -> agent (dashed, conditional) -->
+    <line x1="995" y1="328" x2="1275" y2="369" stroke="#9aa3b2" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#arrowGray)"/>
+    <text x="1032" y="345" font-size="10.5" fill="#5b6472" font-style="italic">未解決のときだけ起動</text>
+
+    <!-- counterexample card -->
+    <rect x="590" y="372" width="430" height="175" rx="10" fill="#ffffff" stroke="#c5221f" stroke-width="2"/>
+    <rect x="590" y="372" width="7" height="175" rx="3" fill="#c5221f"/>
+    <text x="614" y="397" font-size="12" font-weight="700" fill="#b3261e" letter-spacing="0.5">反例の例（VIOLATED）</text>
+    <text x="614" y="421" font-size="14" font-weight="700" fill="#14213d">R-CANCEL-04</text>
+    <text x="614" y="441" font-size="12.5" fill="#14213d">PENDING の注文を所有者がキャンセル</text>
+    <text x="614" y="459" font-size="12.5" fill="#14213d">したら在庫を1回戻す</text>
+    <text x="614" y="483" font-size="12" fill="#14213d">条件: status=PENDING・非管理者・所有者</text>
+    <text x="614" y="505" font-size="12" fill="#14213d">観測: 在庫戻しの呼出しが 0 回</text>
+    <text x="614" y="524" font-size="10.5" fill="#5b6472">（在庫戻しが管理者の経路だけに変更された）</text>
+    <text x="1005" y="539" font-size="10.5" fill="#8a93a6" class="mono" text-anchor="end">service.py:19-27</text>
+
+    <!-- dashed red connector: VIOLATED chip -> example card (routed outside the verdict chips) -->
+    <polyline points="826,200 856,200 856,355 756,355 756,370" fill="none" stroke="#c5221f" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#arrowRed)"/>
+
+    <!-- AGENT box -->
+    <rect x="1080" y="372" width="390" height="225" rx="10" fill="#ffffff" stroke="#8a93a6" stroke-width="1.6"/>
+    <text x="1096" y="397" font-size="14.5" font-weight="700" fill="#14213d">エージェント（ADK + Gemini）</text>
+    <text x="1096" y="417" font-size="11" fill="#5b6472">未解決（UNKNOWN／REVIEW）のときだけ起動し、</text>
+    <text x="1096" y="432" font-size="11" fill="#5b6472">証拠を集めて検査器に差し戻す</text>
+
+    <!-- tool pills -->
+    <rect x="1096" y="446" width="112" height="52" rx="8" fill="#f5f7fa" stroke="#c7ccd6" stroke-width="1.2"/>
+    <text x="1102" y="466" font-size="10.5" font-weight="700" fill="#14213d" class="mono">analyze_focus</text>
+    <text x="1102" y="483" font-size="9.5" fill="#5b6472">上限を上げ再解析</text>
+
+    <rect x="1216" y="446" width="112" height="52" rx="8" fill="#f5f7fa" stroke="#c7ccd6" stroke-width="1.2"/>
+    <text x="1222" y="466" font-size="10.5" font-weight="700" fill="#14213d" class="mono">test_run</text>
+    <text x="1222" y="483" font-size="9.5" fill="#5b6472">隔離実行でテスト</text>
+
+    <rect x="1336" y="446" width="112" height="52" rx="8" fill="#f5f7fa" stroke="#c7ccd6" stroke-width="1.2"/>
+    <text x="1342" y="466" font-size="10.5" font-weight="700" fill="#14213d" class="mono">human_ask</text>
+    <text x="1342" y="483" font-size="9.5" fill="#5b6472">人に選択肢で確認</text>
+
+    <!-- emphasis banner: agent cannot rewrite verdict -->
+    <rect x="1096" y="514" width="358" height="44" rx="6" fill="#14213d"/>
+    <path d="M1114,536 a6,6 0 0 1 12,0 v4 h-12 z" fill="none" stroke="#ffffff" stroke-width="1.8"/>
+    <rect x="1111" y="540" width="18" height="14" rx="2" fill="#ffffff"/>
+    <text x="1140" y="542" font-size="13" font-weight="700" fill="#ffffff">判定は書き換えられない（判定は検査器だけ）</text>
+
+    <text x="1096" y="576" font-size="10.5" fill="#5b6472">全ツール呼出しは権限検査と監査ログを通過する</text>
+
+    <!-- ===================== BAND D: TEAM POLICY ===================== -->
+    <rect x="40" y="612" width="1520" height="62" rx="10" fill="#f5f7fa" stroke="#c7ccd6" stroke-width="1.5"/>
+    <text x="60" y="636" font-size="12.5" fill="#14213d"><tspan font-weight="700">チーム規約</tspan><tspan> — Makefile必須ターゲット・仕様書式などは承認フローで改訂 → 規約検査器がゲートに反映</tspan></text>
+    <text x="60" y="657" font-size="12.5" fill="#14213d">→ MCP でエディタのエージェントに配信（CLAUDE.md へコピーせず、常に最新の規約をそこから読む）</text>
+
+    <!-- ===================== BAND E: DEV LOOP ===================== -->
+    <text x="40" y="696" font-size="13" font-weight="700" fill="#5b6472" letter-spacing="1">開発ループ</text>
+
+    <!-- step 1 -->
+    <rect x="40" y="706" width="270" height="100" rx="10" fill="#ffffff" stroke="#c7ccd6" stroke-width="1.5"/>
+    <circle cx="64" cy="730" r="13" fill="#14213d"/>
+    <text x="64" y="734" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
+    <text x="86" y="734" font-size="13" font-weight="700" fill="#14213d">人が仕様を書く</text>
+    <text x="56" y="764" font-size="11" fill="#5b6472">specs/*.md</text>
+
+    <!-- arrow 1->2 -->
+    <line x1="310" y1="756" x2="348" y2="756" stroke="#14213d" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+    <!-- step 2 -->
+    <rect x="350" y="706" width="270" height="100" rx="10" fill="#ffffff" stroke="#c7ccd6" stroke-width="1.5"/>
+    <circle cx="374" cy="730" r="13" fill="#14213d"/>
+    <text x="374" y="734" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+    <text x="396" y="734" font-size="13" font-weight="700" fill="#14213d">PR で承認</text>
+    <text x="366" y="764" font-size="11" fill="#5b6472">マージ ＝ 承認</text>
+
+    <!-- arrow 2->3 -->
+    <line x1="620" y1="756" x2="658" y2="756" stroke="#14213d" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+    <!-- step 3 -->
+    <rect x="660" y="706" width="270" height="100" rx="10" fill="#ffffff" stroke="#c7ccd6" stroke-width="1.5"/>
+    <circle cx="684" cy="730" r="13" fill="#14213d"/>
+    <text x="684" y="734" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+    <text x="706" y="734" font-size="13" font-weight="700" fill="#14213d">エージェントが実装</text>
+    <text x="676" y="760" font-size="11" fill="#5b6472">MCP で仕様・規約を</text>
+    <text x="676" y="776" font-size="11" fill="#5b6472">読んで実装</text>
+
+    <!-- arrow 3->4 -->
+    <line x1="930" y1="756" x2="968" y2="756" stroke="#14213d" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+    <!-- step 4 -->
+    <rect x="970" y="706" width="270" height="100" rx="10" fill="#ffffff" stroke="#c7ccd6" stroke-width="1.5"/>
+    <circle cx="994" cy="730" r="13" fill="#14213d"/>
+    <text x="994" y="734" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
+    <text x="1016" y="734" font-size="13" font-weight="700" fill="#14213d">SpecLino が検証</text>
+    <text x="986" y="764" font-size="11" fill="#5b6472">Z3 で判定 → ゲート</text>
+
+    <!-- arrow 4->5 -->
+    <line x1="1240" y1="756" x2="1278" y2="756" stroke="#14213d" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+    <!-- step 5 -->
+    <rect x="1280" y="706" width="270" height="100" rx="10" fill="#ffffff" stroke="#c7ccd6" stroke-width="1.5"/>
+    <circle cx="1304" cy="730" r="13" fill="#14213d"/>
+    <text x="1304" y="734" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">5</text>
+    <text x="1326" y="734" font-size="13" font-weight="700" fill="#14213d">違反・未検証を解消</text>
+    <text x="1296" y="764" font-size="11" fill="#5b6472">→ マージ</text>
+
+    <!-- footer -->
+    <text x="40" y="852" font-size="11" fill="#8a93a6">※ 本図は概念図。本番のインフラ構成は design/architecture.png を参照。</text>
+  </svg>
+  <figcaption class="visually-hidden">
+    SpecLinoは承認済み仕様とコードを中間表現（Spec IR / Code IR）に変換し、決定的な検査器（Z3）が要求ごとにVERIFIED_IN_SCOPE・VIOLATED・UNKNOWN・REVIEWの4値を反例つきで判定する。ゲートは必須要求にUNKNOWN／REVIEWが残れば失敗するフェイルクローズで、解析できないものを違反として表示しない。未解決が残ったときだけADK＋Geminiのエージェントがanalyze_focus・test_run・human_askで証拠を集めて検査器に差し戻すが、判定そのものは書き換えられない。チーム規約はSpecLinoが正本を持ち、承認フローで改訂されてゲートに反映され、MCP経由でエディタのエージェントに配信される。開発ループは、人が仕様を書きPRで承認、エージェントがMCPで仕様と規約を読んで実装、SpecLinoが検証し、違反・未検証を解消してからマージする。
+  </figcaption>
+</figure>
+</body>
+</html>
