@@ -282,3 +282,24 @@ async def test_gate_comment_is_updated_not_duplicated(engine: AsyncEngine, tmp_p
     gate_comments = [c for c in host.comments if COMMENT_MARKER in c["body"]]
     assert len(gate_comments) == 1, [c["body"][:60] for c in host.comments]
     assert "SpecLino / gate" in gate_comments[0]["body"]
+
+
+async def test_child_run_rejects_a_parent_from_another_project(
+    service: tuple[ReviewRunService, LocalCodeHost, str, str, str, str],
+) -> None:
+    """子 run の親は同じ project の run に限る（別リポジトリの回答を取り込ませない。S52）。"""
+    svc, host, repo, base, head, _ = service
+    parent = await svc.create_run(
+        repo_full_name=repo, head_sha=head, base_sha=base, pr_number=1, trigger="pull_request"
+    )
+    other = f"{repo}-other"
+    host.repos[other] = host.repos[repo]
+    with pytest.raises(ValueError, match="の run ではない"):
+        await svc.create_run(
+            repo_full_name=other,
+            head_sha=head,
+            base_sha=base,
+            pr_number=1,
+            trigger="comment",
+            parent_run_id=parent,
+        )

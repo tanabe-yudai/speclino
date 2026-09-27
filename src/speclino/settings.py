@@ -49,7 +49,6 @@ class Settings(BaseSettings):
     agent_enabled: bool = True
     agent_model: str = "gemini-3.8-flash"
     daily_cost_limit_usd: float = 3.0
-    approvers: list[str] = []  # プロジェクト設定に無いときの既定の承認者
     demo_rerun_limit_per_day: int = 20
 
     # MCP（S33）: 静的 Bearer。未設定なら /mcp をマウントしない

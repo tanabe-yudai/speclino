@@ -81,7 +81,6 @@ async def demo_rerun(
         trigger=f"{TRIGGER_PREFIX}{user}",
         installation_id=project.installation_id,
         default_branch=project.default_branch,
-        settings=project.settings,
     )
     return RerunOutcome(new_id, used + 1, limit_per_day, "再実行を開始した", cost_ok, cost_note)
 

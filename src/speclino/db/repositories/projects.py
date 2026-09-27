@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -32,12 +31,15 @@ class ProjectRepository:
         repo_full_name: str,
         installation_id: int | None,
         default_branch: str,
-        settings: dict[str, Any],
     ) -> Project:
         """`repo_full_name` の一意制約に対する `INSERT ... ON CONFLICT DO UPDATE`。
 
         GitHub App のインストール/再インストールで同じリポジトリの upsert が競合しても
         原子的に解決できるよう、get→insert/update の 2 ステップではなく単一文にする。
+
+        `settings`（承認者など）は run の作成で書き換えない。以前は呼ぶたびに `{}` で上書きし、
+        project の承認者を消していた（S52）。`installation_id` も、MCP などインストールを
+        知らない経路（None）から呼ばれたときは既存値を保つ。
         """
         stmt = (
             pg_insert(Project)
@@ -45,14 +47,13 @@ class ProjectRepository:
                 repo_full_name=repo_full_name,
                 installation_id=installation_id,
                 default_branch=default_branch,
-                settings=settings,
+                settings={},
             )
             .on_conflict_do_update(
                 index_elements=[Project.repo_full_name],
                 set_={
-                    "installation_id": installation_id,
+                    "installation_id": func.coalesce(installation_id, Project.installation_id),
                     "default_branch": default_branch,
-                    "settings": settings,
                     "updated_at": func.now(),
                 },
             )

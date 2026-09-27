@@ -71,7 +71,6 @@ async def project_id(session: AsyncSession) -> uuid.UUID:
         repo_full_name="tanabe-yudai/spec-lino-test",
         installation_id=None,
         default_branch="main",
-        settings={},
     )
     return project.id
 

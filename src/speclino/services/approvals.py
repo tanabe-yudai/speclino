@@ -1,7 +1,7 @@
 """PR コメントのコマンド（`/speclino approve-spec <hash>` / answer / attest / rerun）。
 
-承認者はサーバ側設定（projects.settings.approvers）で検証する。`author_association` は
-所属であって承認権限ではないので使わない。
+承認者はサーバ側設定（projects.settings.approvers）だけで検証する（全体共通の承認者は
+持たない）。`author_association` は所属であって承認権限ではないので使わない。
 """
 
 from __future__ import annotations

@@ -111,12 +111,12 @@ class ReviewRunService:
         trigger: str,
         installation_id: int | None = None,
         default_branch: str = "main",
-        settings: dict[str, Any] | None = None,
         parent_run_id: UUID | None = None,
     ) -> UUID:
         """run を queued で作り、同じ PR の未完了 run を superseded にして enqueue する。
 
         parent_run_id を持つ子 run は、親（とその祖先）の回答済み質問を引き継いで再開する。
+        親は同じ project の run に限る（別リポジトリの回答を取り込ませない。S52）。
         """
         async with self.session_factory() as session, session.begin():
             projects = ProjectRepository(session)
@@ -124,9 +124,12 @@ class ReviewRunService:
                 repo_full_name=repo_full_name,
                 installation_id=installation_id,
                 default_branch=default_branch,
-                settings=settings or {},
             )
             runs = ReviewRunRepository(session)
+            if parent_run_id is not None:
+                parent = await runs.get(parent_run_id)
+                if parent is None or parent.project_id != project.id:
+                    raise ValueError(f"親 run {parent_run_id} は {repo_full_name} の run ではない")
             run = await runs.create(
                 project_id=project.id,
                 pr_number=pr_number,

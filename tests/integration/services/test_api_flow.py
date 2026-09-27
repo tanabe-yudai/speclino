@@ -14,6 +14,7 @@ from typing import Any
 import httpx
 import pytest
 import pytest_asyncio
+from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from speclino.adapters.localgit.local_code_host import LocalCodeHost
@@ -26,6 +27,7 @@ from speclino.services.review_run_service import ReviewRunConfig, ReviewRunServi
 from speclino.settings import Settings
 from speclino.spec import load_spec_ir
 from speclino.spec.spec_validator import rule_content_hash
+from tests.integration.services.conftest import set_project_approvers
 from tests.integration.services.test_review_run_service import make_demo_repo
 
 
@@ -96,9 +98,7 @@ async def client(
     factory = async_sessionmaker(engine, expire_on_commit=False)
     holder: dict[str, ReviewRunService] = {}
     queue = InProcessQueue(lambda rid: holder["svc"].execute(rid), immediate=True)
-    settings = Settings(
-        env="local", role="all", github_webhook_secret=SECRET, approvers=["approver"]
-    )
+    settings = Settings(env="local", role="all", github_webhook_secret=SECRET)
     service = ReviewRunService(
         factory,
         host,
@@ -166,11 +166,12 @@ async def test_webhook_to_api_flow(
 
 
 async def test_approve_spec_comment_triggers_rerun(
-    client: tuple[httpx.AsyncClient, str, str, str, str, LocalCodeHost],
+    client: tuple[httpx.AsyncClient, str, str, str, str, LocalCodeHost], engine: AsyncEngine
 ) -> None:
     c, repo, base, _, head2, host = client
     raw, headers = signed(pr_payload(repo, head2, base, 2), "pull_request")
     first = (await c.post("/webhooks/github", content=raw, headers=headers)).json()
+    await set_project_approvers(engine, repo, ["approver"])
     assert (await c.get(f"/api/review-runs/{first['run_id']}")).json()["gate_status"] == "fail"
     base_hash = rule_content_hash(_base_rule("R-CANCEL-04"))
     # 承認者でない人のコマンドは拒否（監査に残る）
@@ -189,6 +190,14 @@ async def test_approve_spec_comment_triggers_rerun(
     assert res["status"] == "queued", res
     assert (await c.get(f"/api/review-runs/{res['run_id']}")).json()["gate_status"] == "pass"
     assert host.checks[max(host.checks)]["conclusion"] == "success"
+    # run を作り直しても project の承認者は消えない（以前は create_run が {} で上書きした）
+    async with engine.connect() as conn:
+        settings = (
+            await conn.execute(
+                sql_text("SELECT settings FROM projects WHERE repo_full_name = :r"), {"r": repo}
+            )
+        ).scalar_one()
+    assert settings["approvers"] == ["approver"]
 
 
 async def test_manual_start_and_healthz(

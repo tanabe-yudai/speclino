@@ -21,6 +21,7 @@ from speclino.api.deps import AppState
 from speclino.db.repositories import QuestionRepository, ReviewRunRepository
 from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
 from speclino.settings import Settings
+from tests.integration.services.conftest import set_project_approvers
 from tests.integration.services.test_api_flow import SECRET, comment_payload, pr_payload, signed
 
 _DATABASE_URL = os.environ.get("SPECLINO_DATABASE_URL")
@@ -91,9 +92,7 @@ async def test_question_then_answer_resumes_child_run(engine: AsyncEngine, tmp_p
             [text("承認者の回答待ち")],
         ]
     )
-    settings = Settings(
-        env="local", role="all", github_webhook_secret=SECRET, approvers=["approver"]
-    )
+    settings = Settings(env="local", role="all", github_webhook_secret=SECRET)
     service = ReviewRunService(
         factory,
         host,
@@ -113,6 +112,7 @@ async def test_question_then_answer_resumes_child_run(engine: AsyncEngine, tmp_p
         raw, headers = signed(pr_payload(repo, head, base, 7), "pull_request")
         first = (await c.post("/webhooks/github", content=raw, headers=headers)).json()
         run_id = uuid.UUID(first["run_id"])
+        await set_project_approvers(engine, repo, ["approver"])
         async with factory() as s:
             run = await ReviewRunRepository(s).get(run_id)
             assert run is not None and run.exec_state == "awaiting_answer"
@@ -143,6 +143,22 @@ async def test_question_then_answer_resumes_child_run(engine: AsyncEngine, tmp_p
         assert (await c.post("/webhooks/github", content=raw, headers=headers)).json()["commands"][
             0
         ]["accepted"] is False
+        # 別リポジトリの PR から、その承認者がこの質問に回答しても受理しない（S52）
+        other = f"{repo}-other"
+        host.repos[other] = host.repos[repo]
+        raw, headers = signed(pr_payload(other, head, base, 7), "pull_request")
+        await c.post("/webhooks/github", content=raw, headers=headers)
+        await set_project_approvers(engine, other, ["intruder"])
+        raw, headers = signed(
+            comment_payload(
+                other, 7, f"/speclino answer Q-{short} inventory_restore_command", "intruder"
+            ),
+            "issue_comment",
+        )
+        cross = (await c.post("/webhooks/github", content=raw, headers=headers)).json()
+        assert cross["commands"][0]["accepted"] is False, cross
+        async with factory() as s:
+            assert len(await QuestionRepository(s).list_for_run(run_id, "open")) == 1
         # 承認者の回答 → 子 run（親の回答を bindings に適用）→ 通過
         ScriptedLlm.reset()
         raw, headers = signed(

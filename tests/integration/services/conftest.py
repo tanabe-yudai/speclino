@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import AsyncIterator
 
@@ -12,6 +13,19 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from speclino.db.models import Base
 
 _DATABASE_URL = os.environ.get("SPECLINO_DATABASE_URL")
+
+
+async def set_project_approvers(engine: AsyncEngine, repo: str, approvers: list[str]) -> None:
+    """project の承認者を設定する（PR コマンドの承認者は project ごとの設定だけ。S52）。"""
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            sql_text(
+                "UPDATE projects SET settings = jsonb_set(settings, '{approvers}', "
+                "CAST(:approvers AS jsonb)) WHERE repo_full_name = :repo"
+            ),
+            {"approvers": json.dumps(approvers), "repo": repo},
+        )
+        assert result.rowcount == 1, f"{repo} の project が無い"
 
 
 @pytest_asyncio.fixture

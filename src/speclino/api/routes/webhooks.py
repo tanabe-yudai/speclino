@@ -93,9 +93,9 @@ async def _handle_comment(state: AppState, cm: Any) -> dict[str, Any]:
     results: list[dict[str, Any]] = []
     async with state.session_factory() as session, session.begin():
         project = await ProjectRepository(session).get_by_repo(cm.repo_full_name)
-        approvers = set(state.settings.approvers)
-        if project is not None:
-            approvers |= set(project.settings.get("approvers", []))
+        # 承認者は project ごとの設定だけ。全体共通の承認者は、どのリポジトリでも承認できて
+        # しまうため持たない（S52）。
+        approvers = set(project.settings.get("approvers", [])) if project is not None else set()
         audit = AuditRepository(session)
         latest = (
             await ReviewRunRepository(session).latest_run_for_pr(project.id, cm.issue_number)
@@ -124,7 +124,7 @@ async def _handle_comment(state: AppState, cm: Any) -> dict[str, Any]:
                     comment_url=cm.comment_url,
                 )
             if cmd.kind == "answer":
-                outcome = await _record_answer(session, cmd.args, cm, latest)
+                outcome = await _record_answer(session, cmd.args, cm, project, latest)
                 results.append({"kind": cmd.kind, **outcome})
                 continue
             results.append({"kind": cmd.kind, "accepted": True})
@@ -145,13 +145,26 @@ async def _handle_comment(state: AppState, cm: Any) -> dict[str, Any]:
 
 
 async def _record_answer(
-    session: Any, args: tuple[str, ...], cm: Any, latest: Any
+    session: Any, args: tuple[str, ...], cm: Any, project: Any, latest: Any
 ) -> dict[str, Any]:
-    """`/speclino answer Q-<id> <選択肢>`。head が変わっていれば stale（FR 015）。"""
+    """`/speclino answer Q-<id> <選択肢>`。head が変わっていれば stale（FR 015）。
+
+    質問はこのコメントが付いた PR のもの（同じ project・同じ PR 番号の run の質問）に限る。
+    短縮 ID は全体で引けるため、照合しないと別リポジトリの質問に回答でき、その run を親に
+    した子 run で回答を取り込ませられる（S52）。見つからない場合と同じ応答にして、他の
+    リポジトリの質問の有無を漏らさない。
+    """
     qid, option = args[0].removeprefix("Q-"), args[1]
     qrepo = QuestionRepository(session)
     q = await qrepo.find_by_short_id(qid)
-    if q is None:
+    run = await ReviewRunRepository(session).get(q.run_id) if q is not None else None
+    if (
+        q is None
+        or run is None
+        or project is None
+        or run.project_id != project.id
+        or run.pr_number != cm.issue_number
+    ):
         return {"accepted": False, "reason": f"未回答の質問 Q-{qid} が無い"}
     options = q.options.get("options") or []
     if option not in options:
