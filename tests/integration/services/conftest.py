@@ -38,4 +38,7 @@ async def engine() -> AsyncIterator[AsyncEngine]:
             ("projects", "id", pid),
         ):
             await conn.execute(sql_text(f"DELETE FROM {table} WHERE {col} IN ({sub})"))
+        # チーム規約のテストは e2e- で始まるチームを使う（owner/repo の owner がチーム）
+        for table in ("policy_revisions", "teams"):
+            await conn.execute(sql_text(f"DELETE FROM {table} WHERE team LIKE 'e2e-%'"))
     await eng.dispose()

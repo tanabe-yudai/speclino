@@ -12,7 +12,14 @@ from mcp.client import Client
 from mcp.client.streamable_http import streamable_http_client
 
 from speclino.api.app import create_app
+from speclino.domain.policy import (
+    PolicyApplicability,
+    PolicyPackage,
+    PolicyRevision,
+    PolicyRule,
+)
 from speclino.mcp_server.server import _read_context, allowed_hosts, build_mcp
+from speclino.services.check_pipeline import _run_policies
 from speclino.settings import Settings
 
 REPO = Path(__file__).resolve().parents[2]
@@ -93,3 +100,72 @@ async def test_http_mount_requires_bearer_and_serves_tools() -> None:
             async with Client(transport) as client:
                 tools = await client.list_tools()
     assert "verification_start" in {t.name for t in tools.tools}
+
+
+def _team_revision(*rules: PolicyRule) -> PolicyRevision:
+    package = PolicyPackage(
+        id="team-core", version="1", status="active", owner="acme", rules=list(rules)
+    )
+    return PolicyRevision(team="acme", revision=3, status="active", package=package, author="a")
+
+
+def _advisory(rule_id: str) -> PolicyRule:
+    return PolicyRule(
+        id=rule_id,
+        version="1",
+        level="advisory",
+        title=f"{rule_id} title",
+        text=f"{rule_id} text",
+        applies_to=PolicyApplicability(paths=["**/*.py"]),
+        on_missing_input="skipped",
+    )
+
+
+def test_read_context_merges_team_policy_like_the_pipeline(tmp_path: Path) -> None:
+    """S44: チーム規約を先に並べ、同じ id のプロジェクト規約は無視して、その事実を返す。
+
+    エージェントが読む規約とゲートが照らす規約がずれないよう、合わせた後の id の集合が
+    `check_pipeline._run_policies` の `rules_by_id` と一致することも確かめる。
+    """
+    policy_dir = tmp_path / ".speclino" / "policy"
+    policy_dir.mkdir(parents=True)
+    shutil.copy(REPO / ".speclino" / "policy" / "speclino-core.yaml", policy_dir)
+    team = _team_revision(_advisory("MAKE-001"), _advisory("TEAM-001"))
+
+    ctx = _read_context(tmp_path, team)
+
+    assert ctx["team_policy"] == {"team": "acme", "revision": 3}
+    assert ctx["ignored_project_policies"] == ["MAKE-001"]
+    by_id = {p["id"]: p for p in ctx["policies"]}
+    assert [p["id"] for p in ctx["policies"][:2]] == ["MAKE-001", "TEAM-001"]
+    assert by_id["MAKE-001"]["origin"] == "team" and by_id["MAKE-001"]["verifier"] is None
+    assert by_id["SPEC-FMT-001"]["origin"] == "project"
+    assert by_id["SPEC-FMT-001"]["verifier"] is not None
+    assert set(by_id) == set(_run_policies(tmp_path, team).rules_by_id)
+
+
+def test_read_context_without_team_policy_lists_project_rules_only(tmp_path: Path) -> None:
+    policy_dir = tmp_path / ".speclino" / "policy"
+    policy_dir.mkdir(parents=True)
+    shutil.copy(REPO / ".speclino" / "policy" / "speclino-core.yaml", policy_dir)
+
+    ctx = _read_context(tmp_path)
+
+    assert ctx["team_policy"] is None and ctx["ignored_project_policies"] == []
+    assert {p["origin"] for p in ctx["policies"]} == {"project"}
+
+
+def test_read_context_keeps_the_first_project_rule_like_the_pipeline(tmp_path: Path) -> None:
+    """同じ id のプロジェクト規約が複数ファイルにあるとき、検証と同じく先のファイルだけを採る。"""
+    policy_dir = tmp_path / ".speclino" / "policy"
+    policy_dir.mkdir(parents=True)
+    core = REPO / ".speclino" / "policy" / "speclino-core.yaml"
+    shutil.copy(core, policy_dir / "a.yaml")
+    shutil.copy(core, policy_dir / "b.yml")
+
+    ctx = _read_context(tmp_path)
+
+    ids = [p["id"] for p in ctx["policies"]]
+    assert len(ids) == len(set(ids))
+    assert set(ctx["ignored_project_policies"]) == set(ids)
+    assert set(ids) == set(_run_policies(tmp_path, None).rules_by_id)

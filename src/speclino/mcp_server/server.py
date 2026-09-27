@@ -1,7 +1,7 @@
 """MCP サーバー（S33 / 暫定仕様書 FR「MCP 操作」）。
 
-エディタのエージェント（Claude Code 等）が、仕様を書くための語彙を取り出し（`context_get`）、
-検証を開始し（`verification_start`）、結果を読む（`verification_get`）ためのツール。判定を
+エディタのエージェント（Claude Code 等）が、仕様を書くための語彙とチーム規約を取り出し
+（`context_get`）、検証を開始し（`verification_start`）、結果を読む（`verification_get`）ためのツール。判定を
 書き換えるツールは無い（判定は engine だけが行う）。
 
 - 認証は静的 Bearer（`SPECLINO_MCP_TOKEN`）。未設定ならサーバーをマウントしない
@@ -28,6 +28,8 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from speclino.api.deps import AppState
 from speclino.db.repositories import FindingRepository, ReviewRunRepository
+from speclino.domain.policy import PolicyRevision
+from speclino.services.policy_governance import team_of
 from speclino.spec import load_spec_ir
 
 StateGetter = Callable[[], AppState]
@@ -39,22 +41,28 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
     mcp = MCPServer(
         "speclino",
         instructions=(
-            "SpecLino: 仕様（Spec IR）とコードの意味差分を Z3 で検査する。context_get で語彙と"
-            "既存の要求を読み、verification_start で検証を開始し、verification_get で結果を読む。"
-            "判定（verdict）は変更できない。"
+            "SpecLino: 仕様（Spec IR）とコードの意味差分を Z3 で検査する。実装の前に context_get で"
+            "語彙・既存の要求・チーム規約を読み、verification_start で検証を開始し、"
+            "verification_get で結果を読む。判定（verdict）は変更できない。"
         ),
     )
 
     @mcp.tool()
     async def context_get(repo_full_name: str, ref: str = "HEAD") -> dict[str, Any]:
-        """リポジトリの `.speclino/`（ドメイン語彙・束縛・規約）と `specs/ir` の要求一覧を返す。
+        """語彙（`.speclino/`）、`specs/ir` の要求一覧、このリポジトリに効く規約を返す。
 
-        仕様を書くときは、ここに出る変数・列挙・操作 ID だけを使う。
+        仕様を書くときは、ここに出る変数・列挙・操作 ID だけを使う。実装するときは `policies`
+        （チーム規約 ＋ プロジェクト固有の追加規約）に従う。`verifier` が null の規約は
+        機械検証されない（助言のみ）が、守る対象であることは変わらない。
         """
         state = get_state()
+        # 検証（worker）と同じ解決器・同じチームの決め方で読む。ここがずれると、エージェントが
+        # 読んだ規約とゲートが照らす規約が食い違う。
+        resolve = state.service.config.resolve_team_policy
+        team_policy = await resolve(team_of(repo_full_name)) if resolve is not None else None
         with tempfile.TemporaryDirectory(prefix="speclino-mcp-") as tmp:
             root = await state.code_host.fetch_snapshot(repo_full_name, ref, Path(tmp))
-            return _read_context(root)
+            return _read_context(root, team_policy)
 
     @mcp.tool()
     async def verification_start(
@@ -99,21 +107,70 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
     return mcp
 
 
-def _read_context(root: Path) -> dict[str, Any]:
+def _read_context(root: Path, team_policy: PolicyRevision | None = None) -> dict[str, Any]:
+    """`context_get` の本体。規約は `check_pipeline._run_policies` と同じ規則で合わせる。
+
+    チーム規約を先に並べ、既に採用した id（チーム規約、または先のファイルのプロジェクト規約）と
+    同じ id のプロジェクト規約は無視する（チーム規約をプロジェクト側で無効化できない）。
+    無視したものは `ignored_project_policies` に出し、黙って消さない。
+    """
     speclino_dir = root / ".speclino"
-    out: dict[str, Any] = {"domain": None, "bindings": None, "policies": [], "rules": []}
+    out: dict[str, Any] = {
+        "domain": None,
+        "bindings": None,
+        "team_policy": (
+            {"team": team_policy.team, "revision": team_policy.revision}
+            if team_policy is not None
+            else None
+        ),
+        "policies": [],
+        "ignored_project_policies": [],
+        "rules": [],
+    }
     for name in ("domain", "bindings"):
         path = speclino_dir / f"{name}.yaml"
         if path.is_file():
             out[name] = yaml.safe_load(path.read_text(encoding="utf-8"))
-    policy_dir = speclino_dir / "policy"
-    if policy_dir.is_dir():
-        for path in sorted(policy_dir.glob("*.y*ml")):
-            package = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-            out["policies"].extend(
-                {"id": r.get("id"), "level": r.get("level"), "title": r.get("title")}
-                for r in package.get("rules", [])
+    adopted: set[str] = set()
+    if team_policy is not None:
+        for rule in team_policy.package.rules:
+            adopted.add(rule.id)
+            out["policies"].append(
+                {
+                    "id": rule.id,
+                    "origin": "team",
+                    "level": rule.level,
+                    "title": rule.title,
+                    "text": rule.text,
+                    "verifier": rule.verifier.id if rule.verifier is not None else None,
+                    "exceptions_allowed": rule.exceptions_allowed,
+                }
             )
+    policy_dir = speclino_dir / "policy"
+    policy_files = (
+        sorted({*policy_dir.glob("*.yaml"), *policy_dir.glob("*.yml")})
+        if policy_dir.is_dir()
+        else []
+    )
+    for path in policy_files:
+        package = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        rules = package.get("rules", [])
+        ignored = [r.get("id") for r in rules if r.get("id") in adopted]
+        out["ignored_project_policies"].extend(ignored)
+        kept = [r for r in rules if r.get("id") not in ignored]
+        adopted.update(r.get("id") for r in kept)
+        out["policies"].extend(
+            {
+                "id": r.get("id"),
+                "origin": "project",
+                "level": r.get("level"),
+                "title": r.get("title"),
+                "text": r.get("text"),
+                "verifier": (r.get("verifier") or {}).get("id"),
+                "exceptions_allowed": r.get("exceptions_allowed", True),
+            }
+            for r in kept
+        )
     ir_dir = root / "specs" / "ir"
     if ir_dir.is_dir():
         for path in sorted(ir_dir.glob("*.spec-ir.json")):

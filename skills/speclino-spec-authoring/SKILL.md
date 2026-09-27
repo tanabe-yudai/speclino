@@ -1,6 +1,6 @@
 ---
 name: speclino-spec-authoring
-description: SpecLino で検査できる仕様（specs/*.md と Spec IR）を書き、候補を抽出し、検証して承認に回すまでの手順。仕様の追加・変更、要求 ID の付け方、Spec IR の語彙、検証結果（VIOLATED / UNKNOWN / REVIEW）の読み方が必要なときに使う。
+description: SpecLino で検査できる仕様（specs/*.md と Spec IR）を書き、候補を抽出し、検証して承認に回すまでの手順と、実装前にチーム規約を読む手順。仕様の追加・変更、承認済み仕様に沿った実装、要求 ID の付け方、Spec IR の語彙、チーム規約、検証結果（VIOLATED / UNKNOWN / REVIEW）の読み方が必要なときに使う。
 ---
 
 # SpecLino の仕様を書く
@@ -8,6 +8,19 @@ description: SpecLino で検査できる仕様（specs/*.md と Spec IR）を書
 SpecLino は「仕様（Spec IR）」と「コード（Code IR）」を Z3 で突き合わせ、要求ごとに
 VERIFIED_IN_SCOPE / VIOLATED / UNKNOWN / REVIEW を出す。LLM（あなた）は候補を書くだけで、
 判定と承認はしない。判定はエンジン、承認は人（`/speclino approve-spec`）が行う。
+
+## 0. チーム規約を読む（仕様を書く前にも、実装する前にも）
+
+チームの規約（Makefile の必須ターゲット、仕様の書式、層の依存制約など）は SpecLino が正本を持ち、
+ゲートはそれに照らして検査する。リポジトリの CLAUDE.md / AGENTS.md に写しがあっても、正は
+SpecLino 側。MCP の `context_get(repo_full_name)` の `policies` を読んでから作業する。
+
+- `origin`: `team`（チームの承認済み改訂。`team_policy` に改訂番号）か `project`（`.speclino/policy/` の追加規約）
+- `level`: `mandatory` は違反・未検証があるとゲートが落ちる。`advisory` は警告
+- `verifier`: `null` の規約は機械検証されない（助言のみ）。検査で落ちなくても守る対象であることは変わらない
+- `ignored_project_policies`: チーム規約と同じ id なので無視されたプロジェクト側の規約。チーム規約は
+  プロジェクト側で上書き・無効化できない。免除が必要なら `.speclino/exceptions.yaml`（期限・承認者つき。
+  `exceptions_allowed: false` の規約は免除できない）
 
 ## 1. 語彙を先に読む
 

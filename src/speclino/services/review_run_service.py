@@ -68,6 +68,7 @@ from speclino.services.check_pipeline import (
 from speclino.services.cost_guard import CostGuard
 from speclino.services.investigation import InvestigationResult, investigate
 from speclino.services.obligation_diff import effective_spec
+from speclino.services.policy_governance import team_of
 from speclino.services.run_freshness import should_publish
 from speclino.spec import load_spec_ir
 from speclino.telemetry import configure_tracing, span
@@ -229,9 +230,7 @@ class ReviewRunService:
                 overrides, extra = _reconcile_specs(base_root, head_root, server_approvals)
                 team_policy: PolicyRevision | None = None
                 if self.config.resolve_team_policy is not None:
-                    # S42: チームの識別子は repo_full_name（owner/repo）の owner 部分
-                    team = repo_full_name.split("/", 1)[0]
-                    team_policy = await self.config.resolve_team_policy(team)
+                    team_policy = await self.config.resolve_team_policy(team_of(repo_full_name))
                 req = CheckRequest(
                     repo_root=head_root,
                     head_sha=head_sha,

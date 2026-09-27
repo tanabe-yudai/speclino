@@ -22,6 +22,15 @@ from speclino.domain.policy import PolicyPackage, PolicyRevision
 SEED_ACTOR = "seed"
 
 
+def team_of(repo_full_name: str) -> str:
+    """リポジトリが属するチーム。当面は `owner/repo` の owner をチームとみなす。
+
+    検証（worker）と配信（MCP）が同じ規則でチームを決めないと、エージェントが読んだ規約と
+    ゲートが照らす規約がずれるため、ここ 1 か所で決める。
+    """
+    return repo_full_name.split("/", 1)[0]
+
+
 async def create_draft(
     session: AsyncSession,
     *,
