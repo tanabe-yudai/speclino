@@ -234,3 +234,65 @@ resource "google_cloud_run_v2_service_iam_member" "sandbox_invoker" {
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.this["worker"].email}"
 }
+
+# 本番のマイグレーション。deploy.yml がサービス更新の前に同じイメージで実行する。
+# 秘密（DB の接続 URL）を GitHub Actions のランナーへ出さないため、ランナーから
+# cloud-sql-proxy で直接繋がず、サービスと同じ接続経路（/cloudsql ソケット）を使う。
+# 実行 SA は worker を流用する（cloudsql.client と database-url の参照権を既に持ち、
+# deployer も actAs できる）。
+#
+# サービスより先にスキーマが進むので、マイグレーションは旧コードが新スキーマで動く形
+# （テーブル・列の追加など）に限る。
+resource "google_cloud_run_v2_job" "migrate" {
+  count = var.cloudsql_instance != "" && var.mount_secrets ? 1 : 0
+
+  project  = var.project_id
+  name     = "speclino-migrate"
+  location = var.region
+
+  # 誤って消すとデプロイが止まるだけだが、terraform destroy で巻き込まない。
+  deletion_protection = false
+
+  template {
+    task_count = 1
+
+    template {
+      service_account = google_service_account.this["worker"].email
+      timeout         = "300s"
+      # 失敗したマイグレーションを自動で再実行しない（原因を見てから流し直す）。
+      max_retries = 0
+
+      containers {
+        image   = var.image
+        command = ["uv", "run", "alembic", "upgrade", "head"]
+
+        env {
+          name = "SPECLINO_DATABASE_URL"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.this["database-url"].secret_id
+              version = "latest"
+            }
+          }
+        }
+
+        volume_mounts {
+          name       = "cloudsql"
+          mount_path = "/cloudsql"
+        }
+      }
+
+      volumes {
+        name = "cloudsql"
+        cloud_sql_instance {
+          instances = [var.cloudsql_instance]
+        }
+      }
+    }
+  }
+
+  lifecycle {
+    # サービスと同じく、イメージは deploy.yml の `gcloud run jobs update --image` が更新する。
+    ignore_changes = [template[0].template[0].containers[0].image]
+  }
+}

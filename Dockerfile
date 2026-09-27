@@ -21,6 +21,9 @@ WORKDIR /app
 
 COPY pyproject.toml uv.lock README.md ./
 COPY src/ ./src/
+# 本番のマイグレーションは同じイメージの Cloud Run Job（speclino-migrate）で流す。
+COPY alembic.ini ./
+COPY migrations/ ./migrations/
 # sandbox グループ（pytest）も入れる。Cloud Run sandboxes は親コンテナの / を rootfs に
 # するため、隔離実行に要るものはこのイメージに含まれている必要がある（S38）。
 RUN uv sync --frozen --no-dev --group sandbox

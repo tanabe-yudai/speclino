@@ -62,6 +62,17 @@ jobs:
       # plan/apply の承認フローを毎回挟む必要があり CI/CD の速度と
       # 「apply はユーザー確認後」という運用ルールが両立しないため、
       # イメージ更新だけは `gcloud run services update` で直接反映する。
+      # サービスを更新する前にマイグレーションを流す（infra/envs/prod/run.tf の
+      # google_cloud_run_v2_job.migrate）。失敗したらサービスは旧イメージのまま止める。
+      - name: Migrate database
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          gcloud run jobs update speclino-migrate \
+            --project="${GCP_PROJECT_ID}" --region="${REGION}" --image="${IMAGE}"
+          gcloud run jobs execute speclino-migrate \
+            --project="${GCP_PROJECT_ID}" --region="${REGION}" --wait
+
       - name: Deploy to Cloud Run (web / worker / sandbox)
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
