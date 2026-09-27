@@ -1,23 +1,76 @@
 flowchart TB
-  subgraph clients["利用者"]
+  subgraph USERS["利用者"]
     direction LR
-    GH["GitHub<br/>PR / コメント / 再実行"]
-    ED["エディタのエージェント<br/>MCP + Bearer"]
-    JU["ブラウザ<br/>Identity Platform（メール／パスワード）"]
+    DEV["開発者・審査員<br/>ブラウザ"]
+    ED["エディタのエージェント<br/>（Claude Code 等）"]
   end
 
-  WEB["<b>Cloud Run: speclino-web</b>（公開）<br/>FastAPI: /webhooks/github ・ /api/* ・ /mcp ・ React SPA"]
-  WORKER["<b>Cloud Run: speclino-worker</b>（IAM 必須・GitHub App 秘密鍵を持つ）<br/>ReviewRunService = 決定的なオーケストレータ"]
-  SANDBOX["<b>Cloud Run: speclino-sandbox</b><br/>権限ゼロ SA / ネットワーク無し<br/>宣言済みテストだけを実行"]
-  GEMINI["Gemini（ADK）<br/>証拠収集と質問のみ。判定はしない"]
+  subgraph GHAPPSG["GitHub"]
+    GHAPP["GitHub App<br/>webhook ・ Checks API ・ PR コメント"]
+  end
 
-  GH -- "webhook（HMAC 検証・重複排除）" --> WEB
-  ED --> WEB
-  JU --> WEB
-  WEB -- "Cloud Tasks（OIDC）" --> WORKER
-  WORKER -- "Checks API（成功 / 失敗 / 要対応）" --> GH
-  WORKER -- "ツールは ToolGateway 経由・書込みなし" --> GEMINI
+  subgraph GCP["GCP プロジェクト example-project（asia-northeast1）"]
+    direction TB
+
+    subgraph GCP_RUN["Cloud Run（同一イメージ、SPECLINO_ROLE で役割切替）"]
+      direction LR
+      WEB["<b>speclino-web</b>（公開）<br/>FastAPI: /webhooks/github ・ /api/* ・ /mcp ・ React SPA 配信"]
+      WORKER["<b>speclino-worker</b>（IAM 必須・Cloud Tasks の OIDC からのみ呼出し可）<br/>ReviewRunService：スナップショット→検査（Z3）→未解決ならエージェント→gate→Checks 更新"]
+      SANDBOX["<b>speclino-sandbox</b>（IAM 必須・worker からのみ呼出し可）<br/>権限ゼロ SA・Cloud Run sandboxes（Preview）<br/>Rule.tests の ID だけを隔離実行（test_run）"]
+    end
+
+    TASKS[("Cloud Tasks<br/>speclino-runs キュー")]
+
+    subgraph GCP_DATA["データ / 秘密"]
+      direction LR
+      SQL[("Cloud SQL（PostgreSQL）<br/>runs / findings / audit<br/>questions / policy_revisions<br/>/cloudsql Unix ソケット接続")]
+      GCS[("GCS<br/>run-manifest / spec-ir / code-ir<br/>findings / review.md")]
+      SECRETS[("Secret Manager<br/>DB接続URL・GitHub App秘密鍵<br/>webhook秘密・MCPトークン")]
+    end
+
+    subgraph GCP_AUX["補助サービス"]
+      direction LR
+      IDP["Identity Platform<br/>メール / パスワード"]
+      VERTEX["Vertex AI（global）<br/>Gemini（ADK エージェント）<br/>証拠収集・確認のみ。判定はしない"]
+      OBS["Cloud Logging / Cloud Trace"]
+    end
+
+    subgraph GCP_DEPLOY["デプロイ"]
+      direction LR
+      AR["Artifact Registry<br/>speclino イメージ"]
+      MIGRATE["Cloud Run Job<br/>speclino-migrate<br/>alembic upgrade head"]
+    end
+
+    NOTE["原則：判定は決定的な検査器（Z3）だけが行う。<br/>エージェントは証拠収集と確認のみ。<br/>ゲートは未検証（UNKNOWN/REVIEW）が残れば失敗（フェイルクローズ）"]
+  end
+
+  subgraph GHACTSG["GitHub Actions（CI/CD）"]
+    GHACT["GitHub Actions<br/>push（WIF・長期キー無し）"]
+  end
+
+  DEV -- "ログイン" --> IDP
+  DEV --> WEB
+  ED -- "/mcp（Bearer）<br/>context_get / verification_*" --> WEB
+  GHAPP -- "webhook（HMAC 検証・重複排除）" --> WEB
+  WEB -- "ID トークン検証" --> IDP
+  WEB -- enqueue --> TASKS
+  TASKS -- OIDC --> WORKER
+  WORKER -- "Checks API ・ PR コメント" --> GHAPP
+  WORKER -- "ツールは ToolGateway 経由・書込みなし" --> VERTEX
   WORKER -- "Rule.tests の ID のみ" --> SANDBOX
-  WORKER --> SQL[("Cloud SQL<br/>run / finding / evidence<br/>question / approval / audit")]
-  WORKER --> GCS[("GCS<br/>run-manifest / spec-ir / code-ir<br/>findings / semantic-diff / review.md")]
+  WEB --> SQL
+  WORKER --> SQL
+  MIGRATE --> SQL
   WEB -. "成果物を読んで表示" .-> GCS
+  WORKER --> GCS
+  WEB -. secret参照 .-> SECRETS
+  WORKER -. secret参照 .-> SECRETS
+
+  GHACT --> AR
+  GHACT -- "1) migrate job 実行" --> MIGRATE
+  GHACT -- "2) サービス更新" --> GCP_RUN
+
+  GCP_RUN -.-> OBS
+
+  classDef note fill:#fef7e0,stroke:#f9ab00,stroke-dasharray: 4 3,color:#333
+  class NOTE note
