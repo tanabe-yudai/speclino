@@ -75,8 +75,11 @@ async def test_spa_deep_links_fall_back_to_index() -> None:
         httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c,
     ):
         deep = await c.get("/runs/00000000-0000-0000-0000-000000000000")
+        top = await c.get("/")
         api = await c.get("/api/no-such-route")
     assert deep.status_code == 200 and '<div id="root"' in deep.text
+    # index.html は毎回確認させる（古い index.html が古いバンドルを読み続けないように）
+    assert deep.headers["cache-control"] == top.headers["cache-control"] == "no-cache"
     assert api.status_code == 404 and api.json()["error"]["code"] == "http_error"
 
 

@@ -104,16 +104,25 @@ def create_app(settings: Settings, state: AppState | None = None) -> FastAPI:
 
 class SpaStaticFiles(StaticFiles):
     """SPA 用: 存在しないパス（例 /runs/<id> のディープリンク）は index.html を返し、
-    クライアント側ルーターに委ねる。API は先にルーターが受けるのでここには来ない。"""
+    クライアント側ルーターに委ねる。API は先にルーターが受けるのでここには来ない。
+
+    index.html は毎回確認させる（no-cache）。キャッシュの指定が無いとブラウザが Last-Modified
+    から推測して古い index.html を使い続け、デプロイ後も古いバンドルを読む（S54 の本番で、
+    スマホで新しい画面のリンクが出なかった）。assets はファイル名にハッシュが入り、中身が変われば
+    名前も変わるので指定しない。
+    """
 
     async def get_response(self, path: str, scope: Scope) -> Response:
         try:
-            return await super().get_response(path, scope)
+            response = await super().get_response(path, scope)
         except StarletteHTTPException as e:
             is_api = path.startswith(API_PREFIXES)
             if e.status_code != 404 or scope["method"] not in ("GET", "HEAD") or is_api:
                 raise
-            return await super().get_response("index.html", scope)
+            response = await super().get_response("index.html", scope)
+        if not path.startswith("assets/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
 
 
 # uvicorn からモジュールレベルの ASGI アプリとして参照するためのラッパ。
