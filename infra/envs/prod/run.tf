@@ -224,6 +224,17 @@ resource "google_cloud_run_v2_service_iam_member" "worker_invoker" {
   member   = "serviceAccount:${google_service_account.this["tasks"].email}"
 }
 
+# worker: web SA からも呼出し可能にする（S54）。MCP の context_get はスナップショット取得に
+# GitHub App の秘密鍵が要るが、web はその鍵を持たない（LazyCodeHost）ため、web は OIDC で
+# worker の POST /internal/mcp/context に委譲する（design/2026-09-27-workspaces.md 8.1 節）。
+resource "google_cloud_run_v2_service_iam_member" "worker_invoker_web" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.services["worker"].name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.this["web"].email}"
+}
+
 # sandbox: worker SA からのみ呼出し可能（enable_sandbox のときだけ作る）。
 resource "google_cloud_run_v2_service_iam_member" "sandbox_invoker" {
   count = var.enable_sandbox ? 1 : 0

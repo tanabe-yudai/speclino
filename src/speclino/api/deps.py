@@ -28,6 +28,7 @@ from speclino.db.session import make_engine, make_session_factory
 from speclino.domain.policy import PolicyRevision
 from speclino.ports.blob_store import BlobStore
 from speclino.ports.code_host import CodeHost
+from speclino.ports.mcp_context import McpContextSource
 from speclino.ports.sandbox import Sandbox
 from speclino.ports.task_queue import TaskQueue
 from speclino.services.cost_guard import CostGuard, CostLedger
@@ -44,6 +45,9 @@ class AppState:
     queue: TaskQueue
     blobs: BlobStore
     service: ReviewRunService
+    # MCP context_get の取得元。None ならプロセス内で組み立てる（ローカル、worker）。
+    # web ロールの本番は秘密鍵を持つ worker に委譲する（S54、`services/mcp_context.py`）
+    context_source: McpContextSource | None = None
 
 
 class _SessionLedger:
@@ -227,7 +231,12 @@ def build_state(settings: Settings) -> AppState:
         cost_guard=CostGuard(ledger, Decimal(str(settings.daily_cost_limit_usd))),
     )
     holder["svc"] = service
-    return AppState(settings, engine, factory, code_host, queue, blobs, service)
+    context_source: McpContextSource | None = None
+    if settings.role == "web" and settings.cloud_tasks_worker_url:
+        from speclino.adapters.worker.context_client import WorkerContextClient
+
+        context_source = WorkerContextClient(settings.cloud_tasks_worker_url)
+    return AppState(settings, engine, factory, code_host, queue, blobs, service, context_source)
 
 
 def get_state(request: Request) -> AppState:

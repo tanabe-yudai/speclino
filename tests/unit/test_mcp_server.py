@@ -6,10 +6,8 @@ import shutil
 from pathlib import Path
 
 import httpx
-import httpx2
 import pytest
 from mcp.client import Client
-from mcp.client.streamable_http import streamable_http_client
 
 from speclino.api.app import create_app
 from speclino.domain.policy import (
@@ -18,19 +16,19 @@ from speclino.domain.policy import (
     PolicyRevision,
     PolicyRule,
 )
-from speclino.mcp_server.server import _read_context, allowed_hosts, build_mcp
+from speclino.mcp_server.server import allowed_hosts, build_mcp
 from speclino.services.check_pipeline import _run_policies
+from speclino.services.mcp_context import read_context
 from speclino.settings import Settings
 
 REPO = Path(__file__).resolve().parents[2]
 # tests/fixtures/selfcheck に凍結済みの Spec IR（R-TOOL-01 / R-GATE-01 を含む）を使う。
 # live の specs/ir に依存しないので、デモが Spec IR を消しても振る舞いを検証できる。
 SELFCHECK_FIXTURES = REPO / "tests" / "fixtures" / "selfcheck"
-TOKEN = "test-mcp-token"
 
 
 def test_read_context_lists_vocabulary_policies_and_rules(tmp_path: Path) -> None:
-    """_read_context（MCP の context_get）の抽出結果を検証する。
+    """read_context（MCP の context_get）の抽出結果を検証する。
 
     domain.yaml / bindings.yaml / policy はこの関数の実装上そのまま yaml.safe_load されるだけ
     （pydantic 検証を通らない）なので最小限の内容で足りる。specs/ir だけは load_spec_ir を通るため、
@@ -55,7 +53,7 @@ def test_read_context_lists_vocabulary_policies_and_rules(tmp_path: Path) -> Non
     for name in ("tool_gateway.spec-ir.json", "gate_decide.spec-ir.json"):
         shutil.copy(SELFCHECK_FIXTURES / name, ir_dir / name)
 
-    ctx = _read_context(tmp_path)
+    ctx = read_context(tmp_path)
     assert "has_findings" in ctx["domain"]["variables"]
     assert "gate_decide" in ctx["bindings"]["behaviors"]
     assert {p["id"] for p in ctx["policies"]} >= {"MAKE-001", "SPEC-FMT-001", "CI-001"}
@@ -81,25 +79,20 @@ async def test_tools_are_exposed_in_process() -> None:
 
 
 @pytest.mark.asyncio
-async def test_http_mount_requires_bearer_and_serves_tools() -> None:
-    app = create_app(Settings(env="local", role="all", code_host_kind="local", mcp_token=TOKEN))
-    async with app.router.lifespan_context(app):
-        # 認証なし → 401（API-ERR-001 の形式）
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://localhost"
-        ) as plain:
-            denied = await plain.post("/mcp", json={})
-        assert denied.status_code == 401 and denied.json()["error"]["code"] == "unauthenticated"
-        # Bearer つき → MCP クライアントからツール一覧が取れる
-        async with httpx2.AsyncClient(
-            transport=httpx2.ASGITransport(app=app),
-            base_url="http://localhost",
-            headers={"Authorization": f"Bearer {TOKEN}"},
-        ) as http:
-            transport = streamable_http_client("http://localhost/mcp", http_client=http)
-            async with Client(transport) as client:
-                tools = await client.list_tools()
-    assert "verification_start" in {t.name for t in tools.tools}
+async def test_http_mount_rejects_missing_and_malformed_tokens() -> None:
+    """MCP は常にマウントされ、トークンが無い・形式が違うものは DB を引かずに 401（S54）。
+
+    有効なトークンでツールが使えることは統合テスト（tests/integration/services/test_mcp_flow.py）。
+    """
+    app = create_app(Settings(env="local", role="all", code_host_kind="local"))
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://localhost") as c,
+    ):
+        for headers in ({}, {"Authorization": "Bearer not-a-speclino-token"}):
+            denied = await c.post("/mcp", json={}, headers=headers)
+            assert denied.status_code == 401
+            assert denied.json()["error"]["code"] == "unauthenticated"
 
 
 def _team_revision(*rules: PolicyRule) -> PolicyRevision:
@@ -132,7 +125,7 @@ def test_read_context_merges_team_policy_like_the_pipeline(tmp_path: Path) -> No
     shutil.copy(REPO / ".speclino" / "policy" / "speclino-core.yaml", policy_dir)
     team = _team_revision(_advisory("MAKE-001"), _advisory("TEAM-001"))
 
-    ctx = _read_context(tmp_path, team)
+    ctx = read_context(tmp_path, team)
 
     assert ctx["team_policy"] == {"team": "acme", "revision": 3}
     assert ctx["ignored_project_policies"] == ["MAKE-001"]
@@ -149,7 +142,7 @@ def test_read_context_without_team_policy_lists_project_rules_only(tmp_path: Pat
     policy_dir.mkdir(parents=True)
     shutil.copy(REPO / ".speclino" / "policy" / "speclino-core.yaml", policy_dir)
 
-    ctx = _read_context(tmp_path)
+    ctx = read_context(tmp_path)
 
     assert ctx["team_policy"] is None and ctx["ignored_project_policies"] == []
     assert {p["origin"] for p in ctx["policies"]} == {"project"}
@@ -163,7 +156,7 @@ def test_read_context_keeps_the_first_project_rule_like_the_pipeline(tmp_path: P
     shutil.copy(core, policy_dir / "a.yaml")
     shutil.copy(core, policy_dir / "b.yml")
 
-    ctx = _read_context(tmp_path)
+    ctx = read_context(tmp_path)
 
     ids = [p["id"] for p in ctx["policies"]]
     assert len(ids) == len(set(ids))

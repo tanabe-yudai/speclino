@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Literal
 
 WorkspaceRole = Literal["owner", "approver", "member"]
@@ -59,9 +61,31 @@ class WorkspaceSummary:
     projects: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class McpTokenInfo:
+    """MCP トークンの一覧・発行の応答に出す情報（S54）。平文もハッシュも含めない。"""
+
+    id: uuid.UUID
+    name: str
+    created_by: str
+    created_at: datetime
+    last_used_at: datetime | None
+    revoked_at: datetime | None
+
+
+@dataclass(frozen=True)
+class IssuedMcpToken:
+    """発行直後だけ手に入る平文のトークン（保存しない）。"""
+
+    info: McpTokenInfo
+    token: str
+
+
 __all__ = [
     "APPROVER_ROLES",
     "AuthUser",
+    "IssuedMcpToken",
+    "McpTokenInfo",
     "BackfillIsolationReason",
     "BackfillResult",
     "WorkspaceMemberInfo",

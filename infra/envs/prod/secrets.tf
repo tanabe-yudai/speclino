@@ -3,18 +3,26 @@
 #
 #   echo -n "<値>" | gcloud secrets versions add github-app-private-key --data-file=- --project=<project_id>
 #   echo -n "<値>" | gcloud secrets versions add github-webhook-secret  --data-file=- --project=<project_id>
-#   echo -n "<値>" | gcloud secrets versions add mcp-token              --data-file=- --project=<project_id>
 #   echo -n "<値>" | gcloud secrets versions add session-secret         --data-file=- --project=<project_id>
 #
-# アクセス権は secret 単位で付与する（web: webhook-secret, session-secret, mcp-token /
+# mcp-token は S54 で env への注入をやめた（MCP の認証はワークスペース単位のトークンに
+# 切り替え、UI（/workspaces/<slug>/mcp-tokens）で owner が発行する。DB の mcp_tokens テーブル
+# が正本）。secret のコンテナとアクセス権はロールバック期間が過ぎるまで残す（消すと
+# secret 自体が削除対象になり戻せなくなるため）。値をもう投入する必要は無い。
+#
+# アクセス権は secret 単位で付与する（web: webhook-secret, session-secret, （legacy）mcp-token /
 # worker: github-app-private-key）。design のアーキテクチャ表に従う。
 
 locals {
   secret_accessors = {
     "github-app-private-key" = ["worker"]
     "github-webhook-secret"  = ["web"]
-    "mcp-token"              = ["web"]
-    "session-secret"         = ["web"]
+    # S54: 静的トークンでの MCP 認証は廃止し、ワークスペース単位のトークン（DB の
+    # mcp_tokens、UI から owner が発行）に切り替えた。web はもうこの secret を env に
+    # マウントしない（下の secret_env.web 参照）。ただし secret 自体とアクセス権は
+    # ロールバック期間が過ぎるまで残す（切り替え直後に戻せるように。design の切り替え順序）。
+    "mcp-token"      = ["web"]
+    "session-secret" = ["web"]
     # Cloud SQL の接続 URL（パスワードを含むため tfvars ではなくここに置く）。
     # web も run の一覧・詳細を DB から読むので両方に許可する（iam.tf の cloudsql.client も両方）。
     "database-url" = ["web", "worker"]
@@ -26,7 +34,6 @@ locals {
   secret_env = {
     web = {
       SPECLINO_GITHUB_WEBHOOK_SECRET = "github-webhook-secret"
-      SPECLINO_MCP_TOKEN             = "mcp-token"
       SPECLINO_DATABASE_URL          = "database-url"
     }
     worker = {

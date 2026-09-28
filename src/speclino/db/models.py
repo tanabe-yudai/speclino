@@ -364,6 +364,27 @@ class WorkspaceMember(Base):
     )
 
 
+class McpTokenRecord(Base):
+    """`mcp_tokens`: ワークスペース単位の MCP トークン（S54）。
+
+    平文は発行時の応答で 1 回だけ返し、保存するのは SHA-256 だけ。失効は `revoked_at` を
+    入れる（監査のため行は消さない）。
+    """
+
+    __tablename__ = "mcp_tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    team: Mapped[str] = mapped_column(String, ForeignKey("teams.team"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    token_hash: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class PolicyRevisionRecord(Base):
     """`policy_revisions`: チーム規約の 1 改訂（S42、design/2026-09-26-team-policies-and-dx.md）。
 

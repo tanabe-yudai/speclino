@@ -33,6 +33,7 @@ EXPECTED_TABLES = {
     "policy_revisions",
     "teams",
     "workspace_members",
+    "mcp_tokens",
 }
 
 

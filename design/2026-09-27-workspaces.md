@@ -135,6 +135,24 @@ S43（規約の UI）と S45（プロジェクト画面）はワークスペー�
   （DB の秘密を手元に出さない）。手順は `guides/deploy-runbook.md`
 - **開放条件**: 他のチームにワークスペースを開くのは S54（ワークスペース単位の MCP トークン）の後
 
+## 8.2 S54（ワークスペース単位の MCP トークン）で実装した形
+
+- **トークン**: `mcp_tokens`（team, name, token_hash, created_by, last_used_at, revoked_at）。平文は
+  `slmcp_` + 32 バイトの乱数で、発行時の応答に 1 回だけ出す。保存は SHA-256 だけ（高エントロピーなので
+  低速ハッシュは不要）。失効は `revoked_at` を入れる（行は消さない）。`last_used_at` は 1 分以上古いときだけ更新
+- **管理**: 発行・一覧・失効は owner だけ（approver は含めない）。API は `/api/workspaces/{slug}/mcp-tokens`、
+  UI は `/workspaces/{slug}/mcp-tokens`。owner 以外・別ワークスペースのトークン ID・失効済みは一律 404
+- **認証と絞り込み**: `BearerAuth` がトークンからワークスペースを決めて `scope["state"]` に載せ、ツールは
+  `ctx.request_context.request.state` から読む。3 つのツールとも、トークンのワークスペースに登録された
+  リポジトリ・run だけに答え、それ以外は「無い」と同じ応答。全体共通の `SPECLINO_MCP_TOKEN` は廃止し、
+  MCP は web / all で常にマウントする
+- **context_get の委譲**: スナップショット取得に GitHub App の秘密鍵が要り、鍵は worker だけが持つ。
+  本番の web は OIDC で worker の `POST /internal/mcp/context` を呼び、認可済みの project_id と ref だけを
+  渡す（チームは worker が project から引く）。worker の run.invoker は tasks SA と web SA。ローカルは
+  プロセス内で同じサービス（`services/mcp_context.py`）を呼ぶ
+- **切り替え**: コードを先に出す（旧 secret の注入が残っていても無視される）。Terraform は注入を外すだけで、
+  `mcp-token` secret はロールバック期間が過ぎるまで消さない
+
 ## 9. 判断の記録
 
 - **owner をチームとみなす案は捨てた**: 個人アカウントのリポジトリで成り立たない（ユーザー指摘）

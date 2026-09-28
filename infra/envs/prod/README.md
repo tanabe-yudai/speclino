@@ -46,12 +46,16 @@ terraform apply
 ```sh
 echo -n "<値>" | gcloud secrets versions add github-app-private-key --data-file=- --project=<project_id>
 echo -n "<値>" | gcloud secrets versions add github-webhook-secret  --data-file=- --project=<project_id>
-echo -n "<値>" | gcloud secrets versions add mcp-token              --data-file=- --project=<project_id>
 echo -n "<値>" | gcloud secrets versions add session-secret         --data-file=- --project=<project_id>
 ```
 
+`mcp-token` には値を投入しない。S54 以降、MCP の認証はワークスペース単位のトークン（DB の
+`mcp_tokens`、ハッシュだけ保存）に切り替え、`/workspaces/<slug>/mcp-tokens` で owner が発行する
+（`guides/deploy-runbook.md` の「10. MCP トークン」）。この secret のコンテナとアクセス権は
+ロールバック期間が過ぎるまで残す（消すと secret 自体が削除対象になり戻せなくなるため）。
+
 アクセス権は secret 単位で付与済み（web: `github-webhook-secret` / `session-secret` /
-`mcp-token`、worker: `github-app-private-key`）。
+（legacy）`mcp-token`、worker: `github-app-private-key`）。
 
 ## 既知の TODO
 
