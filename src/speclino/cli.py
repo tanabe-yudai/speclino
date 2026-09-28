@@ -416,6 +416,23 @@ def workspace_backfill_repo_ids() -> None:
     typer.echo(f"埋めた: {len(results) - isolated} 件 / 隔離: {isolated} 件")
 
 
+@workspace_app.command("set-pr-approvers")
+def workspace_set_pr_approvers(
+    repo: Annotated[str, typer.Argument(help="対象リポジトリ（owner/repo）")],
+    logins: Annotated[
+        list[str] | None, typer.Argument(help="承認者の GitHub ログイン名（省略で全員外す）")
+    ] = None,
+) -> None:
+    """PR コメントの `/speclino approve-spec` を受け付ける GitHub ログイン名を置き換える。"""
+    from speclino.services import workspace_admin
+
+    approvers = logins or []
+    _in_transaction(
+        lambda s: workspace_admin.set_pr_approvers(s, repo_full_name=repo, logins=approvers)
+    )
+    typer.echo(f"{repo} の PR 承認者を {approvers} にした")
+
+
 @workspace_app.command("list")
 def workspace_list() -> None:
     """全ワークスペースの slug・表示名・メンバー・登録 project を一覧する。"""

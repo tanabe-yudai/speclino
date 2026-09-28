@@ -494,6 +494,16 @@ gcloud run jobs execute speclino-admin --project=$P --region=$REGION \
 gcloud run jobs logs read speclino-admin --project=$P --region=$REGION --limit=50
 ```
 
+### 9-6. PR コメントの承認者を設定する
+
+`/speclino approve-spec` を受け付ける GitHub ログイン名を project ごとに設定する（ワークスペースの
+approver ロールはチーム規約の承認用で、別物）。引数を省くと全員外す:
+
+```sh
+gcloud run jobs execute speclino-admin --project=$P --region=$REGION \
+  --args=workspace,set-pr-approvers,tanabe-yudai/spec-lino,tanabe-yudai --wait
+```
+
 他のワークスペース（自分とデモ以外）を作れるようにするのは S54（ワークスペース単位の MCP
 トークン）の後（design の切り替えの順序）。
 

@@ -128,6 +128,30 @@ async def add_project(session: AsyncSession, *, slug: str, repo_full_name: str) 
     )
 
 
+async def set_pr_approvers(
+    session: AsyncSession, *, repo_full_name: str, logins: list[str]
+) -> None:
+    """PR コメントの `/speclino approve-spec` を受け付ける GitHub ログイン名を置き換える。
+
+    ワークスペースの approver ロール（チーム規約の承認、uid）とは別物で、project ごとの
+    `settings.approvers` に入る（S52 で全体共通の承認者を廃止したので、ここが唯一の経路）。
+    空リストなら誰も承認できない。project が無ければ `ValueError`。
+    """
+    project = await ProjectRepository(session).get_by_repo(repo_full_name)
+    if project is None:
+        raise ValueError(f"project が存在しない: {repo_full_name}")
+    before = list(project.settings.get("approvers", []))
+    project.settings = {**project.settings, "approvers": logins}
+    await session.flush()
+    await AuditRepository(session).record(
+        actor=ADMIN_ACTOR,
+        action="project.set_pr_approvers",
+        target=repo_full_name,
+        decision="set",
+        detail={"before": before, "after": logins},
+    )
+
+
 async def backfill_repo_ids(session: AsyncSession, code_host: CodeHost) -> list[BackfillResult]:
     """`github_repo_id` が NULL の project 全件に、コードホストから引いた ID を埋める。
 
@@ -234,4 +258,5 @@ __all__ = [
     "backfill_repo_ids",
     "create_workspace",
     "list_workspaces",
+    "set_pr_approvers",
 ]
