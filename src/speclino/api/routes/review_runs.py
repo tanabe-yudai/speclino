@@ -17,6 +17,7 @@ from speclino.api.deps import AppState, get_state
 from speclino.api.errors import api_error, error_responses
 from speclino.db.models import ReviewRun
 from speclino.db.repositories import FindingRepository, RunEventRepository
+from speclino.domain.run import GitRef
 from speclino.domain.workspace import AuthUser
 from speclino.services.demo_rerun import RerunNotFound, demo_rerun
 from speclino.services.workspaces import visible_project, visible_run, visible_runs
@@ -26,8 +27,8 @@ router = APIRouter(prefix="/api/review-runs", tags=["review-runs"], responses=er
 
 class StartRunRequest(BaseModel):
     repo_full_name: str = Field(min_length=3)
-    head_sha: str = Field(min_length=7)
-    base_sha: str | None = None
+    head_sha: GitRef = Field(min_length=7)
+    base_sha: GitRef | None = None
     pr_number: int | None = None
 
 

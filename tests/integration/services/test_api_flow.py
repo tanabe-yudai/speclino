@@ -246,6 +246,12 @@ async def test_non_members_see_nothing_and_cannot_start_runs(
         json={"repo_full_name": "e2e/nope", "head_sha": head, "base_sha": base},
     )
     assert missing.status_code == 404
+    # head_sha は URL のパスに入るので、`..` を含む形は入力の検証で拒否する
+    traversal = await c.post(
+        "/api/review-runs",
+        json={"repo_full_name": repo, "head_sha": "../../other/repo/tarball/main"},
+    )
+    assert traversal.status_code == 422
     async with engine.connect() as conn:
         count = (
             await conn.execute(

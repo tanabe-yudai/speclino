@@ -121,6 +121,6 @@ async def engine() -> AsyncIterator[AsyncEngine]:
         ):
             await conn.execute(sql_text(f"DELETE FROM {table} WHERE {col} IN ({sub})"))
         # チーム規約・ワークスペースのテストは e2e- で始まるチームを使う
-        for table in ("policy_revisions", "workspace_members", "teams"):
+        for table in ("mcp_tokens", "policy_revisions", "workspace_members", "teams"):
             await conn.execute(sql_text(f"DELETE FROM {table} WHERE team LIKE 'e2e-%'"))
     await eng.dispose()

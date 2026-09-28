@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import re
 import tarfile
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from pathlib import Path
 import httpx
 
 from speclino.adapters.github.app_auth import GitHubAppAuth
+from speclino.domain.run import GIT_REF_PATTERN
 
 _MAX_RETRIES = 3
 _RETRY_BASE_DELAY_SECONDS = 0.5
@@ -173,6 +175,9 @@ class GitHubClient:
         return int(response.json()["id"])
 
     async def fetch_snapshot(self, repo: str, sha: str, dest_dir: Path) -> Path:
+        # ref は URL のパスに埋め込む。`..` 等で別リポジトリのパスに移れないよう、形を限る（S54）
+        if not re.fullmatch(GIT_REF_PATTERN, sha):
+            raise ValueError(f"不正な ref: {sha!r}")
         response = await self._request(
             "GET",
             f"{self.base_url}/repos/{repo}/tarball/{sha}",

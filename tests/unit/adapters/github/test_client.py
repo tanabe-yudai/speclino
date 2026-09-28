@@ -232,6 +232,20 @@ def _build_tarball(entries: dict[str, bytes]) -> bytes:
     return buf.getvalue()
 
 
+@pytest.mark.parametrize(
+    "ref", ["../../other/repo/tarball/main", "/abs", "a//b", "feature/../x", ".hidden", ""]
+)
+@respx.mock
+@pytest.mark.asyncio
+async def test_fetch_snapshot_rejects_refs_that_escape_the_repository_path(
+    tmp_path: Path, ref: str
+) -> None:
+    """S54: ref は URL のパスに入るので、別リポジトリのパスに移れる形は送る前に拒否する。"""
+    with pytest.raises(ValueError, match="不正な ref"):
+        await _client().fetch_snapshot("acme/widgets", ref, tmp_path / "snapshot")
+    assert not respx.calls
+
+
 @respx.mock
 @pytest.mark.asyncio
 async def test_fetch_snapshot_follows_redirect_and_extracts(tmp_path: Path) -> None:

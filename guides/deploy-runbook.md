@@ -180,10 +180,11 @@ Webhook secret は **GitHub App と Secret Manager の両方に同じ値**を入
 
 ```sh
 export WEBHOOK_SECRET="$(openssl rand -hex 32)"
-export MCP_TOKEN="$(openssl rand -hex 32)"
 echo "WEBHOOK_SECRET=$WEBHOOK_SECRET"
-echo "MCP_TOKEN=$MCP_TOKEN"        # エディタの MCP 設定に使う。控えておく
 ```
+
+> MCP トークンはここでは作らない（S54 以降、静的トークンは廃止）。ワークスペースの owner が
+> UI（`/workspaces/<slug>/mcp-tokens`）から発行する。手順は「10. MCP トークン（S54）」を参照。
 
 ### 3-2. GitHub App を作る（秘密鍵はここで生成される）
 
@@ -221,12 +222,10 @@ gcloud secrets versions add github-app-private-key --data-file="$PEM" --project=
 
 printf '%s' "$WEBHOOK_SECRET" | \
   gcloud secrets versions add github-webhook-secret --data-file=- --project=$P
-printf '%s' "$MCP_TOKEN" | \
-  gcloud secrets versions add mcp-token --data-file=- --project=$P
 printf '%s' "$(openssl rand -hex 32)" | \
   gcloud secrets versions add session-secret --data-file=- --project=$P
 
-gcloud secrets list --project=$P     # 4 つあること
+gcloud secrets list --project=$P     # 4 つあること（mcp-token は値を入れなくてよい。10 章参照）
 ```
 
 投入したらローカルの `.pem` は消してよい（`rm "$PEM"`）。リポジトリには置かない
@@ -365,11 +364,12 @@ GitHub Actions から自動デプロイする場合は、リポジトリ変数�
 | `cloudsql_instance` | `<project>:<region>:speclino-db` | Cloud SQL 作成後 |
 | `github_app_id` | 本番 GitHub App の App ID | App 作成後 |
 
-秘密（GitHub App 秘密鍵・Webhook secret・MCP トークン）だけは Secret Manager から渡す:
+秘密（GitHub App 秘密鍵・Webhook secret）だけは Secret Manager から渡す。MCP トークンは
+S54 以降 env に渡さない（ワークスペース単位で DB に持ち、UI から owner が発行する。10 章参照）:
 
 ```sh
 gcloud run services update speclino-web --project=$P --region=asia-northeast1 \
-  --set-secrets="SPECLINO_GITHUB_WEBHOOK_SECRET=github-webhook-secret:latest,SPECLINO_MCP_TOKEN=mcp-token:latest"
+  --set-secrets="SPECLINO_GITHUB_WEBHOOK_SECRET=github-webhook-secret:latest"
 gcloud run services update speclino-worker --project=$P --region=asia-northeast1 \
   --set-secrets="SPECLINO_GITHUB_PRIVATE_KEY=github-app-private-key:latest"
 ```
@@ -506,6 +506,31 @@ gcloud run jobs execute speclino-admin --project=$P --region=$REGION \
 
 他のワークスペース（自分とデモ以外）を作れるようにするのは S54（ワークスペース単位の MCP
 トークン）の後（design の切り替えの順序）。
+
+## 10. MCP トークン（S54）
+
+全体共通の静的トークン（`SPECLINO_MCP_TOKEN` / Secret Manager の `mcp-token`）は廃止し、
+ワークスペース単位のトークン（DB の `mcp_tokens`、ハッシュだけ保存）に切り替えた。発行・失効は
+UI から owner だけができる（design/2026-09-27-workspaces.md 8.1 節、切り替えの順序）。
+
+**順序（コード先行、続けて Terraform）**:
+
+1. **デプロイ**: S54 を含むイメージへ切り替える（マイグレーション 0005 → サービス更新）。この
+   時点で旧静的トークンは使えなくなる。MCP は web ロールで常にマウントされる（DB に有効な
+   トークンが無ければ誰も使えない）。旧 secret の注入が残っていてもコードは読まない
+2. **すぐに `terraform apply`**（ユーザー確認の上で）: web SA に worker の `run.invoker` を付け
+   （`worker_invoker_web`）、`SPECLINO_MCP_TOKEN` の注入を外す。**invoker が付くまで `context_get` は
+   web → worker の呼び出しが 403 になり失敗する**（verification_start / verification_get は動く）。
+   `mcp-token` の Secret 自体とアクセス権（`secret_accessors`）はロールバック期間が過ぎるまで残す
+   （消すと secret が削除対象になり戻せなくなるため）
+3. **UI からトークンを発行する**: owner としてログインし、`$WEB_URL/workspaces/<slug>/mcp-tokens`
+   を開く。名前を付けて発行すると平文がその場に 1 回だけ表示される（画面を閉じると二度と見えない。
+   紛失したら失効させて新しく発行し直す）
+4. **エディタの MCP 設定を差し替える**: Claude Code 等の MCP クライアント設定にある
+   `Authorization: Bearer <旧 MCP_TOKEN>` を、3 で発行した値に置き換える
+5. **`context_get` を実際に呼んで確かめる**: `scripts/smoke_prod.sh` は「Bearer なし・不正なトークンは
+   401」しか見ないので、web → worker の委譲（invoker・worker の秘密鍵）が動くことはエディタから
+   `context_get` を 1 回呼んで確かめる
 
 ## 片付け（12/1 以降）
 

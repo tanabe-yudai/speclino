@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import Field, StringConstraints
 
 from speclino.domain.code_ir import AnalysisLimits, ReachabilityDigest
 from speclino.domain.common import SCHEMA_VERSION, IRModel
+
+# 外から受け取る Git の ref（SHA・ブランチ・タグ）。GitHub の URL パスに埋め込むので、どの
+# セグメントも `.` で始まらない形に限る（`..` による別リポジトリへのパス移動を防ぐ。S54）
+GIT_REF_PATTERN = r"^[A-Za-z0-9_-][A-Za-z0-9._-]*(/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$"
+GitRef = Annotated[str, StringConstraints(pattern=GIT_REF_PATTERN, max_length=255)]
 
 GateStatus = Literal["pass", "pass_with_exceptions", "fail"]
 ExecState = Literal[

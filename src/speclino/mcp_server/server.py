@@ -4,23 +4,25 @@
 （`context_get`）、検証を開始し（`verification_start`）、結果を読む（`verification_get`）ためのツール。判定を
 書き換えるツールは無い（判定は engine だけが行う）。
 
-- 認証は静的 Bearer（`SPECLINO_MCP_TOKEN`）。未設定ならサーバーをマウントしない
+- 認証はワークスペース単位のトークン（S54、`services/mcp_tokens.py`）。`BearerAuth` がトークンから
+  ワークスペースを決めてリクエストに載せ、ツールはそのワークスペースに登録されたリポジトリと run
+  にだけ答える（他のワークスペースのものは「無い」と同じ応答）
+- `context_get` のスナップショット取得は GitHub App の秘密鍵が要るので、本番では worker に委譲する
+  （`services/mcp_context.py`）
 - Streamable HTTP を FastAPI に `/mcp` としてマウントする（`mount_mcp`）。
   stateless / JSON 応答にして Cloud Run の複数インスタンスでも動くようにする
 """
 
 from __future__ import annotations
 
-import tempfile
 import uuid
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-import yaml
 from mcp.server import MCPServer
+from mcp.server.mcpserver import Context
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Request
@@ -30,13 +32,15 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from speclino.api.deps import AppState
 from speclino.db.models import Project
 from speclino.db.repositories import FindingRepository, ProjectRepository, ReviewRunRepository
-from speclino.domain.policy import PolicyRevision
-from speclino.services.workspaces import repository_mismatch
-from speclino.spec import load_spec_ir
+from speclino.domain.run import GitRef
+from speclino.services import mcp_tokens
+from speclino.services.mcp_context import ContextUnavailable, InProcessContextSource
 
 StateGetter = Callable[[], AppState]
 MCP_PATH = "/mcp"
 FINDING_FIELDS = ("requirement_id", "verdict", "category", "severity", "message", "next_steps")
+# BearerAuth がリクエストに載せる、トークンのワークスペース（slug）の置き場所
+WORKSPACE_STATE_KEY = "mcp_workspace"
 
 
 def build_mcp(get_state: StateGetter) -> MCPServer:
@@ -50,7 +54,9 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
     )
 
     @mcp.tool()
-    async def context_get(repo_full_name: str, ref: str = "HEAD") -> dict[str, Any]:
+    async def context_get(
+        repo_full_name: str, ctx: Context, ref: GitRef = "HEAD"
+    ) -> dict[str, Any]:
         """語彙（`.speclino/`）、`specs/ir` の要求一覧、このリポジトリに効く規約を返す。
 
         仕様を書くときは、ここに出る変数・列挙・操作 ID だけを使う。実装するときは `policies`
@@ -58,31 +64,27 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
         機械検証されない（助言のみ）が、守る対象であることは変わらない。
         """
         state = get_state()
-        project = await _registered_project(state, repo_full_name)
-        # 名前で取得する前に、登録時のリポジトリと同じものかを確かめる（worker と同じ照合）
-        mismatch = await repository_mismatch(
-            state.code_host, repo_full_name, project.github_repo_id
+        workspace = _workspace(ctx)
+        project = await _workspace_project(state, workspace, repo_full_name)
+        source = state.context_source or InProcessContextSource(
+            state.session_factory, state.code_host, state.service.config.resolve_team_policy
         )
-        if mismatch is not None:
-            raise ToolError(mismatch)
-        # 検証（worker）と同じ解決器・同じチーム（登録先ワークスペース）で読む。ここがずれると、
-        # エージェントが読んだ規約とゲートが照らす規約が食い違う。
-        resolve = state.service.config.resolve_team_policy
-        team_policy = await resolve(project.team) if resolve and project.team else None
-        with tempfile.TemporaryDirectory(prefix="speclino-mcp-") as tmp:
-            root = await state.code_host.fetch_snapshot(repo_full_name, ref, Path(tmp))
-            return _read_context(root, team_policy)
+        try:
+            return await source.get(project.id, workspace, ref)
+        except ContextUnavailable as e:
+            raise ToolError(str(e)) from e
 
     @mcp.tool()
     async def verification_start(
         repo_full_name: str,
-        head_sha: str,
-        base_sha: str | None = None,
+        head_sha: GitRef,
+        ctx: Context,
+        base_sha: GitRef | None = None,
         pr_number: int | None = None,
     ) -> dict[str, str]:
         """head_sha の検証を開始し run_id を返す。結果は verification_get で読む。"""
         state = get_state()
-        project = await _registered_project(state, repo_full_name)
+        project = await _workspace_project(state, _workspace(ctx), repo_full_name)
         run_id = await state.service.create_run(
             project_id=project.id,
             head_sha=head_sha,
@@ -93,15 +95,16 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
         return {"run_id": str(run_id)}
 
     @mcp.tool()
-    async def verification_get(run_id: str) -> dict[str, Any]:
+    async def verification_get(run_id: str, ctx: Context) -> dict[str, Any]:
         """run の状態・ゲート結果・Finding（要求 ID / 判定 / 分類 / 説明 / 次にできること）。"""
         state = get_state()
+        workspace = _workspace(ctx)
         rid = uuid.UUID(run_id)
         async with state.session_factory() as session:
             run = await ReviewRunRepository(session).get(rid)
             project = await session.get(Project, run.project_id) if run is not None else None
-            # 未登録リポジトリの run は、無い場合と同じ応答にする（S53。context_get と同じ境界）
-            if run is None or project is None or project.team is None:
+            # トークンのワークスペースの run でなければ、無い場合と同じ応答にする
+            if run is None or project is None or project.team != workspace:
                 return {"error": "run_not_found", "run_id": run_id}
             findings = await FindingRepository(session).list_for_run(rid)
         manifest = run.manifest or {}
@@ -119,121 +122,58 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
     return mcp
 
 
-async def _registered_project(state: AppState, repo_full_name: str) -> Project:
-    """ワークスペースに登録されたリポジトリの project。未登録なら拒否する（S53）。
+def _workspace(ctx: Context) -> str:
+    """トークンのワークスペース。`BearerAuth` を通っていないリクエストは拒否する。"""
+    request = ctx.request_context.request
+    workspace = getattr(request.state, WORKSPACE_STATE_KEY, None) if request is not None else None
+    if not isinstance(workspace, str):
+        raise ToolError("MCP トークンが無い")
+    return workspace
 
-    全体共通のトークン（S54 まで）で、GitHub App が読める未登録リポジトリの仕様・規約を
-    取り出させない。未登録と存在しないを区別しない。
+
+async def _workspace_project(state: AppState, workspace: str, repo_full_name: str) -> Project:
+    """トークンのワークスペースに登録されたリポジトリの project。それ以外は拒否する。
+
+    未登録・他のワークスペース・存在しないを区別しない（存在を漏らさない）。
     """
     async with state.session_factory() as session:
         project = await ProjectRepository(session).get_by_repo(repo_full_name)
-    if project is None or project.team is None:
-        raise ToolError(f"{repo_full_name} はワークスペースに登録されていない")
+    if project is None or project.team != workspace:
+        raise ToolError(f"{repo_full_name} はこのワークスペースに登録されていない")
     return project
 
 
-def _read_context(root: Path, team_policy: PolicyRevision | None = None) -> dict[str, Any]:
-    """`context_get` の本体。規約は `check_pipeline._run_policies` と同じ規則で合わせる。
-
-    チーム規約を先に並べ、既に採用した id（チーム規約、または先のファイルのプロジェクト規約）と
-    同じ id のプロジェクト規約は無視する（チーム規約をプロジェクト側で無効化できない）。
-    無視したものは `ignored_project_policies` に出し、黙って消さない。
-    """
-    speclino_dir = root / ".speclino"
-    out: dict[str, Any] = {
-        "domain": None,
-        "bindings": None,
-        "team_policy": (
-            {"team": team_policy.team, "revision": team_policy.revision}
-            if team_policy is not None
-            else None
-        ),
-        "policies": [],
-        "ignored_project_policies": [],
-        "rules": [],
-    }
-    for name in ("domain", "bindings"):
-        path = speclino_dir / f"{name}.yaml"
-        if path.is_file():
-            out[name] = yaml.safe_load(path.read_text(encoding="utf-8"))
-    adopted: set[str] = set()
-    if team_policy is not None:
-        for rule in team_policy.package.rules:
-            adopted.add(rule.id)
-            out["policies"].append(
-                {
-                    "id": rule.id,
-                    "origin": "team",
-                    "level": rule.level,
-                    "title": rule.title,
-                    "text": rule.text,
-                    "verifier": rule.verifier.id if rule.verifier is not None else None,
-                    "exceptions_allowed": rule.exceptions_allowed,
-                }
-            )
-    policy_dir = speclino_dir / "policy"
-    policy_files = (
-        sorted({*policy_dir.glob("*.yaml"), *policy_dir.glob("*.yml")})
-        if policy_dir.is_dir()
-        else []
-    )
-    for path in policy_files:
-        package = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        rules = package.get("rules", [])
-        ignored = [r.get("id") for r in rules if r.get("id") in adopted]
-        out["ignored_project_policies"].extend(ignored)
-        kept = [r for r in rules if r.get("id") not in ignored]
-        adopted.update(r.get("id") for r in kept)
-        out["policies"].extend(
-            {
-                "id": r.get("id"),
-                "origin": "project",
-                "level": r.get("level"),
-                "title": r.get("title"),
-                "text": r.get("text"),
-                "verifier": (r.get("verifier") or {}).get("id"),
-                "exceptions_allowed": r.get("exceptions_allowed", True),
-            }
-            for r in kept
-        )
-    ir_dir = root / "specs" / "ir"
-    if ir_dir.is_dir():
-        for path in sorted(ir_dir.glob("*.spec-ir.json")):
-            spec = load_spec_ir(path)
-            out["rules"].extend(
-                {
-                    "id": r.id,
-                    "behavior_id": r.behavior_id,
-                    "title": r.title,
-                    "level": r.level,
-                    "modality": r.modality,
-                    "approved": r.approval_ref is not None,
-                    "spec": next((s.path for s in r.source_refs if s.path), None),
-                }
-                for r in spec.rules
-            )
-    return out
-
-
 class BearerAuth:
-    """静的 Bearer トークンで MCP エンドポイントを守る ASGI ミドルウェア。"""
+    """ワークスペース単位の MCP トークンで `/mcp` を守る ASGI ミドルウェア（S54）。
 
-    def __init__(self, app: ASGIApp, token: str) -> None:
+    有効なトークンなら、そのワークスペースを `scope["state"]` に載せて通す。無い・不正・失効済みは
+    区別せず 401。
+    """
+
+    def __init__(self, app: ASGIApp, get_state: StateGetter) -> None:
         self.app = app
-        self.token = token
+        self.get_state = get_state
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "http":
-            request = Request(scope, receive)
-            auth = request.headers.get("authorization", "")
-            if auth != f"Bearer {self.token}":
+            auth = Request(scope, receive).headers.get("authorization", "")
+            token = auth.removeprefix("Bearer ").strip() if auth.startswith("Bearer ") else ""
+            workspace = await self._authenticate(token) if token else None
+            if workspace is None:
                 response = JSONResponse(
-                    {"error": {"code": "unauthenticated", "message": "Bearer トークンが必要"}},
+                    {"error": {"code": "unauthenticated", "message": "MCP トークンが必要"}},
                     status_code=401,
                 )
                 await response(scope, receive, send)
                 return
+            scope.setdefault("state", {})[WORKSPACE_STATE_KEY] = workspace
         await self.app(scope, receive, send)
+
+    async def _authenticate(self, token: str) -> str | None:
+        # 形式の違う値は authenticate が DB を引く前に拒否する
+        # （セッションは最初の照会まで接続しない）
+        async with self.get_state().session_factory() as session, session.begin():
+            return await mcp_tokens.authenticate(session, token)
 
 
 def allowed_hosts(public_url: str) -> list[str]:
@@ -243,7 +183,7 @@ def allowed_hosts(public_url: str) -> list[str]:
 
 
 def mount_mcp(
-    get_state: StateGetter, token: str, public_url: str
+    get_state: StateGetter, public_url: str
 ) -> tuple[ASGIApp, Callable[[], AbstractAsyncContextManager[None]]]:
     """`/mcp` にマウントする ASGI アプリと、lifespan で入る session manager を返す。"""
     mcp = build_mcp(get_state)
@@ -256,7 +196,7 @@ def mount_mcp(
         stateless_http=True,
         transport_security=security,
     )
-    return BearerAuth(app, token), mcp.session_manager.run
+    return BearerAuth(app, get_state), mcp.session_manager.run
 
 
 __all__ = ["MCP_PATH", "BearerAuth", "allowed_hosts", "build_mcp", "mount_mcp"]

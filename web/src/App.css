@@ -105,7 +105,8 @@
   gap: 14px;
 }
 
-.login-form label {
+.login-form label,
+.mcp-token-issue-form label {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -114,7 +115,8 @@
   color: var(--text-h);
 }
 
-.login-form input {
+.login-form input,
+.mcp-token-issue-form input {
   font: inherit;
   padding: 9px 10px;
   border-radius: 8px;
@@ -123,7 +125,8 @@
   color: var(--text-h);
 }
 
-.login-error {
+.login-error,
+.mcp-token-issue-error {
   color: var(--danger);
   font-size: 13px;
 }
@@ -619,4 +622,40 @@
   padding: 0.5rem 0.75rem;
   border-left: 3px solid var(--color-info, #2563eb);
   background: var(--color-info-bg, #eff6ff);
+}
+
+/* ---------- MCP トークン ---------- */
+
+.mcp-tokens-page {
+  padding-top: 20px;
+}
+
+.mcp-token-reveal {
+  border-color: var(--accent);
+}
+
+.mcp-token-value {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.mcp-token-value code {
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--code-bg);
+  word-break: break-all;
+}
+
+.mcp-token-issue-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 16px 0;
+}
+
+.mcp-token-issue-form input {
+  min-width: 260px;
 }

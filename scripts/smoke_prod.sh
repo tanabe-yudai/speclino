@@ -50,13 +50,16 @@ code=$(curl -so /dev/null -w '%{http_code}' -X POST "$WEB_URL/webhooks/github" \
 [[ "$code" == "401" ]] || fail "webhook が署名なしで ${code}（401 であるべき）"
 ok "webhook は署名なしを拒否"
 
-# 5) MCP は Bearer なしを拒否する（mcp_token 未設定なら 404）
+# 5) MCP は web ロールで常にマウントされる（S54: ワークスペース単位のトークン、DB 照合）。
+#    Bearer なし・不正なトークンはどちらも 401（無い・失効済みを区別しない）
 code=$(curl -so /dev/null -w '%{http_code}' -X POST "$WEB_URL/mcp" -d '{}')
-case "$code" in
-  401) ok "MCP は Bearer を要求" ;;
-  404) echo "SKIP: MCP は無効（SPECLINO_MCP_TOKEN 未設定）" ;;
-  *) fail "MCP が $code を返した" ;;
-esac
+[[ "$code" == "401" ]] || fail "MCP が Bearer なしで ${code}（401 であるべき）"
+# 形は正しいが発行されていない値（gitleaks が本物の秘密と取り違えないよう変数から渡す）
+unknown_token="slmcp_$(openssl rand -hex 8)"
+code=$(curl -so /dev/null -w '%{http_code}' -X POST "$WEB_URL/mcp" \
+  -H "Authorization: Bearer ${unknown_token}" -d '{}')
+[[ "$code" == "401" ]] || fail "MCP が不正なトークンで ${code}（401 であるべき）"
+ok "MCP は Bearer を要求し、不正なトークンも拒否する"
 
 # 6) ログインして run を取得する（任意）
 if [[ -n "${SPECLINO_SMOKE_EMAIL:-}" && -n "${SPECLINO_SMOKE_PASSWORD:-}" &&
