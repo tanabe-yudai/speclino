@@ -105,6 +105,35 @@ async def test_add_member_replaces_role(engine: AsyncEngine) -> None:
     assert [r.decision for r in rows] == ["set", "set"]
 
 
+async def test_set_pr_approvers_replaces_the_list_and_keeps_other_settings(
+    engine: AsyncEngine,
+) -> None:
+    """PR コメントの承認者（GitHub ログイン名）を置き換え、監査に前後を残す。"""
+    repo = _repo()
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session, session.begin():
+        session.add(
+            Project(
+                repo_full_name=repo,
+                default_branch="main",
+                settings={"approvers": ["old"], "other": 1},
+            )
+        )
+    async with factory() as session, session.begin():
+        await workspace_admin.set_pr_approvers(session, repo_full_name=repo, logins=["alice"])
+
+    async with factory() as session:
+        project = await ProjectRepository(session).get_by_repo(repo)
+    assert project is not None
+    assert project.settings == {"approvers": ["alice"], "other": 1}
+    rows = await _audit_rows(factory, "project.set_pr_approvers", repo)
+    assert rows[0].detail == {"before": ["old"], "after": ["alice"]}
+
+    with pytest.raises(ValueError, match="project が存在しない"):
+        async with factory() as session, session.begin():
+            await workspace_admin.set_pr_approvers(session, repo_full_name="e2e/nope", logins=[])
+
+
 async def test_add_member_rejects_missing_workspace(engine: AsyncEngine) -> None:
     slug = _slug()
     factory = async_sessionmaker(engine, expire_on_commit=False)

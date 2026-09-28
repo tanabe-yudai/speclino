@@ -31,5 +31,7 @@ RUN uv sync --frozen --no-dev --group sandbox
 COPY --from=web-build /web/dist /app/web/dist
 
 ENV SPECLINO_ROLE=all
+# `uv run` のたびに開発用の依存（dev グループ）を取りに行かない。依存は上の uv sync で固定済み
+ENV UV_NO_SYNC=1
 EXPOSE 8080
 CMD ["uv", "run", "uvicorn", "speclino.api.app:app", "--host", "0.0.0.0", "--port", "8080"]
