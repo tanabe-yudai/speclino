@@ -67,8 +67,8 @@ MCP は静的トークン 1 本で全リポジトリに触れる。自分とデ�
   - 承認者: 全体共通の承認者（`settings.approvers`）は廃止し、project ごとの承認者だけにする。
     run の作成は project の設定を書き換えない（いまは `create_run` が毎回 `settings={}` で
     upsert し、project の承認者を消している）
-- **許可リスト**: `allowed_users` は「ワークスペースを作れる人」に意味を変える（費用の保護。
-  公開前は招待制のまま）
+- **許可リスト**: `allowed_users` は廃止した（S53。ユーザー判断 2026-09-27: 許可リストは欲しい機能では
+  ない。新規登録は開けたまま、所属ワークスペースで絞る）
 
 ## 5. 切り替えの順序
 
@@ -109,6 +109,31 @@ GitHub 連携をしない人（審査員のテストアカウント）は、メ�
 | 招待とメンバー管理 | 招待・受諾・role 変更（owner だけ）・監査 | P1 | 核 |
 
 S43（規約の UI）と S45（プロジェクト画面）はワークスペースの核に依存させる。
+
+## 8.1 S53（ワークスペースの核）で実装した形
+
+3 章のモデルからの差分。codex レビュー（2026-09-28、計画 v1・v2 の 2 回）の採用分を含む。
+
+- **表**: `workspaces` は作らず、S42 の `teams` をそのまま使う（slug = `teams.team`、表示名 `teams.name`）。
+  改訂操作の排他（`TeamRepository.ensure_and_lock`）を 2 つの行に割らないため。`users` 表も作らない
+  （必要になるのは招待の S56）
+- **利用者の識別子は uid**（ID トークンの `sub`）。メールは表示用。メールをキーにすると、確認していない
+  第三者がそのメールで先にサインアップして権限を得られる。`teams.approvers`（メール）は移さず読まない
+- **role**: owner ⊇ approver ⊇ member。規約の承認は owner / approver。member は閲覧・手動 start・デモ再実行
+- **project の同一性はリポジトリ ID**。`projects.repo_full_name` の一意制約は残し、同じ名前の別リポジトリ
+  （ID 違い、または ID の無い S53 以前の行）が webhook に現れたら、旧行を `<name>#stale-<id 先頭>` に
+  退避して登録（team）を外す。名前一致だけで既存行に ID を埋めない。既存行の ID は管理 CLI の
+  `backfill-repo-ids` が GitHub API で埋め、取れない行は隔離する
+- **webhook**: 重複排除の記録と DB の書き込みを 1 トランザクションに。enqueue は commit 後で、失敗したら
+  記録を消して 500（再配信で作り直した run は supersede で旧 run を置き換える）。コメントのコマンドは
+  ID で引いた project の承認者・質問だけを使い、コメントからは project を作らない
+- **worker**: スナップショット取得・Check 作成は名前で行うので、その前に `GET /repos/{name}` の ID と
+  project の ID を照合し、違えば run を失敗させる（公開しない）
+- **API / MCP**: API・MCP から project は作らない。MCP（S54 まで全体共通トークン）も登録済みの
+  リポジトリにだけ答える（未登録の非公開リポジトリの仕様・規約を読ませない）
+- **管理経路**: 管理 CLI `speclino workspace ...` を Cloud Run Job `speclino-admin` で実行する
+  （DB の秘密を手元に出さない）。手順は `guides/deploy-runbook.md`
+- **開放条件**: 他のチームにワークスペースを開くのは S54（ワークスペース単位の MCP トークン）の後
 
 ## 9. 判断の記録
 

@@ -57,4 +57,3 @@ class Settings(BaseSettings):
     # 認証（S13）
     auth_kind: Literal["dev", "identity_platform"] = "dev"
     firebase_project_id: str | None = None
-    allowed_users: list[str] = []

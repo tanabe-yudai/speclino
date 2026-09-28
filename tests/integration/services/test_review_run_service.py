@@ -29,6 +29,7 @@ from speclino.reporter.check_report import COMMENT_MARKER
 from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
 from speclino.spec import load_spec_ir
 from speclino.spec.spec_validator import rule_content_hash
+from tests.integration.services.conftest import project_id_of, register_repo, repo_id_of
 
 
 def _base_rule(rule_id: str):  # type: ignore[no-untyped-def]
@@ -100,8 +101,11 @@ async def service(
     engine: AsyncEngine, tmp_path: Path
 ) -> tuple[ReviewRunService, LocalCodeHost, str, str, str, str]:
     repo_name = f"e2e/orders-{uuid.uuid4().hex[:8]}"
+    await register_repo(engine, repo_name, {})
     base, head, head2 = make_demo_repo(tmp_path / "repo")
-    host = LocalCodeHost(repos={repo_name: tmp_path / "repo"})
+    host = LocalCodeHost(
+        repos={repo_name: tmp_path / "repo"}, repo_ids={repo_name: repo_id_of(repo_name)}
+    )
     factory = async_sessionmaker(engine, expire_on_commit=False)
     holder: dict[str, ReviewRunService] = {}
     queue = InProcessQueue(lambda run_id: holder["svc"].execute(run_id), immediate=True)
@@ -121,7 +125,11 @@ async def test_pr_run_finds_violation_and_publishes_failure_check(
 ) -> None:
     svc, host, repo, base, head, _ = service
     run_id = await svc.create_run(
-        repo_full_name=repo, head_sha=head, base_sha=base, pr_number=1, trigger="pull_request"
+        project_id=await project_id_of(engine, repo),
+        head_sha=head,
+        base_sha=base,
+        pr_number=1,
+        trigger="pull_request",
     )
     async with async_sessionmaker(engine)() as s:
         run = await ReviewRunRepository(s).get(run_id)
@@ -147,7 +155,11 @@ async def test_removed_rule_without_approval_fails_then_passes_after_approve_spe
 ) -> None:
     svc, host, repo, base, _, head2 = service
     run_id = await svc.create_run(
-        repo_full_name=repo, head_sha=head2, base_sha=base, pr_number=2, trigger="pull_request"
+        project_id=await project_id_of(engine, repo),
+        head_sha=head2,
+        base_sha=base,
+        pr_number=2,
+        trigger="pull_request",
     )
     async with async_sessionmaker(engine)() as s:
         findings = await FindingRepository(s).list_for_run(run_id)
@@ -169,7 +181,11 @@ async def test_removed_rule_without_approval_fails_then_passes_after_approve_spe
             comment_url=None,
         )
     run2 = await svc.create_run(
-        repo_full_name=repo, head_sha=head2, base_sha=base, pr_number=2, trigger="rerun"
+        project_id=await project_id_of(engine, repo),
+        head_sha=head2,
+        base_sha=base,
+        pr_number=2,
+        trigger="rerun",
     )
     async with async_sessionmaker(engine)() as s:
         run = await ReviewRunRepository(s).get(run2)
@@ -187,10 +203,18 @@ async def test_superseded_run_is_not_published(
     assert isinstance(queue, InProcessQueue)
     queue.immediate = False
     old = await svc.create_run(
-        repo_full_name=repo, head_sha=head, base_sha=base, pr_number=3, trigger="pull_request"
+        project_id=await project_id_of(engine, repo),
+        head_sha=head,
+        base_sha=base,
+        pr_number=3,
+        trigger="pull_request",
     )
     new = await svc.create_run(
-        repo_full_name=repo, head_sha=head2, base_sha=base, pr_number=3, trigger="pull_request"
+        project_id=await project_id_of(engine, repo),
+        head_sha=head2,
+        base_sha=base,
+        pr_number=3,
+        trigger="pull_request",
     )
     await queue.drain()
     async with async_sessionmaker(engine)() as s:
@@ -219,6 +243,7 @@ async def test_agent_failure_does_not_fail_the_run(
     monkeypatch.setattr("speclino.services.review_run_service.investigate", _explode)
 
     repo = f"e2e/agent-fail-{uuid.uuid4().hex[:8]}"
+    await register_repo(engine, repo, {})
     # 対応外のループで UNKNOWN を作り、エージェントを起動させる
     root = tmp_path / "repo"
     base, _head, _head2 = make_demo_repo(root)
@@ -235,7 +260,7 @@ async def test_agent_failure_does_not_fail_the_run(
     git(root, "commit", "-qam", "head3: loop")
     head3 = git(root, "rev-parse", "HEAD")
 
-    host = LocalCodeHost(repos={repo: root})
+    host = LocalCodeHost(repos={repo: root}, repo_ids={repo: repo_id_of(repo)})
     factory = async_sessionmaker(engine, expire_on_commit=False)
     holder: dict[str, ReviewRunService] = {}
     queue = InProcessQueue(lambda rid: holder["svc"].execute(rid), immediate=True)
@@ -248,7 +273,11 @@ async def test_agent_failure_does_not_fail_the_run(
     )
     holder["svc"] = service
     run_id = await service.create_run(
-        repo_full_name=repo, head_sha=head3, base_sha=base, pr_number=1, trigger="test"
+        project_id=await project_id_of(engine, repo),
+        head_sha=head3,
+        base_sha=base,
+        pr_number=1,
+        trigger="test",
     )
     async with factory() as session:
         run = await ReviewRunRepository(session).get(run_id)
@@ -264,8 +293,9 @@ async def test_agent_failure_does_not_fail_the_run(
 async def test_gate_comment_is_updated_not_duplicated(engine: AsyncEngine, tmp_path: Path) -> None:
     """再実行しても PR コメントは増えず、同じコメントが更新される。"""
     repo = f"e2e/comment-{uuid.uuid4().hex[:8]}"
+    await register_repo(engine, repo, {})
     base, head, _ = make_demo_repo(tmp_path / "repo")
-    host = LocalCodeHost(repos={repo: tmp_path / "repo"})
+    host = LocalCodeHost(repos={repo: tmp_path / "repo"}, repo_ids={repo: repo_id_of(repo)})
     factory = async_sessionmaker(engine, expire_on_commit=False)
     holder: dict[str, ReviewRunService] = {}
     queue = InProcessQueue(lambda rid: holder["svc"].execute(rid), immediate=True)
@@ -279,7 +309,11 @@ async def test_gate_comment_is_updated_not_duplicated(engine: AsyncEngine, tmp_p
     holder["svc"] = service
     for _ in range(2):
         await service.create_run(
-            repo_full_name=repo, head_sha=head, base_sha=base, pr_number=5, trigger="test"
+            project_id=await project_id_of(engine, repo),
+            head_sha=head,
+            base_sha=base,
+            pr_number=5,
+            trigger="test",
         )
     gate_comments = [c for c in host.comments if COMMENT_MARKER in c["body"]]
     assert len(gate_comments) == 1, [c["body"][:60] for c in host.comments]
@@ -287,21 +321,48 @@ async def test_gate_comment_is_updated_not_duplicated(engine: AsyncEngine, tmp_p
 
 
 async def test_child_run_rejects_a_parent_from_another_project(
-    service: tuple[ReviewRunService, LocalCodeHost, str, str, str, str],
+    service: tuple[ReviewRunService, LocalCodeHost, str, str, str, str], engine: AsyncEngine
 ) -> None:
     """子 run の親は同じ project の run に限る（別リポジトリの回答を取り込ませない。S52）。"""
     svc, host, repo, base, head, _ = service
     parent = await svc.create_run(
-        repo_full_name=repo, head_sha=head, base_sha=base, pr_number=1, trigger="pull_request"
+        project_id=await project_id_of(engine, repo),
+        head_sha=head,
+        base_sha=base,
+        pr_number=1,
+        trigger="pull_request",
     )
     other = f"{repo}-other"
     host.repos[other] = host.repos[repo]
+    await register_repo(engine, other, {})
     with pytest.raises(ValueError, match="の run ではない"):
         await svc.create_run(
-            repo_full_name=other,
+            project_id=await project_id_of(engine, other),
             head_sha=head,
             base_sha=base,
             pr_number=1,
             trigger="comment",
             parent_run_id=parent,
         )
+
+
+async def test_a_run_is_not_executed_when_the_repository_id_changed(
+    service: tuple[ReviewRunService, LocalCodeHost, str, str, str, str], engine: AsyncEngine
+) -> None:
+    """S53: 名前で取れるリポジトリの ID が登録時と違えば（改名後に旧名が再利用された）、
+    スナップショットを取らず、Check も作らずに run を失敗させる。"""
+    svc, host, repo, base, head, _ = service
+    host.repo_ids[repo] = repo_id_of(repo) + 1
+    run_id = await svc.create_run(
+        project_id=await project_id_of(engine, repo),
+        head_sha=head,
+        base_sha=base,
+        pr_number=1,
+        trigger="pull_request",
+    )
+    async with async_sessionmaker(engine)() as s:
+        run = await ReviewRunRepository(s).get(run_id)
+        assert run is not None and run.exec_state == "failed" and run.gate_status is None
+        events = await RunEventRepository(s).list_for_run(run_id)
+    assert "リポジトリ ID が登録時と違う" in events[-1].payload["error"]
+    assert host.checks == {} and host.comments == []

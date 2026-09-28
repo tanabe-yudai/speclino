@@ -18,6 +18,7 @@ from decimal import Decimal
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from speclino.db.models import Base
@@ -67,10 +68,8 @@ async def session(_schema_ready: None) -> AsyncIterator[AsyncSession]:
 @pytest_asyncio.fixture
 async def project_id(session: AsyncSession) -> uuid.UUID:
     repo = ProjectRepository(session)
-    project = await repo.upsert(
-        repo_full_name="tanabe-yudai/spec-lino-test",
-        installation_id=None,
-        default_branch="main",
+    project, _ = await repo.resolve_for_webhook(
+        github_repo_id=990001, repo_full_name="tanabe-yudai/spec-lino-test", installation_id=None
     )
     return project.id
 
@@ -196,3 +195,62 @@ async def test_cost_ledger_total_for_day_with_no_entries_is_zero(session: AsyncS
 
     total = await repo.total_for_day(empty_day)
     assert total == Decimal(0)
+
+
+async def test_resolve_for_webhook_follows_renames_by_id(session: AsyncSession) -> None:
+    """S53: 同じ ID のリポジトリは改名されても同じ project（team・承認者を保つ）。"""
+    projects = ProjectRepository(session)
+    first, _ = await projects.resolve_for_webhook(
+        github_repo_id=990101, repo_full_name="acme/old-name", installation_id=1
+    )
+    first.settings = {"approvers": ["alice"]}
+    await session.flush()
+    renamed, evicted = await projects.resolve_for_webhook(
+        github_repo_id=990101, repo_full_name="acme/new-name", installation_id=None
+    )
+    assert renamed.id == first.id and evicted == []
+    assert renamed.repo_full_name == "acme/new-name"
+    assert renamed.installation_id == 1  # None では上書きしない
+    assert renamed.settings == {"approvers": ["alice"]}
+
+
+async def test_a_new_repository_reusing_an_old_name_does_not_inherit_the_old_project(
+    session: AsyncSession,
+) -> None:
+    """S53: 名前が同じでも ID が違えば別リポジトリ。旧行は退避され、登録（team）も外れる。"""
+    await session.execute(
+        text("INSERT INTO teams (team, approvers) VALUES ('ws-a', '[]') ON CONFLICT DO NOTHING")
+    )
+    projects = ProjectRepository(session)
+    old, _ = await projects.resolve_for_webhook(
+        github_repo_id=990201, repo_full_name="acme/reused", installation_id=1
+    )
+    old.team = "ws-a"
+    await session.flush()
+
+    new, evicted = await projects.resolve_for_webhook(
+        github_repo_id=990202, repo_full_name="acme/reused", installation_id=1
+    )
+    assert new.id != old.id and new.team is None
+    assert evicted == ["acme/reused"]
+    await session.refresh(old)
+    assert old.repo_full_name.startswith("acme/reused#stale-") and old.team is None
+
+
+async def test_a_legacy_row_without_an_id_is_not_adopted_by_name(session: AsyncSession) -> None:
+    """S53: ID の無い既存行（S53 以前）に、名前が一致するだけで ID を埋めない。"""
+    await session.execute(
+        text(
+            "INSERT INTO projects (id, repo_full_name, default_branch, settings) "
+            "VALUES (gen_random_uuid(), 'acme/legacy', 'main', '{}')"
+        )
+    )
+    projects = ProjectRepository(session)
+    legacy = await projects.get_by_repo("acme/legacy")
+    assert legacy is not None and legacy.github_repo_id is None
+
+    resolved, evicted = await projects.resolve_for_webhook(
+        github_repo_id=990301, repo_full_name="acme/legacy", installation_id=1
+    )
+    assert resolved.id != legacy.id and resolved.github_repo_id == 990301
+    assert evicted == ["acme/legacy"]

@@ -44,6 +44,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from speclino.domain.finding import Verdict
 from speclino.domain.policy import PolicyRevisionStatus
 from speclino.domain.run import ExecState, GateStatus
+from speclino.domain.workspace import WorkspaceRole
 
 # DB 固有の Enum（domain 側に対応する Literal がまだ無いもの）。
 EvidenceOrigin = Literal["static_analysis", "runtime_trace", "human"]
@@ -60,12 +61,26 @@ class Project(Base):
     """`projects`: GitHub リポジトリ単位の設定。"""
 
     __tablename__ = "projects"
+    __table_args__ = (
+        Index(
+            "ux_projects_github_repo_id",
+            "github_repo_id",
+            unique=True,
+            postgresql_where=text("github_repo_id IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     repo_full_name: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
     installation_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     default_branch: Mapped[str] = mapped_column(String, nullable=False)
     settings: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    # GitHub のリポジトリ ID（S53）。名前は改名後に別リポジトリへ再利用されうるので、同一性は
+    # ID で決める。backfill 前の既存行と、GitHub を経由しないローカルの行は NULL。
+    github_repo_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # 登録先のワークスペース（`teams.team`）。1 リポジトリは高々 1 ワークスペース。NULL は未登録で、
+    # 誰の一覧にも出ず、チーム規約も当たらない。
+    team: Mapped[str | None] = mapped_column(String, ForeignKey("teams.team"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -321,7 +336,29 @@ class TeamRecord(Base):
     __tablename__ = "teams"
 
     team: Mapped[str] = mapped_column(String, primary_key=True)
+    # S53 から読まない（承認者は `workspace_members` の role）。列の削除は後続のマイグレーションで。
     approvers: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    name: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class WorkspaceMember(Base):
+    """`workspace_members`: ワークスペース（`teams` 行）の所属と role（S53）。
+
+    S42 の `teams` をそのままワークスペースの表として使う（slug = `teams.team`）。別の表に
+    すると、改訂操作の排他（`TeamRepository.ensure_and_lock`）が 2 つの行に割れる。
+    利用者は Identity Platform の uid で持つ（`domain/workspace.AuthUser` の docstring 参照）。
+    """
+
+    __tablename__ = "workspace_members"
+
+    team: Mapped[str] = mapped_column(String, ForeignKey("teams.team"), primary_key=True)
+    uid: Mapped[str] = mapped_column(String, primary_key=True, index=True)
+    role: Mapped[WorkspaceRole] = mapped_column(
+        SAEnum(*get_args(WorkspaceRole), name="workspace_role", native_enum=True), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

@@ -21,15 +21,17 @@ from urllib.parse import urlparse
 
 import yaml
 from mcp.server import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from speclino.api.deps import AppState
-from speclino.db.repositories import FindingRepository, ReviewRunRepository
+from speclino.db.models import Project
+from speclino.db.repositories import FindingRepository, ProjectRepository, ReviewRunRepository
 from speclino.domain.policy import PolicyRevision
-from speclino.services.policy_governance import team_of
+from speclino.services.workspaces import repository_mismatch
 from speclino.spec import load_spec_ir
 
 StateGetter = Callable[[], AppState]
@@ -56,10 +58,17 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
         機械検証されない（助言のみ）が、守る対象であることは変わらない。
         """
         state = get_state()
-        # 検証（worker）と同じ解決器・同じチームの決め方で読む。ここがずれると、エージェントが
-        # 読んだ規約とゲートが照らす規約が食い違う。
+        project = await _registered_project(state, repo_full_name)
+        # 名前で取得する前に、登録時のリポジトリと同じものかを確かめる（worker と同じ照合）
+        mismatch = await repository_mismatch(
+            state.code_host, repo_full_name, project.github_repo_id
+        )
+        if mismatch is not None:
+            raise ToolError(mismatch)
+        # 検証（worker）と同じ解決器・同じチーム（登録先ワークスペース）で読む。ここがずれると、
+        # エージェントが読んだ規約とゲートが照らす規約が食い違う。
         resolve = state.service.config.resolve_team_policy
-        team_policy = await resolve(team_of(repo_full_name)) if resolve is not None else None
+        team_policy = await resolve(project.team) if resolve and project.team else None
         with tempfile.TemporaryDirectory(prefix="speclino-mcp-") as tmp:
             root = await state.code_host.fetch_snapshot(repo_full_name, ref, Path(tmp))
             return _read_context(root, team_policy)
@@ -73,8 +82,9 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
     ) -> dict[str, str]:
         """head_sha の検証を開始し run_id を返す。結果は verification_get で読む。"""
         state = get_state()
+        project = await _registered_project(state, repo_full_name)
         run_id = await state.service.create_run(
-            repo_full_name=repo_full_name,
+            project_id=project.id,
             head_sha=head_sha,
             base_sha=base_sha,
             pr_number=pr_number,
@@ -89,7 +99,9 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
         rid = uuid.UUID(run_id)
         async with state.session_factory() as session:
             run = await ReviewRunRepository(session).get(rid)
-            if run is None:
+            project = await session.get(Project, run.project_id) if run is not None else None
+            # 未登録リポジトリの run は、無い場合と同じ応答にする（S53。context_get と同じ境界）
+            if run is None or project is None or project.team is None:
                 return {"error": "run_not_found", "run_id": run_id}
             findings = await FindingRepository(session).list_for_run(rid)
         manifest = run.manifest or {}
@@ -105,6 +117,19 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
         }
 
     return mcp
+
+
+async def _registered_project(state: AppState, repo_full_name: str) -> Project:
+    """ワークスペースに登録されたリポジトリの project。未登録なら拒否する（S53）。
+
+    全体共通のトークン（S54 まで）で、GitHub App が読める未登録リポジトリの仕様・規約を
+    取り出させない。未登録と存在しないを区別しない。
+    """
+    async with state.session_factory() as session:
+        project = await ProjectRepository(session).get_by_repo(repo_full_name)
+    if project is None or project.team is None:
+        raise ToolError(f"{repo_full_name} はワークスペースに登録されていない")
+    return project
 
 
 def _read_context(root: Path, team_policy: PolicyRevision | None = None) -> dict[str, Any]:

@@ -1,4 +1,8 @@
-"""確認画面用 API（読取り専用）と手動の検証開始。"""
+"""確認画面用 API（読取り専用）と手動の検証開始。
+
+どのルートも、ログインした人の所属ワークスペースに登録された project の run だけを扱う。
+それ以外は存在しない場合と同じ 404 を返す（S53、`services/workspaces.py`）。
+"""
 
 from __future__ import annotations
 
@@ -7,18 +11,17 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
-from sqlalchemy import select
 
 from speclino.api.auth import require_user
 from speclino.api.deps import AppState, get_state
 from speclino.api.errors import api_error, error_responses
-from speclino.db.models import Project, ReviewRun
-from speclino.db.repositories import FindingRepository, ReviewRunRepository, RunEventRepository
+from speclino.db.models import ReviewRun
+from speclino.db.repositories import FindingRepository, RunEventRepository
+from speclino.domain.workspace import AuthUser
 from speclino.services.demo_rerun import RerunNotFound, demo_rerun
+from speclino.services.workspaces import visible_project, visible_run, visible_runs
 
-router = APIRouter(
-    prefix="/api/review-runs", tags=["review-runs"], responses=error_responses(401, 403)
-)
+router = APIRouter(prefix="/api/review-runs", tags=["review-runs"], responses=error_responses(401))
 
 
 class StartRunRequest(BaseModel):
@@ -47,18 +50,29 @@ def _run_view(run: ReviewRun, repo: str | None = None) -> dict[str, Any]:
     }
 
 
-@router.post("", status_code=202)
+async def _require_visible_run(state: AppState, user: AuthUser, run_id: uuid.UUID) -> None:
+    async with state.session_factory() as session:
+        if await visible_run(session, user.uid, run_id) is None:
+            raise api_error(404, "run_not_found", "run が無い")
+
+
+@router.post("", status_code=202, responses=error_responses(404))
 async def start_run(
     body: StartRunRequest,
     state: AppState = Depends(get_state),
-    user: str = Depends(require_user),
+    user: AuthUser = Depends(require_user),
 ) -> dict[str, Any]:
+    """登録済みリポジトリの検証を始める。API から project は作らない（登録は管理操作）。"""
+    async with state.session_factory() as session:
+        project = await visible_project(session, user.uid, body.repo_full_name)
+    if project is None:
+        raise api_error(404, "project_not_found", "リポジトリが無い")
     run_id = await state.service.create_run(
-        repo_full_name=body.repo_full_name,
+        project_id=project.id,
         head_sha=body.head_sha,
         base_sha=body.base_sha,
         pr_number=body.pr_number,
-        trigger=f"manual:{user}",
+        trigger=f"manual:{user.uid}",
     )
     return {"run_id": str(run_id)}
 
@@ -67,16 +81,10 @@ async def start_run(
 async def list_runs(
     limit: int = 50,
     state: AppState = Depends(get_state),
-    user: str = Depends(require_user),
+    user: AuthUser = Depends(require_user),
 ) -> list[dict[str, Any]]:
     async with state.session_factory() as session:
-        stmt = (
-            select(ReviewRun, Project.repo_full_name)
-            .join(Project, Project.id == ReviewRun.project_id)
-            .order_by(ReviewRun.created_at.desc())
-            .limit(min(limit, 200))
-        )
-        rows = (await session.execute(stmt)).all()
+        rows = await visible_runs(session, user.uid, min(limit, 200))
         return [_run_view(run, repo) for run, repo in rows]
 
 
@@ -84,16 +92,16 @@ async def list_runs(
 async def get_run(
     run_id: uuid.UUID,
     state: AppState = Depends(get_state),
-    user: str = Depends(require_user),
+    user: AuthUser = Depends(require_user),
 ) -> dict[str, Any]:
     async with state.session_factory() as session:
-        run = await ReviewRunRepository(session).get(run_id)
-        if run is None:
+        found = await visible_run(session, user.uid, run_id)
+        if found is None:
             raise api_error(404, "run_not_found", "run が無い")
-        project = await session.get(Project, run.project_id)
+        run, project = found
         findings = await FindingRepository(session).list_for_run(run_id)
         return {
-            **_run_view(run, project.repo_full_name if project else None),
+            **_run_view(run, project.repo_full_name),
             "findings": [f.payload for f in findings],
         }
 
@@ -102,16 +110,17 @@ async def get_run(
 async def rerun_run(
     run_id: uuid.UUID,
     state: AppState = Depends(get_state),
-    user: str = Depends(require_user),
+    user: AuthUser = Depends(require_user),
 ) -> dict[str, Any]:
     """デモ再実行（S39）: 同じ head/base で run を作り直す。日次の回数上限と費用枠で守る。"""
+    await _require_visible_run(state, user, run_id)
     try:
         outcome = await demo_rerun(
             state.session_factory,
             state.service,
             state.service.cost_guard,
             run_id,
-            user,
+            user.uid,
             state.settings.demo_rerun_limit_per_day,
         )
     except RerunNotFound as e:
@@ -128,12 +137,13 @@ async def rerun_run(
     }
 
 
-@router.get("/{run_id}/events")
+@router.get("/{run_id}/events", responses=error_responses(404))
 async def get_events(
     run_id: uuid.UUID,
     state: AppState = Depends(get_state),
-    user: str = Depends(require_user),
+    user: AuthUser = Depends(require_user),
 ) -> list[dict[str, Any]]:
+    await _require_visible_run(state, user, run_id)
     async with state.session_factory() as session:
         events = await RunEventRepository(session).list_for_run(run_id)
         return [
@@ -147,12 +157,14 @@ async def get_artifact(
     run_id: uuid.UUID,
     name: str,
     state: AppState = Depends(get_state),
-    user: str = Depends(require_user),
+    user: AuthUser = Depends(require_user),
 ) -> Any:
     from fastapi.responses import Response
 
     if "/" in name or name.startswith("."):
         raise api_error(400, "invalid_name", "不正な名前")
+    # 成果物のパスは run_id だけで決まるので、blob を読む前に run の所属を確かめる
+    await _require_visible_run(state, user, run_id)
     try:
         data = await state.blobs.get(f"runs/{run_id}/{name}")
     except (FileNotFoundError, OSError) as e:

@@ -1,14 +1,25 @@
 """GitHub Webhook（web ロール）。署名検証 → delivery_id 重複排除 → run 作成 or コマンド処理。
 
 Check の作成・更新は鍵を持つ worker が行う。ここでは DB への記録とキュー投入だけ。
+
+重複排除の記録と、その配信で行う DB の書き込み（project の解決・承認・回答・run の作成）は
+1 つのトランザクションにする（S53）。処理が途中で失敗すれば記録も残らず、再配信で処理し直せる。
+キュー投入は commit のあとで行い、失敗したら記録を消して 500 を返す（再配信で同じ PR の run を
+作り直しても、`supersede_open_runs` が古い run を superseded にするので二重に公開されない）。
+
+project はペイロードの `repository.id` で決める。名前は改名後に別リポジトリへ再利用されうるため、
+名前で引くと別リポジトリの承認者・質問・run に触れてしまう。
 """
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from speclino.adapters.github.types import IssueCommentRef, WebhookEvent
 from speclino.adapters.github.webhook import (
     extract_comment,
     extract_pr,
@@ -18,6 +29,7 @@ from speclino.adapters.github.webhook import (
 )
 from speclino.api.deps import AppState, get_state
 from speclino.api.errors import api_error, error_responses
+from speclino.db.models import Project
 from speclino.db.repositories import (
     ApprovalRepository,
     AuditRepository,
@@ -42,110 +54,145 @@ async def github_webhook(request: Request, state: AppState = Depends(get_state))
         raise api_error(401, "invalid_signature", "署名が不正")
     event = parse_event(dict(request.headers), body)
     async with state.session_factory() as session, session.begin():
-        if not await WebhookDeliveryRepository(session).mark_if_new(
-            event.delivery_id, event.event, event.action
-        ):
+        deliveries = WebhookDeliveryRepository(session)
+        if not await deliveries.mark_if_new(event.delivery_id, event.event, event.action):
             return {"status": "duplicate", "delivery_id": event.delivery_id}
+        result, queued = await _dispatch(state, session, event)
+    try:
+        for run_id in queued:
+            await state.queue.enqueue(run_id)
+    except Exception:
+        async with state.session_factory() as session, session.begin():
+            await WebhookDeliveryRepository(session).forget(event.delivery_id)
+        raise
+    return result
 
+
+async def _dispatch(
+    state: AppState, session: AsyncSession, event: WebhookEvent
+) -> tuple[dict[str, Any], list[uuid.UUID]]:
+    """イベントごとの DB の書き込み。戻り値は応答と、commit 後に enqueue する run。"""
     if event.event == "pull_request" and (pr := extract_pr(event.payload)) is not None:
-        run_id = await state.service.create_run(
-            repo_full_name=pr.repo_full_name,
+        project = await _resolve_project(session, pr.repo_id, pr.repo_full_name, pr.installation_id)
+        run_id = await state.service.create_run_in(
+            session,
+            project=project,
             head_sha=pr.head_sha,
             base_sha=pr.base_sha,
             pr_number=pr.pr_number,
             trigger=f"pull_request.{event.action}",
-            installation_id=pr.installation_id,
         )
-        return {"status": "queued", "run_id": str(run_id), "fork": pr.is_fork}
+        return {"status": "queued", "run_id": str(run_id), "fork": pr.is_fork}, [run_id]
 
     if event.event in ("check_run", "check_suite") and (rr := extract_rerun(event.payload)):
+        project = await _resolve_project(session, rr.repo_id, rr.repo_full_name, rr.installation_id)
+        runs = ReviewRunRepository(session)
+        queued: list[uuid.UUID] = []
         for pr_number in rr.pr_numbers or [None]:  # type: ignore[list-item]
-            base = await _latest_base(state, rr.repo_full_name, pr_number)
-            run_id = await state.service.create_run(
-                repo_full_name=rr.repo_full_name,
-                head_sha=rr.head_sha,
-                base_sha=base,
-                pr_number=pr_number,
-                trigger="rerequested",
-                installation_id=rr.installation_id,
+            latest = await runs.latest_run_for_pr(project.id, pr_number)
+            queued.append(
+                await state.service.create_run_in(
+                    session,
+                    project=project,
+                    head_sha=rr.head_sha,
+                    base_sha=latest.base_sha if latest else None,
+                    pr_number=pr_number,
+                    trigger="rerequested",
+                )
             )
-        return {"status": "queued", "run_id": str(run_id)}
+        return {"status": "queued", "run_id": str(queued[-1])}, queued
 
     if event.event == "issue_comment" and (cm := extract_comment(event.payload)) is not None:
-        return await _handle_comment(state, cm)
+        return await _handle_comment(state, session, cm)
 
-    return {"status": "ignored", "event": event.event, "action": event.action}
-
-
-async def _latest_base(state: AppState, repo: str, pr_number: int | None) -> str | None:
-    async with state.session_factory() as session:
-        project = await ProjectRepository(session).get_by_repo(repo)
-        if project is None:
-            return None
-        latest = await ReviewRunRepository(session).latest_run_for_pr(project.id, pr_number)
-        return latest.base_sha if latest else None
+    return {"status": "ignored", "event": event.event, "action": event.action}, []
 
 
-async def _handle_comment(state: AppState, cm: Any) -> dict[str, Any]:
+async def _resolve_project(
+    session: AsyncSession, repo_id: int, repo_full_name: str, installation_id: int
+) -> Project:
+    """ID で project を決め、名前を奪われた旧行があれば監査に残す。"""
+    project, evicted = await ProjectRepository(session).resolve_for_webhook(
+        github_repo_id=repo_id, repo_full_name=repo_full_name, installation_id=installation_id
+    )
+    for name in evicted:
+        await AuditRepository(session).record(
+            "webhook",
+            "project.evict_name",
+            name,
+            "evicted",
+            {"reason": "同じ名前の別リポジトリ（ID 違い）が現れた", "new_repo_id": repo_id},
+        )
+    return project
+
+
+async def _handle_comment(
+    state: AppState, session: AsyncSession, cm: IssueCommentRef
+) -> tuple[dict[str, Any], list[uuid.UUID]]:
     commands = parse_commands(cm.body)
     if not commands or not cm.is_pull_request:
-        return {"status": "ignored", "reason": "コマンドなし"}
+        return {"status": "ignored", "reason": "コマンドなし"}, []
     results: list[dict[str, Any]] = []
-    async with state.session_factory() as session, session.begin():
-        project = await ProjectRepository(session).get_by_repo(cm.repo_full_name)
-        # 承認者は project ごとの設定だけ。全体共通の承認者は、どのリポジトリでも承認できて
-        # しまうため持たない（S52）。
-        approvers = set(project.settings.get("approvers", [])) if project is not None else set()
-        audit = AuditRepository(session)
-        latest = (
-            await ReviewRunRepository(session).latest_run_for_pr(project.id, cm.issue_number)
-            if project
-            else None
+    # ID で引く（名前で引くと、旧名を再利用した別リポジトリから旧 project の承認者・質問に
+    # 触れられる）。コメントからは project を作らない: 見つからなければ承認者はいない。
+    project = await ProjectRepository(session).get_by_github_id(cm.repo_id)
+    # 承認者は project ごとの設定だけ。全体共通の承認者は、どのリポジトリでも承認できて
+    # しまうため持たない（S52）。
+    approvers = set(project.settings.get("approvers", [])) if project is not None else set()
+    audit = AuditRepository(session)
+    latest = (
+        await ReviewRunRepository(session).latest_run_for_pr(project.id, cm.issue_number)
+        if project
+        else None
+    )
+    for cmd in commands:
+        decision = authorize_command(cmd, cm.author_login, approvers)
+        await audit.record(
+            cm.author_login,
+            f"command.{cmd.kind}",
+            f"{cm.repo_full_name}#{cm.issue_number}",
+            "accepted" if decision.accepted else "rejected",
+            {"args": list(cmd.args), "reason": decision.reason, "url": cm.comment_url},
         )
-        for cmd in commands:
-            decision = authorize_command(cmd, cm.author_login, approvers)
-            await audit.record(
-                cm.author_login,
-                f"command.{cmd.kind}",
-                f"{cm.repo_full_name}#{cm.issue_number}",
-                "accepted" if decision.accepted else "rejected",
-                {"args": list(cmd.args), "reason": decision.reason, "url": cm.comment_url},
+        if not decision.accepted:
+            results.append({"kind": cmd.kind, "accepted": False, "reason": decision.reason})
+            continue
+        if cmd.kind == "approve-spec" and project is not None:
+            await ApprovalRepository(session).add(
+                project_id=project.id,
+                kind="approve_spec",
+                target=cmd.args[0],
+                content_hash=None,
+                approver=cm.author_login,
+                comment_url=cm.comment_url,
             )
-            if not decision.accepted:
-                results.append({"kind": cmd.kind, "accepted": False, "reason": decision.reason})
-                continue
-            if cmd.kind == "approve-spec" and project is not None:
-                await ApprovalRepository(session).add(
-                    project_id=project.id,
-                    kind="approve_spec",
-                    target=cmd.args[0],
-                    content_hash=None,
-                    approver=cm.author_login,
-                    comment_url=cm.comment_url,
-                )
-            if cmd.kind == "answer":
-                outcome = await _record_answer(session, cmd.args, cm, project, latest)
-                results.append({"kind": cmd.kind, **outcome})
-                continue
-            results.append({"kind": cmd.kind, "accepted": True})
+        if cmd.kind == "answer":
+            outcome = await _record_answer(session, cmd.args, cm, project, latest)
+            results.append({"kind": cmd.kind, **outcome})
+            continue
+        results.append({"kind": cmd.kind, "accepted": True})
     # 承認・回答・再実行のあとは最新 head で再検証する（回答は親 run を持つ子 run として）
-    if latest is not None and any(r["accepted"] for r in results):
+    if project is not None and latest is not None and any(r["accepted"] for r in results):
         answered = [r for r in results if r["kind"] == "answer" and r["accepted"]]
-        run_id = await state.service.create_run(
-            repo_full_name=cm.repo_full_name,
+        run_id = await state.service.create_run_in(
+            session,
+            project=project,
             head_sha=latest.head_sha,
             base_sha=latest.base_sha,
             pr_number=cm.issue_number,
             trigger="comment",
-            installation_id=cm.installation_id,
             parent_run_id=answered[0]["parent_run_id"] if answered else None,
         )
-        return {"status": "queued", "run_id": str(run_id), "commands": results}
-    return {"status": "handled", "commands": results}
+        return {"status": "queued", "run_id": str(run_id), "commands": results}, [run_id]
+    return {"status": "handled", "commands": results}, []
 
 
 async def _record_answer(
-    session: Any, args: tuple[str, ...], cm: Any, project: Any, latest: Any
+    session: AsyncSession,
+    args: tuple[str, ...],
+    cm: IssueCommentRef,
+    project: Project | None,
+    latest: Any,
 ) -> dict[str, Any]:
     """`/speclino answer Q-<id> <選択肢>`。head が変わっていれば stale（FR 015）。
 

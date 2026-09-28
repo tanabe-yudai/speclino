@@ -20,6 +20,7 @@ from speclino.db.repositories import ReviewRunRepository
 from speclino.services.demo_rerun import TRIGGER_PREFIX
 from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
 from speclino.settings import Settings
+from tests.integration.services.conftest import register_repo, repo_id_of
 from tests.integration.services.test_review_run_service import make_demo_repo
 
 _DATABASE_URL = os.environ.get("SPECLINO_DATABASE_URL")
@@ -33,8 +34,9 @@ async def test_rerun_creates_new_run_and_enforces_daily_limit(
     engine: AsyncEngine, tmp_path: Path
 ) -> None:
     repo = f"e2e/rerun-{uuid.uuid4().hex[:8]}"
+    await register_repo(engine, repo)
     base, head, _ = make_demo_repo(tmp_path / "repo")
-    host = LocalCodeHost(repos={repo: tmp_path / "repo"})
+    host = LocalCodeHost(repos={repo: tmp_path / "repo"}, repo_ids={repo: repo_id_of(repo)})
     factory = async_sessionmaker(engine, expire_on_commit=False)
     holder: dict[str, ReviewRunService] = {}
     queue = InProcessQueue(lambda rid: holder["svc"].execute(rid), immediate=True)

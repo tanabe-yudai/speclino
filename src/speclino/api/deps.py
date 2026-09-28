@@ -160,6 +160,9 @@ class LazyCodeHost:
     async def fetch_snapshot(self, repo: str, sha: str, dest_dir: Path) -> Path:
         return await self.inner.fetch_snapshot(repo, sha, dest_dir)
 
+    async def repository_id(self, repo: str) -> int | None:
+        return await self.inner.repository_id(repo)
+
 
 def build_state(settings: Settings) -> AppState:
     engine = make_engine(settings)

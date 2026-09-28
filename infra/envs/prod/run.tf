@@ -296,3 +296,90 @@ resource "google_cloud_run_v2_job" "migrate" {
     ignore_changes = [template[0].template[0].containers[0].image]
   }
 }
+
+# ワークスペースの管理操作（作成・メンバー登録・project 登録・repository ID の backfill）。
+# DB の秘密や GitHub App 秘密鍵を手元へ出さないため、`speclino` CLI（`speclino.cli:app`）を
+# Cloud Run Job として実行できるようにする。
+# `gcloud run jobs execute speclino-admin --args=workspace,create,... --wait` のように、
+# 実行のたびに `--args` でサブコマンドを渡す（`--args` は実行ごとに置き換えられる。公式ドキュメント
+# で確認済み。design/2026-09-27-workspaces.md 参照）。イメージ・SA・DB 接続は migrate Job と揃える。
+# worker SA を流用するのは、DB（cloudsql.client / database-url の secretAccessor）と
+# GitHub App 秘密鍵（github-app-private-key の secretAccessor）の参照権を既に持っているため
+# （secrets.tf）。新たな IAM 付与は不要。
+resource "google_cloud_run_v2_job" "admin" {
+  count = var.cloudsql_instance != "" && var.mount_secrets ? 1 : 0
+
+  project  = var.project_id
+  name     = "speclino-admin"
+  location = var.region
+
+  # migrate と同じく、誤って消してもデプロイ全体を止めない（terraform destroy にも巻き込まない）。
+  deletion_protection = false
+
+  template {
+    task_count = 1
+
+    template {
+      service_account = google_service_account.this["worker"].email
+      timeout         = "300s"
+      # 誤操作の再実行を自動でしない（内容を見てから流し直す。migrate と同じ理由）。
+      max_retries = 0
+
+      containers {
+        image = var.image
+        # `uv run speclino` がイメージ内の CLI エントリポイント（pyproject.toml の
+        # [project.scripts]）。args は空のままにし、`gcloud run jobs execute --args` で渡す。
+        command = ["uv", "run", "speclino"]
+
+        # backfill-repo-ids が GitHub App の App ID を要る（秘密ではないので env で渡す）。
+        # 空のあいだ（App 未作成）はこの Job にも渡さない（worker サービスと同じ条件）。
+        dynamic "env" {
+          for_each = local.worker_github_env
+          content {
+            name  = env.key
+            value = env.value
+          }
+        }
+
+        env {
+          name = "SPECLINO_DATABASE_URL"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.this["database-url"].secret_id
+              version = "latest"
+            }
+          }
+        }
+
+        # backfill-repo-ids が installation token を取るのに要る。worker サービスと同じ
+        # Secret Manager の秘密を同じ環境変数名で渡す。
+        env {
+          name = "SPECLINO_GITHUB_PRIVATE_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.this["github-app-private-key"].secret_id
+              version = "latest"
+            }
+          }
+        }
+
+        volume_mounts {
+          name       = "cloudsql"
+          mount_path = "/cloudsql"
+        }
+      }
+
+      volumes {
+        name = "cloudsql"
+        cloud_sql_instance {
+          instances = [var.cloudsql_instance]
+        }
+      }
+    }
+  }
+
+  lifecycle {
+    # サービス・migrate と同じく、イメージは deploy.yml 側で更新する。
+    ignore_changes = [template[0].template[0].containers[0].image]
+  }
+}

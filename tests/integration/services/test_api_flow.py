@@ -27,7 +27,7 @@ from speclino.services.review_run_service import ReviewRunConfig, ReviewRunServi
 from speclino.settings import Settings
 from speclino.spec import load_spec_ir
 from speclino.spec.spec_validator import rule_content_hash
-from tests.integration.services.conftest import set_project_approvers
+from tests.integration.services.conftest import register_repo, repo_id_of, set_project_approvers
 from tests.integration.services.test_review_run_service import make_demo_repo
 
 
@@ -67,7 +67,7 @@ def pr_payload(
         "action": action,
         "number": number,
         "installation": {"id": 1},
-        "repository": {"full_name": repo},
+        "repository": {"full_name": repo, "id": repo_id_of(repo)},
         "pull_request": {
             "number": number,
             "html_url": f"https://github.com/{repo}/pull/{number}",
@@ -82,7 +82,7 @@ def comment_payload(repo: str, number: int, body: str, login: str) -> dict[str, 
     return {
         "action": "created",
         "installation": {"id": 1},
-        "repository": {"full_name": repo},
+        "repository": {"full_name": repo, "id": repo_id_of(repo)},
         "issue": {"number": number, "pull_request": {"url": "x"}},
         "comment": {"body": body, "user": {"login": login}, "html_url": "https://c/1"},
     }
@@ -93,8 +93,9 @@ async def client(
     engine: AsyncEngine, tmp_path: Path
 ) -> AsyncIterator[tuple[httpx.AsyncClient, str, str, str, str, LocalCodeHost]]:
     repo = f"e2e/api-{uuid.uuid4().hex[:8]}"
+    await register_repo(engine, repo, {"dev": "member", "judge": "member"})
     base, head, head2 = make_demo_repo(tmp_path / "repo")
-    host = LocalCodeHost(repos={repo: tmp_path / "repo"})
+    host = LocalCodeHost(repos={repo: tmp_path / "repo"}, repo_ids={repo: repo_id_of(repo)})
     factory = async_sessionmaker(engine, expire_on_commit=False)
     holder: dict[str, ReviewRunService] = {}
     queue = InProcessQueue(lambda rid: holder["svc"].execute(rid), immediate=True)
@@ -213,3 +214,52 @@ async def test_manual_start_and_healthz(
     assert res.status_code == 202
     detail = (await c.get(f"/api/review-runs/{res.json()['run_id']}")).json()
     assert detail["trigger"] == "manual:judge" and detail["gate_status"] == "fail"
+
+
+async def test_non_members_see_nothing_and_cannot_start_runs(
+    client: tuple[httpx.AsyncClient, str, str, str, str, LocalCodeHost], engine: AsyncEngine
+) -> None:
+    """S53: 所属ワークスペースに登録されていない run は、一覧に出ず、詳細も 404。"""
+    c, repo, base, head, _, _ = client
+    raw, headers = signed(pr_payload(repo, head, base, 5), "pull_request")
+    run_id = (await c.post("/webhooks/github", content=raw, headers=headers)).json()["run_id"]
+    outsider = {"X-Dev-User": "outsider"}
+
+    assert (await c.get("/api/review-runs", headers=outsider)).json() == []
+    for path in (
+        f"/api/review-runs/{run_id}",
+        f"/api/review-runs/{run_id}/events",
+        f"/api/review-runs/{run_id}/artifacts/review.md",
+    ):
+        res = await c.get(path, headers=outsider)
+        assert res.status_code == 404, (path, res.text)
+    assert (await c.post(f"/api/review-runs/{run_id}/rerun", headers=outsider)).status_code == 404
+    start = await c.post(
+        "/api/review-runs",
+        json={"repo_full_name": repo, "head_sha": head, "base_sha": base},
+        headers=outsider,
+    )
+    assert start.status_code == 404
+    # 存在しないリポジトリも同じ 404（存在を漏らさない）。API から project は作らない
+    missing = await c.post(
+        "/api/review-runs",
+        json={"repo_full_name": "e2e/nope", "head_sha": head, "base_sha": base},
+    )
+    assert missing.status_code == 404
+    async with engine.connect() as conn:
+        count = (
+            await conn.execute(
+                sql_text("SELECT count(*) FROM projects WHERE repo_full_name = 'e2e/nope'")
+            )
+        ).scalar_one()
+    assert count == 0
+
+    # 別のワークスペースのメンバーでも見えない
+    await register_repo(engine, "e2e/other-ws-repo", {"outsider": "owner"}, team="e2e-other")
+    assert (await c.get(f"/api/review-runs/{run_id}", headers=outsider)).status_code == 404
+
+    # メンバーからは見える。/api/me に所属が出る
+    assert (await c.get(f"/api/review-runs/{run_id}")).status_code == 200
+    me = (await c.get("/api/me")).json()
+    assert me["uid"] == "dev"
+    assert {"slug": "e2e-ws", "name": None, "role": "member"} in me["workspaces"]

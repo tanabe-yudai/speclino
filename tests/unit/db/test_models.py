@@ -32,6 +32,7 @@ EXPECTED_TABLES = {
     "cost_ledger",
     "policy_revisions",
     "teams",
+    "workspace_members",
 }
 
 

@@ -12,6 +12,7 @@ import httpx2
 import pytest
 from mcp.client import Client
 from mcp.client.streamable_http import streamable_http_client
+from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from speclino.adapters.localgit.local_code_host import LocalCodeHost
@@ -23,6 +24,7 @@ from speclino.db.repositories.policy_revisions import PolicyRevisionRepository
 from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
 from speclino.settings import Settings
 from tests.integration.db.test_policy_revisions_repository import _package
+from tests.integration.services.conftest import register_repo, repo_id_of
 from tests.integration.services.test_review_run_service import make_demo_repo
 
 _DATABASE_URL = os.environ.get("SPECLINO_DATABASE_URL")
@@ -41,8 +43,9 @@ def _text(result) -> dict:  # type: ignore[no-untyped-def]
 
 async def test_context_start_get_over_mcp(engine: AsyncEngine, tmp_path: Path) -> None:
     repo = f"e2e/mcp-{uuid.uuid4().hex[:8]}"
+    await register_repo(engine, repo, {})
     base, head, _ = make_demo_repo(tmp_path / "repo")
-    host = LocalCodeHost(repos={repo: tmp_path / "repo"})
+    host = LocalCodeHost(repos={repo: tmp_path / "repo"}, repo_ids={repo: repo_id_of(repo)})
     factory = async_sessionmaker(engine, expire_on_commit=False)
     holder: dict[str, ReviewRunService] = {}
     queue = InProcessQueue(lambda rid: holder["svc"].execute(rid), immediate=True)
@@ -62,6 +65,21 @@ async def test_context_start_get_over_mcp(engine: AsyncEngine, tmp_path: Path) -
     ):
         transport = streamable_http_client("http://localhost/mcp", http_client=http)
         async with Client(transport) as client:
+            # S53: ワークスペースに登録されていないリポジトリは読めない・検証を始められない
+            for tool, args in (
+                ("context_get", {"repo_full_name": "e2e/unregistered", "ref": base}),
+                (
+                    "verification_start",
+                    {"repo_full_name": "e2e/unregistered", "head_sha": head},
+                ),
+            ):
+                refused = await client.call_tool(tool, args)
+                assert refused.is_error and "登録されていない" in refused.content[0].text
+            # 名前で取れるリポジトリの ID が登録時と違えば（旧名の再利用）読まない
+            host.repo_ids[repo] = repo_id_of(repo) + 1
+            swapped = await client.call_tool("context_get", {"repo_full_name": repo, "ref": base})
+            assert swapped.is_error and "リポジトリ ID が登録時と違う" in swapped.content[0].text
+            host.repo_ids[repo] = repo_id_of(repo)
             ctx = _text(
                 await client.call_tool("context_get", {"repo_full_name": repo, "ref": base})
             )
@@ -74,6 +92,16 @@ async def test_context_start_get_over_mcp(engine: AsyncEngine, tmp_path: Path) -
                 )
             )
             got = _text(await client.call_tool("verification_get", {"run_id": started["run_id"]}))
+            # 登録を外すと、同じ run でも読めない（無い場合と同じ応答）
+            async with engine.begin() as conn:
+                await conn.execute(
+                    sql_text("UPDATE projects SET team = NULL WHERE repo_full_name = :r"),
+                    {"r": repo},
+                )
+            hidden = _text(
+                await client.call_tool("verification_get", {"run_id": started["run_id"]})
+            )
+            assert hidden == {"error": "run_not_found", "run_id": started["run_id"]}
     assert got["exec_state"] == "completed" and got["gate_status"] == "fail", got
     assert got["semantic_diff"]["counts"]["new_violation"] == 1
     violated = [f for f in got["findings"] if f["verdict"] == "VIOLATED"]
@@ -87,8 +115,9 @@ async def test_context_get_serves_the_active_team_policy(
     """S44: MCP の context_get がチームの active 改訂を返し、承認で改訂が変わると内容も変わる。"""
     owner = f"e2e-team-{uuid.uuid4().hex[:8]}"
     repo = f"{owner}/demo"
+    await register_repo(engine, repo, {}, team=owner)
     base, _, _ = make_demo_repo(tmp_path / "repo")
-    host = LocalCodeHost(repos={repo: tmp_path / "repo"})
+    host = LocalCodeHost(repos={repo: tmp_path / "repo"}, repo_ids={repo: repo_id_of(repo)})
     factory = async_sessionmaker(engine, expire_on_commit=False)
     queue = InProcessQueue(lambda rid: None, immediate=False)  # type: ignore[arg-type, return-value]
     settings = Settings(env="local", role="all", code_host_kind="local", mcp_token=TOKEN)

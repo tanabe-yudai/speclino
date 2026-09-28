@@ -27,10 +27,8 @@ cat <<SUMMARY
 
 uid: ${uid}
 
-このアカウントを許可リストに入れるには、web サービスに環境変数を設定する:
+run を見られるのは所属ワークスペースのメンバーだけ（S53）。審査員として閲覧させるには member で追加する:
 
-  gcloud run services update speclino-web --project=${PROJECT} --region=asia-northeast1 \\
-    --update-env-vars="SPECLINO_ALLOWED_USERS=[\"${EMAIL}\"]"
-
-（SPECLINO_ALLOWED_USERS を設定しない場合は、認証できる全ユーザーが閲覧できる）
+  gcloud run jobs execute speclino-admin --project=${PROJECT} --region=asia-northeast1 --wait \\
+    --args=workspace,add-member,<slug>,${uid},--role,member
 SUMMARY

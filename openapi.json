@@ -95,6 +95,49 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/me": {
+      "get": {
+        "operationId": "get_me_api_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Me Api Me Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Get Me",
+        "tags": [
+          "me"
+        ]
+      }
+    },
     "/api/review-runs": {
       "get": {
         "operationId": "list_runs_api_review_runs_get",
@@ -136,16 +179,6 @@
             },
             "description": "Unauthorized"
           },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
           "422": {
             "content": {
               "application/json": {
@@ -163,6 +196,7 @@
         ]
       },
       "post": {
+        "description": "登録済みリポジトリの検証を始める。API から project は作らない（登録は管理操作）。",
         "operationId": "start_run_api_review_runs_post",
         "requestBody": {
           "content": {
@@ -197,7 +231,7 @@
             },
             "description": "Unauthorized"
           },
-          "403": {
+          "404": {
             "content": {
               "application/json": {
                 "schema": {
@@ -205,7 +239,7 @@
                 }
               }
             },
-            "description": "Forbidden"
+            "description": "Not Found"
           },
           "422": {
             "content": {
@@ -261,16 +295,6 @@
               }
             },
             "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
           },
           "404": {
             "content": {
@@ -354,16 +378,6 @@
             },
             "description": "Unauthorized"
           },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
           "404": {
             "content": {
               "application/json": {
@@ -432,7 +446,7 @@
             },
             "description": "Unauthorized"
           },
-          "403": {
+          "404": {
             "content": {
               "application/json": {
                 "schema": {
@@ -440,7 +454,7 @@
                 }
               }
             },
-            "description": "Forbidden"
+            "description": "Not Found"
           },
           "422": {
             "content": {
@@ -497,16 +511,6 @@
               }
             },
             "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
           },
           "404": {
             "content": {

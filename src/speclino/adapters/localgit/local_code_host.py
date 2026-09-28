@@ -17,6 +17,8 @@ class LocalCodeHost:
     repos: dict[str, Path]  # repo_full_name → ローカルの git リポジトリ
     checks: dict[int, dict[str, Any]] = field(default_factory=dict)
     comments: list[dict[str, Any]] = field(default_factory=list)
+    # repo_full_name → GitHub のリポジトリ ID に相当する値（S53 の ID 照合を試すため）
+    repo_ids: dict[str, int] = field(default_factory=dict)
     _next_id: int = 1
 
     async def create_check(
@@ -78,6 +80,9 @@ class LocalCodeHost:
             {"id": comment_id, "repo": repo, "issue_number": issue_number, "body": body}
         )
         return comment_id
+
+    async def repository_id(self, repo: str) -> int | None:
+        return self.repo_ids.get(repo)
 
     async def fetch_snapshot(self, repo: str, sha: str, dest_dir: Path) -> Path:
         root = self.repos[repo]

@@ -12,25 +12,35 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from speclino.domain.workspace import AuthUser
 from speclino.settings import Settings
 
 ISSUER_PREFIX = "https://securetoken.google.com/"
 
 
-def _check_claims(claims: dict[str, Any], project_id: str) -> str:
-    """検証済みトークンのクレームから利用者の識別子を取り出す。"""
+def _check_claims(claims: dict[str, Any], project_id: str) -> AuthUser:
+    """検証済みトークンのクレームから利用者を取り出す。識別子は `sub`（uid）だけ。
+
+    メールは識別子にしない: Identity Platform は確認前のメールでも登録でき、メールで権限を
+    与えると、そのメールで先にサインアップした第三者が権限を得る（S53）。
+    """
     issuer = claims.get("iss")
     if issuer != f"{ISSUER_PREFIX}{project_id}":
         raise ValueError(f"発行者が不正: {issuer!r}")
     if claims.get("aud") != project_id:
         raise ValueError("aud がプロジェクト ID と一致しない")
-    identifier = claims.get("email") or claims.get("user_id") or claims.get("sub")
-    if not identifier:
-        raise ValueError("利用者を識別できるクレームが無い")
-    return str(identifier)
+    uid = claims.get("sub")
+    if not uid:
+        raise ValueError("利用者を識別できるクレーム（sub）が無い")
+    email = claims.get("email")
+    return AuthUser(
+        uid=str(uid),
+        email=str(email) if email else None,
+        email_verified=claims.get("email_verified") is True,
+    )
 
 
-async def verify_bearer(token: str, settings: Settings) -> str:
+async def verify_bearer(token: str, settings: Settings) -> AuthUser:
     project_id = settings.firebase_project_id
     if not project_id:
         raise ValueError("firebase_project_id が未設定")
