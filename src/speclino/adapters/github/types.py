@@ -22,6 +22,9 @@ class PullRequestRef(_GitHubModel):
     """PR イベント（opened / synchronize / reopened）から抽出した参照。"""
 
     repo_full_name: str
+    # GitHub のリポジトリ ID（S53）。名前は改名後に別リポジトリへ再利用されうるので、project の
+    # 同一性はこちらで決める。
+    repo_id: int
     installation_id: int
     pr_number: int
     head_sha: str
@@ -36,6 +39,7 @@ class IssueCommentRef(_GitHubModel):
     """issue_comment(created) イベントから抽出した参照。"""
 
     repo_full_name: str
+    repo_id: int
     installation_id: int
     issue_number: int
     body: str
@@ -48,6 +52,7 @@ class RerunRef(_GitHubModel):
     """check_run(rerequested/requested_action) または check_suite(rerequested) からの再実行要求。"""
 
     repo_full_name: str
+    repo_id: int
     installation_id: int
     head_sha: str
     pr_numbers: list[int]

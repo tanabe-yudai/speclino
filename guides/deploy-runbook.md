@@ -416,6 +416,87 @@ SPECLINO_SMOKE_EMAIL=<email> SPECLINO_SMOKE_PASSWORD=<password> \
 その後 `guides/github-app-setup.md` に従って本番 GitHub App の Webhook URL を
 `$WEB_URL/webhooks/github` に設定し、デモ PR（`demos/README.md`）を作る。
 
+## 9. ワークスペースの初期設定（S53）
+
+S53 からは、登録されたリポジトリの run しか誰にも見えない（design/2026-09-27-workspaces.md）。
+デプロイ直後は既存 project がどのワークスペースにも属していないため、この手順を流すまで
+UI に何も出ない。**リポジトリ直下で実行する**必要は無い（`gcloud run jobs execute` はどこからでもよい）。
+
+DB の秘密や GitHub App 秘密鍵を手元へ出さないため、`speclino workspace` CLI を Cloud Run Job
+（`speclino-admin`、`infra/envs/prod/run.tf`）で実行する。`--args` は実行のたびに置き換えられる。
+
+**順序（初回）**: S53 を含むイメージを Deploy する**前に** `terraform apply` で `speclino-admin` を作る。
+Deploy は migrate の直後、サービスを更新する前に `backfill-repo-ids`（9-2）を流す。Job が無ければ
+Deploy はそこで失敗し、サービスは旧イメージのまま残る（backfill 前の新しいサービスが webhook を受けると、
+ID の無い既存 project が別リポジトリとして退避され、登録と `settings` を失うため）。
+
+```sh
+cd "$REPO"
+export P=example-project
+export REGION=asia-northeast1
+```
+
+### 9-1. 自分の uid を確かめる
+
+ログイン後、ブラウザの開発者ツールか `curl` で `GET /api/me` を呼ぶと `{uid, email, workspaces}`
+が返る。この `uid` を以降の `--owner-uid` / メンバー登録に使う（Identity Platform の `sub`。
+メールではない）。
+
+```sh
+curl -s "$WEB_URL/api/me" -H "Authorization: Bearer <ID トークン>"
+```
+
+### 9-2. 既存 project の github_repo_id を埋める（Deploy が自動で流す）
+
+改名・削除後の同名リポジトリ再利用を安全に扱うため、まず全 project の GitHub リポジトリ ID を
+確定させる（design の codex レビュー #3。名前一致では自動で埋めない）。
+
+```sh
+gcloud run jobs execute speclino-admin --project=$P --region=$REGION \
+  --args=workspace,backfill-repo-ids --wait
+gcloud run jobs logs read speclino-admin --project=$P --region=$REGION --limit=50
+```
+
+`isolated` と出た行（ID が確認できない・衝突した project）は team が外れたままになる。ログの
+理由（`not_found` / `id_conflict`）を見て、リポジトリの改名・削除やインストール状況を確認する。
+
+### 9-3. 自分のワークスペースを作る
+
+```sh
+gcloud run jobs execute speclino-admin --project=$P --region=$REGION \
+  --args=workspace,create,tanabe-yudai,--owner-uid,<自分の uid>,--name,Tanabe --wait
+```
+
+### 9-4. 審査員をメンバーに追加する（閲覧のみ）
+
+審査員は member（run の閲覧・手動 start・デモ再実行のみ。規約承認はできない）。
+
+```sh
+gcloud run jobs execute speclino-admin --project=$P --region=$REGION \
+  --args=workspace,add-member,tanabe-yudai,<審査員の uid>,--role,member --wait
+```
+
+### 9-5. リポジトリを登録する
+
+`spec-lino` 自身とデモ用リポジトリを登録する（project が無ければ先に webhook を1回受けて
+作らせるか、既存の project 行があること。API からは project を新規作成しない）。
+
+```sh
+gcloud run jobs execute speclino-admin --project=$P --region=$REGION \
+  --args=workspace,add-project,tanabe-yudai,tanabe-yudai/spec-lino --wait
+```
+
+デモリポジトリも同様に繰り返す。登録状況は一覧で確認できる:
+
+```sh
+gcloud run jobs execute speclino-admin --project=$P --region=$REGION \
+  --args=workspace,list --wait
+gcloud run jobs logs read speclino-admin --project=$P --region=$REGION --limit=50
+```
+
+他のワークスペース（自分とデモ以外）を作れるようにするのは S54（ワークスペース単位の MCP
+トークン）の後（design の切り替えの順序）。
+
 ## 片付け（12/1 以降）
 
 ```sh

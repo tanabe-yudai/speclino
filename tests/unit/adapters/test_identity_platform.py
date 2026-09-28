@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from speclino.adapters.auth.identity_platform import ISSUER_PREFIX, _check_claims, verify_bearer
+from speclino.domain.workspace import AuthUser
 from speclino.settings import Settings
 
 PROJECT = "example-project"
@@ -15,19 +16,24 @@ def claims(**overrides: object) -> dict[str, object]:
         "iss": f"{ISSUER_PREFIX}{PROJECT}",
         "aud": PROJECT,
         "email": "judge@example.com",
+        "email_verified": True,
         "user_id": "uid-1",
+        "sub": "uid-1",
     }
     base.update(overrides)
     return base
 
 
-def test_valid_claims_return_the_email() -> None:
-    assert _check_claims(claims(), PROJECT) == "judge@example.com"
+def test_the_identifier_is_the_uid_and_the_email_is_only_for_display() -> None:
+    assert _check_claims(claims(), PROJECT) == AuthUser(
+        uid="uid-1", email="judge@example.com", email_verified=True
+    )
 
 
-def test_falls_back_to_uid_when_no_email() -> None:
-    assert _check_claims(claims(email=None), PROJECT) == "uid-1"
-    assert _check_claims(claims(email=None, user_id=None, sub="sub-1"), PROJECT) == "sub-1"
+def test_an_unverified_email_is_marked_as_such() -> None:
+    user = _check_claims(claims(email_verified=False), PROJECT)
+    assert user.uid == "uid-1"
+    assert user.email_verified is False
 
 
 @pytest.mark.parametrize(
@@ -48,9 +54,9 @@ def test_wrong_audience_is_rejected() -> None:
         _check_claims(claims(aud="other"), PROJECT)
 
 
-def test_unidentifiable_token_is_rejected() -> None:
-    with pytest.raises(ValueError, match="識別"):
-        _check_claims(claims(email=None, user_id=None), PROJECT)
+def test_a_token_without_sub_is_rejected_even_if_it_has_an_email() -> None:
+    with pytest.raises(ValueError, match="sub"):
+        _check_claims(claims(sub=None), PROJECT)
 
 
 async def test_missing_project_id_is_an_error() -> None:

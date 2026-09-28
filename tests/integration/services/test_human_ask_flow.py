@@ -21,7 +21,7 @@ from speclino.api.deps import AppState
 from speclino.db.repositories import QuestionRepository, ReviewRunRepository
 from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
 from speclino.settings import Settings
-from tests.integration.services.conftest import set_project_approvers
+from tests.integration.services.conftest import register_repo, repo_id_of, set_project_approvers
 from tests.integration.services.test_api_flow import SECRET, comment_payload, pr_payload, signed
 
 _DATABASE_URL = os.environ.get("SPECLINO_DATABASE_URL")
@@ -52,6 +52,8 @@ def make_repo(root: Path) -> tuple[str, str]:
     git(root, "init", "-q", "-b", "main")
     git(root, "config", "user.email", "t@example.com")
     git(root, "config", "user.name", "t")
+    # 開発者の git 設定（コミット署名）に左右されないようにする
+    git(root, "config", "commit.gpgsign", "false")
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "base")
     base = git(root, "rev-parse", "HEAD")
@@ -69,8 +71,9 @@ def make_repo(root: Path) -> tuple[str, str]:
 async def test_question_then_answer_resumes_child_run(engine: AsyncEngine, tmp_path: Path) -> None:
     ScriptedLlm.reset()
     repo = f"e2e/ask-{uuid.uuid4().hex[:8]}"
+    await register_repo(engine, repo)
     base, head = make_repo(tmp_path / "repo")
-    host = LocalCodeHost(repos={repo: tmp_path / "repo"})
+    host = LocalCodeHost(repos={repo: tmp_path / "repo"}, repo_ids={repo: repo_id_of(repo)})
     factory = async_sessionmaker(engine, expire_on_commit=False)
     holder: dict[str, ReviewRunService] = {}
     queue = InProcessQueue(lambda rid: holder["svc"].execute(rid), immediate=True)

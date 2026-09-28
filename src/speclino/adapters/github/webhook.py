@@ -1,5 +1,8 @@
 """GitHub webhook の署名検証とイベント抽出（S19）。
 
+`repository.id` が無いペイロードは抽出しない（None）。project の同一性をリポジトリ ID で
+決めるため（S53）、ID の無いイベントは処理しない側に倒す。
+
 署名: `X-Hub-Signature-256` = `"sha256=" + HMAC_SHA256(secret, raw_body).hexdigest()`。
 `hmac.compare_digest` でタイミング攻撃を避ける。
 """
@@ -63,7 +66,8 @@ def extract_pr(payload: dict[str, object]) -> PullRequestRef | None:
         return None
     installation_id = _as_int(installation.get("id"))
     pr_number = _as_int(pr.get("number"))
-    if installation_id is None or pr_number is None:
+    repo_id = _as_int(repo.get("id"))
+    if installation_id is None or pr_number is None or repo_id is None:
         return None
 
     head = _as_dict(pr.get("head"))
@@ -74,6 +78,7 @@ def extract_pr(payload: dict[str, object]) -> PullRequestRef | None:
     head_repo_full_name = _as_str(head_repo.get("full_name"))
     return PullRequestRef(
         repo_full_name=repo_full_name,
+        repo_id=repo_id,
         installation_id=installation_id,
         pr_number=pr_number,
         head_sha=_as_str(head.get("sha")),
@@ -97,12 +102,14 @@ def extract_comment(payload: dict[str, object]) -> IssueCommentRef | None:
         return None
     installation_id = _as_int(installation.get("id"))
     issue_number = _as_int(issue.get("number"))
-    if installation_id is None or issue_number is None:
+    repo_id = _as_int(repo.get("id"))
+    if installation_id is None or issue_number is None or repo_id is None:
         return None
 
     user = _as_dict(comment.get("user"))
     return IssueCommentRef(
         repo_full_name=_as_str(repo.get("full_name")),
+        repo_id=repo_id,
         installation_id=installation_id,
         issue_number=issue_number,
         body=_as_str(comment.get("body")),
@@ -132,7 +139,8 @@ def extract_rerun(payload: dict[str, object]) -> RerunRef | None:
     if not repo or not installation:
         return None
     installation_id = _as_int(installation.get("id"))
-    if installation_id is None:
+    repo_id = _as_int(repo.get("id"))
+    if installation_id is None or repo_id is None:
         return None
     repo_full_name = _as_str(repo.get("full_name"))
 
@@ -141,6 +149,7 @@ def extract_rerun(payload: dict[str, object]) -> RerunRef | None:
         check_suite = _as_dict(check_run.get("check_suite"))
         return RerunRef(
             repo_full_name=repo_full_name,
+            repo_id=repo_id,
             installation_id=installation_id,
             head_sha=_as_str(check_suite.get("head_sha")),
             pr_numbers=_pr_numbers(check_suite),
@@ -151,6 +160,7 @@ def extract_rerun(payload: dict[str, object]) -> RerunRef | None:
     if check_suite and action == "rerequested":
         return RerunRef(
             repo_full_name=repo_full_name,
+            repo_id=repo_id,
             installation_id=installation_id,
             head_sha=_as_str(check_suite.get("head_sha")),
             pr_numbers=_pr_numbers(check_suite),

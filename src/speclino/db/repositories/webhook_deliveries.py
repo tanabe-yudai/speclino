@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from sqlalchemy import CursorResult
+from sqlalchemy import CursorResult, delete
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,3 +31,10 @@ class WebhookDeliveryRepository:
         )
         result = await self._session.execute(stmt)
         return cast(CursorResult[Any], result).rowcount > 0
+
+    async def forget(self, delivery_id: str) -> None:
+        """記録を消す。処理を commit したあとの enqueue に失敗したとき、再配信で処理し直せるように
+        する（S53、`api/routes/webhooks.py`）。"""
+        await self._session.execute(
+            delete(WebhookDelivery).where(WebhookDelivery.delivery_id == delivery_id)
+        )

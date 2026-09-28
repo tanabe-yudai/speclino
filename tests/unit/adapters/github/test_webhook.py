@@ -92,7 +92,7 @@ def _pr_payload(
     return {
         "action": action,
         "installation": {"id": 42},
-        "repository": {"full_name": repo_full_name},
+        "repository": {"full_name": repo_full_name, "id": 4242},
         "pull_request": {
             "number": 7,
             "html_url": "https://github.com/acme/widgets/pull/7",
@@ -107,6 +107,7 @@ def test_extract_pr_opened_same_repo_is_not_fork() -> None:
     ref = extract_pr(_pr_payload(action="opened"))
     assert ref is not None
     assert ref.repo_full_name == "acme/widgets"
+    assert ref.repo_id == 4242
     assert ref.installation_id == 42
     assert ref.pr_number == 7
     assert ref.head_sha == "head-sha-1"
@@ -129,6 +130,13 @@ def test_extract_pr_detects_fork() -> None:
     assert ref.head_repo_full_name == "someone-else/widgets"
 
 
+def test_events_without_a_repository_id_are_not_extracted() -> None:
+    """S53: project の同一性はリポジトリ ID で決めるので、ID の無いイベントは処理しない。"""
+    payload = _pr_payload()
+    payload["repository"] = {"full_name": "acme/widgets"}
+    assert extract_pr(payload) is None
+
+
 def test_extract_pr_ignores_unrelated_action() -> None:
     assert extract_pr(_pr_payload(action="closed")) is None
 
@@ -149,7 +157,7 @@ def _comment_payload(
     return {
         "action": action,
         "installation": {"id": 42},
-        "repository": {"full_name": "acme/widgets"},
+        "repository": {"full_name": "acme/widgets", "id": 4242},
         "issue": issue,
         "comment": {
             "body": "/speclino approve-spec sha256:abc",
@@ -193,7 +201,7 @@ def test_extract_rerun_from_check_run_rerequested() -> None:
     payload: dict[str, object] = {
         "action": "rerequested",
         "installation": {"id": 42},
-        "repository": {"full_name": "acme/widgets"},
+        "repository": {"full_name": "acme/widgets", "id": 4242},
         "check_run": {
             "id": 555,
             "check_suite": {
@@ -215,7 +223,7 @@ def test_extract_rerun_from_check_run_requested_action() -> None:
     payload: dict[str, object] = {
         "action": "requested_action",
         "installation": {"id": 42},
-        "repository": {"full_name": "acme/widgets"},
+        "repository": {"full_name": "acme/widgets", "id": 4242},
         "check_run": {
             "id": 556,
             "check_suite": {"head_sha": "sha-2", "pull_requests": []},
@@ -232,7 +240,7 @@ def test_extract_rerun_from_check_suite_rerequested() -> None:
     payload: dict[str, object] = {
         "action": "rerequested",
         "installation": {"id": 42},
-        "repository": {"full_name": "acme/widgets"},
+        "repository": {"full_name": "acme/widgets", "id": 4242},
         "check_suite": {
             "head_sha": "sha-suite",
             "pull_requests": [{"number": 3}],
@@ -249,7 +257,7 @@ def test_extract_rerun_ignores_unrelated_event() -> None:
     payload: dict[str, object] = {
         "action": "opened",
         "installation": {"id": 42},
-        "repository": {"full_name": "acme/widgets"},
+        "repository": {"full_name": "acme/widgets", "id": 4242},
         "pull_request": {"number": 1},
     }
     assert extract_rerun(payload) is None

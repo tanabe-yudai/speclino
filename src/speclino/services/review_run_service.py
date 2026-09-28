@@ -32,6 +32,7 @@ from speclino.agent.tools import InvestigationContext
 from speclino.analysis.limits import DEFAULT_LIMITS
 from speclino.conformance.engine import EngineInputError
 from speclino.conformance.gate import DEFAULT_FAIL_ON, GatePolicy, GateResult, aggregate_gate
+from speclino.db.models import Project
 from speclino.db.repositories import (
     ApprovalRepository,
     AuditRepository,
@@ -68,8 +69,8 @@ from speclino.services.check_pipeline import (
 from speclino.services.cost_guard import CostGuard
 from speclino.services.investigation import InvestigationResult, investigate
 from speclino.services.obligation_diff import effective_spec
-from speclino.services.policy_governance import team_of
 from speclino.services.run_freshness import should_publish
+from speclino.services.workspaces import repository_mismatch
 from speclino.spec import load_spec_ir
 from speclino.telemetry import configure_tracing, span
 
@@ -104,55 +105,98 @@ class ReviewRunService:
     async def create_run(
         self,
         *,
-        repo_full_name: str,
+        project_id: UUID,
         head_sha: str,
         base_sha: str | None,
         pr_number: int | None,
         trigger: str,
-        installation_id: int | None = None,
-        default_branch: str = "main",
         parent_run_id: UUID | None = None,
     ) -> UUID:
-        """run を queued で作り、同じ PR の未完了 run を superseded にして enqueue する。
+        """既存 project の run を作って enqueue する（API・MCP・デモ再実行用）。
 
-        parent_run_id を持つ子 run は、親（とその祖先）の回答済み質問を引き継いで再開する。
-        親は同じ project の run に限る（別リポジトリの回答を取り込ませない。S52）。
+        project は ID で受け取る（S53）。呼び出し側が所属を確かめた project と別の行に run を
+        作らないよう、名前で引き直さない。project を作るのは、リポジトリ ID を持つ webhook
+        （`ProjectRepository.resolve_for_webhook`）だけ。
         """
         async with self.session_factory() as session, session.begin():
-            projects = ProjectRepository(session)
-            project = await projects.upsert(
-                repo_full_name=repo_full_name,
-                installation_id=installation_id,
-                default_branch=default_branch,
-            )
-            runs = ReviewRunRepository(session)
-            if parent_run_id is not None:
-                parent = await runs.get(parent_run_id)
-                if parent is None or parent.project_id != project.id:
-                    raise ValueError(f"親 run {parent_run_id} は {repo_full_name} の run ではない")
-            run = await runs.create(
-                project_id=project.id,
-                pr_number=pr_number,
+            project = await ProjectRepository(session).get(project_id)
+            if project is None:
+                raise ValueError(f"project {project_id} が無い")
+            run_id = await self.create_run_in(
+                session,
+                project=project,
                 head_sha=head_sha,
                 base_sha=base_sha,
+                pr_number=pr_number,
                 trigger=trigger,
                 parent_run_id=parent_run_id,
             )
-            superseded = await runs.supersede_open_runs(project.id, pr_number, run.id)
-            await RunEventRepository(session).append(
-                run.id,
-                "state",
-                {"exec_state": "queued", "trigger": trigger, "superseded": superseded},
-            )
-            run_id = run.id
         await self.queue.enqueue(run_id)
         return run_id
+
+    async def create_run_in(
+        self,
+        session: AsyncSession,
+        *,
+        project: Project,
+        head_sha: str,
+        base_sha: str | None,
+        pr_number: int | None,
+        trigger: str,
+        parent_run_id: UUID | None = None,
+    ) -> UUID:
+        """呼び出し側のトランザクションの中で run を queued で作る。enqueue はしない。
+
+        呼び出し側は commit のあとで `queue.enqueue(run_id)` する（webhook は重複排除の記録と
+        run の作成を 1 つのトランザクションにするため、これを直接使う。S53）。
+        同じ PR の未完了 run は superseded にする。parent_run_id を持つ子 run は、親（とその
+        祖先）の回答済み質問を引き継いで再開する。親は同じ project の run に限る（別リポジトリの
+        回答を取り込ませない。S52）。
+        """
+        runs = ReviewRunRepository(session)
+        if parent_run_id is not None:
+            parent = await runs.get(parent_run_id)
+            if parent is None or parent.project_id != project.id:
+                raise ValueError(
+                    f"親 run {parent_run_id} は {project.repo_full_name} の run ではない"
+                )
+        run = await runs.create(
+            project_id=project.id,
+            pr_number=pr_number,
+            head_sha=head_sha,
+            base_sha=base_sha,
+            trigger=trigger,
+            parent_run_id=parent_run_id,
+        )
+        superseded = await runs.supersede_open_runs(project.id, pr_number, run.id)
+        await RunEventRepository(session).append(
+            run.id,
+            "state",
+            {"exec_state": "queued", "trigger": trigger, "superseded": superseded},
+        )
+        return run.id
 
     # ------------------------------------------------------------ execute
     async def execute(self, run_id: UUID) -> None:
         configure_tracing()
         with span("speclino.review_run", run_id=str(run_id)):
             await self._execute(run_id)
+
+    async def _fail_before_start(self, run_id: UUID, reason: str) -> None:
+        """スナップショットの取得より前に run を失敗で終える。Check は作らない（公開しない）。"""
+        async with self.session_factory() as session, session.begin():
+            await ReviewRunRepository(session).set_result(run_id, "failed", None, None, None)
+            await RunEventRepository(session).append(
+                run_id, "state", {"exec_state": "failed", "error": reason, "publish": "skip"}
+            )
+            await AuditRepository(session).record(
+                "worker",
+                "run.repository_mismatch",
+                str(run_id),
+                "denied",
+                {"reason": reason},
+                run_id,
+            )
 
     async def _execute(self, run_id: UUID) -> None:
         async with self.session_factory() as session, session.begin():
@@ -164,6 +208,9 @@ class ReviewRunService:
             project = await ProjectRepository(session).get(run.project_id)
             assert project is not None
             repo_full_name = project.repo_full_name
+            github_repo_id = project.github_repo_id
+            # チーム規約は登録先ワークスペースのもの。未登録（None）なら当てない（S53）
+            team = project.team
             approvals = await ApprovalRepository(session).list_for_project(
                 project.id, "approve_spec"
             )
@@ -190,6 +237,11 @@ class ReviewRunService:
             }
             for a in answers:
                 await events.append(run_id, "human_answer", a)
+
+        mismatch = await repository_mismatch(self.code_host, repo_full_name, github_repo_id)
+        if mismatch is not None:
+            await self._fail_before_start(run_id, mismatch)
+            return
 
         details_url = (
             f"{self.config.details_url_base}/{run_id}" if self.config.details_url_base else None
@@ -232,8 +284,8 @@ class ReviewRunService:
                 )
                 overrides, extra = _reconcile_specs(base_root, head_root, server_approvals)
                 team_policy: PolicyRevision | None = None
-                if self.config.resolve_team_policy is not None:
-                    team_policy = await self.config.resolve_team_policy(team_of(repo_full_name))
+                if self.config.resolve_team_policy is not None and team is not None:
+                    team_policy = await self.config.resolve_team_policy(team)
                 req = CheckRequest(
                     repo_root=head_root,
                     head_sha=head_sha,

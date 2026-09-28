@@ -53,5 +53,13 @@ class CodeHost(Protocol):
         """repo の sha 時点のスナップショットを dest_dir に展開し、最上位ディレクトリを返す。"""
         ...
 
+    async def repository_id(self, repo: str) -> int | None:
+        """repo（`owner/name`）の今のリポジトリ ID。存在しない・読めないなら None。
+
+        名前は改名後に別リポジトリへ再利用されうるので、名前で取得する前に、保存してある ID と
+        一致するかをこれで確かめる（S53）。
+        """
+        ...
+
 
 __all__ = ["CodeHost"]

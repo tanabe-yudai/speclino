@@ -74,13 +74,11 @@ async def demo_rerun(
             cost_note,
         )
     new_id = await service.create_run(
-        repo_full_name=project.repo_full_name,
+        project_id=project.id,
         head_sha=original.head_sha,
         base_sha=original.base_sha,
         pr_number=original.pr_number,
         trigger=f"{TRIGGER_PREFIX}{user}",
-        installation_id=project.installation_id,
-        default_branch=project.default_branch,
     )
     return RerunOutcome(new_id, used + 1, limit_per_day, "再実行を開始した", cost_ok, cost_note)
 

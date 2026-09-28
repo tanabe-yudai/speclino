@@ -22,15 +22,6 @@ from speclino.domain.policy import PolicyPackage, PolicyRevision
 SEED_ACTOR = "seed"
 
 
-def team_of(repo_full_name: str) -> str:
-    """リポジトリが属するチーム。当面は `owner/repo` の owner をチームとみなす。
-
-    検証（worker）と配信（MCP）が同じ規則でチームを決めないと、エージェントが読んだ規約と
-    ゲートが照らす規約がずれるため、ここ 1 か所で決める。
-    """
-    return repo_full_name.split("/", 1)[0]
-
-
 async def create_draft(
     session: AsyncSession,
     *,
@@ -75,7 +66,8 @@ async def approve(
 ) -> PolicyRevision:
     """draft 改訂を承認し、`audit_events` に `policy.approve` を残す。
 
-    承認者はチーム単位の許可集合（`teams.approvers`）で検証する（統治の穴修正 #1）。
+    承認者はワークスペースのメンバーのうち role が owner / approver の uid で検証する
+    （統治の穴修正 #1、S53 で `teams.approvers` から移した）。
     許可集合に無い ID からの承認は `PermissionError` で拒否し、拒否も
     `audit_events`（`decision="denied"`）に残す（`agent/gateway.py` の
     ToolGateway が「権限判定 → 拒否なら監査して denied」とする流儀に揃える）。

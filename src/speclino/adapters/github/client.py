@@ -162,6 +162,16 @@ class GitHubClient:
                 return int(updated.json()["id"])
         return await self.post_comment(repo, issue_number, body)
 
+    async def repository_id(self, repo: str) -> int | None:
+        """`GET /repos/{owner}/{repo}` の `id`。App がインストールされていない・無いなら None。"""
+        try:
+            response = await self._request("GET", f"{self.base_url}/repos/{repo}", repo=repo)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return None
+            raise
+        return int(response.json()["id"])
+
     async def fetch_snapshot(self, repo: str, sha: str, dest_dir: Path) -> Path:
         response = await self._request(
             "GET",

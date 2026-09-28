@@ -18,7 +18,7 @@ import yaml
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from speclino.db.models import AuditEvent, Base, PolicyRevisionRecord, TeamRecord
+from speclino.db.models import AuditEvent, Base, PolicyRevisionRecord, TeamRecord, WorkspaceMember
 from speclino.db.repositories.policy_revisions import PolicyRevisionRepository
 from speclino.db.repositories.teams import TeamRepository
 from speclino.domain.policy import PolicyApplicability, PolicyPackage, PolicyRule
@@ -187,7 +187,7 @@ async def test_create_draft_records_audit_event(session: AsyncSession) -> None:
 async def test_approve_records_audit_event(session: AsyncSession) -> None:
     # 承認者の検証（統治の穴修正 #1）が入ったので、承認前に "bob" をチームの承認者として
     # 登録する必要がある（登録しなければ approve が PermissionError で拒否する）。
-    await TeamRepository(session).set_approvers("acme", ["bob"])
+    await TeamRepository(session).set_member("acme", "bob", "approver")
     revision = await policy_governance.create_draft(
         session, team="acme", package=_package(), author="alice"
     )
@@ -238,7 +238,7 @@ async def test_approve_denies_non_approver_and_records_denied_audit(
 ) -> None:
     """穴 #1: 承認者の許可集合に無い ID からの承認は PermissionError で拒否し、
     `audit_events` に `decision="denied"` を残す。"""
-    await TeamRepository(session).set_approvers("acme", ["bob"])
+    await TeamRepository(session).set_member("acme", "bob", "approver")
     revision = await policy_governance.create_draft(
         session, team="acme", package=_package(), author="alice"
     )
@@ -287,7 +287,7 @@ async def test_seed_from_package_rejects_when_team_already_has_a_revision(
     session: AsyncSession,
 ) -> None:
     """穴 #2: 既に改訂があるチームへの seed は拒否し、既存の active をそのまま残す。"""
-    await TeamRepository(session).set_approvers("acme", ["bob"])
+    await TeamRepository(session).set_member("acme", "bob", "approver")
     existing = await policy_governance.create_draft(
         session, team="acme", package=_package("R-EXISTING"), author="alice"
     )
@@ -423,7 +423,7 @@ async def test_seed_fails_when_it_races_with_create_draft_and_approve() -> None:
         session_factory = async_sessionmaker(bind=engine, expire_on_commit=False)
 
         async with session_factory() as setup, setup.begin():
-            await TeamRepository(setup).set_approvers(team, ["bob"])
+            await TeamRepository(setup).set_member(team, "bob", "approver")
 
         session_a = session_factory()
         session_b = session_factory()
@@ -489,6 +489,9 @@ async def test_seed_fails_when_it_races_with_create_draft_and_approve() -> None:
             await conn.execute(
                 PolicyRevisionRecord.__table__.delete().where(PolicyRevisionRecord.team == team)
             )
+            await conn.execute(
+                WorkspaceMember.__table__.delete().where(WorkspaceMember.team == team)
+            )
             await conn.execute(TeamRecord.__table__.delete().where(TeamRecord.team == team))
         await engine.dispose()
 
@@ -510,7 +513,7 @@ async def test_denied_audit_survives_the_callers_rollback(_schema_ready: None) -
     factory = async_sessionmaker(engine, expire_on_commit=False)
     try:
         async with factory() as s:
-            await TeamRepository(s).set_approvers(team, ["alice"])
+            await TeamRepository(s).set_member(team, "alice", "approver")
             await s.commit()
             revision = await PolicyRevisionRepository(s).create_draft(
                 team=team, package=_package(), author="mallory"
@@ -549,6 +552,7 @@ async def test_denied_audit_survives_the_callers_rollback(_schema_ready: None) -
             await s.execute(
                 PolicyRevisionRecord.__table__.delete().where(PolicyRevisionRecord.team == team)
             )
+            await s.execute(WorkspaceMember.__table__.delete().where(WorkspaceMember.team == team))
             await s.execute(TeamRecord.__table__.delete().where(TeamRecord.team == team))
             await s.commit()
         await engine.dispose()

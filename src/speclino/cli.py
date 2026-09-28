@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated, get_args
 
 import typer
 from pydantic import ValidationError
@@ -15,15 +16,54 @@ from speclino.analysis.limits import DEFAULT_LIMITS, clamp
 from speclino.conformance.engine import EngineInputError
 from speclino.domain.code_ir import AnalysisLimits
 from speclino.domain.finding import Verdict
+from speclino.domain.workspace import WorkspaceRole
 from speclino.services import CheckInputError, CheckRequest, run_check, write_result
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 app = typer.Typer(name="speclino", help="仕様–実装の意味差分レビュー基盤 CLI")
 policy_app = typer.Typer(name="policy", help="チーム規約（改訂・承認・監査）の管理（S42）")
 app.add_typer(policy_app, name="policy")
+workspace_app = typer.Typer(name="workspace", help="ワークスペース（テナント境界）の管理（S53）")
+app.add_typer(workspace_app, name="workspace")
 DEFAULT_SCHEMAS_DIR = Path("schemas")
 DEFAULT_POLICY_SEED_SOURCE = Path(".speclino/policy/speclino-core.yaml")
 
 _VERDICTS: tuple[Verdict, ...] = ("VERIFIED_IN_SCOPE", "VIOLATED", "UNKNOWN", "REVIEW")
+_WORKSPACE_ROLES: tuple[WorkspaceRole, ...] = get_args(WorkspaceRole)
+
+
+def _in_transaction[T](work: Callable[[AsyncSession], Awaitable[T]]) -> T:
+    """`SPECLINO_DATABASE_URL` の DB に 1 トランザクションで work を実行する（DB を使う CLI 用）。
+
+    `ValueError` は拒否として終了コード 2 とメッセージにする。
+    """
+    import asyncio
+
+    from speclino.db.session import make_engine, make_session_factory
+    from speclino.settings import Settings
+
+    async def _run() -> T:
+        engine = make_engine(Settings())
+        try:
+            async with make_session_factory(engine)() as session, session.begin():
+                return await work(session)
+        finally:
+            await engine.dispose()
+
+    try:
+        return asyncio.run(_run())
+    except ValueError as e:
+        typer.echo(f"拒否した: {e}", err=True)
+        raise typer.Exit(code=2) from e
+
+
+def _parse_role(value: str) -> WorkspaceRole:
+    if value not in _WORKSPACE_ROLES:
+        raise typer.BadParameter(f"--role に不正な値: {value}（許容値: {list(_WORKSPACE_ROLES)}）")
+    # 上で許容値（_WORKSPACE_ROLES）だけであることを確認済み。
+    return value
 
 
 def _parse_fail_on(values: list[str]) -> tuple[Verdict, ...]:
@@ -286,14 +326,10 @@ def policy_seed(
     下書き作成→承認と同じ経路を通すので、audit_events に policy.draft / policy.approve
     の両方が残る。DB 接続は `SPECLINO_DATABASE_URL`（`Settings.database_url`）を使う。
     """
-    import asyncio
-
     import yaml
 
-    from speclino.db.session import make_engine, make_session_factory
-    from speclino.domain.policy import PolicyPackage, PolicyRevision
+    from speclino.domain.policy import PolicyPackage
     from speclino.services.policy_governance import seed_from_package
-    from speclino.settings import Settings
 
     try:
         raw = yaml.safe_load(source.read_text(encoding="utf-8"))
@@ -302,23 +338,96 @@ def policy_seed(
         typer.echo(f"入力不正: {e}", err=True)
         raise typer.Exit(code=2) from e
 
-    async def _run() -> PolicyRevision:
-        settings = Settings()
-        engine = make_engine(settings)
-        try:
-            session_factory = make_session_factory(engine)
-            async with session_factory() as session, session.begin():
-                return await seed_from_package(session, team=team, package=package)
-        finally:
-            await engine.dispose()
-
-    try:
-        revision = asyncio.run(_run())
-    except ValueError as e:
-        # 既に改訂があるチームへの seed 拒否など（seed_from_package が投げる）。
-        typer.echo(f"seed を拒否した: {e}", err=True)
-        raise typer.Exit(code=2) from e
+    # 既に改訂があるチームへの seed は ValueError で拒否される（seed_from_package）
+    revision = _in_transaction(lambda s: seed_from_package(s, team=team, package=package))
     typer.echo(
         f"{team}@{revision.revision} を {revision.status} として取り込んだ"
         f"（rules={len(revision.package.rules)}）"
     )
+
+
+@workspace_app.command("create")
+def workspace_create(
+    slug: Annotated[
+        str, typer.Argument(help="ワークスペースの識別子（不変。run-manifest に残る）")
+    ],
+    owner_uid: Annotated[str, typer.Option("--owner-uid", help="owner として登録する利用者の uid")],
+    name: Annotated[str | None, typer.Option("--name", help="表示名")] = None,
+) -> None:
+    """ワークスペース（`teams` 行）を作り、owner を登録する。
+
+    既に同じ slug のワークスペースがあれば拒否する（作り直しは対象外）。
+    """
+    from speclino.services import workspace_admin
+
+    _in_transaction(
+        lambda s: workspace_admin.create_workspace(s, slug=slug, name=name, owner_uid=owner_uid)
+    )
+    typer.echo(f"ワークスペース {slug} を作成し、{owner_uid} を owner として登録した")
+
+
+@workspace_app.command("add-member")
+def workspace_add_member(
+    slug: Annotated[str, typer.Argument(help="ワークスペースの識別子")],
+    uid: Annotated[str, typer.Argument(help="登録する利用者の uid")],
+    role: Annotated[str, typer.Option("--role", help="owner|approver|member")],
+) -> None:
+    """uid をワークスペースのメンバーにする（既にいれば role を置き換える）。"""
+    from speclino.services import workspace_admin
+
+    parsed_role = _parse_role(role)
+    _in_transaction(lambda s: workspace_admin.add_member(s, slug=slug, uid=uid, role=parsed_role))
+    typer.echo(f"{uid} を {slug} の {parsed_role} として登録した")
+
+
+@workspace_app.command("add-project")
+def workspace_add_project(
+    slug: Annotated[str, typer.Argument(help="ワークスペースの識別子")],
+    repo: Annotated[str, typer.Argument(help="登録するリポジトリ（owner/repo）")],
+) -> None:
+    """既存の project をワークスペースに登録する（project 自体はここで作らない）。"""
+    from speclino.services import workspace_admin
+
+    _in_transaction(lambda s: workspace_admin.add_project(s, slug=slug, repo_full_name=repo))
+    typer.echo(f"{repo} を {slug} に登録した")
+
+
+@workspace_app.command("backfill-repo-ids")
+def workspace_backfill_repo_ids() -> None:
+    """`github_repo_id` が未確定の project 全件にコードホストから引いた ID を埋める。
+
+    埋められない行（コードホストが解決できない、または ID が既に他の行に使われている）は
+    埋めずに team を外して隔離する（design/2026-09-27-workspaces.md の codex レビュー #3）。
+    """
+    from speclino.api.deps import build_code_host
+    from speclino.services import workspace_admin
+    from speclino.settings import Settings
+
+    try:
+        code_host = build_code_host(Settings())
+    except RuntimeError as e:
+        typer.echo(f"実行不能: {e}", err=True)
+        raise typer.Exit(code=2) from e
+    results = _in_transaction(lambda s: workspace_admin.backfill_repo_ids(s, code_host))
+    for r in results:
+        suffix = f"（{r.reason}）" if r.reason else ""
+        typer.echo(f"{r.repo}: {r.action}{suffix}")
+    isolated = sum(1 for r in results if r.action == "isolated")
+    typer.echo(f"埋めた: {len(results) - isolated} 件 / 隔離: {isolated} 件")
+
+
+@workspace_app.command("list")
+def workspace_list() -> None:
+    """全ワークスペースの slug・表示名・メンバー・登録 project を一覧する。"""
+    from speclino.services import workspace_admin
+
+    summaries = _in_transaction(workspace_admin.list_workspaces)
+    if not summaries:
+        typer.echo("ワークスペースが無い")
+        return
+    for w in summaries:
+        typer.echo(f"{w.slug} ({w.name or '-'})")
+        for m in w.members:
+            typer.echo(f"  member: {m.uid} [{m.role}]")
+        for p in w.projects:
+            typer.echo(f"  project: {p}")

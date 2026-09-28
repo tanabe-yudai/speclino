@@ -84,6 +84,18 @@ jobs:
           gcloud run jobs execute speclino-migrate \
             --project="${GCP_PROJECT_ID}" --region="${REGION}" --wait
 
+          # speclino-admin（ワークスペース管理 CLI、S53）のイメージを更新し、サービスを更新する前に
+          # 既存 project のリポジトリ ID を埋める（backfill-repo-ids は ID が NULL の行だけを見るので
+          # 毎回流してよい）。新しい webhook の処理は ID の無い同名の行を別リポジトリとして退避するため、
+          # 埋める前に新しいサービスが webhook を受けると、既存 project が設定ごと退避される。
+          # 失敗したらサービスは旧イメージのまま止める。
+          # Job が無いときは飛ばさずに止める（先に terraform apply で作る。guides/deploy-runbook.md 9 章）。
+          gcloud run jobs update speclino-admin \
+            --project="${GCP_PROJECT_ID}" --region="${REGION}" --image="${IMAGE}"
+          gcloud run jobs execute speclino-admin \
+            --project="${GCP_PROJECT_ID}" --region="${REGION}" --wait \
+            --args=workspace,backfill-repo-ids
+
       - name: Deploy to Cloud Run (web / worker / sandbox)
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
