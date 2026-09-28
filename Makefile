@@ -4,7 +4,7 @@ export UV_NO_SYNC := 1
 .PHONY: setup test lint typecheck check format dev db-up db-migrate eval openapi web-build schemas sandbox-image diagrams selfcheck
 
 setup:
-	UV_NO_SYNC= uv sync --all-groups
+	UV_NO_SYNC=0 uv sync --all-groups
 	cd web && npm ci
 
 # 振る舞いと検出能力のテスト。デモブランチ（SpecLino 自身の実装・仕様をわざと壊す）でも

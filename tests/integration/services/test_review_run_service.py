@@ -69,6 +69,8 @@ def make_demo_repo(root: Path) -> tuple[str, str, str]:
     git(root, "init", "-q", "-b", "main")
     git(root, "config", "user.email", "t@example.com")
     git(root, "config", "user.name", "t")
+    # 開発者の git 設定（コミット署名）に左右されないようにする
+    git(root, "config", "commit.gpgsign", "false")
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "base: correct implementation")
     base = git(root, "rev-parse", "HEAD")
