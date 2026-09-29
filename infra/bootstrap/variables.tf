@@ -1,11 +1,10 @@
 variable "project_id" {
-  description = "作成する GCP プロジェクト ID。apply 前に実際に利用可能か（未使用か）を確認すること。"
+  description = "作成する GCP プロジェクト ID（例: speclino-prod）。apply 前に実際に利用可能か（未使用か）を確認すること。"
   type        = string
-  default     = "example-project"
 }
 
 variable "billing_account" {
-  description = "プロジェクトに紐付ける課金アカウント ID（例: XXXXXX-XXXXXX-XXXXXX）。"
+  description = "プロジェクトに紐付ける課金アカウント ID（例: 000000-000000-000000）。"
   type        = string
 }
 

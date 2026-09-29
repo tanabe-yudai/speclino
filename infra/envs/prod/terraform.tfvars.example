@@ -2,21 +2,21 @@
 # 値そのものに秘密は含めないが、環境固有値のため誤ってコミットしないよう注意する
 # （リポジトリ直下の .gitignore は現状 *.tfvars を除外していない）。
 
-project_id      = "example-project" # infra/bootstrap の terraform output project_id
+project_id      = "<project_id>" # infra/bootstrap の terraform output project_id
 region          = "asia-northeast1"
-billing_account = "XXXXXX-XXXXXX-XXXXXX"
+billing_account = "000000-000000-000000"
 
 # 初回 apply 時点ではまだ SpecLino イメージが Artifact Registry に無いため、
 # 既定値（Google 公開のサンプルイメージ）のままで問題ない。
 # image = "us-docker.pkg.dev/cloudrun/container/hello"
 
-github_repository = "tanabe-yudai/spec-lino"
+github_repository = "<owner>/<repo>"
 
 # 予算の通貨は課金アカウントの通貨と一致させる（違うと 400 invalid argument）。
-# T-NET（XXXXXX-XXXXXX-XXXXXX）は JPY。
+# 例: 課金アカウントが円建てなら JPY。
 # budget_currency_code = "JPY"
 # budget_amount        = "45000"   # ≒ $300
 
 # 任意: 予算・監視アラートの通知先（google_monitoring_notification_channel の完全リソース名）
-# budget_notification_channels     = ["projects/example-project/notificationChannels/xxxx"]
-# monitoring_notification_channels = ["projects/example-project/notificationChannels/xxxx"]
+# budget_notification_channels     = ["projects/<project_id>/notificationChannels/xxxx"]
+# monitoring_notification_channels = ["projects/<project_id>/notificationChannels/xxxx"]

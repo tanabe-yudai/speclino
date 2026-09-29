@@ -7,7 +7,7 @@ const USE_MOCK = import.meta.env.VITE_MOCK === '1'
 
 export async function listRepositories(slug: string): Promise<RegisteredRepository[]> {
   if (USE_MOCK) {
-    return [{ repo_full_name: 'tanabe-yudai/spec-lino', github_repo_id: 1, default_branch: 'main' }]
+    return [{ repo_full_name: 'example-org/example-repo', github_repo_id: 1, default_branch: 'main' }]
   }
   return apiFetch<RegisteredRepository[]>(`/api/workspaces/${slug}/repositories`)
 }
@@ -22,7 +22,7 @@ export async function startRegistration(slug: string, repoFullName: string): Pro
 }
 
 export async function completeRegistration(code: string, state: string): Promise<RegistrationResult> {
-  if (USE_MOCK) return { slug: 'demo', repo_full_name: 'tanabe-yudai/spec-lino', status: 'registered' }
+  if (USE_MOCK) return { slug: 'demo', repo_full_name: 'example-org/example-repo', status: 'registered' }
   return apiFetch<RegistrationResult>('/api/github/callback', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

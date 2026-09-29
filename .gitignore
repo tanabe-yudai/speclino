@@ -29,3 +29,6 @@ build/
 
 # Claude Code のセッション用（worktree など）
 .claude/
+
+# ブレインストーミングのモック（superpowers）
+.superpowers/

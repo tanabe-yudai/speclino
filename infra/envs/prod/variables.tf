@@ -27,9 +27,8 @@ variable "image" {
 }
 
 variable "github_repository" {
-  description = "WIF の attribute_condition に使う \"owner/repo\""
+  description = "WIF の attribute_condition に使う \"owner/repo\"（このリポジトリを置いた GitHub のリポジトリ）"
   type        = string
-  default     = "tanabe-yudai/spec-lino"
 }
 
 variable "budget_notification_channels" {
@@ -112,7 +111,7 @@ variable "budget_currency_code" {
     確認方法:
       curl -H "Authorization: Bearer $(gcloud auth print-access-token)" \
         https://cloudbilling.googleapis.com/v1/billingAccounts/<課金アカウントID>
-    の `currencyCode`。T-NET（XXXXXX-XXXXXX-XXXXXX）は JPY。
+    の `currencyCode`。例: 円建ての課金アカウントなら JPY。
   EOT
   type        = string
   default     = "JPY"

@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 # 審査員用のテストアカウントを Identity Platform に作る（S13 / 提出フォーム用）。
 #
-#   SPECLINO_FIREBASE_API_KEY=<apiKey> scripts/create_test_user.sh [<email>] [<password>]
+#   SPECLINO_PROJECT=<project_id> SPECLINO_FIREBASE_API_KEY=<apiKey> \
+#     scripts/create_test_user.sh <email> [<password>]
 #
 # apiKey はコンソール → Identity Platform →「アプリケーションの設定の詳細」で取得する。
 # 作った認証情報は提出フォームにだけ書き、リポジトリには置かない。
 set -euo pipefail
 
 : "${SPECLINO_FIREBASE_API_KEY:?SPECLINO_FIREBASE_API_KEY が必要}"
-EMAIL="${1:-judge@example.com}"
+EMAIL="${1:?作成するアカウントのメールアドレスが必要}"
 PASSWORD="${2:-$(openssl rand -base64 18)}"
-PROJECT="${SPECLINO_PROJECT:-example-project}"
+PROJECT="${SPECLINO_PROJECT:?SPECLINO_PROJECT（GCP プロジェクト ID）が必要}"
 
 response=$(curl -sf -X POST \
   "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${SPECLINO_FIREBASE_API_KEY}" \

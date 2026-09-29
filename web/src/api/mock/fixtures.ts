@@ -8,7 +8,7 @@ import type { RunEvent } from '../../types/events'
 import type { Finding } from '../../types/finding'
 import type { ReviewRunDetail, ReviewRunSummary } from '../../types/run'
 
-const REPO = 'tanabe-yudai/spec-lino-demo-orders'
+const REPO = 'example-org/demo-orders'
 
 const RUN_FAIL_ID = '9871e2ff-4602-4382-b512-0bacd3006ae2'
 const RUN_PASS_ID = 'b2c3d4e5-6789-4abc-9def-0123456789ab'

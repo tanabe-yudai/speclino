@@ -44,7 +44,7 @@ function RepositoriesView({ slug }: { slug: string }) {
     e.preventDefault()
     const name = repoName.trim()
     if (!isRepoFullName(name)) {
-      setStartError('owner/name の形で入力してください（例: tanabe-yudai/spec-lino）')
+      setStartError('owner/name の形で入力してください（例: your-org/your-repo）')
       return
     }
     setStarting(true)
