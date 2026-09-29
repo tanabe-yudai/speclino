@@ -21,6 +21,9 @@ class Settings(BaseSettings):
 
     # GitHub App（worker が鍵を持つ。web は Webhook 秘密だけ）
     github_app_id: int | None = None
+    # GitHub App のユーザー認可（S55 のリポジトリ登録）。web だけが使う
+    github_client_id: str | None = None
+    github_client_secret: str | None = None
     github_private_key: str | None = None  # PEM 本文（Secret Manager から環境変数へ）
     github_private_key_path: Path | None = None
     github_webhook_secret: str | None = None

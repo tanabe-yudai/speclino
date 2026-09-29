@@ -106,7 +106,7 @@
 }
 
 .login-form label,
-.mcp-token-issue-form label {
+.inline-form label {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -116,7 +116,7 @@
 }
 
 .login-form input,
-.mcp-token-issue-form input {
+.inline-form input {
   font: inherit;
   padding: 9px 10px;
   border-radius: 8px;
@@ -126,7 +126,7 @@
 }
 
 .login-error,
-.mcp-token-issue-error {
+.form-error {
   color: var(--danger);
   font-size: 13px;
 }
@@ -648,7 +648,7 @@
   word-break: break-all;
 }
 
-.mcp-token-issue-form {
+.inline-form {
   display: flex;
   align-items: flex-end;
   gap: 12px;
@@ -656,7 +656,7 @@
   margin: 16px 0;
 }
 
-.mcp-token-issue-form input {
+.inline-form input {
   min-width: 260px;
 }
 
@@ -689,4 +689,13 @@
   display: inline-flex;
   gap: 8px;
   align-items: center;
+}
+
+.repository-list {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }

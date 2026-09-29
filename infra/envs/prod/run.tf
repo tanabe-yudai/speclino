@@ -76,10 +76,15 @@ locals {
     SPECLINO_CLOUD_TASKS_OIDC_SERVICE_ACCOUNT_EMAIL = google_service_account.this["tasks"].email
   }
 
-  web_env = merge(local.web_queue_env, {
+  web_env = merge(local.web_queue_env, local.web_github_oauth_env, {
     SPECLINO_AUTH_KIND           = "identity_platform"
     SPECLINO_FIREBASE_PROJECT_ID = var.project_id
   })
+
+  # GitHub App のユーザー認可（S55 のリポジトリ登録）。Client ID は秘密ではない
+  web_github_oauth_env = var.github_client_id == "" ? {} : {
+    SPECLINO_GITHUB_CLIENT_ID = var.github_client_id
+  }
 
   worker_github_env = var.github_app_id == "" ? {} : { SPECLINO_GITHUB_APP_ID = var.github_app_id }
 

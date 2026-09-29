@@ -385,6 +385,29 @@ class McpTokenRecord(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class RepoLinkAttempt(Base):
+    """`repo_link_attempts`: リポジトリ登録の GitHub 認可の試行（S55）。
+
+    state は平文を保存せず SHA-256 だけ。コールバックで 1 回だけ消費する（`consumed_at`）。
+    `code_verifier`（PKCE）は GitHub へのトークン交換で送るので平文で持つが、10 分で期限切れになり、
+    消費後は使わない。
+    """
+
+    __tablename__ = "repo_link_attempts"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    state_hash: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    uid: Mapped[str] = mapped_column(String, nullable=False)
+    team: Mapped[str] = mapped_column(String, ForeignKey("teams.team"), nullable=False)
+    repo_full_name: Mapped[str] = mapped_column(String, nullable=False)
+    code_verifier: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class PolicyRevisionRecord(Base):
     """`policy_revisions`: チーム規約の 1 改訂（S42、design/2026-09-26-team-policies-and-dx.md）。
 

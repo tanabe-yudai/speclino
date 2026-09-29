@@ -4,6 +4,8 @@ import { AuthProvider } from './auth/AuthProvider'
 import { RequireAuth } from './components/RequireAuth'
 import { Login } from './pages/Login'
 import { McpTokens } from './pages/McpTokens'
+import { Repositories } from './pages/Repositories'
+import { GithubCallback } from './pages/GithubCallback'
 import { RunDetail } from './pages/RunDetail'
 import { RunList } from './pages/RunList'
 
@@ -17,6 +19,8 @@ function App() {
             <Route path="/" element={<RunList />} />
             <Route path="/runs/:id" element={<RunDetail />} />
             <Route path="/workspaces/:slug/mcp-tokens" element={<McpTokens />} />
+            <Route path="/workspaces/:slug/repositories" element={<Repositories />} />
+            <Route path="/github/callback" element={<GithubCallback />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
