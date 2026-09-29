@@ -45,22 +45,10 @@ export function RunList() {
     fetchRuns()
   }
 
-  const ownedWorkspaces = me?.workspaces.filter((w) => w.role === 'owner') ?? []
-
   return (
     <main className="run-list-page">
       <h1>SpecLino レビュー実行一覧</h1>
       <p className="muted">新しい順。行をクリックすると詳細（判定・反例・タイムライン）を確認できます。</p>
-
-      {ownedWorkspaces.length > 0 && (
-        <div className="run-links">
-          {ownedWorkspaces.map((w) => (
-            <Link key={w.slug} to={`/workspaces/${w.slug}/mcp-tokens`}>
-              MCP トークン（{w.slug}）
-            </Link>
-          ))}
-        </div>
-      )}
 
       {runs === null && error === null && <LoadingState message="run 一覧を取得しています…" />}
       {error && <ErrorState message={error} onRetry={retry} />}

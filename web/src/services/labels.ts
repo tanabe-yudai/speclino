@@ -3,6 +3,7 @@
 import type { BaseHeadStatus, Category, Severity, TestObservation, Verdict } from '../types/finding'
 import type { ExecState, GateStatus } from '../types/run'
 import type { BadgeTone } from '../types/components'
+import type { WorkspaceRole } from '../types/me'
 
 export const VERDICT_LABELS: Record<Verdict, string> = {
   VERIFIED_IN_SCOPE: '適合（確認範囲内）',
@@ -112,4 +113,10 @@ export const BASE_HEAD_STATUS_TONE: Record<BaseHeadStatus, BadgeTone> = {
   existing: 'warning',
   resolved: 'success',
   unchanged: 'neutral',
+}
+
+export const WORKSPACE_ROLE_LABELS: Record<WorkspaceRole, string> = {
+  owner: 'オーナー',
+  approver: '承認者',
+  member: 'メンバー',
 }

@@ -659,3 +659,34 @@
 .mcp-token-issue-form input {
   min-width: 260px;
 }
+
+.account-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.account-bar-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.account-bar-email {
+  font-weight: 600;
+  color: var(--text-h);
+  overflow-wrap: anywhere;
+}
+
+.account-bar-workspace {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
