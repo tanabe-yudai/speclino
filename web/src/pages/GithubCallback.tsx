@@ -3,6 +3,8 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { completeRegistration } from '../api/repositories'
 import { ApiError } from '../api/errors'
 import { LoadingState } from '../components/LoadingState'
+import { Panel } from '@/components/app/Panel'
+import { paths } from '@/services/paths'
 import type { RegistrationResult } from '../types/repository'
 
 /** GitHub の認可から戻ってきたところ。code と state をサーバーに渡して登録を終える（S55）。 */
@@ -30,31 +32,40 @@ export function GithubCallback() {
   }, [code, state, denied])
 
   return (
-    <main className="run-list-page">
-      <h1>リポジトリの登録</h1>
-      {result === null && error === null && <LoadingState message="GitHub で確認しています…" />}
-      {error && (
-        <>
-          <p className="form-error">{error}</p>
-          <p className="muted">
-            SpecLino の GitHub App がリポジトリにインストールされているか、あなたがそのリポジトリの
-            admin かを確かめてください。
-          </p>
-          <p>
-            <Link to="/">一覧へ戻る</Link>
-          </p>
-        </>
-      )}
-      {result && (
-        <>
-          <p>
-            {result.repo_full_name} を{result.status === 'registered' ? '登録しました' : 'すでに登録済みです'}。
-          </p>
-          <p>
-            <Link to={`/workspaces/${result.slug}/repositories`}>リポジトリの画面へ</Link>
-          </p>
-        </>
-      )}
-    </main>
+    <div className="mx-auto max-w-xl">
+      <Panel className="space-y-4">
+        <h1 className="text-lg font-semibold tracking-tight">リポジトリの登録</h1>
+        {result === null && error === null && <LoadingState message="GitHub で確認しています…" />}
+        {error && (
+          <>
+            <p className="text-sm text-bad" role="alert">
+              {error}
+            </p>
+            <p className="text-sm text-ink-2">
+              SpecLino の GitHub App がリポジトリにインストールされているか、あなたがそのリポジトリの admin
+              かを確かめてください。
+            </p>
+            <Link className="text-sm text-primary underline-offset-4 hover:underline" to={paths.home()}>
+              ホームへ戻る
+            </Link>
+          </>
+        )}
+        {result && (
+          <>
+            <p className="flex items-center gap-2 text-sm">
+              <span aria-hidden className="size-2 rounded-full bg-ok" />
+              <span className="font-mono">{result.repo_full_name}</span>
+              を{result.status === 'registered' ? '登録しました' : 'すでに登録済みです'}。
+            </p>
+            <Link
+              className="text-sm text-primary underline-offset-4 hover:underline"
+              to={paths.settings(result.slug, 'repositories')}
+            >
+              リポジトリの設定へ
+            </Link>
+          </>
+        )}
+      </Panel>
+    </div>
   )
 }
