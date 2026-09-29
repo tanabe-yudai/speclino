@@ -2,7 +2,7 @@
 
 import type { BaseHeadStatus, Category, Severity, TestObservation, Verdict } from '../types/finding'
 import type { ExecState, GateStatus } from '../types/run'
-import type { BadgeTone } from '../types/components'
+import type { BadgeTone, VerdictTone } from '../types/components'
 import type { WorkspaceRole } from '../types/me'
 
 export const VERDICT_LABELS: Record<Verdict, string> = {
@@ -119,4 +119,9 @@ export const WORKSPACE_ROLE_LABELS: Record<WorkspaceRole, string> = {
   owner: 'オーナー',
   approver: '承認者',
   member: 'メンバー',
+}
+
+/** ゲートの結果を判定の色に対応させる（通過=適合の色、例外付き通過=要確認の色、失敗=違反の色）。 */
+export function gateTone(status: GateStatus): VerdictTone {
+  return status === 'pass' ? 'ok' : status === 'pass_with_exceptions' ? 'rev' : 'bad'
 }

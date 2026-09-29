@@ -15,7 +15,7 @@ export function Login() {
 
   if (user) {
     const state = location.state as LocationState | null
-    return <Navigate to={state?.from?.pathname ?? '/'} replace />
+    return <Navigate to={state?.from?.pathname ?? '/app'} replace />
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
