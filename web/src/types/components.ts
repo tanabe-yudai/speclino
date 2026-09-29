@@ -7,6 +7,9 @@ import type { RerunResponse } from './run'
 
 export type BadgeTone = 'success' | 'warning' | 'danger' | 'neutral' | 'info'
 
+/** 判定の 4 値の色（design 3.1。意味と色の対応は固定）。 */
+export type VerdictTone = 'ok' | 'bad' | 'unk' | 'rev'
+
 export interface BadgeProps {
   tone: BadgeTone
   children: ReactNode
