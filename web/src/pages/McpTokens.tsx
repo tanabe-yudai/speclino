@@ -109,7 +109,7 @@ function McpTokensView({ slug }: { slug: string }) {
         </div>
       )}
 
-      <form className="mcp-token-issue-form" onSubmit={handleIssue}>
+      <form className="inline-form" onSubmit={handleIssue}>
         <label>
           トークン名
           <input
@@ -124,7 +124,7 @@ function McpTokensView({ slug }: { slug: string }) {
         <button type="submit" className="button-primary" disabled={issuing || !name.trim()}>
           {issuing ? '発行しています…' : 'トークンを発行'}
         </button>
-        {issueError && <span className="mcp-token-issue-error">{issueError}</span>}
+        {issueError && <span className="form-error">{issueError}</span>}
       </form>
 
       {tokens === null && error === null && <LoadingState message="トークン一覧を取得しています…" />}

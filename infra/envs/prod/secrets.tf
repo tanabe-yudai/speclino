@@ -23,6 +23,8 @@ locals {
     # ロールバック期間が過ぎるまで残す（切り替え直後に戻せるように。design の切り替え順序）。
     "mcp-token"      = ["web"]
     "session-secret" = ["web"]
+    # S55: GitHub App のユーザー認可（リポジトリ登録）の client secret。web だけが使う
+    "github-app-client-secret" = ["web"]
     # Cloud SQL の接続 URL（パスワードを含むため tfvars ではなくここに置く）。
     # web も run の一覧・詳細を DB から読むので両方に許可する（iam.tf の cloudsql.client も両方）。
     "database-url" = ["web", "worker"]
@@ -32,10 +34,17 @@ locals {
   # 値は state に入らない（参照だけを宣言する）。mount_secrets = false のあいだは
   # 何も参照しないので、まだ値を入れていない秘密があっても起動できる。
   secret_env = {
-    web = {
-      SPECLINO_GITHUB_WEBHOOK_SECRET = "github-webhook-secret"
-      SPECLINO_DATABASE_URL          = "database-url"
-    }
+    web = merge(
+      {
+        SPECLINO_GITHUB_WEBHOOK_SECRET = "github-webhook-secret"
+        SPECLINO_DATABASE_URL          = "database-url"
+      },
+      # 値（バージョン）の無い secret を注入すると新しいリビジョンが起動できない。client secret は
+      # ユーザーが値を投入して github_client_id を tfvars に書いてから注入する（2 回目の apply）
+      var.github_client_id == "" ? {} : {
+        SPECLINO_GITHUB_CLIENT_SECRET = "github-app-client-secret"
+      },
+    )
     worker = {
       SPECLINO_GITHUB_PRIVATE_KEY = "github-app-private-key"
       SPECLINO_DATABASE_URL       = "database-url"

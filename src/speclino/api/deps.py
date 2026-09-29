@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from speclino.adapters.github.app_auth import GitHubAppAuth
 from speclino.adapters.github.client import GitHubClient
+from speclino.adapters.github.user_oauth import GitHubUserOAuth
 from speclino.adapters.localgit.local_code_host import LocalCodeHost
 from speclino.adapters.queue.cloud_tasks import CloudTasksQueue
 from speclino.adapters.queue.inprocess import InProcessQueue
@@ -48,6 +49,8 @@ class AppState:
     # MCP context_get の取得元。None ならプロセス内で組み立てる（ローカル、worker）。
     # web ロールの本番は秘密鍵を持つ worker に委譲する（S54、`services/mcp_context.py`）
     context_source: McpContextSource | None = None
+    # GitHub App のユーザー認可（S55 のリポジトリ登録）。client_id / secret が無ければ None
+    github_user_oauth: GitHubUserOAuth | None = None
 
 
 class _SessionLedger:
@@ -236,7 +239,14 @@ def build_state(settings: Settings) -> AppState:
         from speclino.adapters.worker.context_client import WorkerContextClient
 
         context_source = WorkerContextClient(settings.cloud_tasks_worker_url)
-    return AppState(settings, engine, factory, code_host, queue, blobs, service, context_source)
+    user_oauth = (
+        GitHubUserOAuth(settings.github_client_id, settings.github_client_secret)
+        if settings.github_client_id and settings.github_client_secret
+        else None
+    )
+    return AppState(
+        settings, engine, factory, code_host, queue, blobs, service, context_source, user_oauth
+    )
 
 
 def get_state(request: Request) -> AppState:

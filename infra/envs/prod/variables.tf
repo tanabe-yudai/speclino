@@ -135,3 +135,13 @@ variable "github_app_id" {
   type        = string
   default     = ""
 }
+
+variable "github_client_id" {
+  description = <<-EOT
+    本番 GitHub App の Client ID（秘密ではない。S55 のリポジトリ登録で使う）。client secret を
+    Secret Manager の github-app-client-secret に投入してから tfvars に書く。空のあいだ web は
+    client secret を注入せず、リポジトリ登録は 503（未設定）になる。
+  EOT
+  type        = string
+  default     = ""
+}

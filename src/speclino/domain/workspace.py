@@ -81,8 +81,42 @@ class IssuedMcpToken:
     token: str
 
 
+@dataclass(frozen=True)
+class AccessibleRepository:
+    """GitHub App のユーザートークンで見えた、App がインストール済みのリポジトリ（S55）。
+
+    `admin` はそのユーザーのリポジトリでの権限（`GET /user/installations/{id}/repositories` の
+    `permissions.admin`）。
+    """
+
+    github_repo_id: int
+    full_name: str
+    default_branch: str
+    installation_id: int
+    admin: bool
+
+
+@dataclass(frozen=True)
+class RepositoryRegistration:
+    """リポジトリ登録の結果（S55）。status は registered か already_registered。"""
+
+    slug: str
+    repo_full_name: str
+    status: Literal["registered", "already_registered"]
+
+
+@dataclass(frozen=True)
+class RegisteredRepository:
+    repo_full_name: str
+    github_repo_id: int | None
+    default_branch: str
+
+
 __all__ = [
     "APPROVER_ROLES",
+    "AccessibleRepository",
+    "RegisteredRepository",
+    "RepositoryRegistration",
     "AuthUser",
     "IssuedMcpToken",
     "McpTokenInfo",

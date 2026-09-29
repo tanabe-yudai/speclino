@@ -33,6 +33,7 @@ export function AccountBar() {
             me.workspaces.map((w) => (
               <span key={w.slug} className="account-bar-workspace">
                 {w.name ?? w.slug}（{WORKSPACE_ROLE_LABELS[w.role]}）
+                <Link to={`/workspaces/${w.slug}/repositories`}>リポジトリ</Link>
                 {w.role === 'owner' && (
                   <Link to={`/workspaces/${w.slug}/mcp-tokens`}>MCP トークン</Link>
                 )}

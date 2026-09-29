@@ -153,6 +153,25 @@ S43（規約の UI）と S45（プロジェクト画面）はワークスペー�
 - **切り替え**: コードを先に出す（旧 secret の注入が残っていても無視される）。Terraform は注入を外すだけで、
   `mcp-token` secret はロールバック期間が過ぎるまで消さない
 
+## 8.3 S55（リポジトリの登録）で実装した形
+
+6 章の流れを、公式ドキュメントで確かめた事実と codex レビュー（2026-09-29）で具体化した。
+
+- **認可**: GitHub App のユーザー認可（web application flow）。インストール時の OAuth は使わず、インストール済みの
+  リポジトリを後から登録する。認可 URL に state と PKCE（S256）を付け、redirect_uri は App の Callback URL と
+  完全一致（ワイルドカード無効）で、トークン交換にも同じ値を送る
+- **試行**: `repo_link_attempts`（state の SHA-256、uid、ワークスペース、リポジトリ名、PKCE の verifier、期限 10 分）。
+  コールバックで条件付きの更新により 1 回だけ消費する（別の uid・期限切れ・使用済みは拒否）
+- **確かめること**: 6 章の `GET /user` ＋ collaborators permission ではなく、ユーザートークンで
+  `GET /user/installations` → `/user/installations/{id}/repositories` に列挙され、かつ `permissions.admin` であること。
+  `GET /repos/{owner}/{repo}` の 200 は公開リポジトリなら App が入っていなくても返るので、インストールの証明にならない
+- **登録**: project の解決（リポジトリ ID で。無ければ作る、同名で ID 違いの旧行は退避）・条件付きの更新
+  （`team IS NULL`）・監査（actor は uid）を 1 トランザクションで行い、別ワークスペースに登録済みなら全体を戻す
+- **トークン**: 保存しない。確認が済んだら `DELETE /applications/{client_id}/grant` で認可ごと取り消し
+  （access token と refresh token がまとめて失効する。`/token` は access token 1 本だけで refresh token が残る）、
+  **取り消せたときだけ登録する**。拒否・例外の経路でも取り消しを試みる。値は例外の文面・ログ・監査・DB に出さない
+- **制約**: 本番の App は「Only on this account」なので、App 所有アカウントのリポジトリだけが登録できる
+
 ## 9. 判断の記録
 
 - **owner をチームとみなす案は捨てた**: 個人アカウントのリポジトリで成り立たない（ユーザー指摘）

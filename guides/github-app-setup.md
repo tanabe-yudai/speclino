@@ -38,6 +38,31 @@ Webhook URL はトンネルで頻繁に変わり、秘密鍵も手元に置く�
 
 作成後に **Generate a private key** して `.pem` をダウンロードし、App ID を控える。
 
+## 1.1 ユーザー認可（S55 のリポジトリ登録）
+
+ワークスペースの owner がリポジトリを登録するとき、GitHub App のユーザー認可（web application flow）で
+本人がそのリポジトリの admin であり、App がインストールされていることを確かめる。App の設定で次を行う。
+
+| 項目 | 値 |
+| --- | --- |
+| Callback URL | `https://<Cloud Run web>/github/callback`（**完全一致**。ワイルドカードの一致は無効にする。有効だと認可コードを配下の任意のパスに送れてしまう） |
+| Client secrets | 「Generate a new client secret」で生成し、Secret Manager の `github-app-client-secret` に投入する |
+| Expire user authorization tokens | 有効を推奨（access token は 8 時間。SpecLino は確認の直後に失効させ、refresh token は使わない） |
+| Request user authorization (OAuth) during installation | 使わない（インストール済みのリポジトリを後から登録するので、通常の認可で足りる） |
+
+```sh
+printf '%s' '<client secret>' | gcloud secrets versions add github-app-client-secret --data-file=- --project=<project_id>
+```
+
+Client ID は秘密ではないので `infra/envs/prod/terraform.tfvars` の `github_client_id` に書く。
+
+- 「Where can this be installed」が **Only on this account** のあいだは、App 所有アカウントのリポジトリしか
+  登録できない（他のアカウントは App をインストールできない）。他チームに開くときに公開を判断する
+- 認可の `state` はサーバーに保存して 1 回だけ使い、PKCE（S256）を付ける。トークン交換は
+  `Accept: application/json` で行い、確認が済んだら `DELETE /applications/{client_id}/grant` で認可ごと取り消す
+  （access token と refresh token がまとめて失効する。取り消せなかったら登録しない）
+  （根拠は GitHub Docs「Generating a user access token for a GitHub App」「About the user authorization callback URL」）
+
 ## 2. インストールする
 
 App の設定 → Install App → 対象リポジトリだけを選ぶ（All repositories にしない）。

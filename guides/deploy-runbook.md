@@ -532,6 +532,22 @@ UI から owner だけができる（design/2026-09-27-workspaces.md 8.1 節、�
    401」しか見ないので、web → worker の委譲（invoker・worker の秘密鍵）が動くことはエディタから
    `context_get` を 1 回呼んで確かめる
 
+## 11. リポジトリの登録（S55）
+
+ワークスペースの owner が画面（ヘッダーの「リポジトリ」→ 追加）から登録する。GitHub で本人が admin で、
+SpecLino の GitHub App がインストール済みであることを確かめてから登録する（`guides/github-app-setup.md` 1.1）。
+
+**順序**（値の無い secret を注入するとリビジョンが起動できないので 2 回に分ける）:
+
+1. `terraform apply`（ユーザー確認の上で）: `github-app-client-secret` の入れ物を作る。`github_client_id` が空の
+   あいだは web に注入しない
+2. GitHub App の設定: Callback URL を完全一致で登録（ワイルドカード無効）、client secret を生成して投入
+   （`guides/github-app-setup.md` 1.1）
+3. `infra/envs/prod/terraform.tfvars` に `github_client_id = "<Client ID>"` を書き、もう一度 `terraform apply`
+   （web に `SPECLINO_GITHUB_CLIENT_ID` と client secret が入る）
+4. Deploy（マイグレーション 0006 → サービス更新）。3 と順序は問わないが、両方が済むまで登録は 503
+5. 画面から登録を試す: 既に登録済みの `tanabe-yudai/spec-lino` なら「すでに登録済み」と出る
+
 ## 片付け（12/1 以降）
 
 ```sh

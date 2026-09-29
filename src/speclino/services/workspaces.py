@@ -12,7 +12,8 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from speclino.db.models import Project, ReviewRun
+from speclino.db.models import Project, ReviewRun, WorkspaceMember
+from speclino.db.repositories.audit import AuditRepository
 from speclino.db.repositories.projects import ProjectRepository
 from speclino.db.repositories.teams import TeamRepository
 from speclino.ports.code_host import CodeHost
@@ -58,6 +59,57 @@ async def _is_member_of_project(session: AsyncSession, uid: str, project: Projec
     return project.team is not None and project.team in await TeamRepository(session).teams_of(uid)
 
 
+class WorkspaceNotFound(LookupError):
+    """ワークスペースが無い、または呼び出した人に必要な role が無い。
+
+    区別しない（呼び出し側は 404 にして存在を漏らさない）。
+    """
+
+
+async def require_owner(session: AsyncSession, slug: str, uid: str) -> None:
+    """uid が slug の owner でなければ `WorkspaceNotFound`（approver は含めない完全一致）。"""
+    stmt = select(WorkspaceMember.role).where(
+        WorkspaceMember.team == slug, WorkspaceMember.uid == uid
+    )
+    if (await session.execute(stmt)).scalar_one_or_none() != "owner":
+        raise WorkspaceNotFound(slug)
+
+
+async def require_member(session: AsyncSession, slug: str, uid: str) -> None:
+    if slug not in await TeamRepository(session).teams_of(uid):
+        raise WorkspaceNotFound(slug)
+
+
+async def resolve_github_project(
+    session: AsyncSession,
+    *,
+    github_repo_id: int,
+    repo_full_name: str,
+    installation_id: int | None,
+    actor: str,
+    default_branch: str = "main",
+) -> Project:
+    """GitHub のリポジトリ ID で project を決め（無ければ作る）、名前を奪われた旧行を監査に残す。
+
+    webhook とリポジトリ登録（S55）が同じ規則で project を決める（`resolve_for_webhook`）。
+    """
+    project, evicted = await ProjectRepository(session).resolve_for_webhook(
+        github_repo_id=github_repo_id,
+        repo_full_name=repo_full_name,
+        installation_id=installation_id,
+        default_branch=default_branch,
+    )
+    for name in evicted:
+        await AuditRepository(session).record(
+            actor,
+            "project.evict_name",
+            name,
+            "evicted",
+            {"reason": "同じ名前の別リポジトリ（ID 違い）が現れた", "new_repo_id": github_repo_id},
+        )
+    return project
+
+
 async def repository_mismatch(
     code_host: CodeHost, repo_full_name: str, github_repo_id: int | None
 ) -> str | None:
@@ -83,7 +135,11 @@ async def repository_mismatch(
 
 
 __all__ = [
+    "WorkspaceNotFound",
     "repository_mismatch",
+    "require_member",
+    "require_owner",
+    "resolve_github_project",
     "visible_project",
     "visible_run",
     "visible_runs",

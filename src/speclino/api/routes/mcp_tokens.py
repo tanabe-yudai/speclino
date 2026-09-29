@@ -18,7 +18,7 @@ from speclino.api.deps import AppState, get_state
 from speclino.api.errors import api_error, error_responses
 from speclino.domain.workspace import AuthUser, IssuedMcpToken, McpTokenInfo
 from speclino.services import mcp_tokens as mcp_token_service
-from speclino.services.mcp_tokens import WorkspaceNotFound
+from speclino.services.workspaces import WorkspaceNotFound
 
 router = APIRouter(
     prefix="/api/workspaces/{slug}/mcp-tokens",

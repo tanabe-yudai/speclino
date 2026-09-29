@@ -12,19 +12,15 @@ import hashlib
 import secrets
 import uuid
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from speclino.db.models import McpTokenRecord, WorkspaceMember
+from speclino.db.models import McpTokenRecord
 from speclino.db.repositories.audit import AuditRepository
 from speclino.db.repositories.mcp_tokens import McpTokenRepository
 from speclino.domain.workspace import IssuedMcpToken, McpTokenInfo
+from speclino.services.workspaces import WorkspaceNotFound, require_owner
 
 TOKEN_PREFIX = "slmcp_"
-
-
-class WorkspaceNotFound(LookupError):
-    """ワークスペースが無い、または呼び出した人がその owner ではない（区別しない）。"""
 
 
 def hash_token(token: str) -> str:
@@ -32,7 +28,7 @@ def hash_token(token: str) -> str:
 
 
 async def issue(session: AsyncSession, *, slug: str, name: str, actor_uid: str) -> IssuedMcpToken:
-    await _require_owner(session, slug, actor_uid)
+    await require_owner(session, slug, actor_uid)
     token = TOKEN_PREFIX + secrets.token_urlsafe(32)
     record = await McpTokenRepository(session).create(
         team=slug, name=name, token_hash=hash_token(token), created_by=actor_uid
@@ -44,13 +40,13 @@ async def issue(session: AsyncSession, *, slug: str, name: str, actor_uid: str) 
 
 
 async def list_tokens(session: AsyncSession, *, slug: str, actor_uid: str) -> list[McpTokenInfo]:
-    await _require_owner(session, slug, actor_uid)
+    await require_owner(session, slug, actor_uid)
     return [_info(r) for r in await McpTokenRepository(session).list_for_team(slug)]
 
 
 async def revoke(session: AsyncSession, *, slug: str, token_id: uuid.UUID, actor_uid: str) -> None:
     """失効させる。別のワークスペースのトークン・失効済みも `WorkspaceNotFound`（404）。"""
-    await _require_owner(session, slug, actor_uid)
+    await require_owner(session, slug, actor_uid)
     if not await McpTokenRepository(session).revoke(token_id=token_id, team=slug):
         raise WorkspaceNotFound(slug)
     await AuditRepository(session).record(
@@ -68,15 +64,6 @@ async def authenticate(session: AsyncSession, token: str) -> str | None:
         return None
     await repo.touch(record.id)
     return record.team
-
-
-async def _require_owner(session: AsyncSession, slug: str, uid: str) -> None:
-    # APPROVER_ROLES を流用しない: approver はトークンを扱えない（owner の完全一致）
-    stmt = select(WorkspaceMember.role).where(
-        WorkspaceMember.team == slug, WorkspaceMember.uid == uid
-    )
-    if (await session.execute(stmt)).scalar_one_or_none() != "owner":
-        raise WorkspaceNotFound(slug)
 
 
 def _info(record: McpTokenRecord) -> McpTokenInfo:

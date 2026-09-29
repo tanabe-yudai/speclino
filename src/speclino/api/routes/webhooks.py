@@ -39,6 +39,7 @@ from speclino.db.repositories import (
     WebhookDeliveryRepository,
 )
 from speclino.services.approvals import authorize_command, parse_commands
+from speclino.services.workspaces import resolve_github_project
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
@@ -73,7 +74,13 @@ async def _dispatch(
 ) -> tuple[dict[str, Any], list[uuid.UUID]]:
     """イベントごとの DB の書き込み。戻り値は応答と、commit 後に enqueue する run。"""
     if event.event == "pull_request" and (pr := extract_pr(event.payload)) is not None:
-        project = await _resolve_project(session, pr.repo_id, pr.repo_full_name, pr.installation_id)
+        project = await resolve_github_project(
+            session,
+            github_repo_id=pr.repo_id,
+            repo_full_name=pr.repo_full_name,
+            installation_id=pr.installation_id,
+            actor="webhook",
+        )
         run_id = await state.service.create_run_in(
             session,
             project=project,
@@ -85,7 +92,13 @@ async def _dispatch(
         return {"status": "queued", "run_id": str(run_id), "fork": pr.is_fork}, [run_id]
 
     if event.event in ("check_run", "check_suite") and (rr := extract_rerun(event.payload)):
-        project = await _resolve_project(session, rr.repo_id, rr.repo_full_name, rr.installation_id)
+        project = await resolve_github_project(
+            session,
+            github_repo_id=rr.repo_id,
+            repo_full_name=rr.repo_full_name,
+            installation_id=rr.installation_id,
+            actor="webhook",
+        )
         runs = ReviewRunRepository(session)
         queued: list[uuid.UUID] = []
         for pr_number in rr.pr_numbers or [None]:  # type: ignore[list-item]
@@ -106,24 +119,6 @@ async def _dispatch(
         return await _handle_comment(state, session, cm)
 
     return {"status": "ignored", "event": event.event, "action": event.action}, []
-
-
-async def _resolve_project(
-    session: AsyncSession, repo_id: int, repo_full_name: str, installation_id: int
-) -> Project:
-    """ID で project を決め、名前を奪われた旧行があれば監査に残す。"""
-    project, evicted = await ProjectRepository(session).resolve_for_webhook(
-        github_repo_id=repo_id, repo_full_name=repo_full_name, installation_id=installation_id
-    )
-    for name in evicted:
-        await AuditRepository(session).record(
-            "webhook",
-            "project.evict_name",
-            name,
-            "evicted",
-            {"reason": "同じ名前の別リポジトリ（ID 違い）が現れた", "new_repo_id": repo_id},
-        )
-    return project
 
 
 async def _handle_comment(
