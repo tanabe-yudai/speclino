@@ -92,7 +92,7 @@ GitHub (PR / comment / rerun)        Editor (MCP, Bearer)     審査員ブラウ
 
 **時間と冪等性**: パイプライン全体 15分（エージェント10分）< Cloud Run request timeout 20分 < Cloud Tasks dispatch deadline 25分。worker は `UPDATE review_runs SET exec_state='running' WHERE id=? AND exec_state='queued'` で実行権を取り、再配信は 200 で無視。外部副作用のID（check_run_id、コメントID）を保存。
 
-## ディレクトリ構成（ルート: `/Users/tanabe_yudai/workspace/project/github/spec-lino/`）
+## ディレクトリ構成（リポジトリのルート）
 
 ```text
 pyproject.toml  uv.lock  Makefile  Dockerfile  docker-compose.yml  CLAUDE.md  README.md  alembic.ini  migrations/
@@ -187,7 +187,7 @@ infra/bootstrap/   infra/envs/prod/*.tf   design/   scripts/{smoke_prod.sh, seed
 
 ## タスク管理（GitHub Projects）
 
-現状: `tanabe-yudai/spec-lino` は GitHub 上に private・空で存在。Issues / Projects 有効。`gh` は `project` スコープ済み。
+現状: リポジトリは GitHub 上に private・空で存在。Issues / Projects 有効。`gh` は `project` スコープ済み。
 
 - **ボード**: ユーザー所有の Project「SpecLino」を新規作成しリポジトリにリンク（M0 の最初のタスク）。フィールド: `Status`（Todo / In Progress / Blocked / Done）、`Priority`（P0=Must / P1=Should / P2=Stretch）、`Milestone`（GitHub Milestones M0〜M5、期限つき）、`Depends on`（テキスト。`#12,#15` 形式）。
 - **ストーリー = Issue（機能単位）**。ラベル `story` ＋ 領域ラベル（core / analysis / agent / github / infra / ui / eval / docs）。本文テンプレート（`.github/ISSUE_TEMPLATE/story.md`）:

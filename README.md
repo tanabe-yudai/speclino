@@ -55,7 +55,7 @@ flowchart TB
     GHAPP["GitHub App<br/>webhook ・ Checks API ・ PR コメント"]
   end
 
-  subgraph GCP["GCP プロジェクト example-project（asia-northeast1）"]
+  subgraph GCP["GCP プロジェクト（asia-northeast1）"]
     direction TB
 
     subgraph GCP_RUN["Cloud Run（同一イメージ、SPECLINO_ROLE で役割切替）"]

@@ -3,8 +3,12 @@
 GCP プロジェクトの作成から、Cloud Run への初回デプロイまで。**`terraform apply` と課金に関わる
 操作はユーザーが実行する**（Claude は plan とレビューまで）。
 
-前提: `gcloud` が `13311633+tanabe-yudai@users.noreply.github.com` で認証済み、課金アカウント `XXXXXX-XXXXXX-XXXXXX`
-（T-NET、OPEN）、Terraform v1.12 以上。
+前提: `gcloud` が自分のアカウントで認証済みで、使える課金アカウント（`<billing_account_id>`）があること、
+Terraform v1.12 以上。
+
+以下の `<...>` は自分の環境の値に置き換える: `<project_id>`（GCP プロジェクト ID）、`<billing_account_id>`、
+`<owner>/<repo>`（このリポジトリを置いた GitHub のリポジトリ）、`<web-url>`（Cloud Run の web サービスの URL。
+手順 3 で分かる）、`<workspace>`（SpecLino のワークスペースの識別子）。
 
 ## どこで実行するか
 
@@ -12,8 +16,8 @@ GCP プロジェクトの作成から、Cloud Run への初回デプロイまで
 残りはリポジトリ直下（`docker build .` が Dockerfile を見つけるため）。
 
 ```sh
-export REPO=/Users/tanabe_yudai/workspace/project/github/spec-lino
-export P=example-project                 # プロジェクト ID
+export REPO=<このリポジトリを clone した場所>
+export P=<project_id>                  # プロジェクト ID（例: speclino-prod。世界で一意）
 export REGION=asia-northeast1
 ```
 
@@ -22,7 +26,7 @@ export REGION=asia-northeast1
 **先に ADC の quota project を設定する**（bootstrap の apply 後、プロジェクトができてから）:
 
 ```sh
-gcloud auth application-default set-quota-project example-project
+gcloud auth application-default set-quota-project $P
 ```
 
 `gcloud auth application-default login` で作る ADC には quota project が付かない。
@@ -33,7 +37,7 @@ Google 既定の共有プロジェクト（`projects/764086051850`）が使わ�
 
 ## 1. bootstrap（プロジェクト・API・tfstate バケット）
 
-作るもの: プロジェクト `example-project`、API 18 個、GCS バケット `example-project-tfstate`。
+作るもの: プロジェクト `<project_id>`、API 18 個、GCS バケット `<project_id>-tfstate`。
 **この時点では課金が発生するリソースは無い。**
 
 ```sh
@@ -42,16 +46,16 @@ terraform init
 
 # plan を固定してから中身を確認する
 terraform plan -out=tfplan \
-  -var project_id=example-project \
-  -var billing_account=XXXXXX-XXXXXX-XXXXXX
+  -var project_id=$P \
+  -var billing_account=<billing_account_id>
 terraform show tfplan | grep -E '^  # |^Plan:'      # 20 to add, 0 to change, 0 to destroy
 
 terraform apply tfplan
-terraform output state_bucket                        # → example-project-tfstate
+terraform output state_bucket                        # → <project_id>-tfstate
 ```
 
 > プロジェクト ID が既に使われていると `already exists` で失敗する。その場合は
-> `-var project_id=example-project-<接尾辞>` にして、以降の手順でも同じ値を使う。
+> `-var project_id=<project_id>-<接尾辞>` にして、以降の手順でも同じ値を使う。
 
 ### bootstrap の state を GCS へ移す
 
@@ -63,11 +67,11 @@ bootstrap は tfstate バケット自体を作るため、**初回はローカ�
 cd "$REPO/infra/bootstrap"
 cp backend.tf.migrate backend.tf          # backend "gcs" {} を有効化する
 terraform init -migrate-state \
-  -backend-config="bucket=example-project-tfstate" \
+  -backend-config="bucket=<project_id>-tfstate" \
   -backend-config="prefix=bootstrap"
 # → 「Do you want to copy existing state to the new backend?」に yes
 
-terraform plan -var project_id=example-project -var billing_account=XXXXXX-XXXXXX-XXXXXX
+terraform plan -var project_id=$P -var billing_account=<billing_account_id>
 # → "No changes." なら移行できている
 ```
 
@@ -85,7 +89,7 @@ terraform plan -var project_id=example-project -var billing_account=XXXXXX-XXXXX
 
 ## 2. prod（Cloud Run・Tasks・Secret・WIF・Identity Platform・予算）
 
-prod の state は bootstrap が作った GCS バケットに置く（`gs://example-project-tfstate/envs/prod/`、
+prod の state は bootstrap が作った GCS バケットに置く（`gs://<project_id>-tfstate/envs/prod/`、
 versioning 有効）。`tfvars` を用意する:
 
 ```sh
@@ -96,7 +100,7 @@ cp terraform.tfvars.example terraform.tfvars
 
 ```sh
 terraform init \
-  -backend-config="bucket=example-project-tfstate" \
+  -backend-config="bucket=<project_id>-tfstate" \
   -backend-config="prefix=envs/prod"
 terraform plan -out=tfplan
 terraform show tfplan | grep -E '^  # |^Plan:'
@@ -113,10 +117,10 @@ terraform output
 | Cloud Tasks | キュー `speclino-runs`（asia-northeast1） |
 | Secret Manager | 空のコンテナ 4 つ（値は次の手順で投入） |
 | IAM | SA 5 つ（web / worker / sandbox / tasks / deployer）と最小権限 |
-| WIF | GitHub Actions 用（`tanabe-yudai/spec-lino` からのみ） |
+| WIF | GitHub Actions 用（`<owner>/<repo>` からのみ） |
 | Identity Platform | メール/パスワードのみ有効化 |
 | 予算 | $300 に対し 17% / 33% / 67% / 100% でアラート |
-| GCS | `example-project-artifacts`（成果物） |
+| GCS | `<project_id>-artifacts`（成果物） |
 
 `speclino-sandbox` は **既定で作らない**（`enable_sandbox = false`）。Cloud Run sandboxes は
 Preview で、プロジェクトが許可されていないと apply 全体が失敗するため。S38 で
@@ -147,7 +151,7 @@ provider 側でも `user_project_override = true` が要る（`versions.tf` に�
 provider は `X-Goog-User-Project` ヘッダを送らない）。
 
 ```sh
-gcloud auth application-default set-quota-project example-project
+gcloud auth application-default set-quota-project $P
 terraform plan -out=tfplan && terraform apply tfplan   # 失敗した分だけ作られる
 ```
 
@@ -157,12 +161,12 @@ terraform plan -out=tfplan && terraform apply tfplan   # 失敗した分だけ�
 
 ```sh
 curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" \
-  https://cloudbilling.googleapis.com/v1/billingAccounts/XXXXXX-XXXXXX-XXXXXX
+  https://cloudbilling.googleapis.com/v1/billingAccounts/<billing_account_id>
 # → "currencyCode": "JPY"
 ```
 
-T-NET は JPY なので `budget_currency_code = "JPY"` / `budget_amount = "45000"`（≒ $300）が既定。
-別の課金アカウントを使うときは tfvars で合わせる。
+既定は `budget_currency_code = "JPY"` / `budget_amount = "45000"`（≒ $300）。課金アカウントの通貨が
+違うときは tfvars で合わせる。
 
 なお、通知チャネルを指定しない場合に `all_updates_rule` を空で送るのも同じ 400 になるため、
 `budget.tf` ではブロックごと省略している（既定の課金管理者宛メールが使われる）。
@@ -194,8 +198,8 @@ echo "WEBHOOK_SECRET=$WEBHOOK_SECRET"
 | 項目 | 値 |
 | --- | --- |
 | GitHub App name | `SpecLino` |
-| Homepage URL | `https://speclino-web-6h5m3svkja-an.a.run.app`（必須。App のページに公開表示される。リポジトリは提出まで private なので web URL にしておく） |
-| Webhook URL | `https://speclino-web-6h5m3svkja-an.a.run.app/webhooks/github` |
+| Homepage URL | `<web-url>`（必須。App のページに公開表示される。リポジトリは提出まで private なので web URL にしておく） |
+| Webhook URL | `<web-url>/webhooks/github` |
 | Webhook secret | 上で作った `$WEBHOOK_SECRET` |
 
 権限: Checks = Read and write / Contents = Read-only / **Issues = Read-only** /
@@ -432,7 +436,7 @@ ID の無い既存 project が別リポジトリとして退避され、登録�
 
 ```sh
 cd "$REPO"
-export P=example-project
+export P=<project_id>
 export REGION=asia-northeast1
 ```
 
@@ -464,7 +468,7 @@ gcloud run jobs logs read speclino-admin --project=$P --region=$REGION --limit=5
 
 ```sh
 gcloud run jobs execute speclino-admin --project=$P --region=$REGION \
-  --args=workspace,create,tanabe-yudai,--owner-uid,<自分の uid>,--name,Tanabe --wait
+  --args=workspace,create,<workspace>,--owner-uid,<自分の uid>,--name,<表示名> --wait
 ```
 
 ### 9-4. 審査員をメンバーに追加する（閲覧のみ）
@@ -473,7 +477,7 @@ gcloud run jobs execute speclino-admin --project=$P --region=$REGION \
 
 ```sh
 gcloud run jobs execute speclino-admin --project=$P --region=$REGION \
-  --args=workspace,add-member,tanabe-yudai,<審査員の uid>,--role,member --wait
+  --args=workspace,add-member,<workspace>,<審査員の uid>,--role,member --wait
 ```
 
 ### 9-5. リポジトリを登録する
@@ -483,7 +487,7 @@ gcloud run jobs execute speclino-admin --project=$P --region=$REGION \
 
 ```sh
 gcloud run jobs execute speclino-admin --project=$P --region=$REGION \
-  --args=workspace,add-project,tanabe-yudai,tanabe-yudai/spec-lino --wait
+  --args=workspace,add-project,<workspace>,<owner>/<repo> --wait
 ```
 
 デモリポジトリも同様に繰り返す。登録状況は一覧で確認できる:
@@ -501,7 +505,7 @@ approver ロールはチーム規約の承認用で、別物）。引数を省�
 
 ```sh
 gcloud run jobs execute speclino-admin --project=$P --region=$REGION \
-  --args=workspace,set-pr-approvers,tanabe-yudai/spec-lino,tanabe-yudai --wait
+  --args=workspace,set-pr-approvers,<owner>/<repo>,<GitHub のログイン名> --wait
 ```
 
 他のワークスペース（自分とデモ以外）を作れるようにするのは S54（ワークスペース単位の MCP
@@ -546,7 +550,7 @@ SpecLino の GitHub App がインストール済みであることを確かめ�
 3. `infra/envs/prod/terraform.tfvars` に `github_client_id = "<Client ID>"` を書き、もう一度 `terraform apply`
    （web に `SPECLINO_GITHUB_CLIENT_ID` と client secret が入る）
 4. Deploy（マイグレーション 0006 → サービス更新）。3 と順序は問わないが、両方が済むまで登録は 503
-5. 画面から登録を試す: 既に登録済みの `tanabe-yudai/spec-lino` なら「すでに登録済み」と出る
+5. 画面から登録を試す: 既に登録済みのリポジトリなら「すでに登録済み」と出る
 
 ## 片付け（12/1 以降）
 

@@ -8,7 +8,7 @@
 # SPECLINO_FIREBASE_API_KEY を設定する（未設定なら認証なしで確認できる範囲だけ見る）。
 set -euo pipefail
 
-PROJECT="${SPECLINO_PROJECT:-example-project}"
+PROJECT="${SPECLINO_PROJECT:?SPECLINO_PROJECT（GCP プロジェクト ID）が必要}"
 REGION="${SPECLINO_REGION:-asia-northeast1}"
 WEB_URL="${1:-}"
 

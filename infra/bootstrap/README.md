@@ -11,9 +11,9 @@ state は**初回だけローカル**（`terraform.tfstate`）。tfstate バケ�
 
 ## 前提
 
-- gcloud アカウント: `13311633+tanabe-yudai@users.noreply.github.com`
-- 課金アカウント ID: `XXXXXX-XXXXXX-XXXXXX`（有効であることを確認済み。ただし apply 直前に再確認する）
-- `project_id`（既定 `example-project`）が実際に利用可能（他プロジェクトで未使用）かは **apply 前に `gcloud projects describe <project_id>` 等で確認する**
+- gcloud アカウント: 課金アカウントに紐付けられる自分のアカウント
+- 課金アカウント ID: `<billing_account_id>`（有効であることを apply 前に確認する）
+- `project_id`（必須。例: `speclino-prod`）が実際に利用可能（他プロジェクトで未使用）かは **apply 前に `gcloud projects describe <project_id>` 等で確認する**
 
 ## 手順
 
@@ -25,13 +25,13 @@ terraform init
 
 # 差分確認
 terraform plan \
-  -var project_id=example-project \
-  -var billing_account=XXXXXX-XXXXXX-XXXXXX
+  -var project_id=<project_id> \
+  -var billing_account=<billing_account_id>
 
 # ユーザー確認後のみ実行
 terraform apply \
-  -var project_id=example-project \
-  -var billing_account=XXXXXX-XXXXXX-XXXXXX
+  -var project_id=<project_id> \
+  -var billing_account=<billing_account_id>
 ```
 
 組織配下で作る場合は `-var org_id=<組織ID>` または `-var folder_id=<フォルダID>` を追加する（個人アカウントで組織を使わない場合は指定不要）。
