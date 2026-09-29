@@ -2,7 +2,7 @@
 
 import type { BaseHeadStatus, Category, Severity, TestObservation, Verdict } from '../types/finding'
 import type { ExecState, GateStatus } from '../types/run'
-import type { BadgeTone, VerdictTone } from '../types/components'
+import type { VerdictTone } from '../types/components'
 import type { WorkspaceRole } from '../types/me'
 
 export const VERDICT_LABELS: Record<Verdict, string> = {
@@ -10,19 +10,6 @@ export const VERDICT_LABELS: Record<Verdict, string> = {
   VIOLATED: '違反',
   UNKNOWN: '不明',
   REVIEW: '要確認',
-}
-
-export const VERDICT_TONE: Record<Verdict, BadgeTone> = {
-  VERIFIED_IN_SCOPE: 'success',
-  VIOLATED: 'danger',
-  REVIEW: 'warning',
-  UNKNOWN: 'neutral',
-}
-
-export const GATE_TONE: Record<GateStatus, BadgeTone> = {
-  pass: 'success',
-  pass_with_exceptions: 'warning',
-  fail: 'danger',
 }
 
 /** VIOLATED → REVIEW → UNKNOWN → VERIFIED_IN_SCOPE の表示順。 */
@@ -108,11 +95,11 @@ export const BASE_HEAD_STATUS_LABELS: Record<BaseHeadStatus, string> = {
   unchanged: '変化なし',
 }
 
-export const BASE_HEAD_STATUS_TONE: Record<BaseHeadStatus, BadgeTone> = {
-  new: 'danger',
-  existing: 'warning',
-  resolved: 'success',
-  unchanged: 'neutral',
+/** base との比較の色（変化なしは出さない）。 */
+export const BASE_HEAD_STATUS_TONE: Record<Exclude<BaseHeadStatus, 'unchanged'>, VerdictTone> = {
+  new: 'bad',
+  existing: 'rev',
+  resolved: 'ok',
 }
 
 export const WORKSPACE_ROLE_LABELS: Record<WorkspaceRole, string> = {

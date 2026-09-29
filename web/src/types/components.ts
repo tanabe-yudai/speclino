@@ -1,19 +1,11 @@
 /** 再利用コンポーネントの props 型。コンポーネント本体には型を書かず、ここに集約する。 */
 
-import type { ReactNode } from 'react'
 import type { Counterexample, Finding } from './finding'
 import type { RunEvent } from './events'
 import type { RerunResponse } from './run'
 
-export type BadgeTone = 'success' | 'warning' | 'danger' | 'neutral' | 'info'
-
 /** 判定の 4 値の色（design 3.1。意味と色の対応は固定）。 */
 export type VerdictTone = 'ok' | 'bad' | 'unk' | 'rev'
-
-export interface BadgeProps {
-  tone: BadgeTone
-  children: ReactNode
-}
 
 export interface LoadingStateProps {
   message?: string

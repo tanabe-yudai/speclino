@@ -1,10 +1,12 @@
+import { RotateCw } from 'lucide-react'
 import { useState } from 'react'
+import { Button } from '@/components/ui/button'
 import { rerunRun } from '../api/reviewRuns'
 import { ApiError } from '../api/errors'
 import type { RerunButtonProps } from '../types/components'
 import type { RerunResponse } from '../types/run'
 
-/** デモ再実行ボタン（S39）。回数上限・費用枠の判断はサーバー側で行い、ここは結果を表示する。 */
+/** 検査の再実行（S39）。回数上限・費用枠の判断はサーバー側で行い、ここは結果を表示する。 */
 export function RerunButton({ runId, onStarted }: RerunButtonProps) {
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -21,11 +23,12 @@ export function RerunButton({ runId, onStarted }: RerunButtonProps) {
   }
 
   return (
-    <div className="rerun-block">
-      <button type="button" className="button-primary" onClick={handleClick} disabled={pending}>
-        {pending ? '再実行を開始しています…' : 'デモを再実行'}
-      </button>
-      {error && <span className="rerun-error">{error}</span>}
+    <div className="flex flex-wrap items-center gap-3">
+      <Button variant="secondary" onClick={handleClick} disabled={pending}>
+        <RotateCw className="size-4" />
+        {pending ? '再実行を開始しています…' : '再実行'}
+      </Button>
+      {error && <span className="text-sm text-bad">{error}</span>}
     </div>
   )
 }

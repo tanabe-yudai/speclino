@@ -4,7 +4,6 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { getReviewMarkdown, getRun, getRunEvents } from '../api/reviewRuns'
 import { ApiError } from '../api/errors'
-import { Badge } from '../components/Badge'
 import { ErrorState } from '../components/ErrorState'
 import { FindingCard } from '../components/FindingCard'
 import { LoadingState } from '../components/LoadingState'
@@ -14,11 +13,17 @@ import { Timeline } from '../components/Timeline'
 import { describeGateReason } from '../services/gate'
 import { formatDateTime, shortSha } from '../services/format'
 import { githubChecksUrl, githubPrUrl } from '../services/github'
-import { EXEC_STATE_LABELS, GATE_STATUS_LABELS, GATE_TONE, VERDICT_LABELS } from '../services/labels'
+import { EXEC_STATE_LABELS, VERDICT_LABELS } from '../services/labels'
+import { GateBadge } from '@/components/app/GateBadge'
+import { Panel } from '@/components/app/Panel'
+import { VerdictBadge } from '@/components/app/VerdictBadge'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { paths } from '@/services/paths'
 import { describeLimits, describeSemanticDiff } from '../services/manifest'
 import { collectScopeAndAssumptions, collectUnresolvedItems, countByVerdict, groupFindingsByVerdict } from '../services/verdict'
 import type { RunEvent } from '../types/events'
 import type { RerunResponse, ReviewRunDetail } from '../types/run'
+import type { Verdict } from '../types/finding'
 
 type Tab = 'timeline' | 'markdown'
 
@@ -103,63 +108,46 @@ function RunDetailView({ id }: { id: string }) {
   }
 
   return (
-    <main className="run-detail-page">
-      <Link to="/" className="back-link">
-        ← run 一覧へ戻る
+    <div className="space-y-8">
+      <Link to={paths.home()} className="text-sm text-ink-3 hover:text-foreground">
+        ← ホームへ
       </Link>
 
-      {run === null && loadError === null && <LoadingState message="run を取得しています…" />}
+      {run === null && loadError === null && <LoadingState message="検査を取得しています…" />}
       {loadError && <ErrorState message={loadError} onRetry={retryRun} />}
 
       {run && (
         <>
           <RunSummary run={run} />
 
-          <section className="findings-section">
-            <h2>判定結果</h2>
+          <section className="space-y-4">
+            <h2 className="text-lg font-semibold tracking-tight">判定結果</h2>
             <FindingsByVerdict run={run} />
           </section>
 
-          <section className="run-detail-tabs">
-            <div className="tab-bar" role="tablist">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={tab === 'timeline'}
-                className={tab === 'timeline' ? 'tab-active' : ''}
-                onClick={() => selectTab('timeline')}
-              >
-                タイムライン
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={tab === 'markdown'}
-                className={tab === 'markdown' ? 'tab-active' : ''}
-                onClick={() => selectTab('markdown')}
-              >
-                review.md
-              </button>
-            </div>
-
-            {tab === 'timeline' &&
-              (events !== null ? <Timeline events={events} /> : <LoadingState message="イベントを取得しています…" />)}
-
-            {tab === 'markdown' && (
-              <>
-                {markdownLoading && <LoadingState message="review.md を取得しています…" />}
-                {markdownError && <ErrorState message={markdownError} onRetry={retryMarkdown} />}
-                {markdown !== null && !markdownLoading && !markdownError && (
-                  <div className="markdown-body">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
-                  </div>
-                )}
-              </>
-            )}
-          </section>
+          <Tabs value={tab} onValueChange={(v) => selectTab(v as Tab)}>
+            <TabsList>
+              <TabsTrigger value="timeline">タイムライン</TabsTrigger>
+              <TabsTrigger value="markdown">レビュー（review.md）</TabsTrigger>
+            </TabsList>
+            <TabsContent value="timeline" className="mt-4">
+              <Panel>
+                {events !== null ? <Timeline events={events} /> : <LoadingState message="イベントを取得しています…" />}
+              </Panel>
+            </TabsContent>
+            <TabsContent value="markdown" className="mt-4">
+              {markdownLoading && <LoadingState message="review.md を取得しています…" />}
+              {markdownError && <ErrorState message={markdownError} onRetry={retryMarkdown} />}
+              {markdown !== null && !markdownLoading && !markdownError && (
+                <Panel className="text-sm leading-relaxed [&_a]:text-primary [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:font-mono [&_code]:text-xs [&_h1]:mb-3 [&_h1]:text-xl [&_h1]:font-bold [&_h2]:mt-6 [&_h2]:mb-2 [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:mt-4 [&_h3]:font-semibold [&_li]:ml-5 [&_li]:list-disc [&_p]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_table]:my-3 [&_td]:border [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:px-2 [&_th]:py-1">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
+                </Panel>
+              )}
+            </TabsContent>
+          </Tabs>
         </>
       )}
-    </main>
+    </div>
   )
 }
 
@@ -168,7 +156,6 @@ function RunSummary({ run }: { run: ReviewRunDetail }) {
   // 再実行ボタンから遷移してきたときは、回数・費用枠の情報を router state で受け取る
   const rerun = (useLocation().state as { rerun?: RerunResponse } | null)?.rerun
   const counts = countByVerdict(run.findings)
-  const unverifiedCount = counts.UNKNOWN + counts.REVIEW
   const { assumptions } = collectScopeAndAssumptions(run.findings)
   const unresolvedItems = collectUnresolvedItems(run.findings)
   const scopeItems = run.manifest ? [describeLimits(run.manifest)] : []
@@ -177,121 +164,118 @@ function RunSummary({ run }: { run: ReviewRunDetail }) {
   const canLinkGithub = Boolean(run.repo_full_name && run.pr_number != null)
 
   return (
-    <section className="run-summary">
-      <div className="run-summary-header">
-        <div>
-          <h1>
-            {run.repo_full_name ?? '(repo 不明)'}
-            {run.pr_number != null && `#${run.pr_number}`}
-          </h1>
-          <p className="muted">
-            head <code title={run.head_sha}>{shortSha(run.head_sha)}</code>
-            {' ← '}
-            base <code title={run.base_sha ?? undefined}>{shortSha(run.base_sha)}</code>
+    <div className="space-y-4">
+      <Panel className="space-y-5">
+        <div className="flex flex-wrap items-start gap-4">
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-2xl font-bold tracking-tight">
+              {run.repo_full_name ?? '(リポジトリ不明)'}
+              {run.pr_number != null && <span className="text-ink-3">#{run.pr_number}</span>}
+            </h1>
+            <p className="mt-1 font-mono text-xs text-ink-3">
+              head <span title={run.head_sha}>{shortSha(run.head_sha)}</span>
+              {' ← '}
+              base <span title={run.base_sha ?? undefined}>{shortSha(run.base_sha)}</span>
+            </p>
+          </div>
+          {run.gate_status ? (
+            <GateBadge status={run.gate_status} />
+          ) : (
+            <span className="rounded-full bg-muted px-2.5 py-1 text-xs text-ink-3">
+              未確定（{EXEC_STATE_LABELS[run.exec_state]}）
+            </span>
+          )}
+        </div>
+
+        <p className="text-sm text-ink-2">{gateReason}</p>
+        {semanticDiff && <p className="text-xs text-ink-3">{semanticDiff}</p>}
+
+        <div className="flex flex-wrap gap-3">
+          <CountTile verdict="VIOLATED" count={counts.VIOLATED} />
+          <CountTile verdict="REVIEW" count={counts.REVIEW} />
+          <CountTile verdict="UNKNOWN" count={counts.UNKNOWN} />
+          <CountTile verdict="VERIFIED_IN_SCOPE" count={counts.VERIFIED_IN_SCOPE} />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+          {canLinkGithub ? (
+            <>
+              <a className="text-primary underline-offset-4 hover:underline" href={githubPrUrl(run.repo_full_name!, run.pr_number!)} target="_blank" rel="noreferrer">
+                GitHub の PR
+              </a>
+              <a className="text-primary underline-offset-4 hover:underline" href={githubChecksUrl(run.repo_full_name!, run.pr_number!)} target="_blank" rel="noreferrer">
+                Check
+              </a>
+            </>
+          ) : (
+            <span className="text-ink-3">GitHub へのリンクなし（PR 情報が未設定）</span>
+          )}
+          <div className="ml-auto">
+            <RerunButton runId={run.id} onStarted={(res) => navigate(paths.run(res.run_id), { state: { rerun: res } })} />
+          </div>
+        </div>
+
+        {rerun && rerun.run_id === run.id && (
+          <p className="rounded-md bg-muted/70 px-3 py-2 text-xs text-ink-2">
+            再実行を開始しました（本日 {rerun.used_today}/{rerun.limit} 回、残り {rerun.remaining}）
+            {!rerun.cost_ok && ` ・ 費用枠超過のためエージェント調査は行われません（${rerun.cost_note}）`}
           </p>
-        </div>
-        {run.gate_status ? (
-          <Badge tone={GATE_TONE[run.gate_status]}>{GATE_STATUS_LABELS[run.gate_status]}</Badge>
-        ) : (
-          <Badge tone="neutral">未確定（{EXEC_STATE_LABELS[run.exec_state]}）</Badge>
         )}
-      </div>
 
-      <p className="gate-reason">{gateReason}</p>
-      {semanticDiff && <p className="muted run-meta-line">{semanticDiff}</p>}
-
-      <dl className="run-counts">
-        <div>
-          <dt>{VERDICT_LABELS.VIOLATED}</dt>
-          <dd>{counts.VIOLATED}</dd>
-        </div>
-        <div>
-          <dt>未検証（要確認 {counts.REVIEW} ・ 不明 {counts.UNKNOWN}）</dt>
-          <dd>{unverifiedCount}</dd>
-        </div>
-        <div>
-          <dt>{VERDICT_LABELS.VERIFIED_IN_SCOPE}</dt>
-          <dd>{counts.VERIFIED_IN_SCOPE}</dd>
-        </div>
-      </dl>
-
-      <div className="run-links">
-        {canLinkGithub ? (
-          <>
-            <a href={githubPrUrl(run.repo_full_name!, run.pr_number!)} target="_blank" rel="noreferrer">
-              GitHub の PR を開く
-            </a>
-            <a href={githubChecksUrl(run.repo_full_name!, run.pr_number!)} target="_blank" rel="noreferrer">
-              Check を開く
-            </a>
-          </>
-        ) : (
-          <span className="muted">GitHub へのリンクなし（PR 情報が未設定）</span>
-        )}
-      </div>
-
-      {rerun && rerun.run_id === run.id && (
-        <p className="rerun-notice">
-          再実行を開始しました（本日 {rerun.used_today}/{rerun.limit} 回、残り {rerun.remaining}）
-          {!rerun.cost_ok && ` ・ 費用枠超過のためエージェント調査は行われません（${rerun.cost_note}）`}
+        <p className="text-xs text-ink-3">
+          作成 {formatDateTime(run.created_at)} ・ 完了 {formatDateTime(run.finished_at)} ・ トリガー {run.trigger}
         </p>
-      )}
-      <RerunButton
-        runId={run.id}
-        onStarted={(res) => navigate(`/runs/${res.run_id}`, { state: { rerun: res } })}
-      />
+      </Panel>
 
-      <p className="muted run-meta-line">
-        作成: {formatDateTime(run.created_at)} ／ 完了: {formatDateTime(run.finished_at)} ／ トリガー: {run.trigger}
-      </p>
+      <ScopeBlock title="保証範囲" scopeItems={scopeItems} assumptions={assumptions} unresolvedItems={unresolvedItems} />
+    </div>
+  )
+}
 
-      <ScopeBlock
-        title="保証範囲"
-        scopeItems={scopeItems}
-        assumptions={assumptions}
-        unresolvedItems={unresolvedItems}
-      />
-    </section>
+function CountTile({ verdict, count }: { verdict: Verdict; count: number }) {
+  return (
+    <div className="row flex min-w-[8rem] items-center gap-3 px-4 py-2.5">
+      <span className="text-2xl font-bold tabular-nums">{count}</span>
+      <VerdictBadge verdict={verdict} />
+    </div>
   )
 }
 
 function FindingsByVerdict({ run }: { run: ReviewRunDetail }) {
   if (run.findings.length === 0) {
-    return <p className="muted">この run にはまだ Finding がありません（実行中、または未完了の可能性があります）。</p>
+    return <p className="text-sm text-ink-3">この検査にはまだ所見がありません（実行中、または未完了の可能性があります）。</p>
   }
   const grouped = groupFindingsByVerdict(run.findings)
   return (
-    <>
+    <div className="space-y-6">
       {DETAIL_VERDICTS.map((verdict) => {
         const items = grouped[verdict]
         if (items.length === 0) return null
         return (
-          <div key={verdict} className="finding-group">
-            <h3>
-              {VERDICT_LABELS[verdict]}（{items.length}件）
+          <div key={verdict} className="space-y-3">
+            <h3 className="flex items-center gap-2 text-sm font-semibold text-ink-2">
+              <VerdictBadge verdict={verdict} />
+              {items.length} 件
             </h3>
             {items.map((finding) => (
-              <FindingCard
-                key={finding.id}
-                finding={finding}
-                repoFullName={run.repo_full_name}
-                headSha={run.head_sha}
-              />
+              <FindingCard key={finding.id} finding={finding} repoFullName={run.repo_full_name} headSha={run.head_sha} />
             ))}
           </div>
         )
       })}
 
       {grouped.VERIFIED_IN_SCOPE.length > 0 && (
-        <details className="finding-group finding-group-verified">
-          <summary>
-            {VERDICT_LABELS.VERIFIED_IN_SCOPE}（{grouped.VERIFIED_IN_SCOPE.length}件） — 展開して表示
+        <details className="space-y-3">
+          <summary className="cursor-pointer text-sm font-semibold text-ink-2">
+            {VERDICT_LABELS.VERIFIED_IN_SCOPE} {grouped.VERIFIED_IN_SCOPE.length} 件（開いて表示）
           </summary>
-          {grouped.VERIFIED_IN_SCOPE.map((finding) => (
-            <FindingCard key={finding.id} finding={finding} repoFullName={run.repo_full_name} headSha={run.head_sha} />
-          ))}
+          <div className="mt-3 space-y-3">
+            {grouped.VERIFIED_IN_SCOPE.map((finding) => (
+              <FindingCard key={finding.id} finding={finding} repoFullName={run.repo_full_name} headSha={run.head_sha} />
+            ))}
+          </div>
         </details>
       )}
-    </>
+    </div>
   )
 }
