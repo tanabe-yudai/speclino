@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import { invalidateProjects } from '../api/projects'
 import { completeRegistration } from '../api/repositories'
 import { ApiError } from '../api/errors'
 import { LoadingState } from '../components/LoadingState'
@@ -25,7 +26,10 @@ export function GithubCallback() {
     if (sent.current || denied || !code || !state) return
     sent.current = true
     completeRegistration(code, state)
-      .then(setResult)
+      .then((r) => {
+        invalidateProjects(r.slug)
+        setResult(r)
+      })
       .catch((err: unknown) => {
         setApiError(err instanceof ApiError ? err.message : '登録に失敗しました')
       })
