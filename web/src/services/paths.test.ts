@@ -12,4 +12,7 @@ describe('paths', () => {
   it('slug と名前はエンコードする', () => {
     expect(paths.policies('a b')).toBe('/w/a%20b/policies')
   })
+  it('ワークスペースのホーム', () => {
+    expect(paths.workspace('acme team')).toBe('/w/acme%20team')
+  })
 })

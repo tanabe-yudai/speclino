@@ -1,28 +1,57 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { listRepositories } from '@/api/repositories'
+import { Link, useParams } from 'react-router-dom'
 import { listRuns } from '@/api/reviewRuns'
 import { ApiError } from '@/api/errors'
+import { GateBadge } from '@/components/app/GateBadge'
 import { Panel, PanelTitle } from '@/components/app/Panel'
 import { RunRow } from '@/components/app/RunRow'
 import { ErrorState } from '@/components/ErrorState'
 import { LoadingState } from '@/components/LoadingState'
-import { useCurrentWorkspace } from '@/hooks/useCurrentWorkspace'
+import { HealthRing } from '@/components/project/HealthRing'
 import { useMe } from '@/hooks/useMe'
+import { useWorkspaceProjects } from '@/hooks/useWorkspaceProjects'
+import { healthRatio } from '@/services/health'
 import { paths } from '@/services/paths'
-import type { RegisteredRepository } from '@/types/repository'
+import { pickWorkspace } from '@/services/workspaces'
+import type { ProjectSummary } from '@/types/project'
 import type { ReviewRunSummary } from '@/types/run'
 
-/** ホーム: 今のワークスペースのプロジェクトと、最近の検査。 */
+/** 1 つのプロジェクトのカード（健康状態・違反などの件数・最新のゲート）。 */
+function ProjectCard({ slug, project }: { slug: string; project: ProjectSummary }) {
+  const [, name] = project.repo_full_name.split('/')
+  const c = project.counts
+  return (
+    <Link to={paths.project(slug, project.repo_full_name)} className="row flex min-w-0 items-center gap-4 p-5">
+      <HealthRing ratio={c && project.unanalyzed !== null ? healthRatio(c, project.unanalyzed) : null} />
+      <div className="min-w-0 flex-1">
+        <p className="truncate font-semibold">{name}</p>
+        <p className="mt-0.5 truncate font-mono text-xs text-ink-3">{project.repo_full_name}</p>
+        {project.status === 'unavailable' ? (
+          <p className="mt-2 text-xs text-ink-3">最新の検査の成果物を読めません</p>
+        ) : c ? (
+          <p className="mt-2 flex flex-wrap gap-x-3 text-xs text-ink-2">
+            <span className="text-bad">違反 {c.VIOLATED}</span>
+            <span className="text-rev">要確認 {c.REVIEW}</span>
+            <span className="text-unk">未検証 {c.UNKNOWN}</span>
+          </p>
+        ) : (
+          <p className="mt-2 text-xs text-ink-3">まだ検査されていません</p>
+        )}
+      </div>
+      {project.latest_run?.gate_status && <GateBadge status={project.latest_run.gate_status} />}
+    </Link>
+  )
+}
+
+/** ワークスペースのホーム（`/w/:slug`）: プロジェクトのカードと、そのワークスペースの最近の検査。 */
 export function Home() {
   const { me } = useMe()
-  const workspace = useCurrentWorkspace()
-  const [repos, setRepos] = useState<RegisteredRepository[] | null>(null)
+  const { slug: urlSlug } = useParams<{ slug?: string }>()
+  const workspace = pickWorkspace(me?.workspaces ?? [], urlSlug)
+  const slug = workspace?.slug
+  const { projects, error: projectsError, retry: retryProjects } = useWorkspaceProjects(slug)
   const [runs, setRuns] = useState<ReviewRunSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [reposError, setReposError] = useState<string | null>(null)
-  const [reposAttempt, setReposAttempt] = useState(0)
-  const slug = workspace?.slug
 
   const fetchRuns = useCallback(() => {
     listRuns(50)
@@ -40,25 +69,6 @@ export function Home() {
     fetchRuns()
   }
 
-  useEffect(() => {
-    if (!slug) return
-    let alive = true
-    listRepositories(slug)
-      .then((r) => alive && setRepos(r))
-      .catch((err: unknown) => {
-        if (alive) setReposError(err instanceof ApiError ? err.message : 'プロジェクトの一覧を取得できませんでした')
-      })
-    return () => {
-      alive = false
-    }
-  }, [slug, reposAttempt])
-
-  function retryRepos() {
-    setReposError(null)
-    setRepos(null)
-    setReposAttempt((n) => n + 1)
-  }
-
   if (!me) return <LoadingState />
 
   if (me.workspaces.length === 0) {
@@ -71,21 +81,36 @@ export function Home() {
     )
   }
 
+  // URL の slug が所属に無い: 別のワークスペースの内容に化けさせない
+  if (!workspace || !slug) {
+    return (
+      <Panel className="mx-auto max-w-xl text-center">
+        <PanelTitle className="text-base">このワークスペースは見つかりません</PanelTitle>
+        <Link className="mt-3 inline-block text-sm text-primary underline-offset-4 hover:underline" to={paths.home()}>
+          ホームへ戻る
+        </Link>
+      </Panel>
+    )
+  }
+
+  const names = projects ? new Set(projects.map((p) => p.repo_full_name)) : null
+  const recent = runs && names ? runs.filter((r) => names.has(r.repo_full_name ?? '')) : null
+
   return (
     <div className="space-y-8">
       <header>
         <p className="text-xs font-semibold tracking-widest text-primary uppercase">Workspace</p>
-        <h1 className="mt-1 text-2xl font-bold tracking-tight">{workspace?.name ?? workspace?.slug ?? 'ホーム'}</h1>
+        <h1 className="mt-1 truncate text-2xl font-bold tracking-tight">{workspace.name ?? workspace.slug}</h1>
       </header>
 
       <section className="space-y-3">
         <h2 className="text-sm font-semibold text-ink-2">プロジェクト</h2>
-        {repos === null && reposError === null && slug && <LoadingState message="プロジェクトを取得しています…" />}
-        {reposError && <ErrorState message={reposError} onRetry={retryRepos} />}
-        {repos !== null && repos.length === 0 && (
+        {projectsError && <ErrorState message={projectsError} onRetry={retryProjects} />}
+        {!projectsError && projects === null && <LoadingState message="プロジェクトを取得しています…" />}
+        {projects !== null && projects.length === 0 && (
           <Panel className="text-sm text-ink-2">
             まだリポジトリが登録されていません。
-            {workspace?.role === 'owner' && slug && (
+            {workspace.role === 'owner' && (
               <>
                 {' '}
                 <Link className="text-primary underline-offset-4 hover:underline" to={paths.settings(slug, 'repositories')}>
@@ -95,18 +120,10 @@ export function Home() {
             )}
           </Panel>
         )}
-        {repos !== null && repos.length > 0 && slug && (
+        {projects !== null && projects.length > 0 && (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {repos.map((r) => (
-              <Link
-                key={r.repo_full_name}
-                to={paths.project(slug, r.repo_full_name)}
-                className="row block min-w-0 p-5"
-              >
-                <p className="truncate font-semibold">{r.repo_full_name.split('/')[1]}</p>
-                <p className="mt-1 truncate font-mono text-xs text-ink-3">{r.repo_full_name}</p>
-                <p className="mt-3 text-xs text-ink-2">既定ブランチ {r.default_branch}</p>
-              </Link>
+            {projects.map((p) => (
+              <ProjectCard key={p.id} slug={slug} project={p} />
             ))}
           </div>
         )}
@@ -114,12 +131,12 @@ export function Home() {
 
       <section className="space-y-3">
         <h2 className="text-sm font-semibold text-ink-2">最近の検査</h2>
-        {runs === null && error === null && <LoadingState message="検査の一覧を取得しています…" />}
         {error && <ErrorState message={error} onRetry={retry} />}
-        {runs !== null && runs.length === 0 && <p className="text-sm text-ink-3">まだ検査がありません。</p>}
-        {runs !== null && runs.length > 0 && (
+        {!error && recent === null && !projectsError && <LoadingState message="検査の一覧を取得しています…" />}
+        {recent !== null && recent.length === 0 && <p className="text-sm text-ink-3">まだ検査がありません。</p>}
+        {recent !== null && recent.length > 0 && (
           <div className="space-y-2">
-            {runs.map((run) => (
+            {recent.map((run) => (
               <RunRow key={run.id} run={run} />
             ))}
           </div>

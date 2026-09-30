@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { listRepositories } from '@/api/repositories'
+import { listProjects } from '@/api/projects'
 import {
   CommandDialog,
   CommandEmpty,
@@ -12,32 +12,32 @@ import {
 import { useMe } from '@/hooks/useMe'
 import { buildCommands } from '@/services/commands'
 import type { CommandGroup as Group } from '@/types/command'
-import type { RegisteredRepository } from '@/types/repository'
+import type { ProjectSummary } from '@/types/project'
 
 const GROUP_ORDER: Group[] = ['プロジェクト', 'ワークスペース', '画面']
 
-/** ⌘K / Ctrl+K のパレット。開いたときに所属ワークスペースのリポジトリを取る。 */
+/** ⌘K / Ctrl+K のパレット。開いたときに所属ワークスペースのプロジェクトを取る（一覧はキャッシュを共有）。 */
 export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const { me } = useMe()
   const navigate = useNavigate()
-  const [repositories, setRepositories] = useState<Record<string, RegisteredRepository[]>>({})
+  const [projects, setProjects] = useState<Record<string, ProjectSummary[]>>({})
 
   useEffect(() => {
     if (!open || !me) return
     let alive = true
     Promise.all(
       me.workspaces.map((w) =>
-        listRepositories(w.slug)
+        listProjects(w.slug)
           .then((r) => [w.slug, r] as const)
           .catch(() => [w.slug, []] as const),
       ),
-    ).then((entries) => alive && setRepositories(Object.fromEntries(entries)))
+    ).then((entries) => alive && setProjects(Object.fromEntries(entries)))
     return () => {
       alive = false
     }
   }, [open, me])
 
-  const commands = useMemo(() => buildCommands({ me, repositories }), [me, repositories])
+  const commands = useMemo(() => buildCommands({ me, projects }), [me, projects])
 
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange} title="移動" description="画面やプロジェクトへ移動する">

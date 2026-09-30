@@ -128,3 +128,25 @@ class ReviewRunRepository:
     async def set_check_run_id(self, run_id: uuid.UUID, check_run_id: int) -> None:
         stmt = update(ReviewRun).where(ReviewRun.id == run_id).values(check_run_id=check_run_id)
         await self._session.execute(stmt)
+
+    async def latest_completed(self, project_id: uuid.UUID) -> ReviewRun | None:
+        """最新の完了した run（S45。awaiting_answer は判定と成果物が出そろっている）。"""
+        stmt = (
+            select(ReviewRun)
+            .where(
+                ReviewRun.project_id == project_id,
+                ReviewRun.exec_state.in_(("completed", "awaiting_answer")),
+            )
+            .order_by(ReviewRun.created_at.desc())
+            .limit(1)
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none()
+
+    async def list_for_project(self, project_id: uuid.UUID, limit: int) -> list[ReviewRun]:
+        stmt = (
+            select(ReviewRun)
+            .where(ReviewRun.project_id == project_id)
+            .order_by(ReviewRun.created_at.desc())
+            .limit(limit)
+        )
+        return list((await self._session.execute(stmt)).scalars())

@@ -6,6 +6,7 @@ const e = encodeURIComponent
 
 export const paths = {
   home: () => '/app',
+  workspace: (slug: string) => `/w/${e(slug)}`,
   project: (slug: string, fullName: string) => {
     const [owner, repo] = fullName.split('/')
     return `/w/${e(slug)}/p/${e(owner)}/${e(repo)}`
