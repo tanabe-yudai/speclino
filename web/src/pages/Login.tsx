@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth/useAuth'
+import { loginReturnPath } from '@/services/loginReturn'
+import type { LoginFrom } from '@/types/auth'
 import { Panel } from '@/components/app/Panel'
 import { ThemeToggle } from '@/components/shell/ThemeToggle'
 import { Button } from '@/components/ui/button'
@@ -8,7 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
 interface LocationState {
-  from?: { pathname: string }
+  from?: LoginFrom
 }
 
 export function Login() {
@@ -20,7 +22,7 @@ export function Login() {
 
   if (user) {
     const state = location.state as LocationState | null
-    return <Navigate to={state?.from?.pathname ?? '/app'} replace />
+    return <Navigate to={loginReturnPath(state?.from)} replace />
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {

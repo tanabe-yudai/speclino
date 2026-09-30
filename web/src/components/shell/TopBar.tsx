@@ -8,7 +8,7 @@ import { ThemeToggle } from './ThemeToggle'
 import { WorkspacePill } from './WorkspacePill'
 
 const navClass = ({ isActive }: { isActive: boolean }) =>
-  cn('rounded-full px-3 py-1.5 text-sm text-ink-3 transition-colors hover:text-foreground', isActive && 'text-foreground font-semibold')
+  cn('shrink-0 rounded-full px-3 py-1.5 text-sm text-ink-3 transition-colors hover:text-foreground', isActive && 'text-foreground font-semibold')
 
 /** ログイン後の上部に固定するバー（design 3.3）。 */
 export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
@@ -17,7 +17,8 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
     <header className="sticky top-0 z-40 border-b bg-background/70 backdrop-blur-md">
       <div className="mx-auto flex h-14 w-full max-w-6xl items-center gap-2 px-4 sm:px-6">
         <Link to={paths.home()} className="mr-1 shrink-0 font-extrabold tracking-tight">
-          <span className="text-brand">◆</span> SpecLino
+          <span className="text-brand">◆</span>
+          <span className="hidden sm:inline"> SpecLino</span>
         </Link>
         <WorkspacePill />
         <ProjectPill />
@@ -35,7 +36,9 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
           >
             ⌘K
           </button>
-          <ThemeToggle />
+          <span className="hidden sm:inline-flex">
+            <ThemeToggle />
+          </span>
           <AccountMenu />
         </div>
       </div>

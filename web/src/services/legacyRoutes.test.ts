@@ -10,4 +10,7 @@ describe('legacyRedirect', () => {
     expect(legacyRedirect('/runs/abc')).toBeNull()
     expect(legacyRedirect('/workspaces/ws/other')).toBeNull()
   })
+  it('壊れた % を含むパスは例外にせず null', () => {
+    expect(legacyRedirect('/workspaces/%E0/repositories')).toBeNull()
+  })
 })

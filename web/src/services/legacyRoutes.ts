@@ -7,6 +7,11 @@ const LEGACY = /^\/workspaces\/([^/]+)\/(mcp-tokens|repositories)\/?$/
 export function legacyRedirect(pathname: string): string | null {
   const m = LEGACY.exec(pathname)
   if (!m) return null
-  const slug = decodeURIComponent(m[1])
+  let slug: string
+  try {
+    slug = decodeURIComponent(m[1])
+  } catch {
+    return null
+  }
   return paths.settings(slug, m[2] === 'mcp-tokens' ? 'tokens' : 'repositories')
 }

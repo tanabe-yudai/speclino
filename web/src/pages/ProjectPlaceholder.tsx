@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
+import { ApiError } from '@/api/errors'
 import { listRuns } from '@/api/reviewRuns'
 import { Panel, PanelTitle } from '@/components/app/Panel'
 import { RunRow } from '@/components/app/RunRow'
+import { ErrorState } from '@/components/ErrorState'
 import { LoadingState } from '@/components/LoadingState'
 import type { ReviewRunSummary } from '@/types/run'
 
@@ -11,16 +13,26 @@ export function ProjectPlaceholder() {
   const { owner, repo } = useParams<{ owner: string; repo: string }>()
   const fullName = `${owner}/${repo}`
   const [runs, setRuns] = useState<ReviewRunSummary[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     let alive = true
     listRuns(50)
       .then((all) => alive && setRuns(all.filter((r) => r.repo_full_name === fullName)))
-      .catch(() => alive && setRuns([]))
+      .catch((err: unknown) => {
+        if (alive) setError(err instanceof ApiError ? err.message : '検査の一覧を取得できませんでした')
+      })
     return () => {
       alive = false
     }
-  }, [fullName])
+  }, [fullName, attempt])
+
+  function retry() {
+    setError(null)
+    setRuns(null)
+    setAttempt((n) => n + 1)
+  }
 
   return (
     <div className="space-y-6">
@@ -32,7 +44,9 @@ export function ProjectPlaceholder() {
         <PanelTitle>このプロジェクトの画面は準備中です</PanelTitle>
         <p className="mt-1 text-sm text-ink-2">仕様・要求・規約の状態はここにまとまる予定です。今は検査の履歴だけを出しています。</p>
       </Panel>
-      {runs === null ? (
+      {error ? (
+        <ErrorState message={error} onRetry={retry} />
+      ) : runs === null ? (
         <LoadingState />
       ) : runs.length === 0 ? (
         <p className="text-sm text-ink-3">まだ検査がありません。</p>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Outlet } from 'react-router-dom'
 import { getMe } from '@/api/me'
 import { ApiError } from '@/api/errors'
+import { ErrorState } from '@/components/ErrorState'
 import { MeContext } from '@/hooks/meContext'
 import type { Me } from '@/types/me'
 import { CommandPalette } from './CommandPalette'
@@ -44,7 +45,7 @@ export function AppShell() {
     <MeContext.Provider value={value}>
       <TopBar onOpenPalette={() => setPaletteOpen(true)} />
       <main className="mx-auto w-full max-w-6xl px-4 pt-6 pb-16 sm:px-6">
-        <Outlet />
+        {error && !me ? <ErrorState message={error} onRetry={reload} /> : <Outlet />}
       </main>
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
     </MeContext.Provider>

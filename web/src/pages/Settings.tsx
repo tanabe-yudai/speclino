@@ -2,6 +2,7 @@ import { useParams, useSearchParams } from 'react-router-dom'
 import { RepositoriesTab } from '@/components/settings/RepositoriesTab'
 import { TokensTab } from '@/components/settings/TokensTab'
 import { ErrorState } from '@/components/ErrorState'
+import { LoadingState } from '@/components/LoadingState'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useMe } from '@/hooks/useMe'
 import { pickSettingsTab, visibleSettingsTabs } from '@/services/settingsTabs'
@@ -15,6 +16,7 @@ export function Settings() {
   const { me } = useMe()
   const [params, setParams] = useSearchParams()
   if (!slug) return <ErrorState message="ワークスペースが指定されていません" />
+  if (!me) return <LoadingState />
   const membership = me?.workspaces.find((w) => w.slug === slug) ?? null
   const visible = visibleSettingsTabs(membership?.role ?? null)
   const tab = pickSettingsTab(params.get('tab'), visible)

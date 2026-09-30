@@ -46,6 +46,7 @@
 }
 
 :root {
+  color-scheme: light;
   --radius: 16px;
   --bg: #f5f7fb;
   --glow-a: #dbe6ff;
@@ -90,6 +91,7 @@
 }
 
 .dark {
+  color-scheme: dark;
   --bg: #0b1020;
   --glow-a: rgb(79 107 255 / 0.2);
   --glow-b: rgb(39 183 168 / 0.14);

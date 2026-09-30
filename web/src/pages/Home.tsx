@@ -20,6 +20,8 @@ export function Home() {
   const [repos, setRepos] = useState<RegisteredRepository[] | null>(null)
   const [runs, setRuns] = useState<ReviewRunSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [reposError, setReposError] = useState<string | null>(null)
+  const [reposAttempt, setReposAttempt] = useState(0)
   const slug = workspace?.slug
 
   const fetchRuns = useCallback(() => {
@@ -43,13 +45,23 @@ export function Home() {
     let alive = true
     listRepositories(slug)
       .then((r) => alive && setRepos(r))
-      .catch(() => alive && setRepos([]))
+      .catch((err: unknown) => {
+        if (alive) setReposError(err instanceof ApiError ? err.message : 'プロジェクトの一覧を取得できませんでした')
+      })
     return () => {
       alive = false
     }
-  }, [slug])
+  }, [slug, reposAttempt])
 
-  if (me && me.workspaces.length === 0) {
+  function retryRepos() {
+    setReposError(null)
+    setRepos(null)
+    setReposAttempt((n) => n + 1)
+  }
+
+  if (!me) return <LoadingState />
+
+  if (me.workspaces.length === 0) {
     return (
       <Panel className="mx-auto max-w-xl text-center">
         <PanelTitle className="text-base">所属しているワークスペースがありません</PanelTitle>
@@ -68,7 +80,8 @@ export function Home() {
 
       <section className="space-y-3">
         <h2 className="text-sm font-semibold text-ink-2">プロジェクト</h2>
-        {repos === null && slug && <LoadingState message="プロジェクトを取得しています…" />}
+        {repos === null && reposError === null && slug && <LoadingState message="プロジェクトを取得しています…" />}
+        {reposError && <ErrorState message={reposError} onRetry={retryRepos} />}
         {repos !== null && repos.length === 0 && (
           <Panel className="text-sm text-ink-2">
             まだリポジトリが登録されていません。
@@ -83,12 +96,12 @@ export function Home() {
           </Panel>
         )}
         {repos !== null && repos.length > 0 && slug && (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {repos.map((r) => (
               <Link
                 key={r.repo_full_name}
                 to={paths.project(slug, r.repo_full_name)}
-                className="row block p-5"
+                className="row block min-w-0 p-5"
               >
                 <p className="truncate font-semibold">{r.repo_full_name.split('/')[1]}</p>
                 <p className="mt-1 truncate font-mono text-xs text-ink-3">{r.repo_full_name}</p>

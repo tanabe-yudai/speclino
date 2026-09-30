@@ -19,3 +19,9 @@ export interface AuthContextValue {
   enterDevMode: () => void
   signOut: () => Promise<void>
 }
+
+/** ログイン画面へ転送される前にいた場所（react-router の location の一部）。 */
+export interface LoginFrom {
+  pathname: string
+  search?: string
+}
