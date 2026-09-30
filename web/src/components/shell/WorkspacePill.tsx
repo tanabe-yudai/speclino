@@ -28,7 +28,7 @@ export function WorkspacePill() {
       <DropdownMenuContent align="start">
         <DropdownMenuLabel>ワークスペース</DropdownMenuLabel>
         {me.workspaces.map((w) => (
-          <DropdownMenuItem key={w.slug} onSelect={() => navigate(paths.settings(w.slug))}>
+          <DropdownMenuItem key={w.slug} onSelect={() => navigate(paths.workspace(w.slug))}>
             <span className="truncate">{w.name ?? w.slug}</span>
             <span className="ml-auto text-xs text-ink-3">{WORKSPACE_ROLE_LABELS[w.role]}</span>
           </DropdownMenuItem>

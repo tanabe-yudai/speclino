@@ -1,7 +1,5 @@
 import { ChevronDown } from 'lucide-react'
-import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { listRepositories } from '@/api/repositories'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,8 +9,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useCurrentWorkspace } from '@/hooks/useCurrentWorkspace'
+import { useWorkspaceProjects } from '@/hooks/useWorkspaceProjects'
 import { paths } from '@/services/paths'
-import type { RegisteredRepository } from '@/types/repository'
 import { PILL_CLASS } from './pill'
 
 /** 今のワークスペースに登録されたリポジトリ（プロジェクト）の切り替え。 */
@@ -20,19 +18,8 @@ export function ProjectPill() {
   const workspace = useCurrentWorkspace()
   const { owner, repo } = useParams<{ owner?: string; repo?: string }>()
   const navigate = useNavigate()
-  const [repos, setRepos] = useState<RegisteredRepository[]>([])
   const slug = workspace?.slug
-
-  useEffect(() => {
-    if (!slug) return
-    let alive = true
-    listRepositories(slug)
-      .then((r) => alive && setRepos(r))
-      .catch(() => alive && setRepos([]))
-    return () => {
-      alive = false
-    }
-  }, [slug])
+  const repos = useWorkspaceProjects(slug).projects ?? []
 
   if (!slug) return null
   const current = owner && repo ? `${owner}/${repo}` : null
