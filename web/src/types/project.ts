@@ -75,3 +75,10 @@ export interface NextAction {
   title: string | null
   hint: string
 }
+
+export interface RequirementGroup {
+  key: string
+  specPath: string | null
+  behaviorId: string
+  items: RequirementView[]
+}

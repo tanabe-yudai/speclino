@@ -1,0 +1,8 @@
+import type { VerdictCounts } from '@/types/project'
+
+/** 適合の割合（0〜1）。未解析も分母に入れる。要求が 1 件も無ければ null（0% と言わない）。 */
+export function healthRatio(counts: VerdictCounts | null, unanalyzed = 0): number | null {
+  if (!counts) return null
+  const total = counts.VERIFIED_IN_SCOPE + counts.VIOLATED + counts.UNKNOWN + counts.REVIEW + unanalyzed
+  return total === 0 ? null : counts.VERIFIED_IN_SCOPE / total
+}
