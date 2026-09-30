@@ -2,17 +2,24 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import uuid as _uuid
 from pathlib import Path
 
+import pytest
+
+from speclino.adapters.storage.fs import FileSystemBlobStore
 from speclino.domain.finding import Finding, Verdict
 from speclino.domain.policy import PolicyApplicability, PolicyPackage, PolicyRule
 from speclino.domain.semantic_diff import RuleDelta, SemanticDiff
 from speclino.domain.spec_ir import SpecIR
 from speclino.services.project_overview import (
+    ArtifactsIncomplete,
     build_policies,
     build_requirements,
     count_verdicts,
+    load_spec_irs,
     requirement_verdicts,
     worst_verdict,
 )
@@ -173,3 +180,28 @@ def test_policies_combine_team_rules_and_project_findings() -> None:
 
 def test_policies_without_team_or_gate() -> None:
     assert build_policies([_finding("R-1", "VIOLATED")], None, None) == []
+
+
+def _put(store: FileSystemBlobStore, run_id: _uuid.UUID, name: str, spec: SpecIR) -> None:
+    asyncio.run(store.put(f"runs/{run_id}/{name}", spec.model_dump_json().encode()))
+
+
+def test_missing_behavior_spec_ir_is_incomplete(tmp_path: Path) -> None:
+    store, run_id, spec = FileSystemBlobStore(tmp_path), _uuid.uuid4(), _spec()
+    other = spec.model_copy(update={"behavior_id": "refund"})
+    _put(store, run_id, "spec-ir.json", spec)  # 複数 behavior でも先頭の spec-ir.json は残る
+    _put(store, run_id, f"spec-ir.{spec.behavior_id}.json", spec)
+    with pytest.raises(FileNotFoundError):  # refund のファイルが無い
+        asyncio.run(load_spec_irs(store, run_id, [spec.behavior_id, "refund"]))
+    _put(store, run_id, "spec-ir.refund.json", other)
+    assert [
+        s.behavior_id
+        for s in asyncio.run(load_spec_irs(store, run_id, [spec.behavior_id, "refund"]))
+    ] == [spec.behavior_id, "refund"]
+
+
+def test_single_behavior_must_match_manifest(tmp_path: Path) -> None:
+    store, run_id, spec = FileSystemBlobStore(tmp_path), _uuid.uuid4(), _spec()
+    _put(store, run_id, "spec-ir.json", spec)
+    with pytest.raises(ArtifactsIncomplete):
+        asyncio.run(load_spec_irs(store, run_id, ["refund"]))
