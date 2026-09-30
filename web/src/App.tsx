@@ -6,6 +6,7 @@ import { legacyRedirect } from './services/legacyRoutes'
 import { GithubCallback } from './pages/GithubCallback'
 import { Home } from './pages/Home'
 import { HomeRedirect } from './pages/HomeRedirect'
+import { Landing } from './pages/Landing'
 import { Login } from './pages/Login'
 import { Project } from './pages/Project'
 import { RunDetail } from './pages/RunDetail'
@@ -23,8 +24,7 @@ function App() {
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<Login />} />
-          {/* ランディングページは段 3。それまでは / をホームへ送る */}
-          <Route path="/" element={<Navigate to="/app" replace />} />
+          <Route path="/" element={<Landing />} />
           <Route element={<RequireAuth />}>
             <Route path="/app" element={<HomeRedirect />} />
             <Route path="/w/:slug" element={<Home />} />
