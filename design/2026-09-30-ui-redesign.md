@@ -75,7 +75,8 @@ AI とのチャットは今回作らない（別ストーリー。最初の版�
 | --- | --- | --- |
 | `/` | ランディングページ（ログイン済みなら `/app` へ） | 未ログイン |
 | `/login` | ログイン | 未ログイン |
-| `/app` | ホーム: 所属ワークスペースのプロジェクトのカード（健康状態）と最近の検査 | メンバー |
+| `/app` | 所属の先頭のワークスペースのホーム（`/w/:slug`）へ転送。所属が無ければ uid を出す | メンバー |
+| `/w/:slug` | ワークスペースのホーム: プロジェクトのカード（健康状態）と最近の検査 | メンバー |
 | `/w/:slug/p/:owner/:repo` | プロジェクト（S45） | メンバー |
 | `/w/:slug/policies` | チーム規約（S43） | メンバー（承認は owner / approver） |
 | `/w/:slug/settings` | 設定: リポジトリ登録・MCP トークン・メンバー（今の個別画面を 1 か所に） | メンバー（変更は owner） |
@@ -103,8 +104,14 @@ AI とのチャットは今回作らない（別ストーリー。最初の版�
 `GET /api/workspaces/{slug}/projects/{project_id}/overview`（メンバーだけ。それ以外は 404）。
 その project の**最新の完了した検査**（`exec_state` が completed または awaiting_answer）の成果物から組み立てる:
 
-- 要求: 成果物の Spec IR（`spec-ir.json`）のルール（ID・題・振る舞い・承認の有無・`tests` の数・仕様ファイルと行）
-  × findings の判定。承認切れ = 承認の内容ハッシュ不一致の finding がある要求
+- 要求: 成果物の Spec IR（`spec-ir.json`、behavior が複数なら `spec-ir.<behavior>.json`）のルール（ID・題・振る舞い・
+  承認の状態・`tests` の数・仕様ファイルと行）× findings の判定（要求ごとに最も重いもの。finding が無ければ未解析）
+- 承認の状態: 承認済み = `approval_ref` がその Spec IR の承認記録にある。承認切れ = 承認済みでなく、
+  semantic diff で内容が変わった（`changed`）要求、または head から消えて `stale_approval` の finding が残る要求。
+  未承認 = それ以外。承認済みかどうかは検査器と同じく `approval_ref` で決める（仕様本文のハッシュ不一致は検証エラーで
+  run が失敗する。IR ハッシュの不一致は警告で、検査器は承認として扱う）
+- 未解析 = finding の無い要求と Spec IR の `unextracted`。健康状態の分母に入れる
+- 成果物（manifest の behavior ごとの Spec IR）が欠けていれば `{"status": "unavailable"}`
 - 規約: manifest のチーム改訂番号 ＋ 規約の findings（`<rule>:<path>`）をルールごとに集計
 - 検査履歴: その project の run 一覧（上限 20）
 - 検査がまだ無ければ `{"status": "not_checked"}` を返し、画面は「まだ検査されていない」とだけ出す（推測で埋めない）
