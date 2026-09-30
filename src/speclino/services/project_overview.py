@@ -7,12 +7,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from collections import Counter
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Any
 
-from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +26,7 @@ from speclino.domain.finding import Finding, Verdict, VerdictCounts
 from speclino.domain.policy import PolicyPackage
 from speclino.domain.project_overview import (
     ApprovalState,
+    OverviewStatus,
     PolicyView,
     ProjectOverview,
     ProjectSummary,
@@ -35,6 +37,8 @@ from speclino.domain.semantic_diff import SemanticDiff
 from speclino.domain.spec_ir import Rule, SpecIR
 from speclino.ports.blob_store import BlobStore
 from speclino.services.workspaces import WorkspaceNotFound, require_member
+
+logger = logging.getLogger(__name__)
 
 # 重い順（web/src/services/labels.ts の VERDICT_ORDER と同じ）
 VERDICT_SEVERITY: tuple[Verdict, ...] = ("VIOLATED", "REVIEW", "UNKNOWN", "VERIFIED_IN_SCOPE")
@@ -182,6 +186,23 @@ def build_policies(
 HISTORY_LIMIT = 20
 
 
+class ArtifactsIncomplete(LookupError):
+    """run の成果物（Spec IR・gate・チーム規約の改訂）が揃っていない。"""
+
+
+@dataclass(frozen=True)
+class _Assembled:
+    """最新の完了した run から組み立てた要求と規約（カードと画面で同じものを使う）。"""
+
+    spec_irs: list[SpecIR]
+    requirements: list[RequirementView]
+    policies: list[PolicyView]
+    counts: VerdictCounts
+    unanalyzed: int
+    team_name: str | None
+    revision: int | None
+
+
 def run_view(run: ReviewRun) -> RunView:
     return RunView(
         id=str(run.id),
@@ -200,41 +221,15 @@ async def _findings(session: AsyncSession, run_id: uuid.UUID) -> list[Finding]:
     ]
 
 
-async def _summary(session: AsyncSession, blobs: BlobStore, project: Project) -> ProjectSummary:
-    latest = await ReviewRunRepository(session).latest_completed(project.id)
-    counts: VerdictCounts | None = None
-    unanalyzed: int | None = None
-    if latest is not None:
-        verdicts = requirement_verdicts(await _findings(session, latest.id))
-        counts = count_verdicts(verdicts.values())
-        raw = await _optional_json(blobs, latest.id, "findings.json")
-        total = raw.get("coverage", {}).get("requirements_total") if isinstance(raw, dict) else None
-        if isinstance(total, int):
-            unanalyzed = max(0, total - len(verdicts))
-    return ProjectSummary(
-        id=str(project.id),
-        repo_full_name=project.repo_full_name,
-        default_branch=project.default_branch,
-        latest_run=run_view(latest) if latest else None,
-        counts=counts,
-        unanalyzed=unanalyzed,
-    )
-
-
-async def list_projects(
-    session: AsyncSession, blobs: BlobStore, slug: str, uid: str
-) -> list[ProjectSummary]:
-    await require_member(session, slug, uid)
-    stmt = select(Project).where(Project.team == slug).order_by(Project.repo_full_name)
-    return [await _summary(session, blobs, p) for p in (await session.execute(stmt)).scalars()]
-
-
 async def _json(blobs: BlobStore, run_id: uuid.UUID, name: str) -> Any:
     return json.loads(await blobs.get(f"runs/{run_id}/{name}"))
 
 
-class ArtifactsIncomplete(LookupError):
-    """manifest にある behavior の Spec IR が揃っていない。"""
+async def _optional_json(blobs: BlobStore, run_id: uuid.UUID, name: str) -> Any | None:
+    try:
+        return await _json(blobs, run_id, name)
+    except FileNotFoundError:
+        return None
 
 
 async def load_spec_irs(blobs: BlobStore, run_id: uuid.UUID, expected: list[str]) -> list[SpecIR]:
@@ -262,11 +257,81 @@ async def load_spec_irs(blobs: BlobStore, run_id: uuid.UUID, expected: list[str]
     return specs
 
 
-async def _optional_json(blobs: BlobStore, run_id: uuid.UUID, name: str) -> Any | None:
-    try:
-        return await _json(blobs, run_id, name)
-    except (FileNotFoundError, OSError):
-        return None
+async def _assemble(session: AsyncSession, blobs: BlobStore, run: ReviewRun) -> _Assembled:
+    """最新の完了した run の要求と規約を組み立てる。
+
+    成果物が欠けている・壊れている・チーム規約の改訂が引けないときは例外
+    （呼び出し側で unavailable）。
+    """
+    manifest = run.manifest or {}
+    expected = [
+        a["behavior_id"]
+        for a in manifest.get("analysis", [])
+        if isinstance(a, dict) and "behavior_id" in a
+    ]
+    spec_irs = await load_spec_irs(blobs, run.id, expected)
+    raw_diff = await _optional_json(blobs, run.id, "semantic-diff.json")
+    diff = SemanticDiff.model_validate(raw_diff) if raw_diff is not None else None
+    # ゲートを計算した run では gate.json は必ず書かれる（reporter/json_out.py）
+    gate = await (_json if run.gate_status is not None else _optional_json)(
+        blobs, run.id, "gate.json"
+    )
+
+    team_name, revision = manifest.get("policy_team"), manifest.get("policy_revision")
+    team = None
+    if isinstance(team_name, str) and isinstance(revision, int):
+        found = await PolicyRevisionRepository(session).revision_at(team_name, revision)
+        if found is None:
+            raise ArtifactsIncomplete(f"{team_name}#{revision}")
+        team = found.package
+
+    findings = await _findings(session, run.id)
+    requirements = build_requirements(spec_irs, findings, diff)
+    present = [r for r in requirements if not r.removed]
+    return _Assembled(
+        spec_irs=spec_irs,
+        requirements=requirements,
+        policies=build_policies(findings, gate, team),
+        counts=count_verdicts(r.verdict for r in present if r.verdict is not None),
+        unanalyzed=sum(1 for r in present if r.verdict is None)
+        + sum(len(s.unextracted) for s in spec_irs),
+        team_name=team_name if isinstance(team_name, str) else None,
+        revision=revision if isinstance(revision, int) else None,
+    )
+
+
+async def _latest(
+    session: AsyncSession, blobs: BlobStore, project: Project
+) -> tuple[ProjectSummary, ReviewRun | None, _Assembled | None]:
+    latest = await ReviewRunRepository(session).latest_completed(project.id)
+    assembled: _Assembled | None = None
+    status: OverviewStatus = "not_checked"
+    if latest is not None:
+        try:
+            assembled = await _assemble(session, blobs, latest)
+            status = "ok"
+        except Exception:  # noqa: BLE001 - 読めない成果物は判定を出さず unavailable として見せる
+            logger.warning("run %s の成果物を読めない", latest.id, exc_info=True)
+            status = "unavailable"
+    summary = ProjectSummary(
+        id=str(project.id),
+        repo_full_name=project.repo_full_name,
+        default_branch=project.default_branch,
+        status=status,
+        latest_run=run_view(latest) if latest else None,
+        counts=assembled.counts if assembled else None,
+        unanalyzed=assembled.unanalyzed if assembled else None,
+    )
+    return summary, latest, assembled
+
+
+async def list_projects(
+    session: AsyncSession, blobs: BlobStore, slug: str, uid: str
+) -> list[ProjectSummary]:
+    await require_member(session, slug, uid)
+    stmt = select(Project).where(Project.team == slug).order_by(Project.repo_full_name)
+    projects = list((await session.execute(stmt)).scalars())
+    return [(await _latest(session, blobs, p))[0] for p in projects]
 
 
 async def load_overview(
@@ -276,49 +341,29 @@ async def load_overview(
     project = await ProjectRepository(session).get(project_id)
     if project is None or project.team != slug:
         raise WorkspaceNotFound(slug)
-    runs = ReviewRunRepository(session)
-    summary = await _summary(session, blobs, project)
-    history = [run_view(r) for r in await runs.list_for_project(project.id, HISTORY_LIMIT)]
-    latest = await runs.latest_completed(project.id)
-    if latest is None:
-        return ProjectOverview(status="not_checked", project=summary, runs=history)
-    manifest = latest.manifest or {}
-    expected = [
-        a["behavior_id"]
-        for a in manifest.get("analysis", [])
-        if isinstance(a, dict) and "behavior_id" in a
+    history = [
+        run_view(r)
+        for r in await ReviewRunRepository(session).list_for_project(project.id, HISTORY_LIMIT)
     ]
-    try:
-        spec_irs = await load_spec_irs(blobs, latest.id, expected)
-        raw_diff = await _optional_json(blobs, latest.id, "semantic-diff.json")
-        diff = SemanticDiff.model_validate(raw_diff) if raw_diff is not None else None
-        gate = await _optional_json(blobs, latest.id, "gate.json")
-    except (FileNotFoundError, OSError, ValueError, ValidationError, ArtifactsIncomplete):
+    summary, latest, a = await _latest(session, blobs, project)
+    if latest is None or a is None:
         return ProjectOverview(
-            status="unavailable", project=summary, run=run_view(latest), runs=history
+            status=summary.status,
+            project=summary,
+            run=run_view(latest) if latest else None,
+            runs=history,
         )
-
-    team_name, revision = manifest.get("policy_team"), manifest.get("policy_revision")
-    team = None
-    if isinstance(team_name, str) and isinstance(revision, int):
-        found = await PolicyRevisionRepository(session).revision_at(team_name, revision)
-        team = found.package if found is not None else None
-
-    findings = await _findings(session, latest.id)
-    requirements = build_requirements(spec_irs, findings, diff)
-    present = [r for r in requirements if not r.removed]
     return ProjectOverview(
         status="ok",
         project=summary,
         run=run_view(latest),
-        counts=count_verdicts(r.verdict for r in present if r.verdict is not None),
-        unanalyzed=sum(1 for r in present if r.verdict is None)
-        + sum(len(s.unextracted) for s in spec_irs),
-        unextracted=[u for s in spec_irs for u in s.unextracted],
-        unapproved=sum(1 for r in requirements if r.approval != "approved"),
-        policy_team=team_name if isinstance(team_name, str) else None,
-        policy_revision=revision if isinstance(revision, int) else None,
-        requirements=requirements,
-        policies=build_policies(findings, gate, team),
+        counts=a.counts,
+        unanalyzed=a.unanalyzed,
+        unextracted=[u for s in a.spec_irs for u in s.unextracted],
+        unapproved=sum(1 for r in a.requirements if r.approval != "approved"),
+        policy_team=a.team_name,
+        policy_revision=a.revision,
+        requirements=a.requirements,
+        policies=a.policies,
         runs=history,
     )

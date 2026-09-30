@@ -19,6 +19,7 @@ describe('buildCommands', () => {
             id: 'p1',
             repo_full_name: 'example-org/example-repo',
             default_branch: 'main',
+            status: 'not_checked',
             latest_run: null,
             counts: null,
             unanalyzed: null,

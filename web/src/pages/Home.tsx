@@ -12,6 +12,7 @@ import { useMe } from '@/hooks/useMe'
 import { useWorkspaceProjects } from '@/hooks/useWorkspaceProjects'
 import { healthRatio } from '@/services/health'
 import { paths } from '@/services/paths'
+import { pickWorkspace } from '@/services/workspaces'
 import type { ProjectSummary } from '@/types/project'
 import type { ReviewRunSummary } from '@/types/run'
 
@@ -21,11 +22,13 @@ function ProjectCard({ slug, project }: { slug: string; project: ProjectSummary 
   const c = project.counts
   return (
     <Link to={paths.project(slug, project.repo_full_name)} className="row flex min-w-0 items-center gap-4 p-5">
-      <HealthRing ratio={healthRatio(c, project.unanalyzed ?? 0)} />
+      <HealthRing ratio={c && project.unanalyzed !== null ? healthRatio(c, project.unanalyzed) : null} />
       <div className="min-w-0 flex-1">
         <p className="truncate font-semibold">{name}</p>
         <p className="mt-0.5 truncate font-mono text-xs text-ink-3">{project.repo_full_name}</p>
-        {c ? (
+        {project.status === 'unavailable' ? (
+          <p className="mt-2 text-xs text-ink-3">最新の検査の成果物を読めません</p>
+        ) : c ? (
           <p className="mt-2 flex flex-wrap gap-x-3 text-xs text-ink-2">
             <span className="text-bad">違反 {c.VIOLATED}</span>
             <span className="text-rev">要確認 {c.REVIEW}</span>
@@ -44,7 +47,7 @@ function ProjectCard({ slug, project }: { slug: string; project: ProjectSummary 
 export function Home() {
   const { me } = useMe()
   const { slug: urlSlug } = useParams<{ slug?: string }>()
-  const workspace = me?.workspaces.find((w) => w.slug === urlSlug) ?? (urlSlug ? null : me?.workspaces[0] ?? null)
+  const workspace = pickWorkspace(me?.workspaces ?? [], urlSlug)
   const slug = workspace?.slug
   const { projects, error: projectsError, retry: retryProjects } = useWorkspaceProjects(slug)
   const [runs, setRuns] = useState<ReviewRunSummary[] | null>(null)

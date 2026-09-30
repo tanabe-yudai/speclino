@@ -59,13 +59,14 @@ class ProjectSummary(IRModel):
     id: str
     repo_full_name: str
     default_branch: str
+    status: OverviewStatus = Field(description="latest_run の成果物を読めたか（overview と同じ）")
     latest_run: RunView | None = Field(
         description="最新の完了した検査（completed / awaiting_answer）"
     )
     counts: VerdictCounts | None = Field(description="latest_run の要求ごとの判定の件数")
     unanalyzed: int | None = Field(
         default=None,
-        description="判定の無い要求の数（findings.json の coverage から）。読めなければ None",
+        description="finding の無い要求と抽出しきれなかった要求の数。読めなければ None",
     )
 
 

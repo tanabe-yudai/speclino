@@ -6,3 +6,8 @@ export function healthRatio(counts: VerdictCounts | null, unanalyzed = 0): numbe
   const total = counts.VERIFIED_IN_SCOPE + counts.VIOLATED + counts.UNKNOWN + counts.REVIEW + unanalyzed
   return total === 0 ? null : counts.VERIFIED_IN_SCOPE / total
 }
+
+/** 表示用の百分率。切り捨てる（違反が 1 件でもあれば 100 と出さない）。 */
+export function healthPercent(ratio: number): number {
+  return Math.floor(ratio * 100)
+}

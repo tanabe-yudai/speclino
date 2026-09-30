@@ -24,7 +24,7 @@ export function PoliciesPanel({ overview }: { overview: ProjectOverview }) {
         <ul className="divide-y overflow-hidden rounded-lg border">
           {overview.policies.map((p) => (
             <li key={p.rule_id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-sm">
-              <code className="shrink-0 font-mono text-xs">{p.rule_id}</code>
+              <code className="min-w-0 font-mono text-xs break-all">{p.rule_id}</code>
               <span className="min-w-0 flex-1 truncate">{p.title ?? '—'}</span>
               <span className="text-xs text-ink-3">{p.origin === 'team' ? 'チーム' : 'プロジェクト'}</span>
               <span className="text-xs text-ink-3">{p.level ? POLICY_LEVEL_LABELS[p.level] : '—'}</span>

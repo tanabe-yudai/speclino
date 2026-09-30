@@ -139,3 +139,33 @@ async def test_missing_artifacts_are_unavailable_not_500(ctx: Ctx) -> None:
         and body["run"]["id"] == run_id
         and body["requirements"] == []
     )
+
+
+async def test_corrupt_artifact_does_not_break_the_list(ctx: Ctx) -> None:
+    c, slug, repo, base, head, _, pid, blobs = ctx
+    run_id = await _run(c, repo, head, base)
+    (blobs / "runs" / run_id / "spec-ir.json").write_text("{not json")
+    res = await c.get(f"/api/workspaces/{slug}/projects", headers=DEV)
+    assert res.status_code == 200, res.text
+    [summary] = res.json()
+    assert summary["status"] == "unavailable" and summary["counts"] is None
+    assert summary["latest_run"]["id"] == run_id
+    body = (await c.get(f"/api/workspaces/{slug}/projects/{pid}/overview", headers=DEV)).json()
+    assert body["status"] == "unavailable"
+
+
+async def test_card_and_page_count_the_same(ctx: Ctx) -> None:
+    c, slug, repo, base, _, head2, pid, _ = ctx
+    await _run(c, repo, head2, base)  # 削除された要求（stale_approval）を含む run
+    [summary] = (await c.get(f"/api/workspaces/{slug}/projects", headers=DEV)).json()
+    body = (await c.get(f"/api/workspaces/{slug}/projects/{pid}/overview", headers=DEV)).json()
+    assert summary["status"] == "ok"
+    assert summary["counts"] == body["counts"] and summary["unanalyzed"] == body["unanalyzed"]
+
+
+async def test_missing_gate_json_is_unavailable(ctx: Ctx) -> None:
+    c, slug, repo, base, head, _, pid, blobs = ctx
+    run_id = await _run(c, repo, head, base)
+    (blobs / "runs" / run_id / "gate.json").unlink()
+    body = (await c.get(f"/api/workspaces/{slug}/projects/{pid}/overview", headers=DEV)).json()
+    assert body["status"] == "unavailable"

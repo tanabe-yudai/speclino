@@ -17,10 +17,13 @@ export interface ProjectRun {
   created_at: string | null
 }
 
+export type OverviewStatus = 'ok' | 'not_checked' | 'unavailable'
+
 export interface ProjectSummary {
   id: string
   repo_full_name: string
   default_branch: string
+  status: OverviewStatus
   latest_run: ProjectRun | null
   counts: VerdictCounts | null
   unanalyzed: number | null
@@ -51,7 +54,7 @@ export interface PolicyView {
 }
 
 export interface ProjectOverview {
-  status: 'ok' | 'not_checked' | 'unavailable'
+  status: OverviewStatus
   project: ProjectSummary
   run: ProjectRun | null
   counts: VerdictCounts | null

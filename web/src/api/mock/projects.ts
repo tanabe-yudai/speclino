@@ -8,12 +8,12 @@ const RUN = {
 
 export const MOCK_PROJECTS: ProjectSummary[] = [
   {
-    id: '00000000-0000-4000-8000-000000000001', repo_full_name: 'example-org/orders', default_branch: 'main',
+    id: '00000000-0000-4000-8000-000000000001', repo_full_name: 'example-org/orders', default_branch: 'main', status: 'ok',
     latest_run: RUN, counts: { VERIFIED_IN_SCOPE: 1, VIOLATED: 1, UNKNOWN: 1, REVIEW: 1 }, unanalyzed: 0,
   },
   {
     id: '00000000-0000-4000-8000-000000000002', repo_full_name: 'example-org/a-repository-with-a-very-long-name-for-layout',
-    default_branch: 'main', latest_run: null, counts: null, unanalyzed: null,
+    default_branch: 'main', status: 'not_checked', latest_run: null, counts: null, unanalyzed: null,
   },
 ]
 

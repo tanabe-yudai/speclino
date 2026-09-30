@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { healthRatio } from './health'
+import { healthPercent, healthRatio } from './health'
 
 describe('healthRatio', () => {
   it('適合の割合', () => {
@@ -11,5 +11,13 @@ describe('healthRatio', () => {
   it('判定が無ければ null（0% と言わない）', () => {
     expect(healthRatio(null)).toBeNull()
     expect(healthRatio({ VERIFIED_IN_SCOPE: 0, VIOLATED: 0, UNKNOWN: 0, REVIEW: 0 })).toBeNull()
+  })
+})
+
+describe('healthPercent', () => {
+  it('切り捨てる（違反が 1 件でもあれば 100 と出さない）', () => {
+    expect(healthPercent(0.995)).toBe(99)
+    expect(healthPercent(1)).toBe(100)
+    expect(healthPercent(0)).toBe(0)
   })
 })

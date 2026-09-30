@@ -7,10 +7,13 @@ import type { ProjectOverview, ProjectSummary } from '../types/project'
 
 const USE_MOCK = import.meta.env.VITE_MOCK === '1'
 
-const projectsCache = createRequestCache<ProjectSummary[]>((slug) =>
+// 30 秒で取り直す: 検査が終わったあとにホームのカードが古いまま残らないように
+const projectsCache = createRequestCache<ProjectSummary[]>(
+  (slug) =>
   USE_MOCK
     ? Promise.resolve(MOCK_PROJECTS)
     : apiFetch<ProjectSummary[]>(`/api/workspaces/${encodeURIComponent(slug)}/projects`),
+  { ttlMs: 30_000 },
 )
 
 export function listProjects(slug: string): Promise<ProjectSummary[]> {

@@ -1,8 +1,9 @@
 import { cn } from '@/lib/utils'
+import { healthPercent } from '@/services/health'
 
 /** 健康状態のリング（適合の割合）。ratio が null なら判定なし。 */
 export function HealthRing({ ratio, size = 'sm' }: { ratio: number | null; size?: 'sm' | 'lg' }) {
-  const pct = ratio === null ? 0 : Math.round(ratio * 100)
+  const pct = ratio === null ? 0 : healthPercent(ratio)
   const outer = size === 'lg' ? 'size-24' : 'size-12'
   const inner = size === 'lg' ? 'size-18 text-xl' : 'size-9 text-xs'
   return (
