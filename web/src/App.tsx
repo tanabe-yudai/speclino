@@ -1,5 +1,4 @@
 import { Navigate, Route, Routes, BrowserRouter, useLocation } from 'react-router-dom'
-import './App.css'
 import { Toaster } from '@/components/ui/sonner'
 import { AuthProvider } from './auth/AuthProvider'
 import { RequireAuth } from './components/RequireAuth'
