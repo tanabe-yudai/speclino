@@ -1,0 +1,179 @@
+/* SpecLino のデザイントークン（design/2026-09-30-ui-redesign.md 3.1「光の空間」）。
+   shadcn/ui の CSS 変数に当てはめ、.dark で切り替える。 */
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: "Inter", "Noto Sans JP", system-ui, sans-serif;
+  --font-heading: var(--font-sans);
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-surface: var(--surface);
+  --color-surface-solid: var(--surface-solid);
+  --color-ok: var(--ok);
+  --color-ok-bg: var(--ok-bg);
+  --color-bad: var(--bad);
+  --color-bad-bg: var(--bad-bg);
+  --color-unk: var(--unk);
+  --color-unk-bg: var(--unk-bg);
+  --color-rev: var(--rev);
+  --color-rev-bg: var(--rev-bg);
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 22px;
+}
+
+:root {
+  color-scheme: light;
+  --radius: 16px;
+  --bg: #f5f7fb;
+  --glow-a: #dbe6ff;
+  --glow-b: #d8f3ec;
+  --glow-c: #ece4ff;
+  --background: var(--bg);
+  --foreground: #131c33;
+  --ink-2: #3b4766;
+  --ink-3: #6b7896;
+  --surface: rgb(255 255 255 / 0.78);
+  --surface-solid: #ffffff;
+  --card: var(--surface);
+  --card-foreground: var(--foreground);
+  --popover: #ffffff;
+  --popover-foreground: var(--foreground);
+  --primary: #4f6bff;
+  --primary-foreground: #ffffff;
+  --brand-grad: linear-gradient(100deg, #4f6bff, #27b7a8);
+  --secondary: #ffffff;
+  --secondary-foreground: var(--foreground);
+  --muted: #eef1f8;
+  --muted-foreground: var(--ink-3);
+  --accent: #eef1f8;
+  --accent-foreground: var(--foreground);
+  --destructive: #c2410c;
+  --border: rgb(21 32 58 / 0.08);
+  --input: rgb(21 32 58 / 0.12);
+  --ring: #4f6bff;
+  --ok: #1a8f6e;
+  --ok-bg: #e4f6ef;
+  --bad: #c2410c;
+  --bad-bg: #fff1e6;
+  --unk: #6b5bd6;
+  --unk-bg: #efecff;
+  --rev: #a16207;
+  --rev-bg: #fdf6dc;
+  --shadow-1: 0 1px 0 rgb(255 255 255 / 0.9) inset, 0 8px 24px rgb(36 64 140 / 0.08);
+  --shadow-2: 0 1px 0 rgb(255 255 255 / 0.9) inset, 0 18px 48px rgb(36 64 140 / 0.14);
+  --row: #ffffff;
+  --row-edge: transparent;
+  --row-hover-edge: transparent;
+}
+
+.dark {
+  color-scheme: dark;
+  --bg: #0b1020;
+  --glow-a: rgb(79 107 255 / 0.2);
+  --glow-b: rgb(39 183 168 / 0.14);
+  --glow-c: rgb(140 110 255 / 0.14);
+  --foreground: #e8ecf8;
+  --ink-2: #b7c0da;
+  --ink-3: #7f8bab;
+  --surface: rgb(22 30 54 / 0.72);
+  --surface-solid: #19223e;
+  --popover: #141b31;
+  --primary: #6f86ff;
+  --brand-grad: linear-gradient(100deg, #6f86ff, #3fd0bf);
+  --secondary: #1b2440;
+  --muted: #1b2440;
+  --accent: #1b2440;
+  --destructive: #ff9a5c;
+  --border: rgb(255 255 255 / 0.08);
+  --input: rgb(255 255 255 / 0.14);
+  --ring: #6f86ff;
+  --ok: #4fd1a8;
+  --ok-bg: rgb(79 209 168 / 0.14);
+  --bad: #ff9a5c;
+  --bad-bg: rgb(255 154 92 / 0.14);
+  --unk: #a99bff;
+  --unk-bg: rgb(169 155 255 / 0.14);
+  --rev: #f2c94c;
+  --rev-bg: rgb(242 201 76 / 0.14);
+  --shadow-1: 0 1px 0 rgb(255 255 255 / 0.05) inset, 0 2px 10px rgb(0 0 0 / 0.16);
+  --shadow-2: 0 1px 0 rgb(255 255 255 / 0.06) inset, 0 8px 22px rgb(0 0 0 / 0.24);
+  --row: #19223e;
+  --row-edge: rgb(111 134 255 / 0.14);
+  --row-hover-edge: rgb(111 134 255 / 0.36);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply text-foreground font-sans antialiased;
+    min-height: 100vh;
+    background:
+      radial-gradient(60% 50% at 0% 0%, var(--glow-a), transparent 70%),
+      radial-gradient(50% 45% at 100% 20%, var(--glow-b), transparent 70%),
+      radial-gradient(55% 45% at 40% 100%, var(--glow-c), transparent 70%),
+      var(--bg);
+    background-attachment: fixed;
+  }
+}
+
+@layer utilities {
+  .text-brand {
+    background: var(--brand-grad);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .bg-brand {
+    background: var(--brand-grad);
+  }
+  .shadow-soft {
+    box-shadow: var(--shadow-1);
+  }
+  .shadow-lift {
+    box-shadow: var(--shadow-2);
+  }
+  /* 要求・検査の行。ダークでは影ではなく面と縁で浮かせる（design 3.1） */
+  .row {
+    background: var(--row);
+    border-radius: var(--radius-md);
+    box-shadow: 0 0 0 1px var(--row-edge), var(--shadow-1);
+    transition: transform 0.2s, box-shadow 0.2s, background-color 0.2s;
+  }
+  .row:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0 0 1px var(--row-hover-edge), var(--shadow-2);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .row,
+    .row:hover {
+      transition: none;
+      transform: none;
+    }
+  }
+}

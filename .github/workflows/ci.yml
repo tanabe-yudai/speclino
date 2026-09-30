@@ -92,6 +92,15 @@ jobs:
       - run: npm run typecheck
         working-directory: web
 
+  test-frontend:
+    name: test (frontend)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-frontend
+      - run: npm test
+        working-directory: web
+
   build-frontend:
     name: build (frontend)
     runs-on: ubuntu-latest

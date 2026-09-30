@@ -1,14 +1,16 @@
+import { Button } from '@/components/ui/button'
+import { Panel } from '@/components/app/Panel'
 import type { ErrorStateProps } from '../types/components'
 
 export function ErrorState({ message, onRetry }: ErrorStateProps) {
   return (
-    <div className="state-panel state-error" role="alert">
-      <p>{message}</p>
+    <Panel role="alert" className="flex flex-wrap items-center gap-3">
+      <span className="text-bad">{message}</span>
       {onRetry && (
-        <button type="button" onClick={onRetry} className="button-secondary">
+        <Button variant="secondary" size="sm" onClick={onRetry} className="ml-auto">
           再試行
-        </button>
+        </Button>
       )}
-    </div>
+    </Panel>
   )
 }

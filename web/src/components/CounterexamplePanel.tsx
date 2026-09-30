@@ -8,33 +8,22 @@ const KIND_LABELS: Record<'symbolic' | 'observed', string> = {
 export function CounterexamplePanel({ counterexample }: CounterexamplePanelProps) {
   const assignments = Object.entries(counterexample.assignments).sort(([a], [b]) => a.localeCompare(b))
   return (
-    <div className="counterexample-panel">
-      <div className="counterexample-header">
-        <span className="counterexample-kind">{KIND_LABELS[counterexample.kind]}</span>
-        {counterexample.path_id && <span className="counterexample-path">経路: {counterexample.path_id}</span>}
+    <div className="rounded-md bg-muted/70 p-4 text-sm">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-3">
+        <span className="font-semibold text-bad">反例</span>
+        <span>{KIND_LABELS[counterexample.kind]}</span>
+        {counterexample.path_id && <span className="font-mono">経路: {counterexample.path_id}</span>}
       </div>
-      <p className="counterexample-description">{counterexample.description}</p>
+      <p className="mt-2 text-ink-2">{counterexample.description}</p>
       {assignments.length > 0 && (
-        <table className="assignments-table">
-          <thead>
-            <tr>
-              <th>変数</th>
-              <th>値</th>
-            </tr>
-          </thead>
-          <tbody>
-            {assignments.map(([name, value]) => (
-              <tr key={name}>
-                <td>
-                  <code>{name}</code>
-                </td>
-                <td>
-                  <code>{String(value)}</code>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 font-mono text-xs">
+          {assignments.map(([name, value]) => (
+            <div key={name} className="contents">
+              <dt className="text-ink-3">{name}</dt>
+              <dd className="text-foreground">{String(value)}</dd>
+            </div>
+          ))}
+        </dl>
       )}
     </div>
   )
