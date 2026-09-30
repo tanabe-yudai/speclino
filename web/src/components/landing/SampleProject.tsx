@@ -2,13 +2,10 @@ import { Panel } from '@/components/app/Panel'
 import { ToneBadge } from '@/components/app/ToneBadge'
 import { HealthRing } from '@/components/project/HealthRing'
 import { healthRatio } from '@/services/health'
+import { NEXT_ACTION_KIND } from '@/services/labels'
 import { SAMPLE_PROJECT } from '@/services/landingContent'
-import type { VerdictTone } from '@/types/components'
-import type { NextActionKind } from '@/types/project'
 import { Sample } from './Sample'
 
-const TONE: Record<NextActionKind, VerdictTone> = { violated: 'bad', stale: 'rev', review: 'rev', unknown: 'unk', unapproved: 'rev' }
-const LABEL: Record<NextActionKind, string> = { violated: '違反', stale: '承認切れ', review: '要確認', unknown: '未検証', unapproved: '未承認' }
 
 export function SampleProject() {
   const c = SAMPLE_PROJECT.counts
@@ -28,7 +25,7 @@ export function SampleProject() {
           <ul className="space-y-1">
             {SAMPLE_PROJECT.next.map((n) => (
               <li key={n.id} className="flex min-w-0 flex-wrap items-center gap-2 text-xs">
-                <ToneBadge tone={TONE[n.kind]}>{LABEL[n.kind]}</ToneBadge>
+                <ToneBadge tone={NEXT_ACTION_KIND[n.kind].tone}>{NEXT_ACTION_KIND[n.kind].label}</ToneBadge>
                 <code className="font-mono">{n.id}</code>
                 <span className="text-ink-3">{n.hint}</span>
               </li>

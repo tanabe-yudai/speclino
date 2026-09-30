@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '@/auth/useAuth'
 import { LandingHeader } from '@/components/landing/LandingHeader'
@@ -15,6 +16,13 @@ const STEP_SAMPLES = [SampleRepo, SampleSpec, SampleMcp, SampleProject]
 export function Landing() {
   const { user, loading } = useAuth()
   const decision = landingDecision(loading, user !== null)
+
+  // 認証の確認中は何も描かないので、/#start などを直接開いたときは描いてから位置を合わせる
+  useEffect(() => {
+    if (decision !== 'landing' || !window.location.hash) return
+    document.getElementById(decodeURIComponent(window.location.hash.slice(1)))?.scrollIntoView()
+  }, [decision])
+
   if (decision === 'wait') return null
   if (decision === 'app') return <Navigate to="/app" replace />
 
@@ -63,15 +71,15 @@ export function Landing() {
           <div className="mt-6 grid gap-4 md:grid-cols-3">
             {PRINCIPLES.map((p) => (
               <div key={p.title} className="rounded-2xl bg-card/70 p-5 shadow-soft">
-                <p className="font-bold">{p.title}</p>
+                <h3 className="font-bold">{p.title}</h3>
                 <p className="mt-2 text-sm leading-relaxed text-ink-2">{p.body}</p>
               </div>
             ))}
           </div>
         </section>
 
-        <footer className="py-12 text-center text-sm text-ink-3">{INVITE_ONLY}</footer>
       </main>
+      <footer className="py-12 text-center text-sm text-ink-3">{INVITE_ONLY}</footer>
     </div>
   )
 }

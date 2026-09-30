@@ -19,15 +19,15 @@ export function SamplePrCheck() {
               key={c.id}
               className={cn('rounded-lg bg-card px-3 py-2 transition-colors', bad && 'bg-bad-bg')}
             >
-              <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <code className="font-mono text-xs">{c.id}</code>
-                <span className="min-w-0 flex-1 truncate text-sm">{c.title}</span>
+              <div className="flex min-w-0 items-center justify-between gap-2">
+                <code className="min-w-0 font-mono text-xs break-all">{c.id}</code>
                 {done ? (
                   <VerdictBadge verdict={c.verdict} />
                 ) : (
-                  <span className="text-xs text-ink-3 motion-safe:animate-pulse">検査中…</span>
+                  <span className="shrink-0 text-xs text-ink-3 motion-safe:animate-pulse">検査中…</span>
                 )}
               </div>
+              <p className="mt-0.5 text-sm">{c.title}</p>
               {bad && c.counterexample && (
                 <p className="mt-1 font-mono text-[11px] break-all text-ink-2">{c.counterexample}</p>
               )}

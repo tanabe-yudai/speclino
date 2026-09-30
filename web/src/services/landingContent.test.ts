@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import * as content from './landingContent'
+import { VERDICT_LABELS } from './labels'
 
 function strings(value: unknown): string[] {
   if (typeof value === 'string') return [value]
@@ -38,5 +39,18 @@ describe('landingContent', () => {
 
   it('末尾は招待制の一文', () => {
     expect(content.INVITE_ONLY).toBe('SpecLino は現在、招待制で提供しています。')
+  })
+
+  it('原則の 4 値の名前は、画面の判定の名前と同じ', () => {
+    const labels = Object.values(VERDICT_LABELS).join(' ')
+    for (const name of ['適合', '違反', '未検証', '要確認']) {
+      expect(content.PRINCIPLES[0].body).toContain(name)
+      expect(labels).toContain(name)
+    }
+  })
+
+  it('エディタの段は、判定するのが検査器だと書く（エージェントが判定するように読ませない）', () => {
+    expect(content.STEPS[2].body).toContain('検査器')
+    expect(content.STEPS[2].body).not.toMatch(/検証します/)
   })
 })
