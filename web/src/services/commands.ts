@@ -27,6 +27,12 @@ export function buildCommands(input: {
       })
     }
     commands.push({
+      id: `policies:${ws.slug}`,
+      label: `${label} の規約`,
+      group: 'ワークスペース',
+      path: paths.policies(ws.slug),
+    })
+    commands.push({
       id: `settings:${ws.slug}`,
       label: `${label} の設定`,
       group: 'ワークスペース',
