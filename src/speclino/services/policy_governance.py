@@ -18,8 +18,118 @@ from speclino.db.repositories.audit import AuditRepository
 from speclino.db.repositories.policy_revisions import PolicyRevisionRepository
 from speclino.db.repositories.teams import TeamRepository
 from speclino.domain.policy import PolicyPackage, PolicyRevision
+from speclino.services.check_pipeline import policy_package_hash
+from speclino.verifiers.api_error_format import VERIFIER_ID as _API_ID
+from speclino.verifiers.api_error_format import VERIFIER_VERSION as _API_V
+from speclino.verifiers.ci_required import VERIFIER_ID as _CI_ID
+from speclino.verifiers.ci_required import VERIFIER_VERSION as _CI_V
+from speclino.verifiers.make_targets import VERIFIER_ID as _MAKE_ID
+from speclino.verifiers.make_targets import VERIFIER_VERSION as _MAKE_V
+from speclino.verifiers.spec_format import VERIFIER_ID as _SPEC_ID
+from speclino.verifiers.spec_format import VERIFIER_VERSION as _SPEC_V
+from speclino.verifiers.spec_tests import VERIFIER_ID as _TESTS_ID
+from speclino.verifiers.spec_tests import VERIFIER_VERSION as _TESTS_V
 
 SEED_ACTOR = "seed"
+
+# 画面から選べる検証器（services/check_pipeline.py の _policy_registry と同じ集合）
+KNOWN_VERIFIERS: dict[str, str] = {
+    _MAKE_ID: _MAKE_V,
+    _SPEC_ID: _SPEC_V,
+    _TESTS_ID: _TESTS_V,
+    _CI_ID: _CI_V,
+    _API_ID: _API_V,
+}
+
+
+class InvalidPackage(ValueError):
+    """下書きにできない規約（重複したルール ID・未登録の検証器）。"""
+
+
+class DraftExists(ValueError):
+    """下書きが既にある（同時に 1 つ）。保存は save_draft で同じ下書きを更新する。"""
+
+
+class DraftConflict(Exception):
+    """承認しようとした下書きが、承認者の見た改訂ではない（別の人が先に更新・承認した）。"""
+
+
+def _validate(package: PolicyPackage) -> None:
+    ids = [r.id for r in package.rules]
+    dup = sorted({i for i in ids if ids.count(i) > 1})
+    if dup:
+        raise InvalidPackage(f"ルール ID が重複している: {', '.join(dup)}")
+    for r in package.rules:
+        if r.verifier is not None and r.verifier.id not in KNOWN_VERIFIERS:
+            raise InvalidPackage(f"{r.id}: 未登録の検証器 {r.verifier.id}")
+
+
+async def save_draft(
+    session: AsyncSession, *, team: str, package: PolicyPackage, author: str, note: str
+) -> PolicyRevision:
+    """下書きを保存する（S43）。無ければ作り、あれば同じ下書きを更新する（下書きは同時に 1 つ）。
+
+    チーム行のロックを先に取るので、同時の保存・承認・seed と直列化される（create_draft と同じ）。
+    """
+    _validate(package)
+    await TeamRepository(session).ensure_and_lock(team)
+    revisions = PolicyRevisionRepository(session)
+    current = await revisions.current_draft(team)
+    if current is None:
+        return await create_draft(session, team=team, package=package, author=author, note=note)
+    updated = await revisions.update_draft(
+        team=team, revision=current.revision, package=package, note=note
+    )
+    await AuditRepository(session).record(
+        actor=author,
+        action="policy.draft",
+        target=f"{team}@{current.revision}",
+        decision="updated",
+        detail={"note": note, "rule_count": len(package.rules)},
+    )
+    return updated
+
+
+def draft_hash(revision: PolicyRevision) -> str:
+    """承認者が見た下書きの内容のハッシュ（manifest の team_policy_hash と同じ計算）。"""
+    return policy_package_hash(revision.package)
+
+
+async def approve_draft(
+    session: AsyncSession,
+    *,
+    team: str,
+    expected_revision: int,
+    expected_hash: str,
+    approver: str,
+    audit_factory: async_sessionmaker[AsyncSession] | None,
+) -> PolicyRevision:
+    """承認者が見た下書き（番号と内容のハッシュ）を承認する（S43）。
+
+    1. 承認者でなければ、下書きの有無や番号に関係なく拒否し、監査に残す（PermissionError）
+    2. 今の下書きが見たもの（番号・ハッシュ）でなければ DraftConflict
+    3. 承認は既存の `approve`（承認者の検証をもう一度通るが、結果は同じ）
+    作成者本人の承認は認め、監査の detail に self_approved を残す（`_approve`）。
+    """
+    teams = TeamRepository(session)
+    await teams.ensure_and_lock(team)
+    if approver not in set(await teams.list_approvers(team)):
+        await _record_denial(session, audit_factory, team, expected_revision, approver)
+        raise PermissionError(f"{approver} は {team} の承認者ではない")
+    current = await PolicyRevisionRepository(session).current_draft(team)
+    if (
+        current is None
+        or current.revision != expected_revision
+        or draft_hash(current) != expected_hash
+    ):
+        raise DraftConflict(f"{team}@{expected_revision} は承認者が見た下書きではない")
+    return await approve(
+        session,
+        team=team,
+        revision=expected_revision,
+        approver=approver,
+        audit_factory=audit_factory,
+    )
 
 
 async def create_draft(
@@ -43,6 +153,10 @@ async def create_draft(
     改訂行に統一し、デッドロックを避ける。
     """
     await TeamRepository(session).ensure_and_lock(team)
+    if await PolicyRevisionRepository(session).current_draft(team) is not None:
+        raise DraftExists(
+            f"{team} には既に下書きがある。保存は save_draft（同じ下書きを更新）で行う"
+        )
     revision = await PolicyRevisionRepository(session).create_draft(
         team=team, package=package, author=author, note=note
     )
@@ -117,7 +231,7 @@ async def _approve(
         action="policy.approve",
         target=f"{team}@{revision}",
         decision="approved",
-        detail={"author": approved.author},
+        detail={"author": approved.author, "self_approved": approved.author == approver},
     )
     return approved
 
@@ -169,7 +283,19 @@ async def seed_from_package(
     )
 
 
-__all__ = ["SEED_ACTOR", "approve", "create_draft", "seed_from_package"]
+__all__ = [
+    "KNOWN_VERIFIERS",
+    "SEED_ACTOR",
+    "DraftConflict",
+    "DraftExists",
+    "InvalidPackage",
+    "approve",
+    "approve_draft",
+    "create_draft",
+    "draft_hash",
+    "save_draft",
+    "seed_from_package",
+]
 
 
 async def _record_denial(

@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from speclino.db.models import PolicyRevisionRecord
 from speclino.domain.policy import PolicyPackage, PolicyRevision
+from speclino.domain.policy_view import RevisionSummary
 
 _MAX_CREATE_DRAFT_ATTEMPTS = 5
 
@@ -110,6 +111,57 @@ class PolicyRevisionRepository:
                 continue
             return _to_domain(row)
         raise AssertionError("unreachable")  # ループは return か raise で必ず抜ける
+
+    async def current_draft(self, team: str) -> PolicyRevision | None:
+        """team の下書き（S43: 同時に 1 つ。複数あれば新しいもの）。"""
+        stmt = (
+            select(PolicyRevisionRecord)
+            .where(PolicyRevisionRecord.team == team, PolicyRevisionRecord.status == "draft")
+            .order_by(PolicyRevisionRecord.revision.desc())
+            .limit(1)
+        )
+        row = (await self._session.execute(stmt)).scalar_one_or_none()
+        return _to_domain(row) if row is not None else None
+
+    async def update_draft(
+        self, *, team: str, revision: int, package: PolicyPackage, note: str
+    ) -> PolicyRevision:
+        """下書きの中身を置き換える。draft でなくなっていれば ValueError（承認と競合した）。"""
+        stmt = (
+            update(PolicyRevisionRecord)
+            .where(
+                PolicyRevisionRecord.team == team,
+                PolicyRevisionRecord.revision == revision,
+                PolicyRevisionRecord.status == "draft",
+            )
+            .values(package=package.model_dump(mode="json"), note=note)
+            .returning(PolicyRevisionRecord)
+        )
+        row = (await self._session.execute(stmt)).scalar_one_or_none()
+        if row is None:
+            raise ValueError(f"{team}@{revision} は下書きではない")
+        return _to_domain(row)
+
+    async def list_summaries(self, team: str, limit: int) -> list[RevisionSummary]:
+        stmt = (
+            select(PolicyRevisionRecord)
+            .where(PolicyRevisionRecord.team == team)
+            .order_by(PolicyRevisionRecord.revision.desc())
+            .limit(limit)
+        )
+        return [
+            RevisionSummary(
+                revision=r.revision,
+                status=r.status,
+                author=r.author,
+                approver=r.approver,
+                note=r.note,
+                rule_count=len(r.package.get("rules", [])),
+                created_at=r.created_at,
+                approved_at=r.approved_at,
+            )
+            for r in (await self._session.execute(stmt)).scalars()
+        ]
 
     async def _next_revision(self, team: str) -> int:
         stmt = select(func.coalesce(func.max(PolicyRevisionRecord.revision), 0)).where(
