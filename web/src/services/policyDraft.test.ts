@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { baseForDraft, diffPackages, newRule, parsePaths, upsertRule } from './policyDraft'
+import { baseForDraft, diffPackages, newRule, parsePaths, ruleProblems, upsertRule } from './policyDraft'
 import type { PoliciesView, PolicyPackage } from '@/types/policy'
 
 const pkg = (rules = [newRule('DOC-001')]): PolicyPackage => ({ id: 'team', version: '1', status: 'active', owner: 'o', rules })
@@ -41,5 +41,16 @@ describe('policyDraft', () => {
 
   it('新しいルールは助言・検証器なし・例外可', () => {
     expect(newRule('X')).toMatchObject({ id: 'X', level: 'advisory', verifier: null, exceptions_allowed: true, on_missing_input: 'unknown' })
+  })
+
+  it('保存できない理由（空の ID・コロン・重複・空の題・検査器の無い必須）', () => {
+    const ok = { ...newRule('A'), title: '題' }
+    expect(ruleProblems(ok, ['B'], undefined)).toEqual([])
+    expect(ruleProblems({ ...ok, id: ' ' }, [], undefined)).toContain('ID を入れてください')
+    expect(ruleProblems({ ...ok, id: 'A:B' }, [], undefined)).toContain('ID にコロン（:）は使えません')
+    expect(ruleProblems(ok, ['A'], undefined)).toContain('同じ ID のルールがあります')
+    expect(ruleProblems(ok, ['A'], 'A')).toEqual([])
+    expect(ruleProblems({ ...ok, title: '' }, [], undefined)).toContain('題を入れてください')
+    expect(ruleProblems({ ...ok, level: 'mandatory' }, [], undefined)).toContain('必須のルールには検査器が要ります')
   })
 })

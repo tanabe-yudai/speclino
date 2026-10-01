@@ -59,3 +59,18 @@ export function newRule(id: string): PolicyRule {
     exceptions_allowed: true,
   }
 }
+
+/**
+ * ルールを保存できない理由（空なら保存できる）。最終的な検証はサーバ（422）が行う。
+ * existingIds は下書きのルール ID、originalId は編集前の ID（追加なら undefined）。
+ */
+export function ruleProblems(rule: PolicyRule, existingIds: string[], originalId: string | undefined): string[] {
+  const problems: string[] = []
+  const id = rule.id.trim()
+  if (id === '') problems.push('ID を入れてください')
+  if (id.includes(':')) problems.push('ID にコロン（:）は使えません')
+  if (id !== originalId && existingIds.includes(id)) problems.push('同じ ID のルールがあります')
+  if (rule.title.trim() === '') problems.push('題を入れてください')
+  if (rule.level === 'mandatory' && rule.verifier === null) problems.push('必須のルールには検査器が要ります')
+  return problems
+}

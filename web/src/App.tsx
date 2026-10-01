@@ -8,6 +8,7 @@ import { Home } from './pages/Home'
 import { HomeRedirect } from './pages/HomeRedirect'
 import { Landing } from './pages/Landing'
 import { Login } from './pages/Login'
+import { Policies } from './pages/Policies'
 import { Project } from './pages/Project'
 import { RunDetail } from './pages/RunDetail'
 import { Settings } from './pages/Settings'
@@ -29,6 +30,7 @@ function App() {
             <Route path="/app" element={<HomeRedirect />} />
             <Route path="/w/:slug" element={<Home />} />
             <Route path="/w/:slug/p/:owner/:repo" element={<Project />} />
+            <Route path="/w/:slug/policies" element={<Policies />} />
             <Route path="/w/:slug/settings" element={<Settings />} />
             <Route path="/runs/:id" element={<RunDetail />} />
             <Route path="/github/callback" element={<GithubCallback />} />
