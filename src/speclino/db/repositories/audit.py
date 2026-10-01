@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from speclino.db.models import AuditEvent
@@ -57,7 +57,10 @@ class AuditRepository:
                 rest.op("~")("^[0-9]+$"),
                 AuditEvent.action.in_(actions),
             )
-            .order_by(AuditEvent.ts.desc())
+            # 同じトランザクションの記録は ts が同じ。承認を作成より新しく並べる
+            .order_by(
+                AuditEvent.ts.desc(), case((AuditEvent.action == "policy.approve", 0), else_=1)
+            )
             .limit(limit)
         )
         return [
@@ -71,3 +74,10 @@ class AuditRepository:
             )
             for e in (await self._session.execute(stmt)).scalars()
         ]
+
+    async def actors_for(self, target: str, action: str) -> set[str]:
+        """target に action を記録した人（S43: 下書きを書いた人を数える）。"""
+        stmt = select(AuditEvent.actor).where(
+            AuditEvent.target == target, AuditEvent.action == action
+        )
+        return set((await self._session.execute(stmt)).scalars())

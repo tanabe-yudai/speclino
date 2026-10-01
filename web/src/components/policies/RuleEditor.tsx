@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { ON_MISSING_INPUT_LABELS, POLICY_LEVEL_LABELS } from '@/services/labels'
-import { newRule, parsePaths, ruleProblems } from '@/services/policyDraft'
+import { newRule, parsePaths, ruleProblems, withVerifier } from '@/services/policyDraft'
 import type { OnMissingInput, PolicyLevel, PolicyRule } from '@/types/policy'
 
 const LEVELS: PolicyLevel[] = ['advisory', 'mandatory']
@@ -20,6 +20,7 @@ export function RuleEditor({
   saving,
   onCancel,
   onSave,
+  onDelete,
 }: {
   rule: PolicyRule | null
   existingIds: string[]
@@ -27,6 +28,7 @@ export function RuleEditor({
   saving: boolean
   onCancel: () => void
   onSave: (rule: PolicyRule, originalId: string | undefined) => void
+  onDelete: (ruleId: string) => void
 }) {
   const originalId = rule?.id
   const [draft, setDraft] = useState<PolicyRule>(rule ?? newRule(''))
@@ -77,7 +79,7 @@ export function RuleEditor({
               id="rule-verifier"
               className={SELECT_CLASS}
               value={draft.verifier?.id ?? ''}
-              onChange={(e) => set({ verifier: e.target.value ? { id: e.target.value, version: verifiers[e.target.value] } : null })}
+              onChange={(e) => setDraft(withVerifier(draft, e.target.value, verifiers))}
             >
               <option value="">なし（助言のみ）</option>
               {Object.keys(verifiers).map((id) => (
@@ -129,6 +131,11 @@ export function RuleEditor({
           <Button type="button" variant="secondary" onClick={onCancel}>
             やめる
           </Button>
+          {rule && (
+            <Button type="button" variant="destructive" className="ml-auto" disabled={saving} onClick={() => onDelete(rule.id)}>
+              このルールを下書きから削除
+            </Button>
+          )}
         </div>
       </form>
     </Panel>

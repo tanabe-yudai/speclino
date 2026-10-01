@@ -25,6 +25,12 @@ function describe(change: RuleChange, view: PoliciesView): string {
   if (change.kind !== 'changed') return KIND_LABELS[change.kind]
   return change.fields
     .map((f) => {
+      if (f === 'verifier') {
+        // 検査器の設定（params）の前後も見せる（画面では編集しないが、API からは変えられる）
+        const before = view.active?.package.rules.find((r) => r.id === change.ruleId)?.verifier ?? null
+        const after = view.draft?.package.rules.find((r) => r.id === change.ruleId)?.verifier ?? null
+        return `${RULE_FIELD_LABELS.verifier}: ${JSON.stringify(before)} → ${JSON.stringify(after)}`
+      }
       if (f !== 'level') return RULE_FIELD_LABELS[f] ?? f
       const before = view.active?.package.rules.find((r) => r.id === change.ruleId)?.level
       const after = view.draft?.package.rules.find((r) => r.id === change.ruleId)?.level

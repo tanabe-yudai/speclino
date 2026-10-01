@@ -62,19 +62,39 @@ def _validate(package: PolicyPackage) -> None:
     for r in package.rules:
         if r.verifier is not None and r.verifier.id not in KNOWN_VERIFIERS:
             raise InvalidPackage(f"{r.id}: 未登録の検証器 {r.verifier.id}")
+        if r.verifier is not None and r.verifier.version != KNOWN_VERIFIERS[r.verifier.id]:
+            raise InvalidPackage(
+                f"{r.id}: 検証器 {r.verifier.id} の版 {r.verifier.version} は使えない"
+                f"（{KNOWN_VERIFIERS[r.verifier.id]}）"
+            )
 
 
 async def save_draft(
-    session: AsyncSession, *, team: str, package: PolicyPackage, author: str, note: str
+    session: AsyncSession,
+    *,
+    team: str,
+    package: PolicyPackage,
+    author: str,
+    note: str,
+    expected_revision: int | None,
+    expected_hash: str | None,
 ) -> PolicyRevision:
     """下書きを保存する（S43）。無ければ作り、あれば同じ下書きを更新する（下書きは同時に 1 つ）。
 
+    expected_* は保存する人が前提にした下書き（無ければ両方 None）。今の下書きと違えば
+    DraftConflict（古い画面から保存して他の人の変更を黙って上書きしない）。
     チーム行のロックを先に取るので、同時の保存・承認・seed と直列化される（create_draft と同じ）。
     """
     _validate(package)
     await TeamRepository(session).ensure_and_lock(team)
     revisions = PolicyRevisionRepository(session)
     current = await revisions.current_draft(team)
+    if current is None:
+        seen = expected_revision is None and expected_hash is None
+    else:
+        seen = current.revision == expected_revision and draft_hash(current) == expected_hash
+    if not seen:
+        raise DraftConflict(f"{team} の下書きが変わった。読み直してから保存する")
     if current is None:
         return await create_draft(session, team=team, package=package, author=author, note=note)
     updated = await revisions.update_draft(
@@ -113,10 +133,12 @@ async def approve_draft(
     """
     teams = TeamRepository(session)
     await teams.ensure_and_lock(team)
-    if approver not in set(await teams.list_approvers(team)):
-        await _record_denial(session, audit_factory, team, expected_revision, approver)
-        raise PermissionError(f"{approver} は {team} の承認者ではない")
     current = await PolicyRevisionRepository(session).current_draft(team)
+    if approver not in set(await teams.list_approvers(team)):
+        # 監査の対象は今の下書き（送られた番号は使わない: 任意の番号で監査を埋められないように）
+        target_revision = current.revision if current is not None else 0
+        await _record_denial(session, audit_factory, team, target_revision, approver)
+        raise PermissionError(f"{approver} は {team} の承認者ではない")
     if (
         current is None
         or current.revision != expected_revision
@@ -223,15 +245,18 @@ async def _approve(
             await _record_denial(session, audit_factory, team, revision, approver)
             raise PermissionError(f"{approver} は {team} の承認者ではない")
 
+    # 作成者だけでなく、下書きを更新した人も「自分で書いた」に数える
+    editors = await AuditRepository(session).actors_for(f"{team}@{revision}", "policy.draft")
     approved = await PolicyRevisionRepository(session).approve(
         team=team, revision=revision, approver=approver
     )
+    self_approved = approver == approved.author or approver in editors
     await AuditRepository(session).record(
         actor=approver,
         action="policy.approve",
         target=f"{team}@{revision}",
         decision="approved",
-        detail={"author": approved.author, "self_approved": approved.author == approver},
+        detail={"author": approved.author, "self_approved": self_approved},
     )
     return approved
 

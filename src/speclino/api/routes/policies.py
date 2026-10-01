@@ -32,6 +32,9 @@ HISTORY_LIMIT = 50
 class DraftRequest(BaseModel):
     package: PolicyPackage
     note: str = Field(default="", max_length=500)
+    # 保存する人が前提にした下書き（無ければ両方 null）。今の下書きと違えば 409
+    expected_revision: int | None = Field(default=None, ge=1)
+    expected_hash: str | None = Field(default=None, max_length=200)
 
 
 class ApproveRequest(BaseModel):
@@ -55,7 +58,7 @@ async def get_policies(
     return view.model_dump(mode="json")
 
 
-@router.put("/draft", responses=error_responses(422))
+@router.put("/draft", responses=error_responses(409, 422))
 async def put_draft(
     slug: str,
     body: DraftRequest,
@@ -66,12 +69,20 @@ async def put_draft(
         async with state.session_factory() as s, s.begin():
             await require_member(s, slug, user.uid)
             draft = await gov.save_draft(
-                s, team=slug, package=body.package, author=user.uid, note=body.note
+                s,
+                team=slug,
+                package=body.package,
+                author=user.uid,
+                note=body.note,
+                expected_revision=body.expected_revision,
+                expected_hash=body.expected_hash,
             )
     except WorkspaceNotFound as e:
         raise _not_found() from e
     except gov.InvalidPackage as e:
         raise api_error(422, "invalid_policy", str(e)) from e
+    except gov.DraftConflict as e:
+        raise api_error(409, "draft_changed", "下書きが変わった。読み直してから保存する") from e
     return draft.model_dump(mode="json")
 
 

@@ -45,7 +45,9 @@ export function RuleList({
                 <span>{POLICY_LEVEL_LABELS[r.level]}</span>
                 <span>{r.verifier ? `検査器 ${r.verifier.id}` : '助言のみ（検査器なし）'}</span>
                 <span>{r.exceptions_allowed ? '例外を認める' : '例外を認めない'}</span>
-                {result?.status ? (
+                {kind ? (
+                  <span className="text-ink-3">未検査（下書きの変更。承認後の検査から）</span>
+                ) : result?.status ? (
                   <span className="flex items-center gap-1.5">
                     <VerdictBadge verdict={result.status} />
                     <span>

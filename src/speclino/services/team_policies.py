@@ -24,7 +24,9 @@ def aggregate_results(per_project: list[list[PolicyView]]) -> dict[str, RuleResu
     grouped: dict[str, list[PolicyView]] = {}
     for views in per_project:
         for v in views:
-            grouped.setdefault(v.rule_id, []).append(v)
+            # リポジトリ固有の規約に同じ ID があっても、チーム規約の成否には入れない
+            if v.origin == "team":
+                grouped.setdefault(v.rule_id, []).append(v)
     out: dict[str, RuleResult] = {}
     for rule_id, views in grouped.items():
         decided = [v for v in views if v.status is not None]
@@ -41,15 +43,22 @@ async def load_policies(
 ) -> PoliciesView:
     await require_member(session, slug, uid)
     revisions = PolicyRevisionRepository(session)
+    active = await revisions.active_revision(slug)
     projects = (await session.execute(select(Project).where(Project.team == slug))).scalars()
     per_project: list[list[PolicyView]] = []
     for p in projects:
         _, _, assembled = await latest_assembled(session, blobs, p)
-        if assembled is not None:
+        # 今の有効な改訂で検査した結果だけ（規約を変えた後の古い結果を今の成否として見せない）
+        if (
+            assembled is not None
+            and active is not None
+            and assembled.team_name == slug
+            and assembled.revision == active.revision
+        ):
             per_project.append(assembled.policies)
     draft = await revisions.current_draft(slug)
     return PoliciesView(
-        active=await revisions.active_revision(slug),
+        active=active,
         draft=draft,
         draft_hash=draft_hash(draft) if draft is not None else None,
         can_approve=uid in await TeamRepository(session).list_approvers(slug),

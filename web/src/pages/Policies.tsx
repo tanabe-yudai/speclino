@@ -13,7 +13,7 @@ import { RuleEditor } from '@/components/policies/RuleEditor'
 import { RuleList } from '@/components/policies/RuleList'
 import { useCurrentWorkspace } from '@/hooks/useCurrentWorkspace'
 import { paths } from '@/services/paths'
-import { baseForDraft, upsertRule } from '@/services/policyDraft'
+import { baseForDraft, removeRule, upsertRule } from '@/services/policyDraft'
 import type { AuditEntry, PoliciesView, PolicyRule, RevisionSummary } from '@/types/policy'
 
 interface Loaded {
@@ -69,17 +69,33 @@ function PoliciesBody({ slug, name }: { slug: string; name: string }) {
   const { view } = loaded
   const pkg = baseForDraft(view)
 
-  function save(rule: PolicyRule, originalId: string | undefined) {
+  // 保存の前提は画面に出している下書き（無ければ null）。他の人が先に変えていれば 409
+  function persist(next: typeof pkg, note: string) {
     setSaving(true)
-    const note = `${rule.id} を${originalId ? '変更' : '追加'}`
-    saveDraft(slug, upsertRule(pkg, rule, originalId), note)
+    saveDraft(slug, next, note, view.draft?.revision ?? null, view.draft_hash)
       .then(() => {
         toast.success('下書きに保存しました')
         setEditing(undefined)
         reload()
       })
-      .catch((err: unknown) => toast.error(err instanceof ApiError ? err.message : '下書きを保存できませんでした'))
+      .catch((err: unknown) => {
+        if (err instanceof ApiError && err.status === 409) {
+          toast.error('下書きが他の人に変えられました。読み直してから、もう一度変更してください')
+          setEditing(undefined)
+          reload()
+          return
+        }
+        toast.error(err instanceof ApiError ? err.message : '下書きを保存できませんでした')
+      })
       .finally(() => setSaving(false))
+  }
+
+  function save(rule: PolicyRule, originalId: string | undefined) {
+    persist(upsertRule(pkg, rule, originalId), `${rule.id} を${originalId ? '変更' : '追加'}`)
+  }
+
+  function remove(ruleId: string) {
+    persist(removeRule(pkg, ruleId), `${ruleId} を削除`)
   }
 
   return (
@@ -108,6 +124,7 @@ function PoliciesBody({ slug, name }: { slug: string; name: string }) {
               saving={saving}
               onCancel={() => setEditing(undefined)}
               onSave={save}
+              onDelete={remove}
             />
           ) : (
             <RuleList view={view} pkg={pkg} onEdit={setEditing} />

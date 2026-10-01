@@ -93,7 +93,7 @@ async def test_non_member_gets_404(ctx: Ctx) -> None:
     c, slug, *_ = ctx
     pkg = {"id": "team", "version": "1", "status": "active", "owner": "o", "rules": [RULE]}
     bodies = {
-        "/draft": {"package": pkg, "note": ""},
+        "/draft": {"package": pkg, "note": "", "expected_revision": None, "expected_hash": None},
         "/draft/approve": {"expected_revision": 1, "expected_hash": "sha256:x"},
     }
     for method, path in (
@@ -124,12 +124,18 @@ async def test_member_drafts_owner_approves(ctx: Ctx) -> None:
     pkg = {"id": "team", "version": "1", "status": "active", "owner": "o", "rules": [RULE]}
     saved = await c.put(
         f"/api/workspaces/{slug}/policies/draft",
-        json={"package": pkg, "note": "追加"},
+        json={"package": pkg, "note": "追加", "expected_revision": None, "expected_hash": None},
         headers=MEMBER,
     )
     assert saved.status_code == 200, saved.text
     rev = saved.json()["revision"]
     h = (await c.get(f"/api/workspaces/{slug}/policies", headers=MEMBER)).json()["draft_hash"]
+    stale_put = await c.put(
+        f"/api/workspaces/{slug}/policies/draft",
+        json={"package": pkg, "note": "", "expected_revision": None, "expected_hash": None},
+        headers=OWNER,
+    )
+    assert stale_put.status_code == 409, stale_put.text
     denied = await c.post(
         f"/api/workspaces/{slug}/policies/draft/approve",
         json={"expected_revision": rev, "expected_hash": h},
@@ -170,7 +176,7 @@ async def test_invalid_package_is_422(ctx: Ctx) -> None:
         pkg = {"id": "team", "version": "1", "status": "active", "owner": "o", "rules": [rule]}
         res = await c.put(
             f"/api/workspaces/{slug}/policies/draft",
-            json={"package": pkg, "note": ""},
+            json={"package": pkg, "note": "", "expected_revision": None, "expected_hash": None},
             headers=MEMBER,
         )
         assert res.status_code == 422, res.text
@@ -193,7 +199,9 @@ async def test_results_come_from_the_latest_runs(ctx: Ctx) -> None:
     }
     pkg = {"id": "team", "version": "1", "status": "active", "owner": "o", "rules": [rule]}
     saved = await c.put(
-        f"/api/workspaces/{slug}/policies/draft", json={"package": pkg, "note": ""}, headers=OWNER
+        f"/api/workspaces/{slug}/policies/draft",
+        json={"package": pkg, "note": "", "expected_revision": None, "expected_hash": None},
+        headers=OWNER,
     )
     assert saved.status_code == 200, saved.text
     h = (await c.get(f"/api/workspaces/{slug}/policies", headers=OWNER)).json()["draft_hash"]
@@ -217,3 +225,21 @@ async def test_results_come_from_the_latest_runs(ctx: Ctx) -> None:
         "projects": 1,
         "failing_projects": 1,
     }
+    # 規約を変えて承認したら、古い改訂での検査の結果は出さない（次の検査までは「結果なし」）
+    rule2 = {**rule, "title": "変えた題"}
+    pkg2 = {**pkg, "rules": [rule2]}
+    saved2 = await c.put(
+        f"/api/workspaces/{slug}/policies/draft",
+        json={"package": pkg2, "note": "", "expected_revision": None, "expected_hash": None},
+        headers=OWNER,
+    )
+    assert saved2.status_code == 200, saved2.text
+    h2 = (await c.get(f"/api/workspaces/{slug}/policies", headers=OWNER)).json()["draft_hash"]
+    ok2 = await c.post(
+        f"/api/workspaces/{slug}/policies/draft/approve",
+        json={"expected_revision": saved2.json()["revision"], "expected_hash": h2},
+        headers=OWNER,
+    )
+    assert ok2.status_code == 200, ok2.text
+    after = (await c.get(f"/api/workspaces/{slug}/policies", headers=MEMBER)).json()
+    assert after["results"] == {}

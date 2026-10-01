@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { baseForDraft, diffPackages, newRule, parsePaths, ruleProblems, upsertRule } from './policyDraft'
+import {
+  baseForDraft,
+  diffPackages,
+  newRule,
+  parsePaths,
+  removeRule,
+  ruleProblems,
+  upsertRule,
+  withVerifier,
+} from './policyDraft'
 import type { PoliciesView, PolicyPackage } from '@/types/policy'
 
 const pkg = (rules = [newRule('DOC-001')]): PolicyPackage => ({ id: 'team', version: '1', status: 'active', owner: 'o', rules })
@@ -44,7 +53,7 @@ describe('policyDraft', () => {
   })
 
   it('保存できない理由（空の ID・コロン・重複・空の題・検査器の無い必須）', () => {
-    const ok = { ...newRule('A'), title: '題' }
+    const ok = { ...newRule('A'), title: '題', text: '本文' }
     expect(ruleProblems(ok, ['B'], undefined)).toEqual([])
     expect(ruleProblems({ ...ok, id: ' ' }, [], undefined)).toContain('ID を入れてください')
     expect(ruleProblems({ ...ok, id: 'A:B' }, [], undefined)).toContain('ID にコロン（:）は使えません')
@@ -52,5 +61,27 @@ describe('policyDraft', () => {
     expect(ruleProblems(ok, ['A'], 'A')).toEqual([])
     expect(ruleProblems({ ...ok, title: '' }, [], undefined)).toContain('題を入れてください')
     expect(ruleProblems({ ...ok, level: 'mandatory' }, [], undefined)).toContain('必須のルールには検査器が要ります')
+  })
+
+  it('本文が空なら保存できない（サーバの 422 を読めない形で見せない）', () => {
+    expect(ruleProblems({ ...newRule('A'), title: '題', text: ' ' }, [], undefined)).toContain('本文を入れてください')
+  })
+
+  it('検査器を選び直しても、同じ検査器なら設定（params）を残す', () => {
+    const verifiers = { make: '1.0.0', spec: '1.0.0' }
+    const r = { ...newRule('A'), verifier: { id: 'make', version: '1.0.0', params: { targets: ['test'] } } }
+    expect(withVerifier(r, 'make', verifiers).verifier).toEqual(r.verifier)
+    expect(withVerifier(r, 'spec', verifiers).verifier).toEqual({ id: 'spec', version: '1.0.0' })
+    expect(withVerifier(r, '', verifiers).verifier).toBeNull()
+  })
+
+  it('ルールを消す', () => {
+    expect(removeRule(pkg([newRule('A'), newRule('B')]), 'A').rules.map((r) => r.id)).toEqual(['B'])
+  })
+
+  it('出典（source）の変更も差分に出す', () => {
+    const before = pkg([newRule('A')])
+    const after = pkg([{ ...newRule('A'), source: { doc: 'docs/x.md' } }])
+    expect(diffPackages(before, after)).toEqual([{ ruleId: 'A', kind: 'changed', fields: ['source'] }])
   })
 })

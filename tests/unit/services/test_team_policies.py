@@ -7,10 +7,10 @@ from speclino.domain.project_overview import PolicyView
 from speclino.services.team_policies import aggregate_results
 
 
-def _p(rule: str, status: str | None) -> PolicyView:
+def _p(rule: str, status: str | None, origin: str = "team") -> PolicyView:
     return PolicyView(
         rule_id=rule,
-        origin="team",
+        origin=origin,  # type: ignore[arg-type]
         title=None,
         level=None,
         has_verifier=None,
@@ -30,3 +30,9 @@ def test_worst_status_and_project_counts() -> None:
 
 def test_no_projects_means_no_results() -> None:
     assert aggregate_results([]) == {}
+
+
+def test_project_specific_rules_do_not_count_as_team_rules() -> None:
+    """リポジトリ固有の規約に同じ ID があっても、チーム規約の成否には入れない。"""
+    results = aggregate_results([[_p("A", "VIOLATED", origin="project")]])
+    assert results == {}

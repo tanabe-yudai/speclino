@@ -13,9 +13,16 @@ export async function getPolicies(slug: string): Promise<PoliciesView> {
   return apiFetch<PoliciesView>(base(slug))
 }
 
-export async function saveDraft(slug: string, pkg: PolicyPackage, note: string): Promise<PolicyRevision> {
+/** expectedRevision / expectedHash は保存の前提にした下書き（無ければ null）。違えば 409。 */
+export async function saveDraft(
+  slug: string,
+  pkg: PolicyPackage,
+  note: string,
+  expectedRevision: number | null,
+  expectedHash: string | null,
+): Promise<PolicyRevision> {
   if (USE_MOCK) return { ...(MOCK_POLICIES.draft as PolicyRevision), package: pkg, note }
-  return apiFetch<PolicyRevision>(`${base(slug)}/draft`, { method: 'PUT', headers: json, body: JSON.stringify({ package: pkg, note }) })
+  return apiFetch<PolicyRevision>(`${base(slug)}/draft`, { method: 'PUT', headers: json, body: JSON.stringify({ package: pkg, note, expected_revision: expectedRevision, expected_hash: expectedHash }) })
 }
 
 export async function approveDraft(

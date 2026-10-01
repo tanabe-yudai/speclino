@@ -59,7 +59,13 @@ async def test_save_draft_creates_then_updates_the_same_draft(engine: AsyncEngin
     f = async_sessionmaker(engine, expire_on_commit=False)
     async with f() as s, s.begin():
         first = await gov.save_draft(
-            s, team=slug, package=_pkg(_rule()), author="member1", note="追加"
+            s,
+            team=slug,
+            package=_pkg(_rule()),
+            author="member1",
+            note="追加",
+            expected_revision=None,
+            expected_hash=None,
         )
     async with f() as s, s.begin():
         second = await gov.save_draft(
@@ -68,6 +74,8 @@ async def test_save_draft_creates_then_updates_the_same_draft(engine: AsyncEngin
             package=_pkg(_rule(level="mandatory", verifier="spec_tests")),
             author="owner1",
             note="必須に",
+            expected_revision=first.revision,
+            expected_hash=gov.draft_hash(first),
         )
     assert second.revision == first.revision and second.status == "draft"
     assert second.package.rules[0].level == "mandatory"
@@ -86,14 +94,30 @@ async def test_invalid_verifier_and_duplicate_ids_are_rejected(engine: AsyncEngi
     for pkg in (_pkg(_rule(verifier="nope")), _pkg(_rule(), _rule())):
         with pytest.raises(gov.InvalidPackage):
             async with f() as s, s.begin():
-                await gov.save_draft(s, team=slug, package=pkg, author="member1", note="")
+                await gov.save_draft(
+                    s,
+                    team=slug,
+                    package=pkg,
+                    author="member1",
+                    note="",
+                    expected_revision=None,
+                    expected_hash=None,
+                )
 
 
 async def test_non_approver_is_denied_and_the_denial_is_audited(engine: AsyncEngine) -> None:
     slug = await _workspace(engine)
     f = async_sessionmaker(engine, expire_on_commit=False)
     async with f() as s, s.begin():
-        draft = await gov.save_draft(s, team=slug, package=_pkg(_rule()), author="member1", note="")
+        draft = await gov.save_draft(
+            s,
+            team=slug,
+            package=_pkg(_rule()),
+            author="member1",
+            note="",
+            expected_revision=None,
+            expected_hash=None,
+        )
     with pytest.raises(PermissionError):
         async with f() as s, s.begin():
             await gov.approve_draft(
@@ -107,14 +131,22 @@ async def test_non_approver_is_denied_and_the_denial_is_audited(engine: AsyncEng
     async with f() as s:
         assert (await PolicyRevisionRepository(s).current_draft(slug)) is not None
         denied = await AuditRepository(s).list_for_team(slug, ("policy.approve",), 10)
-        assert [a.decision for a in denied] == ["denied"]
+        assert [(a.decision, a.target) for a in denied] == [("denied", f"{slug}@{draft.revision}")]
 
 
 async def test_approve_checks_the_revision_the_approver_saw(engine: AsyncEngine) -> None:
     slug = await _workspace(engine)
     f = async_sessionmaker(engine, expire_on_commit=False)
     async with f() as s, s.begin():
-        draft = await gov.save_draft(s, team=slug, package=_pkg(_rule()), author="member1", note="")
+        draft = await gov.save_draft(
+            s,
+            team=slug,
+            package=_pkg(_rule()),
+            author="member1",
+            note="",
+            expected_revision=None,
+            expected_hash=None,
+        )
     with pytest.raises(gov.DraftConflict):
         async with f() as s, s.begin():
             await gov.approve_draft(
@@ -129,7 +161,13 @@ async def test_approve_checks_the_revision_the_approver_saw(engine: AsyncEngine)
     seen = gov.draft_hash(draft)
     async with f() as s, s.begin():
         changed = await gov.save_draft(
-            s, team=slug, package=_pkg(_rule(), _rule("DOC-002")), author="member1", note="追加"
+            s,
+            team=slug,
+            package=_pkg(_rule(), _rule("DOC-002")),
+            author="member1",
+            note="追加",
+            expected_revision=draft.revision,
+            expected_hash=seen,
         )
     with pytest.raises(gov.DraftConflict):
         async with f() as s, s.begin():
@@ -162,7 +200,15 @@ async def test_author_can_approve_their_own_draft(engine: AsyncEngine) -> None:
     slug = await _workspace(engine)
     f = async_sessionmaker(engine, expire_on_commit=False)
     async with f() as s, s.begin():
-        draft = await gov.save_draft(s, team=slug, package=_pkg(_rule()), author="owner1", note="")
+        draft = await gov.save_draft(
+            s,
+            team=slug,
+            package=_pkg(_rule()),
+            author="owner1",
+            note="",
+            expected_revision=None,
+            expected_hash=None,
+        )
         active = await gov.approve_draft(
             s,
             team=slug,
@@ -175,6 +221,9 @@ async def test_author_can_approve_their_own_draft(engine: AsyncEngine) -> None:
     async with f() as s:
         [approved] = await AuditRepository(s).list_for_team(slug, ("policy.approve",), 10)
         assert approved.detail["self_approved"] is True
+        both = await AuditRepository(s).list_for_team(slug, ("policy.draft", "policy.approve"), 10)
+        # 同じトランザクション（同じ時刻）でも承認が作成より新しく並ぶ
+        assert [a.action for a in both] == ["policy.approve", "policy.draft"]
 
 
 async def test_create_draft_refuses_a_second_draft(engine: AsyncEngine) -> None:
@@ -200,7 +249,98 @@ async def test_audit_does_not_leak_a_workspace_whose_slug_shares_the_prefix(
             decision="created",
             detail={},
         )
-        await gov.save_draft(s, team=slug, package=_pkg(_rule()), author="member1", note="")
+        await gov.save_draft(
+            s,
+            team=slug,
+            package=_pkg(_rule()),
+            author="member1",
+            note="",
+            expected_revision=None,
+            expected_hash=None,
+        )
     async with f() as s:
         rows = await AuditRepository(s).list_for_team(slug, ("policy.draft",), 10)
         assert [r.target for r in rows] == [f"{slug}@1"]
+
+
+async def test_save_draft_rejects_a_stale_base(engine: AsyncEngine) -> None:
+    """古い画面から保存して、他の人の変更を黙って上書きしない。"""
+    slug = await _workspace(engine)
+    f = async_sessionmaker(engine, expire_on_commit=False)
+    async with f() as s, s.begin():
+        draft = await gov.save_draft(
+            s,
+            team=slug,
+            package=_pkg(_rule()),
+            author="member1",
+            note="",
+            expected_revision=None,
+            expected_hash=None,
+        )
+    for rev, h in ((None, None), (draft.revision, "sha256:stale")):
+        with pytest.raises(gov.DraftConflict):
+            async with f() as s, s.begin():
+                await gov.save_draft(
+                    s,
+                    team=slug,
+                    package=_pkg(_rule("DOC-009")),
+                    author="owner1",
+                    note="",
+                    expected_revision=rev,
+                    expected_hash=h,
+                )
+
+
+async def test_self_approval_counts_anyone_who_edited_the_draft(engine: AsyncEngine) -> None:
+    slug = await _workspace(engine)
+    f = async_sessionmaker(engine, expire_on_commit=False)
+    async with f() as s, s.begin():
+        draft = await gov.save_draft(
+            s,
+            team=slug,
+            package=_pkg(_rule()),
+            author="member1",
+            note="",
+            expected_revision=None,
+            expected_hash=None,
+        )
+        edited = await gov.save_draft(
+            s,
+            team=slug,
+            package=_pkg(_rule("DOC-002")),
+            author="owner1",
+            note="",
+            expected_revision=draft.revision,
+            expected_hash=gov.draft_hash(draft),
+        )
+        await gov.approve_draft(
+            s,
+            team=slug,
+            expected_revision=edited.revision,
+            expected_hash=gov.draft_hash(edited),
+            approver="owner1",
+            audit_factory=f,
+        )
+    async with f() as s:
+        [approved] = await AuditRepository(s).list_for_team(slug, ("policy.approve",), 10)
+        assert approved.detail["self_approved"] is True
+
+
+async def test_verifier_version_must_match(engine: AsyncEngine) -> None:
+    slug = await _workspace(engine)
+    f = async_sessionmaker(engine, expire_on_commit=False)
+    rule = _rule(verifier="spec_tests")
+    bad = rule.model_copy(
+        update={"verifier": rule.verifier.model_copy(update={"version": "9.9.9"})}
+    )  # type: ignore[union-attr]
+    with pytest.raises(gov.InvalidPackage):
+        async with f() as s, s.begin():
+            await gov.save_draft(
+                s,
+                team=slug,
+                package=_pkg(bad),
+                author="member1",
+                note="",
+                expected_revision=None,
+                expected_hash=None,
+            )
