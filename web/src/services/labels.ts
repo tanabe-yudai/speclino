@@ -1,7 +1,7 @@
 /** 判定・状態を日本語ラベルへ変換する定数群。コンポーネントには埋め込まない。 */
 
 import type { BaseHeadStatus, Category, Severity, TestObservation, Verdict } from '../types/finding'
-import type { ApprovalState, PolicyLevel, RequirementFilter } from '../types/project'
+import type { ApprovalState, NextActionKind, PolicyLevel, RequirementFilter } from '../types/project'
 import type { ExecState, GateStatus } from '../types/run'
 import type { VerdictTone } from '../types/components'
 import type { WorkspaceRole } from '../types/me'
@@ -9,7 +9,7 @@ import type { WorkspaceRole } from '../types/me'
 export const VERDICT_LABELS: Record<Verdict, string> = {
   VERIFIED_IN_SCOPE: '適合（確認範囲内）',
   VIOLATED: '違反',
-  UNKNOWN: '不明',
+  UNKNOWN: '未検証',
   REVIEW: '要確認',
 }
 
@@ -128,4 +128,13 @@ export const REQUIREMENT_FILTER_LABELS: Record<RequirementFilter, string> = {
   unknown: '未検証',
   review: '要確認',
   unapproved: '未承認',
+}
+
+/** 「次にやること」の種類の名前と色（プロジェクト画面とランディングページの見本で共通）。 */
+export const NEXT_ACTION_KIND: Record<NextActionKind, { label: string; tone: VerdictTone }> = {
+  violated: { label: '違反', tone: 'bad' },
+  stale: { label: '承認切れ', tone: 'rev' },
+  review: { label: '要確認', tone: 'rev' },
+  unknown: { label: '未検証', tone: 'unk' },
+  unapproved: { label: '未承認', tone: 'rev' },
 }

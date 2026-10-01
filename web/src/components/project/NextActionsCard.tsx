@@ -2,17 +2,10 @@ import { Link } from 'react-router-dom'
 import { Panel, PanelTitle } from '@/components/app/Panel'
 import { ToneBadge } from '@/components/app/ToneBadge'
 import { Button } from '@/components/ui/button'
+import { NEXT_ACTION_KIND } from '@/services/labels'
 import { paths } from '@/services/paths'
-import type { VerdictTone } from '@/types/components'
-import type { NextAction, NextActionKind, ProjectRun } from '@/types/project'
+import type { NextAction, ProjectRun } from '@/types/project'
 
-const KIND: Record<NextActionKind, { label: string; tone: VerdictTone }> = {
-  violated: { label: '違反', tone: 'bad' },
-  stale: { label: '承認切れ', tone: 'rev' },
-  review: { label: '要確認', tone: 'rev' },
-  unknown: { label: '未検証', tone: 'unk' },
-  unapproved: { label: '未承認', tone: 'rev' },
-}
 
 /** 次にやること（design 5.3）。並びは services/nextActions.ts の規則。 */
 export function NextActionsCard({ actions, run }: { actions: NextAction[]; run: ProjectRun }) {
@@ -27,7 +20,7 @@ export function NextActionsCard({ actions, run }: { actions: NextAction[]; run: 
             <li key={a.requirementId}>
               <Link to={paths.run(run.id)} className="row block min-w-0 px-3 py-2">
                 <span className="flex min-w-0 items-center gap-2">
-                  <ToneBadge tone={KIND[a.kind].tone}>{KIND[a.kind].label}</ToneBadge>
+                  <ToneBadge tone={NEXT_ACTION_KIND[a.kind].tone}>{NEXT_ACTION_KIND[a.kind].label}</ToneBadge>
                   <code className="truncate font-mono text-xs">{a.requirementId}</code>
                 </span>
                 {a.title && <span className="mt-1 block truncate text-sm">{a.title}</span>}
