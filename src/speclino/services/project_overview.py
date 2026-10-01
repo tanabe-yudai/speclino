@@ -300,7 +300,7 @@ async def _assemble(session: AsyncSession, blobs: BlobStore, run: ReviewRun) -> 
     )
 
 
-async def _latest(
+async def latest_assembled(
     session: AsyncSession, blobs: BlobStore, project: Project
 ) -> tuple[ProjectSummary, ReviewRun | None, _Assembled | None]:
     latest = await ReviewRunRepository(session).latest_completed(project.id)
@@ -331,7 +331,7 @@ async def list_projects(
     await require_member(session, slug, uid)
     stmt = select(Project).where(Project.team == slug).order_by(Project.repo_full_name)
     projects = list((await session.execute(stmt)).scalars())
-    return [(await _latest(session, blobs, p))[0] for p in projects]
+    return [(await latest_assembled(session, blobs, p))[0] for p in projects]
 
 
 async def load_overview(
@@ -345,7 +345,7 @@ async def load_overview(
         run_view(r)
         for r in await ReviewRunRepository(session).list_for_project(project.id, HISTORY_LIMIT)
     ]
-    summary, latest, a = await _latest(session, blobs, project)
+    summary, latest, a = await latest_assembled(session, blobs, project)
     if latest is None or a is None:
         return ProjectOverview(
             status=summary.status,

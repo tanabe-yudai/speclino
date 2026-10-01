@@ -6,7 +6,8 @@ from datetime import datetime
 from typing import Any
 
 from speclino.domain.common import IRModel
-from speclino.domain.policy import PolicyRevisionStatus
+from speclino.domain.finding import Verdict
+from speclino.domain.policy import PolicyRevision, PolicyRevisionStatus
 
 
 class RevisionSummary(IRModel):
@@ -27,3 +28,18 @@ class AuditEntry(IRModel):
     target: str
     decision: str
     detail: dict[str, Any]
+
+
+class RuleResult(IRModel):
+    status: Verdict | None
+    projects: int
+    failing_projects: int
+
+
+class PoliciesView(IRModel):
+    active: PolicyRevision | None
+    draft: PolicyRevision | None
+    draft_hash: str | None
+    can_approve: bool
+    verifiers: dict[str, str]
+    results: dict[str, RuleResult]
