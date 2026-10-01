@@ -31,6 +31,7 @@ describe('buildCommands', () => {
       '/app',
       '/w/ws',
       '/w/ws/p/example-org/example-repo',
+      '/w/ws/policies',
       '/w/ws/settings',
     ])
   })
@@ -45,5 +46,9 @@ describe('buildCommands', () => {
       path: '/w/ws',
       group: 'ワークスペース',
     })
+  })
+  it('ワークスペースごとに規約への候補がある', () => {
+    const cmds = buildCommands({ me, projects: {} })
+    expect(cmds.find((c) => c.id === 'policies:ws')).toMatchObject({ label: 'Example の規約', path: '/w/ws/policies' })
   })
 })

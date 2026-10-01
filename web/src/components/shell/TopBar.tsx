@@ -23,9 +23,14 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
         <WorkspacePill />
         <ProjectPill />
         {workspace && (
-          <NavLink to={paths.settings(workspace.slug)} className={navClass}>
-            設定
-          </NavLink>
+          <>
+            <NavLink to={paths.policies(workspace.slug)} className={navClass}>
+              規約
+            </NavLink>
+            <NavLink to={paths.settings(workspace.slug)} className={navClass}>
+              設定
+            </NavLink>
+          </>
         )}
         <div className="ml-auto flex items-center gap-1">
           <button

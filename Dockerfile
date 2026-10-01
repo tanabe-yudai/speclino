@@ -21,6 +21,8 @@ WORKDIR /app
 
 COPY pyproject.toml uv.lock README.md ./
 COPY src/ ./src/
+# 本番の admin Job の `policy seed` が既定で読む規約パッケージ（S43）
+COPY .speclino/policy/ ./.speclino/policy/
 # 本番のマイグレーションは同じイメージの Cloud Run Job（speclino-migrate）で流す。
 COPY alembic.ini ./
 COPY migrations/ ./migrations/

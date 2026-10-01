@@ -1,6 +1,7 @@
 /** 判定・状態を日本語ラベルへ変換する定数群。コンポーネントには埋め込まない。 */
 
 import type { BaseHeadStatus, Category, Severity, TestObservation, Verdict } from '../types/finding'
+import type { OnMissingInput, PolicyRevision } from '../types/policy'
 import type { ApprovalState, NextActionKind, PolicyLevel, RequirementFilter } from '../types/project'
 import type { ExecState, GateStatus } from '../types/run'
 import type { VerdictTone } from '../types/components'
@@ -137,4 +138,35 @@ export const NEXT_ACTION_KIND: Record<NextActionKind, { label: string; tone: Ver
   review: { label: '要確認', tone: 'rev' },
   unknown: { label: '未検証', tone: 'unk' },
   unapproved: { label: '未承認', tone: 'rev' },
+}
+
+export const ON_MISSING_INPUT_LABELS: Record<OnMissingInput, string> = {
+  violation: '対象が無ければ違反',
+  unknown: '対象が無ければ未検証',
+  skipped: '対象が無ければ評価しない',
+}
+
+export const REVISION_STATUS_LABELS: Record<PolicyRevision['status'], string> = {
+  active: '有効',
+  draft: '下書き',
+  superseded: '置き換え済み',
+}
+
+/** 規約の差分で変わった項目の名前。 */
+export const RULE_FIELD_LABELS: Record<string, string> = {
+  level: 'レベル',
+  title: '題',
+  text: '本文',
+  applies_to: '適用範囲',
+  verifier: '検査器',
+  on_missing_input: '対象が無いとき',
+  exceptions_allowed: '例外の可否',
+  version: '版',
+}
+
+/** 監査の「何を」（action と decision の組）。 */
+export function auditLabel(action: string, decision: string): string {
+  if (action === 'policy.draft') return decision === 'updated' ? '下書きを更新' : '下書きを作成'
+  if (action === 'policy.approve') return decision === 'denied' ? '承認を拒否（承認者ではない）' : '承認して有効にした'
+  return `${action} ${decision}`
 }

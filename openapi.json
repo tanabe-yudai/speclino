@@ -1,6 +1,27 @@
 {
   "components": {
     "schemas": {
+      "ApproveRequest": {
+        "properties": {
+          "expected_hash": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Expected Hash",
+            "type": "string"
+          },
+          "expected_revision": {
+            "minimum": 1.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_revision",
+          "expected_hash"
+        ],
+        "title": "ApproveRequest",
+        "type": "object"
+      },
       "AuthorizeRequest": {
         "properties": {
           "repo_full_name": {
@@ -65,6 +86,48 @@
         "title": "ContextRequest",
         "type": "object"
       },
+      "DraftRequest": {
+        "properties": {
+          "expected_hash": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Hash"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Revision"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Note",
+            "type": "string"
+          },
+          "package": {
+            "$ref": "#/components/schemas/PolicyPackage"
+          }
+        },
+        "required": [
+          "package"
+        ],
+        "title": "DraftRequest",
+        "type": "object"
+      },
       "ErrorBody": {
         "properties": {
           "code": {
@@ -108,6 +171,220 @@
           "name"
         ],
         "title": "IssueTokenRequest",
+        "type": "object"
+      },
+      "PolicyApplicability": {
+        "additionalProperties": false,
+        "description": "ルールの適用範囲。paths は glob パターンの一覧。",
+        "properties": {
+          "languages": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Languages",
+            "type": "array"
+          },
+          "paths": {
+            "description": "glob パターン（例 specs/*.md）",
+            "items": {
+              "type": "string"
+            },
+            "title": "Paths",
+            "type": "array"
+          }
+        },
+        "title": "PolicyApplicability",
+        "type": "object"
+      },
+      "PolicyPackage": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "owner": {
+            "minLength": 1,
+            "title": "Owner",
+            "type": "string"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/PolicyRule"
+            },
+            "title": "Rules",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "0.1",
+            "default": "0.1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "draft"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "version": {
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "status",
+          "owner"
+        ],
+        "title": "PolicyPackage",
+        "type": "object"
+      },
+      "PolicyRule": {
+        "additionalProperties": false,
+        "properties": {
+          "applies_to": {
+            "$ref": "#/components/schemas/PolicyApplicability"
+          },
+          "exceptions_allowed": {
+            "default": true,
+            "title": "Exceptions Allowed",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "安定した規約 ID（例 MAKE-001）。コロンは使えない",
+            "minLength": 1,
+            "pattern": "^[^:]+$",
+            "title": "Id",
+            "type": "string"
+          },
+          "level": {
+            "enum": [
+              "mandatory",
+              "advisory"
+            ],
+            "title": "Level",
+            "type": "string"
+          },
+          "on_missing_input": {
+            "description": "applies_to が対象を1つも見つけられないときの扱い",
+            "enum": [
+              "violation",
+              "unknown",
+              "skipped"
+            ],
+            "title": "On Missing Input",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PolicySource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "text": {
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          },
+          "title": {
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "verifier": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PolicyVerifierRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "検証器の参照。None は「機械検証されていない（助言のみ）」を表す（S42）。散文の制約をまず advisory として登録し、検証器を書けたものから mandatory に上げる"
+          },
+          "version": {
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "level",
+          "title",
+          "text",
+          "applies_to",
+          "on_missing_input"
+        ],
+        "title": "PolicyRule",
+        "type": "object"
+      },
+      "PolicySource": {
+        "additionalProperties": false,
+        "description": "ルールの根拠となる正本文書の参照。",
+        "properties": {
+          "anchor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "文書内の節を指す任意の参照",
+            "title": "Anchor"
+          },
+          "doc": {
+            "description": "正本文書のパスまたは URL",
+            "minLength": 1,
+            "title": "Doc",
+            "type": "string"
+          }
+        },
+        "required": [
+          "doc"
+        ],
+        "title": "PolicySource",
+        "type": "object"
+      },
+      "PolicyVerifierRef": {
+        "additionalProperties": false,
+        "description": "ルールが使う検証器と、その実行パラメータ。",
+        "properties": {
+          "id": {
+            "description": "VerifierRegistry に登録した検証器 ID",
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": true,
+            "title": "Params",
+            "type": "object"
+          },
+          "version": {
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "version"
+        ],
+        "title": "PolicyVerifierRef",
         "type": "object"
       },
       "RunTask": {
@@ -908,6 +1185,382 @@
         "summary": "Revoke Token",
         "tags": [
           "mcp-tokens"
+        ]
+      }
+    },
+    "/api/workspaces/{slug}/policies": {
+      "get": {
+        "operationId": "get_policies_api_workspaces__slug__policies_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Policies Api Workspaces  Slug  Policies Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Get Policies",
+        "tags": [
+          "policies"
+        ]
+      }
+    },
+    "/api/workspaces/{slug}/policies/audit": {
+      "get": {
+        "operationId": "list_audit_api_workspaces__slug__policies_audit_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Audit Api Workspaces  Slug  Policies Audit Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "List Audit",
+        "tags": [
+          "policies"
+        ]
+      }
+    },
+    "/api/workspaces/{slug}/policies/draft": {
+      "put": {
+        "operationId": "put_draft_api_workspaces__slug__policies_draft_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Put Draft Api Workspaces  Slug  Policies Draft Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Put Draft",
+        "tags": [
+          "policies"
+        ]
+      }
+    },
+    "/api/workspaces/{slug}/policies/draft/approve": {
+      "post": {
+        "operationId": "approve_draft_api_workspaces__slug__policies_draft_approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Approve Draft Api Workspaces  Slug  Policies Draft Approve Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Approve Draft",
+        "tags": [
+          "policies"
+        ]
+      }
+    },
+    "/api/workspaces/{slug}/policies/revisions": {
+      "get": {
+        "operationId": "list_revisions_api_workspaces__slug__policies_revisions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Revisions Api Workspaces  Slug  Policies Revisions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "List Revisions",
+        "tags": [
+          "policies"
         ]
       }
     },
