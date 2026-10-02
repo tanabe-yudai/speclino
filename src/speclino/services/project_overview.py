@@ -6,10 +6,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
-from collections import Counter
+from collections import Counter, OrderedDict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
@@ -251,10 +252,32 @@ async def load_spec_irs(blobs: BlobStore, run_id: uuid.UUID, expected: list[str]
         targets = ["spec-ir.json"]
     else:
         targets = [f"spec-ir.{b}.json" for b in expected]
-    specs = [SpecIR.model_validate(await _json(blobs, run_id, n)) for n in targets]
+    # behavior ごとのファイルを並列に読む（GCS は 1 回ごとに往復がかかる）
+    raw = await asyncio.gather(*(_json(blobs, run_id, n) for n in targets))
+    specs = [SpecIR.model_validate(r) for r in raw]
     if expected and sorted(s.behavior_id for s in specs) != sorted(expected):
         raise ArtifactsIncomplete(str(run_id))
     return specs
+
+
+# 組み立て済みの結果を run ごとに覚える。完了した検査の成果物と findings、参照するチーム規約の
+# 改訂は変わらないので、状態と更新時刻が同じなら同じ結果になる（awaiting_answer から completed に
+# 進むと更新時刻が変わり、読み直す）。読めなかった run は覚えない（次で読み直す）。
+_ASSEMBLED_CACHE_SIZE = 32
+_assembled_cache: OrderedDict[tuple[uuid.UUID, str, object], _Assembled] = OrderedDict()
+
+
+async def _assemble_cached(session: AsyncSession, blobs: BlobStore, run: ReviewRun) -> _Assembled:
+    key = (run.id, str(run.exec_state), run.updated_at)
+    hit = _assembled_cache.get(key)
+    if hit is not None:
+        _assembled_cache.move_to_end(key)
+        return hit
+    assembled = await _assemble(session, blobs, run)
+    _assembled_cache[key] = assembled
+    if len(_assembled_cache) > _ASSEMBLED_CACHE_SIZE:
+        _assembled_cache.popitem(last=False)
+    return assembled
 
 
 async def _assemble(session: AsyncSession, blobs: BlobStore, run: ReviewRun) -> _Assembled:
@@ -308,7 +331,7 @@ async def latest_assembled(
     status: OverviewStatus = "not_checked"
     if latest is not None:
         try:
-            assembled = await _assemble(session, blobs, latest)
+            assembled = await _assemble_cached(session, blobs, latest)
             status = "ok"
         except Exception:  # noqa: BLE001 - 読めない成果物は判定を出さず unavailable として見せる
             logger.warning("run %s の成果物を読めない", latest.id, exc_info=True)

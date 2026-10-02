@@ -8,17 +8,21 @@ locals {
   # パイプライン全体15分 < Cloud Run timeout 20分 < Cloud Tasks dispatch deadline 25分
   # （design の「時間と冪等性」）なので web / worker は 1200s。
   cloud_run_services = {
+    # web は人が画面で待つので 1 インスタンスを常に待機させる（起動待ちが 12〜21 秒あった）。
+    # 待機中は idle 料金（1 vCPU・1 GiB で月 $13 程度）。worker / sandbox は非同期なので 0 のまま。
     web = {
-      cpu         = "1"
-      memory      = "1Gi"
-      timeout     = "1200s"
-      concurrency = 80
+      cpu           = "1"
+      memory        = "1Gi"
+      timeout       = "1200s"
+      concurrency   = 80
+      min_instances = 1
     }
     worker = {
-      cpu         = "1"
-      memory      = "2Gi"
-      timeout     = "1200s"
-      concurrency = 80
+      cpu           = "1"
+      memory        = "2Gi"
+      timeout       = "1200s"
+      concurrency   = 80
+      min_instances = 0
     }
   }
 
@@ -34,10 +38,11 @@ locals {
   #                    サンドボックスが 20 分インスタンスを占有しうる
   sandbox_service = var.enable_sandbox ? {
     sandbox = {
-      cpu         = "1"
-      memory      = "512Mi"
-      timeout     = "300s"
-      concurrency = 1
+      cpu           = "1"
+      memory        = "512Mi"
+      timeout       = "300s"
+      concurrency   = 1
+      min_instances = 0
     }
   } : {}
 
@@ -131,7 +136,7 @@ resource "google_cloud_run_v2_service" "services" {
     max_instance_request_concurrency = each.value.concurrency
 
     scaling {
-      min_instance_count = 0
+      min_instance_count = each.value.min_instances
       max_instance_count = 2
     }
 
@@ -148,6 +153,8 @@ resource "google_cloud_run_v2_service" "services" {
           cpu    = each.value.cpu
           memory = each.value.memory
         }
+        # 起動中だけ CPU を上げて、コールドスタート（import と DB 接続）を短くする
+        startup_cpu_boost = true
       }
 
       env {
