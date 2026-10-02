@@ -19,7 +19,7 @@ import { Panel } from '@/components/app/Panel'
 import { VerdictBadge } from '@/components/app/VerdictBadge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { paths } from '@/services/paths'
-import { describeLimits, describeSemanticDiff } from '../services/manifest'
+import { describeLimits, describeSemanticDiff, describeTeamPolicy } from '../services/manifest'
 import { collectScopeAndAssumptions, collectUnresolvedItems, countByVerdict, groupFindingsByVerdict } from '../services/verdict'
 import type { RunEvent } from '../types/events'
 import type { RerunResponse, ReviewRunDetail } from '../types/run'
@@ -158,7 +158,7 @@ function RunSummary({ run }: { run: ReviewRunDetail }) {
   const counts = countByVerdict(run.findings)
   const { assumptions } = collectScopeAndAssumptions(run.findings)
   const unresolvedItems = collectUnresolvedItems(run.findings)
-  const scopeItems = run.manifest ? [describeLimits(run.manifest)] : []
+  const scopeItems = run.manifest ? [describeLimits(run.manifest), describeTeamPolicy(run.manifest)] : []
   const semanticDiff = run.manifest ? describeSemanticDiff(run.manifest) : null
   const gateReason = describeGateReason(run.gate_status, run.manifest, run.findings)
   const canLinkGithub = Boolean(run.repo_full_name && run.pr_number != null)

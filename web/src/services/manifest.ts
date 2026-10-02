@@ -27,3 +27,9 @@ export function describeSemanticDiff(manifest: RunManifest): string | null {
     `解消 ${c.resolved_violation} ・ 判定不能化 ${c.became_undecidable}`
   )
 }
+
+/** 適用したチーム規約の改訂（どの改訂で判定したか）。 */
+export function describeTeamPolicy(manifest: RunManifest): string {
+  if (!manifest.policy_team || manifest.policy_revision == null) return 'チーム規約: 適用なし'
+  return `チーム規約: ${manifest.policy_team} 改訂 ${manifest.policy_revision}`
+}

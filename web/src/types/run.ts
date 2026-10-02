@@ -73,6 +73,9 @@ export interface RunManifest {
   fail_on: string[]
   mode: 'advisory' | 'blocking'
   semantic_diff?: SemanticDiffSummary | null
+  /** 適用したチーム規約（S42/S43）。チーム規約の無い run は null */
+  policy_team?: string | null
+  policy_revision?: number | null
 }
 
 /** `GET /api/review-runs` の1件（findings を含まない）。 */
