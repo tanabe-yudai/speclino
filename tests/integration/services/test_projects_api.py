@@ -169,3 +169,26 @@ async def test_missing_gate_json_is_unavailable(ctx: Ctx) -> None:
     (blobs / "runs" / run_id / "gate.json").unlink()
     body = (await c.get(f"/api/workspaces/{slug}/projects/{pid}/overview", headers=DEV)).json()
     assert body["status"] == "unavailable"
+
+
+async def test_assembled_overview_is_cached_per_run(
+    ctx: Ctx, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """完了した検査の成果物は変わらないので、2 回目以降は blob を読みに行かない（性能）。"""
+    c, slug, repo, base, head, _, pid, _ = ctx
+    await _run(c, repo, head, base)
+    reads: list[str] = []
+    original = FileSystemBlobStore.get
+
+    async def counting_get(self: FileSystemBlobStore, key: str) -> bytes:
+        reads.append(key)
+        return await original(self, key)
+
+    monkeypatch.setattr(FileSystemBlobStore, "get", counting_get)
+    first = (await c.get(f"/api/workspaces/{slug}/projects/{pid}/overview", headers=DEV)).json()
+    assert first["status"] == "ok" and reads
+    reads.clear()
+    second = (await c.get(f"/api/workspaces/{slug}/projects/{pid}/overview", headers=DEV)).json()
+    listing = (await c.get(f"/api/workspaces/{slug}/projects", headers=DEV)).json()
+    assert second == first and listing[0]["status"] == "ok"
+    assert reads == []
