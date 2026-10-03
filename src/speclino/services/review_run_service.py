@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import tempfile
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -72,6 +72,7 @@ from speclino.services.check_pipeline import (
 from speclino.services.cost_guard import CostGuard
 from speclino.services.investigation import InvestigationResult, investigate
 from speclino.services.obligation_diff import effective_spec
+from speclino.services.project_settings import parse_stored
 from speclino.services.run_freshness import should_publish
 from speclino.services.spec_pr_bot import (
     SPEC_BOT_EVENT,
@@ -226,6 +227,9 @@ class ReviewRunService:
             github_repo_id = project.github_repo_id
             # チーム規約は登録先ワークスペースのもの。未登録（None）なら当てない（S53）
             team = project.team
+            # S47: project の設定は証拠集めを止める方向にだけ効く（サーバ全体の設定と AND）。
+            # 保存値が型に合わなければ止めた側（parse_stored の LOCKED_DOWN）
+            project_settings = parse_stored(project.settings).settings
             approvals = await ApprovalRepository(session).list_for_project(
                 project.id, "approve_spec"
             )
@@ -330,7 +334,13 @@ class ReviewRunService:
                 gate = result.gate
                 semantic = result.semantic_diff
                 # 未解決があればエージェントが証拠を集める（判定はエンジン）
-                if self.config.agent_enabled and result.domain and result.bindings:
+                agent_enabled = self.config.agent_enabled and project_settings.agent_enabled
+                permissions = replace(
+                    self.config.permissions,
+                    test_run_enabled=self.config.permissions.test_run_enabled
+                    and project_settings.test_run_enabled,
+                )
+                if agent_enabled and result.domain and result.bindings:
                     ctx = InvestigationContext(
                         repo_root=head_root,
                         domain=result.domain,
@@ -341,7 +351,7 @@ class ReviewRunService:
                         code_irs={c.behavior_id: c for c in result.code_irs},
                         limits=self.config.limits,
                         base_root=base_root,
-                        sandbox=self.config.sandbox,
+                        sandbox=self.config.sandbox if permissions.test_run_enabled else None,
                     )
                     cost_ok = (True, "")
                     if self.cost_guard is not None:
@@ -351,9 +361,7 @@ class ReviewRunService:
                     # 証拠不足 → 未検証 → ゲート失敗」）。LLM の 429/5xx や
                     # ネットワーク障害はここで吸収する。
                     try:
-                        inv = await investigate(
-                            ctx, self.config.permissions, self.config.model, cost_ok
-                        )
+                        inv = await investigate(ctx, permissions, self.config.model, cost_ok)
                     except Exception as e:  # noqa: BLE001 - 証拠収集の失敗は判定に影響させない
                         inv = InvestigationResult(
                             started=False,

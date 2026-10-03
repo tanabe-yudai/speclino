@@ -8,9 +8,12 @@ import type { RerunResponse, ReviewRunDetail, ReviewRunSummary } from '../types/
 
 const USE_MOCK = import.meta.env.VITE_MOCK === '1'
 
-export async function listRuns(limit = 50): Promise<ReviewRunSummary[]> {
+/** workspace を渡すと、そのワークスペースの run だけを API 側で絞る（他のワークスペースに押し出されない）。 */
+export async function listRuns(limit = 50, workspace?: string): Promise<ReviewRunSummary[]> {
   if (USE_MOCK) return MOCK_RUNS.slice(0, limit)
-  return apiFetch<ReviewRunSummary[]>(`/api/review-runs?limit=${limit}`)
+  const query = new URLSearchParams({ limit: String(limit) })
+  if (workspace) query.set('workspace', workspace)
+  return apiFetch<ReviewRunSummary[]>(`/api/review-runs?${query.toString()}`)
 }
 
 export async function getRun(id: string): Promise<ReviewRunDetail> {

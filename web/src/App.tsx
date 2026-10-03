@@ -3,6 +3,7 @@ import { Toaster } from '@/components/ui/sonner'
 import { AuthProvider } from './auth/AuthProvider'
 import { RequireAuth } from './components/RequireAuth'
 import { legacyRedirect } from './services/legacyRoutes'
+import { AcceptInvite } from './pages/AcceptInvite'
 import { GithubCallback } from './pages/GithubCallback'
 import { Home } from './pages/Home'
 import { HomeRedirect } from './pages/HomeRedirect'
@@ -34,6 +35,7 @@ function App() {
             <Route path="/w/:slug/settings" element={<Settings />} />
             <Route path="/runs/:id" element={<RunDetail />} />
             <Route path="/github/callback" element={<GithubCallback />} />
+            <Route path="/invite" element={<AcceptInvite />} />
           </Route>
           <Route path="*" element={<Fallback />} />
         </Routes>

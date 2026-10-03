@@ -15,7 +15,7 @@ export function AppShell() {
   const [paletteOpen, setPaletteOpen] = useState(false)
 
   const reload = useCallback(() => {
-    getMe()
+    return getMe()
       .then((m) => {
         setMe(m)
         setError(null)

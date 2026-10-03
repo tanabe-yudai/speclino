@@ -35,6 +35,7 @@ EXPECTED_TABLES = {
     "workspace_members",
     "mcp_tokens",
     "repo_link_attempts",
+    "workspace_invitations",
 }
 
 

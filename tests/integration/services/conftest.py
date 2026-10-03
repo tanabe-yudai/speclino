@@ -124,6 +124,7 @@ async def engine() -> AsyncIterator[AsyncEngine]:
         for table in (
             "mcp_tokens",
             "repo_link_attempts",
+            "workspace_invitations",
             "policy_revisions",
             "workspace_members",
             "teams",

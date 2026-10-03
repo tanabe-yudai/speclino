@@ -53,24 +53,35 @@ export function Home() {
   const workspace = pickWorkspace(me?.workspaces ?? [], urlSlug)
   const slug = workspace?.slug
   const { projects, error: projectsError, retry: retryProjects } = useWorkspaceProjects(slug)
-  const [runs, setRuns] = useState<ReviewRunSummary[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  const fetchRuns = useCallback(() => {
-    listRuns(50)
-      .then(setRuns)
-      .catch((err: unknown) => setError(err instanceof ApiError ? err.message : '検査の一覧を取得できませんでした'))
-  }, [])
+  // 最近の検査は API 側でこのワークスペースに絞る。slug が変わった直後は前の一覧を出さない
+  const [loaded, setLoaded] = useState<{ slug: string; runs: ReviewRunSummary[] | null; error: string | null } | null>(
+    null,
+  )
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
-    fetchRuns()
-  }, [fetchRuns])
+    if (!slug) return
+    let alive = true
+    listRuns(50, slug)
+      .then((runs) => alive && setLoaded({ slug, runs, error: null }))
+      .catch((err: unknown) => {
+        if (alive) {
+          setLoaded({ slug, runs: null, error: err instanceof ApiError ? err.message : '検査の一覧を取得できませんでした' })
+        }
+      })
+    return () => {
+      alive = false
+    }
+  }, [slug, attempt])
 
-  function retry() {
-    setError(null)
-    setRuns(null)
-    fetchRuns()
-  }
+  const current = loaded && loaded.slug === slug ? loaded : null
+  const recent = current?.runs ?? null
+  const error = current?.error ?? null
+
+  const retry = useCallback(() => {
+    setLoaded(null)
+    setAttempt((n) => n + 1)
+  }, [])
 
   if (!me) return <LoadingState />
 
@@ -78,7 +89,10 @@ export function Home() {
     return (
       <Panel className="mx-auto max-w-xl text-center">
         <PanelTitle className="text-base">所属しているワークスペースがありません</PanelTitle>
-        <p className="mt-2 text-sm text-ink-2">管理者にこの uid を伝えて、ワークスペースに追加してもらってください。</p>
+        <p className="mt-2 text-sm text-ink-2">
+          招待リンクを受け取っている場合は、そのリンクを開いてください。招待が無い場合は、管理者にこの uid
+          を伝えてワークスペースに追加してもらってください。
+        </p>
         <code className="mt-3 inline-block rounded-md bg-muted px-3 py-1.5 font-mono text-xs select-all">{me.uid}</code>
       </Panel>
     )
@@ -95,9 +109,6 @@ export function Home() {
       </Panel>
     )
   }
-
-  const names = projects ? new Set(projects.map((p) => p.repo_full_name)) : null
-  const recent = runs && names ? runs.filter((r) => names.has(r.repo_full_name ?? '')) : null
 
   return (
     <div className="space-y-8">
@@ -130,12 +141,20 @@ export function Home() {
             ))}
           </div>
         )}
+        {projects !== null && projects.some((p) => p.status === 'not_checked') && (
+          <p className="text-sm text-ink-3">
+            まだ検査されていないプロジェクトがあります。{' '}
+            <Link className="text-primary underline-offset-4 hover:underline" to={paths.settings(slug, 'projects')}>
+              はじめ方を見る
+            </Link>
+          </p>
+        )}
       </section>
 
       <section className="space-y-3">
         <h2 className="text-sm font-semibold text-ink-2">最近の検査</h2>
         {error && <ErrorState message={error} onRetry={retry} />}
-        {!error && recent === null && !projectsError && <LoadingState message="検査の一覧を取得しています…" />}
+        {!error && recent === null && <LoadingState message="検査の一覧を取得しています…" />}
         {recent !== null && recent.length === 0 && <p className="text-sm text-ink-3">まだ検査がありません。</p>}
         {recent !== null && recent.length > 0 && (
           <div className="space-y-2">

@@ -20,7 +20,9 @@ from speclino.api.routes import (
     internal_mcp,
     mcp_tokens,
     me,
+    members,
     policies,
+    project_settings,
     projects,
     repositories,
     review_runs,
@@ -98,6 +100,9 @@ def create_app(settings: Settings, state: AppState | None = None) -> FastAPI:
         app.include_router(repositories.router)
         app.include_router(projects.router)
         app.include_router(policies.router)
+        app.include_router(project_settings.router)
+        app.include_router(members.router)
+        app.include_router(members.accept_router)
     if settings.role in ("worker", "all"):
         app.include_router(tasks.router)
         app.include_router(internal_mcp.router)

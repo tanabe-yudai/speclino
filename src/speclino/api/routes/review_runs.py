@@ -20,7 +20,12 @@ from speclino.db.repositories import FindingRepository, RunEventRepository
 from speclino.domain.run import GitRef
 from speclino.domain.workspace import AuthUser
 from speclino.services.demo_rerun import RerunNotFound, demo_rerun
-from speclino.services.workspaces import visible_project, visible_run, visible_runs
+from speclino.services.workspaces import (
+    WorkspaceNotFound,
+    visible_project,
+    visible_run,
+    visible_runs,
+)
 
 router = APIRouter(prefix="/api/review-runs", tags=["review-runs"], responses=error_responses(401))
 
@@ -78,15 +83,20 @@ async def start_run(
     return {"run_id": str(run_id)}
 
 
-@router.get("")
+@router.get("", responses=error_responses(404))
 async def list_runs(
     limit: int = 50,
+    workspace: str | None = None,
     state: AppState = Depends(get_state),
     user: AuthUser = Depends(require_user),
 ) -> list[dict[str, Any]]:
-    async with state.session_factory() as session:
-        rows = await visible_runs(session, user.uid, min(limit, 200))
-        return [_run_view(run, repo) for run, repo in rows]
+    """見える run（新しい順）。workspace を渡すとそのワークスペースだけ（非メンバーは 404）。"""
+    try:
+        async with state.session_factory() as session:
+            rows = await visible_runs(session, user.uid, min(limit, 200), workspace)
+            return [_run_view(run, repo) for run, repo in rows]
+    except WorkspaceNotFound as e:
+        raise api_error(404, "workspace_not_found", "ワークスペースが無い") from e
 
 
 @router.get("/{run_id}", responses=error_responses(404))

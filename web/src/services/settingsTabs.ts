@@ -3,8 +3,10 @@
 import type { SettingsTab } from '@/types/command'
 import type { WorkspaceRole } from '@/types/me'
 
+const COMMON_TABS: SettingsTab[] = ['projects', 'repositories', 'members']
+
 export function visibleSettingsTabs(role: WorkspaceRole | null): SettingsTab[] {
-  return role === 'owner' ? ['repositories', 'tokens'] : ['repositories']
+  return role === 'owner' ? [...COMMON_TABS, 'tokens'] : COMMON_TABS
 }
 
 /** URL の ?tab= を、見えるタブのどれかに正す（見えない・不正なら先頭）。 */

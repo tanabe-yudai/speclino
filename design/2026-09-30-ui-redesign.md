@@ -82,6 +82,7 @@ AI とのチャットは今回作らない（別ストーリー。最初の版�
 | `/w/:slug/settings` | 設定: リポジトリ登録・MCP トークン・メンバー（今の個別画面を 1 か所に） | メンバー（変更は owner） |
 | `/runs/:id` | 検査の詳細（今の画面を新しい見た目に） | メンバー |
 | `/github/callback` | リポジトリ登録のコールバック | owner |
+| `/invite#<token>` | 招待の受諾（S56。トークンはフラグメントに載せる） | ログイン済み |
 
 旧パス（`/workspaces/:slug/mcp-tokens`、`/workspaces/:slug/repositories`）は新しいパスへ転送する。
 

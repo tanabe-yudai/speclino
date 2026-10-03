@@ -18,7 +18,14 @@ async def require_user(request: Request, state: AppState = Depends(get_state)) -
     if settings.auth_kind == "dev":
         if settings.env != "local":
             raise api_error(500, "auth_misconfigured", "dev 認証は local 以外で無効")
-        return AuthUser(uid=request.headers.get("X-Dev-User", "dev"))
+        # メールは招待の受諾（S56）を手元で試すためだけ。local 以外では上で弾いている
+        email = request.headers.get("X-Dev-Email")
+        return AuthUser(
+            uid=request.headers.get("X-Dev-User", "dev"),
+            email=email,
+            email_verified=email is not None
+            and request.headers.get("X-Dev-Email-Verified", "true") == "true",
+        )
     from speclino.adapters.auth.identity_platform import verify_bearer
 
     auth = request.headers.get("Authorization", "")

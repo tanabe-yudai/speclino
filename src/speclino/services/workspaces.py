@@ -8,20 +8,33 @@ UI / API で見えるのは、ログインした人が所属するワークス�
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from speclino.db.models import Project, ReviewRun, WorkspaceMember
 from speclino.db.repositories.audit import AuditRepository
 from speclino.db.repositories.projects import ProjectRepository
 from speclino.db.repositories.teams import TeamRepository
+from speclino.domain.workspace import WorkspaceRole
 from speclino.ports.code_host import CodeHost
 
 
-async def visible_runs(session: AsyncSession, uid: str, limit: int) -> list[tuple[ReviewRun, str]]:
-    """uid が所属するワークスペースの run（新しい順）と、そのリポジトリ名。"""
+async def visible_runs(
+    session: AsyncSession, uid: str, limit: int, workspace: str | None = None
+) -> list[tuple[ReviewRun, str]]:
+    """uid が所属するワークスペースの run（新しい順）と、そのリポジトリ名。
+
+    workspace を渡すとそのワークスペースの run だけ（所属していなければ `WorkspaceNotFound`）。
+    全ワークスペースから上位 N 件を取ってから画面で絞ると、別のワークスペースの run が多いときに
+    このワークスペースの run が押し出される。
+    """
     teams = await TeamRepository(session).teams_of(uid)
+    if workspace is not None:
+        if workspace not in teams:
+            raise WorkspaceNotFound(workspace)
+        teams = {workspace}
     if not teams:
         return []
     stmt = (
@@ -80,6 +93,38 @@ async def require_member(session: AsyncSession, slug: str, uid: str) -> None:
         raise WorkspaceNotFound(slug)
 
 
+async def role_of(session: AsyncSession, slug: str, uid: str) -> WorkspaceRole | None:
+    """uid の slug での role。メンバーでなければ None。"""
+    stmt = select(WorkspaceMember.role).where(
+        WorkspaceMember.team == slug, WorkspaceMember.uid == uid
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+class NotPermitted(PermissionError):
+    """メンバーではあるが、その操作に必要な role が無い（呼び出し側は 403。拒否は監査に残る）。"""
+
+
+async def record_denial(
+    session: AsyncSession,
+    audit_factory: async_sessionmaker[AsyncSession] | None,
+    *,
+    actor: str,
+    action: str,
+    target: str,
+    detail: dict[str, Any],
+) -> None:
+    """拒否を監査に残す。拒否は例外で返り呼び出し側が rollback するので、`audit_factory` が
+    あれば独立したトランザクションで確定させる（`policy_governance._record_denial` と同じ流儀）。
+    無ければ同じセッションに書く（テスト用。本番の経路は必ず factory を渡す）。
+    """
+    if audit_factory is None:
+        await AuditRepository(session).record(actor, action, target, "denied", detail)
+        return
+    async with audit_factory() as audit_session, audit_session.begin():
+        await AuditRepository(audit_session).record(actor, action, target, "denied", detail)
+
+
 async def resolve_github_project(
     session: AsyncSession,
     *,
@@ -135,7 +180,10 @@ async def repository_mismatch(
 
 
 __all__ = [
+    "NotPermitted",
     "WorkspaceNotFound",
+    "record_denial",
+    "role_of",
     "repository_mismatch",
     "require_member",
     "require_owner",
