@@ -4,8 +4,8 @@ import type { Counterexample, Finding } from './finding'
 import type { RunEvent } from './events'
 import type { RerunResponse } from './run'
 
-/** 判定の 4 値の色（design 3.1。意味と色の対応は固定）。 */
-export type VerdictTone = 'ok' | 'bad' | 'unk' | 'rev'
+/** 判定の 4 値の色（design 3.1。意味と色の対応は固定）と、免除中（exempt）の色。 */
+export type VerdictTone = 'ok' | 'bad' | 'unk' | 'rev' | 'exempt'
 
 export interface LoadingStateProps {
   message?: string

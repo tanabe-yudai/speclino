@@ -4,12 +4,14 @@ import { listRuns } from '@/api/reviewRuns'
 import { ApiError } from '@/api/errors'
 import { GateBadge } from '@/components/app/GateBadge'
 import { Panel, PanelTitle } from '@/components/app/Panel'
+import { ToneBadge } from '@/components/app/ToneBadge'
 import { RunRow } from '@/components/app/RunRow'
 import { ErrorState } from '@/components/ErrorState'
 import { LoadingState } from '@/components/LoadingState'
 import { HealthRing } from '@/components/project/HealthRing'
 import { useMe } from '@/hooks/useMe'
 import { useWorkspaceProjects } from '@/hooks/useWorkspaceProjects'
+import { STATE_META, TILE_ORDER } from '@/services/health'
 import { paths } from '@/services/paths'
 import { pickWorkspace } from '@/services/workspaces'
 import type { ProjectSummary } from '@/types/project'
@@ -18,20 +20,22 @@ import type { ReviewRunSummary } from '@/types/run'
 /** 1 つのプロジェクトのカード（健康状態・違反などの件数・最新のゲート）。 */
 function ProjectCard({ slug, project }: { slug: string; project: ProjectSummary }) {
   const [, name] = project.repo_full_name.split('/')
-  const c = project.counts
   return (
     <Link to={paths.project(slug, project.repo_full_name)} className="row flex min-w-0 items-center gap-4 p-5">
-      <HealthRing counts={project.unanalyzed !== null ? c : null} unanalyzed={project.unanalyzed ?? 0} />
+      <HealthRing counts={project.status_counts} />
       <div className="min-w-0 flex-1">
         <p className="truncate font-semibold">{name}</p>
         <p className="mt-0.5 truncate font-mono text-xs text-ink-3">{project.repo_full_name}</p>
         {project.status === 'unavailable' ? (
           <p className="mt-2 text-xs text-ink-3">最新の検査の成果物を読めません</p>
-        ) : c ? (
-          <p className="mt-2 flex flex-wrap gap-x-3 text-xs text-ink-2">
-            <span className="text-bad">違反 {c.VIOLATED}</span>
-            <span className="text-rev">要確認 {c.REVIEW}</span>
-            <span className="text-unk">未検証 {c.UNKNOWN}</span>
+        ) : project.state && project.status_counts ? (
+          <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-2">
+            <ToneBadge tone={STATE_META[project.state].tone}>{STATE_META[project.state].label}</ToneBadge>
+            {TILE_ORDER.filter((k) => k !== 'ok' && (project.status_counts?.[k] ?? 0) > 0).map((k) => (
+              <span key={k}>
+                {STATE_META[k].segment} {project.status_counts?.[k]}
+              </span>
+            ))}
           </p>
         ) : (
           <p className="mt-2 text-xs text-ink-3">まだ検査されていません</p>

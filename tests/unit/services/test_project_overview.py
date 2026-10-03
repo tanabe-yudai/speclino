@@ -264,3 +264,39 @@ def test_policies_marked_exempted_when_every_violation_is_waived() -> None:
         ("EX-1", "2026-12-01", "a")
     ]
     assert ci.exempted is False and ci.waived == 1  # 1 件は免除されていない違反が残る
+
+
+def test_status_counts_combine_requirements_and_policies() -> None:
+    """プロジェクトの状態は要求と規約を合わせた 5 区分で数える。
+
+    区分は違反・要確認・未検証・免除中・適合。
+
+    円グラフと状態の見出しはこの 1 つの集計から作る（同期させる）。
+    """
+    from speclino.domain.finding import VerdictCounts
+    from speclino.domain.project_overview import PolicyView
+    from speclino.services.project_overview import project_state, status_counts
+
+    def pol(rule: str, status: str | None, exempted: bool = False) -> PolicyView:
+        return PolicyView(
+            rule_id=rule,
+            origin="team",
+            title=None,
+            level=None,
+            has_verifier=True,
+            status=status,
+            counts=VerdictCounts(),
+            exempted=exempted,  # type: ignore[arg-type]
+        )
+
+    spec = _spec()
+    findings = [_finding("R-CANCEL-01", "VERIFIED_IN_SCOPE"), _finding("R-CANCEL-02", "REVIEW")]
+    reqs = build_requirements([spec], findings, None)  # 残りの要求は未解析
+    policies = [pol("A", "VERIFIED_IN_SCOPE"), pol("B", "VIOLATED", exempted=True), pol("C", None)]
+    c = status_counts(reqs, policies, unextracted=1)
+    unanalyzed = len(spec.rules) - 2 + 1
+    assert (c.violated, c.review, c.unknown, c.exempted, c.ok) == (0, 1, unanalyzed, 1, 2)
+    assert project_state(c) == "review"
+    assert project_state(c.model_copy(update={"review": 0, "unknown": 0})) == "exempted"
+    assert project_state(c.model_copy(update={"review": 0, "unknown": 0, "exempted": 0})) == "ok"
+    assert project_state(c.model_copy(update={"violated": 1})) == "violated"

@@ -11,14 +11,15 @@ export function SampleProject() {
   return (
     <Sample label="プロジェクト画面の見本: 健康状態と次にやること">
       <Panel className="flex flex-wrap items-start gap-4 p-4">
-        <HealthRing size="lg" counts={c} unanalyzed={SAMPLE_PROJECT.unanalyzed} />
+        <HealthRing size="lg" counts={c} />
         <div className="min-w-0 flex-1 space-y-2">
           <p className="font-semibold">{SAMPLE_PROJECT.name}</p>
           <p className="flex flex-wrap gap-x-3 text-xs">
-            <span className="text-ok">適合 {c.VERIFIED_IN_SCOPE}</span>
-            <span className="text-bad">違反 {c.VIOLATED}</span>
-            <span className="text-unk">未検証 {c.UNKNOWN}</span>
-            <span className="text-rev">要確認 {c.REVIEW}</span>
+            <span className="text-bad">違反 {c.violated}</span>
+            <span className="text-rev">要確認 {c.review}</span>
+            <span className="text-unk">未検証 {c.unknown}</span>
+            <span className="text-exempt">免除中 {c.exempted}</span>
+            <span className="text-ok">適合 {c.ok}</span>
           </p>
           <p className="text-xs font-semibold text-primary">✦ 次にやること</p>
           <ul className="space-y-1">

@@ -30,9 +30,11 @@ from speclino.domain.project_overview import (
     OverviewStatus,
     PolicyView,
     ProjectOverview,
+    ProjectState,
     ProjectSummary,
     RequirementView,
     RunView,
+    StatusCounts,
     WaiverView,
 )
 from speclino.domain.semantic_diff import SemanticDiff
@@ -71,6 +73,38 @@ def requirement_verdicts(findings: Iterable[Finding]) -> dict[str, Verdict]:
 def count_verdicts(verdicts: Iterable[Verdict]) -> VerdictCounts:
     c = Counter(verdicts)
     return VerdictCounts(**{v: c.get(v, 0) for v in VERDICT_SEVERITY})
+
+
+_POLICY_STATE: dict[Verdict, str] = {
+    "VIOLATED": "violated",
+    "REVIEW": "review",
+    "UNKNOWN": "unknown",
+    "VERIFIED_IN_SCOPE": "ok",
+}
+# 重い順（状態の見出しはこの順で最初に件数のある区分）
+_STATE_ORDER: tuple[ProjectState, ...] = ("violated", "review", "unknown", "exempted", "ok")
+
+
+def status_counts(
+    requirements: list[RequirementView], policies: list[PolicyView], unextracted: int
+) -> StatusCounts:
+    """要求と規約を合わせた 5 区分の件数。円グラフと状態の見出しはこれから作る（同期させる）。"""
+    counter: Counter[str] = Counter()
+    for r in requirements:
+        if r.removed:
+            continue
+        counter[_POLICY_STATE[r.verdict] if r.verdict is not None else "unknown"] += 1
+    counter["unknown"] += unextracted
+    for p in policies:
+        if p.status is None:
+            continue  # この検査で結果の無い規約は数えない
+        counter["exempted" if p.exempted else _POLICY_STATE[p.status]] += 1
+    return StatusCounts(**{k: counter.get(k, 0) for k in _STATE_ORDER})
+
+
+def project_state(counts: StatusCounts) -> ProjectState | None:
+    """いちばん重い区分。判定が 1 件も無ければ None。"""
+    return next((k for k in _STATE_ORDER if getattr(counts, k) > 0), None)
 
 
 def _approval(rule: Rule, spec: SpecIR, changed: set[tuple[str, str]]) -> ApprovalState:
@@ -229,6 +263,7 @@ class _Assembled:
     policies: list[PolicyView]
     counts: VerdictCounts
     unanalyzed: int
+    status_counts: StatusCounts
     team_name: str | None
     revision: int | None
 
@@ -340,13 +375,17 @@ async def _assemble(session: AsyncSession, blobs: BlobStore, run: ReviewRun) -> 
     findings = await _findings(session, run.id)
     requirements = build_requirements(spec_irs, findings, diff)
     present = [r for r in requirements if not r.removed]
+    policies = build_policies(findings, gate, team)
     return _Assembled(
         spec_irs=spec_irs,
         requirements=requirements,
-        policies=build_policies(findings, gate, team),
+        policies=policies,
         counts=count_verdicts(r.verdict for r in present if r.verdict is not None),
         unanalyzed=sum(1 for r in present if r.verdict is None)
         + sum(len(s.unextracted) for s in spec_irs),
+        status_counts=status_counts(
+            requirements, policies, sum(len(s.unextracted) for s in spec_irs)
+        ),
         team_name=team_name if isinstance(team_name, str) else None,
         revision=revision if isinstance(revision, int) else None,
     )
@@ -373,6 +412,8 @@ async def latest_assembled(
         latest_run=run_view(latest) if latest else None,
         counts=assembled.counts if assembled else None,
         unanalyzed=assembled.unanalyzed if assembled else None,
+        status_counts=assembled.status_counts if assembled else None,
+        state=project_state(assembled.status_counts) if assembled else None,
     )
     return summary, latest, assembled
 

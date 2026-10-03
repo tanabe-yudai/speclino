@@ -10,7 +10,7 @@ describe('describeEvent', () => {
     expect(
       describeEvent('state', { gate: 'pass_with_exceptions', error: null, publish: 'publish', exec_state: 'completed' })
         .summary,
-    ).toBe('完了 · ゲート: 例外付き通過 · GitHub に反映')
+    ).toBe('完了 · ゲート: 通過（免除中あり） · GitHub に反映')
     expect(describeEvent('state', { exec_state: 'failed', error: '入力不正: x', publish: 'skip' }).summary).toBe(
       '実行失敗 · GitHub に反映しない',
     )

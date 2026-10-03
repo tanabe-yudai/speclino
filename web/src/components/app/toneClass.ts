@@ -6,4 +6,5 @@ export const TONE_CLASS: Record<VerdictTone, string> = {
   bad: 'text-bad bg-bad-bg',
   unk: 'text-unk bg-unk-bg',
   rev: 'text-rev bg-rev-bg',
+  exempt: 'text-exempt bg-exempt-bg',
 }

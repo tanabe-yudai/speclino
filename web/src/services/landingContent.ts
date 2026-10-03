@@ -68,13 +68,11 @@ export const SAMPLE_MCP = {
 
 export const SAMPLE_PROJECT: {
   name: string
-  counts: { VERIFIED_IN_SCOPE: number; VIOLATED: number; UNKNOWN: number; REVIEW: number }
-  unanalyzed: number
+  counts: { violated: number; review: number; unknown: number; exempted: number; ok: number }
   next: { kind: NextActionKind; id: string; hint: string }[]
 } = {
   name: 'orders',
-  counts: { VERIFIED_IN_SCOPE: 20, VIOLATED: 1, UNKNOWN: 1, REVIEW: 1 },
-  unanalyzed: 0,
+  counts: { violated: 1, review: 1, unknown: 1, exempted: 1, ok: 24 },
   next: [
     { kind: 'violated', id: 'R-CANCEL-04', hint: '反例を見る' },
     { kind: 'review', id: 'R-REFUND-02', hint: '人の確認が要る質問に答える' },

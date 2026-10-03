@@ -310,3 +310,10 @@ def test_review_md_names_unknown_as_unverified() -> None:
         "UNKNOWN": "未検証",
         "REVIEW": "要確認",
     }
+
+
+def test_gate_label_says_exempted_not_exceptions() -> None:
+    """例外付き通過は画面と同じく「通過（免除中あり）」と書く（言葉を「免除中」に揃える）。"""
+    from speclino.reporter.review_md import GATE_STATUS_LABELS
+
+    assert GATE_STATUS_LABELS["pass_with_exceptions"] == "通過（免除中あり）"

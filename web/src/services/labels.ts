@@ -65,7 +65,7 @@ export const EXEC_STATE_LABELS: Record<ExecState, string> = {
 
 export const GATE_STATUS_LABELS: Record<GateStatus, string> = {
   pass: '通過',
-  pass_with_exceptions: '例外付き通過',
+  pass_with_exceptions: '通過（免除中あり）',
   fail: '失敗',
 }
 
@@ -110,9 +110,9 @@ export const WORKSPACE_ROLE_LABELS: Record<WorkspaceRole, string> = {
   member: 'メンバー',
 }
 
-/** ゲートの結果を判定の色に対応させる（通過=適合の色、例外付き通過=要確認の色、失敗=違反の色）。 */
+/** ゲートの結果を判定の色に対応させる（通過=適合の色、通過（免除中あり）=免除中の色、失敗=違反の色）。 */
 export function gateTone(status: GateStatus): VerdictTone {
-  return status === 'pass' ? 'ok' : status === 'pass_with_exceptions' ? 'rev' : 'bad'
+  return status === 'pass' ? 'ok' : status === 'pass_with_exceptions' ? 'exempt' : 'bad'
 }
 
 export const APPROVAL_LABELS: Record<ApprovalState, string> = {
