@@ -22,7 +22,16 @@ export function HealthRing({ counts, size = 'sm' }: { counts: StatusCounts | nul
       : `${segments.map((s) => `${STATE_META[s.kind].segment} ${counts[s.kind]}`).join('・')}（適合 ${pct}%）`
   return (
     <div className={cn('grid shrink-0 place-items-center rounded-full', outer)} style={{ background }} role="img" aria-label={label}>
-      <span className={cn('grid place-items-center rounded-full bg-card font-bold', inner)}>{pct === null ? '—' : pct}</span>
+      <span className={cn('grid place-items-center rounded-full bg-card font-bold', inner)}>
+        {pct === null ? (
+          '—'
+        ) : (
+          <span>
+            {pct}
+            <span className="text-[0.6em] font-semibold">%</span>
+          </span>
+        )}
+      </span>
     </div>
   )
 }
