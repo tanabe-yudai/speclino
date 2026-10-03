@@ -19,7 +19,7 @@ from speclino.domain.semantic_diff import (
 )
 
 VERDICT_LABELS: dict[Verdict, str] = {
-    "VERIFIED_IN_SCOPE": "適合（確認範囲内）",
+    "VERIFIED_IN_SCOPE": "適合",
     "VIOLATED": "違反",
     "UNKNOWN": "未検証",
     "REVIEW": "要確認",
@@ -67,6 +67,8 @@ def _render_overview(
     ]
     for v in ("VERIFIED_IN_SCOPE", "VIOLATED", "UNKNOWN", "REVIEW"):
         lines.append(f"| {VERDICT_LABELS[v]} | {getattr(counts, v)} |")
+    lines.append("")
+    lines.append("適合は、検査器が確認した範囲（解析の深さ・経路の上限など）での適合です。")
     lines.append("")
     if gate is not None:
         lines.append(f"- ゲート: **{GATE_STATUS_LABELS[gate.status]}** — {gate.reason}")

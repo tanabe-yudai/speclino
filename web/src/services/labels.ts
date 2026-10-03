@@ -8,7 +8,7 @@ import type { VerdictTone } from '../types/components'
 import type { WorkspaceRole } from '../types/me'
 
 export const VERDICT_LABELS: Record<Verdict, string> = {
-  VERIFIED_IN_SCOPE: '適合（確認範囲内）',
+  VERIFIED_IN_SCOPE: '適合',
   VIOLATED: '違反',
   UNKNOWN: '未検証',
   REVIEW: '要確認',
@@ -136,6 +136,7 @@ export const NEXT_ACTION_KIND: Record<NextActionKind, { label: string; tone: Ver
   violated: { label: '違反', tone: 'bad' },
   stale: { label: '承認切れ', tone: 'rev' },
   review: { label: '要確認', tone: 'rev' },
+  exempted: { label: '免除中', tone: 'rev' },
   unknown: { label: '未検証', tone: 'unk' },
   unapproved: { label: '未承認', tone: 'rev' },
 }

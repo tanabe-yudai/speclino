@@ -46,8 +46,9 @@ from speclino.analysis.reachability import reachable_source_hash
 from speclino.conformance.engine import ENGINE_VERSION, EngineConfig, EngineInputError, evaluate
 from speclino.conformance.exceptions import (
     RejectedWaiver,
+    Waiver,
     rejected_exceptions_for,
-    waived_ids,
+    waivers_for,
 )
 from speclino.conformance.gate import DEFAULT_FAIL_ON, GatePolicy, GateResult, aggregate_gate
 from speclino.conformance.semantic_diff import DiffSide, annotate_findings, semantic_diff
@@ -148,6 +149,8 @@ class CheckResult:
     # 仕様側に上書きされる・免除が消えるといったずれが起きる。codex レビュー指摘）。
     gate_levels: dict[str, RuleLevel] = field(default_factory=dict)
     waived_finding_ids: frozenset[str] = field(default_factory=frozenset)
+    # 免除の中身（どの例外で・いつまで・どう直すか）。gate.json に残す
+    waivers: list[Waiver] = field(default_factory=list)
     artifacts: dict[str, Path] | None = None
     domain: DomainSpec | None = None
     bindings: Bindings | None = None
@@ -309,7 +312,8 @@ def run_check(req: CheckRequest) -> CheckResult:
     # policy_result.rules_by_id に載っているので、対象・期限が一致していても免除しない。
     exceptions = _load_exceptions(project_dir)
     today = req.today or date.today()
-    waived = waived_ids(combined, exceptions, today, policy_result.rules_by_id)
+    waivers = waivers_for(combined, exceptions, today, policy_result.rules_by_id)
+    waived = frozenset(w.finding_id for w in waivers)
     rejected = rejected_exceptions_for(combined, exceptions, today, policy_result.rules_by_id)
     combined = _annotate_rejected_waivers(combined, rejected)
     gate = aggregate_gate(combined, levels, GatePolicy(fail_on=fail_on, mode=req.mode), waived)
@@ -354,6 +358,7 @@ def run_check(req: CheckRequest) -> CheckResult:
         policy_findings=policy_result.findings,
         gate_levels=levels,
         waived_finding_ids=waived,
+        waivers=waivers,
         domain=domain,
         bindings=bindings,
         contracts=contracts,
@@ -390,6 +395,7 @@ def write_result(result: CheckResult, out_dir: Path) -> dict[str, Path]:
             result.findings,
             result.gate,
             result.semantic_diff,
+            result.waivers,
         )
         _write_domain(result, out_dir, written)
         return written
@@ -402,6 +408,7 @@ def write_result(result: CheckResult, out_dir: Path) -> dict[str, Path]:
         result.findings,
         result.gate,
         result.semantic_diff,
+        result.waivers,
     )
     _write_domain(result, out_dir, written)
     for spec in result.spec_irs:

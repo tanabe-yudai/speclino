@@ -29,13 +29,21 @@ export function PoliciesPanel({ overview }: { overview: ProjectOverview }) {
               <span className="text-xs text-ink-3">{p.origin === 'team' ? 'チーム' : 'プロジェクト'}</span>
               <span className="text-xs text-ink-3">{p.level ? POLICY_LEVEL_LABELS[p.level] : '—'}</span>
               <span className="text-xs text-ink-3">{verifierLabel(p.has_verifier)}</span>
-              {p.waived > 0 && <ToneBadge tone="rev">例外で免除 {p.waived}</ToneBadge>}
-              {p.status ? (
+              {/* 違反がすべて期限付きの例外で免除されているなら「免除中」（違反でも適合でもない） */}
+              {p.exempted ? (
+                <ToneBadge tone="rev">免除中</ToneBadge>
+              ) : p.status ? (
                 <VerdictBadge verdict={p.status} />
               ) : (
                 <span className="text-xs text-ink-3">この検査では結果なし</span>
               )}
+              {!p.exempted && p.waived > 0 && <span className="text-xs text-ink-3">うち {p.waived} 件は例外で免除</span>}
               <span className="w-full text-sm text-ink-2">{p.title ?? '—'}</span>
+              {p.waivers.map((w) => (
+                <span key={w.exception_id} className="w-full text-xs text-ink-2">
+                  {w.exception_id} · 期限 {w.expires_on} · 直し方: {w.alternative}
+                </span>
+              ))}
             </li>
           ))}
         </ul>

@@ -38,4 +38,21 @@ describe('nextActions', () => {
   it('何も無ければ空', () => {
     expect(nextActions([req('OK', {})])).toEqual([])
   })
+
+  it('免除中の規約は、要確認の後ろに期限の近い順で入る', () => {
+    const policies = [
+      { rule_id: 'P-LATE', origin: 'team' as const, title: '遅い', level: null, has_verifier: true, status: 'VIOLATED' as const,
+        counts: { VERIFIED_IN_SCOPE: 0, VIOLATED: 1, UNKNOWN: 0, REVIEW: 0 }, waived: 1, exempted: true,
+        waivers: [{ exception_id: 'E2', expires_on: '2026-12-31', reason: 'r', alternative: '直し方2' }] },
+      { rule_id: 'P-SOON', origin: 'team' as const, title: '近い', level: null, has_verifier: true, status: 'VIOLATED' as const,
+        counts: { VERIFIED_IN_SCOPE: 0, VIOLATED: 1, UNKNOWN: 0, REVIEW: 0 }, waived: 1, exempted: true,
+        waivers: [{ exception_id: 'E1', expires_on: '2026-11-01', reason: 'r', alternative: '直し方1' }] },
+    ]
+    const reqs = [req('Q', { verdict: 'REVIEW' }), req('K', { verdict: 'UNKNOWN' })]
+    expect(nextActions(reqs, policies).map((a) => [a.kind, a.requirementId])).toEqual([
+      ['review', 'Q'], ['exempted', 'P-SOON'], ['exempted', 'P-LATE'], ['unknown', 'K'],
+    ])
+    expect(nextActions([], policies)[0].hint).toBe('免除の期限 2026-11-01 までに直す: 直し方1')
+  })
 })
+

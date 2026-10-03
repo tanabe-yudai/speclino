@@ -106,6 +106,42 @@ def test_write_artifacts_writes_expected_files_deterministically(tmp_path: Path)
     assert manifest_data["run_id"] == "run-test-0001"
 
 
+def test_gate_json_records_waivers_with_expiry_and_fix(tmp_path: Path) -> None:
+    """例外で免除した違反は、どの例外で・いつまで・どう直すかを gate.json に残す。
+
+    画面の「免除中」に期限と直し方を出すため。
+    """
+    from datetime import date
+
+    from speclino.conformance.exceptions import Waiver
+
+    findings = evaluate(co.SPEC, co.RESTORE_ADMIN_ONLY, co.DOMAIN)
+    violated = next(f for f in findings.findings if f.requirement_id == "R-CANCEL-04")
+    gate = aggregate_gate(findings, _levels(), waived_ids=frozenset({violated.id}))
+    waiver = Waiver(
+        violated.id, "R-CANCEL-04", "EXC-1", "owner", date(2026, 12, 1), "理由", "直し方"
+    )
+    # ゲートで免除されていない finding の例外は書かない
+    stray = Waiver("F-unused", "R-X", "EXC-2", "owner", date(2026, 12, 1), "理由", "直し方")
+    out = write_artifacts(
+        tmp_path, _manifest(), co.SPEC, None, findings, gate, waivers=[waiver, stray]
+    )
+    data = json.loads(out["gate.json"].read_text(encoding="utf-8"))
+    assert data["waivers"] == [
+        {
+            "finding_id": violated.id,
+            "requirement_id": "R-CANCEL-04",
+            "exception_id": "EXC-1",
+            "approver": "owner",
+            "expires_on": "2026-12-01",
+            "reason": "理由",
+            "alternative": "直し方",
+        }
+    ]
+    plain = write_artifacts(tmp_path / "plain", _manifest(), co.SPEC, None, findings, gate)
+    assert json.loads(plain["gate.json"].read_text(encoding="utf-8"))["waivers"] == []
+
+
 def test_write_artifacts_skips_optional_none_inputs(tmp_path: Path) -> None:
     findings = evaluate(co.SPEC, co.CORRECT, co.DOMAIN)
     gate = _gate_for(findings)
@@ -181,7 +217,9 @@ def test_review_md_orders_and_summarizes_verified() -> None:
     assert "## 違反" not in text
     assert "## 要確認" not in text
     assert "## 未検証" not in text
-    assert "## 適合（確認範囲内）" in text
+    assert "## 適合" in text
+    # 「適合」は検査器が確認した範囲での適合（表示名を短くしても意味は注記で残す）
+    assert "検査器が確認した範囲" in text
     assert "| 要求ID | 確認範囲 | 概要 |" in text
 
 
@@ -267,7 +305,7 @@ def test_review_md_names_unknown_as_unverified() -> None:
     from speclino.reporter.review_md import VERDICT_LABELS
 
     assert VERDICT_LABELS == {
-        "VERIFIED_IN_SCOPE": "適合（確認範囲内）",
+        "VERIFIED_IN_SCOPE": "適合",
         "VIOLATED": "違反",
         "UNKNOWN": "未検証",
         "REVIEW": "要確認",

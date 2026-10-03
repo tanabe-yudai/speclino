@@ -34,8 +34,9 @@ export const MOCK_OVERVIEW: ProjectOverview = {
     { id: 'R-CANCEL-06', behavior_id: 'cancel_order', title: '監査ログを残す', spec_path: null, line_start: null, line_end: null, approval: 'unapproved', tests_declared: 1, verdict: 'REVIEW', finding_ids: ['f6'], removed: false },
   ],
   policies: [
-    { rule_id: 'SPEC-001', origin: 'team', title: '仕様に要求 ID を付ける', level: 'mandatory', has_verifier: true, status: 'VERIFIED_IN_SCOPE', counts: { VERIFIED_IN_SCOPE: 3, VIOLATED: 0, UNKNOWN: 0, REVIEW: 0 }, waived: 0 },
-    { rule_id: 'DOC-001', origin: 'team', title: '設計判断を記録する', level: 'advisory', has_verifier: false, status: null, counts: { VERIFIED_IN_SCOPE: 0, VIOLATED: 0, UNKNOWN: 0, REVIEW: 0 }, waived: 0 },
+    { rule_id: 'SPEC-001', origin: 'team', title: '仕様に要求 ID を付ける', level: 'mandatory', has_verifier: true, status: 'VERIFIED_IN_SCOPE', counts: { VERIFIED_IN_SCOPE: 3, VIOLATED: 0, UNKNOWN: 0, REVIEW: 0 }, waived: 0, exempted: false, waivers: [] },
+    { rule_id: 'TEST-001', origin: 'team', title: '要求にテストを宣言する', level: 'advisory', has_verifier: true, status: 'VIOLATED', counts: { VERIFIED_IN_SCOPE: 2, VIOLATED: 1, UNKNOWN: 0, REVIEW: 0 }, waived: 1, exempted: true, waivers: [{ exception_id: 'EX-TEST-001', expires_on: '2026-12-01', reason: '軽量イメージで収集できない', alternative: 'イメージの依存を揃えてから宣言する' }] },
+    { rule_id: 'DOC-001', origin: 'team', title: '設計判断を記録する', level: 'advisory', has_verifier: false, status: null, counts: { VERIFIED_IN_SCOPE: 0, VIOLATED: 0, UNKNOWN: 0, REVIEW: 0 }, waived: 0, exempted: false, waivers: [] },
   ],
   runs: [RUN, { ...RUN, id: 'b2c3d4e5-6789-4abc-9def-0123456789ab', pr_number: 11, gate_status: 'pass', created_at: '2026-09-29T01:00:00Z' }],
 }

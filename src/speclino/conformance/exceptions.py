@@ -30,6 +30,7 @@ class Waiver:
     approver: str
     expires_on: date
     reason: str
+    alternative: str = ""  # 代替策（直し方）。画面の「免除中」に期限と並べて出す
 
 
 @dataclass(frozen=True)
@@ -102,7 +103,15 @@ def waivers_for(
             if not _rule_allows_exception(exc.rule, policy_rules):
                 continue
             out.append(
-                Waiver(f.id, f.requirement_id, exc.id, exc.approver, exc.expires_on, exc.reason)
+                Waiver(
+                    f.id,
+                    f.requirement_id,
+                    exc.id,
+                    exc.approver,
+                    exc.expires_on,
+                    exc.reason,
+                    exc.alternative,
+                )
             )
             break
     return out

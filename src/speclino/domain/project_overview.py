@@ -5,7 +5,7 @@ design/2026-09-30-ui-redesign.md 5.2 節。判定は検査器の findings をそ
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import Field
@@ -43,6 +43,15 @@ class RequirementView(IRModel):
     removed: bool = Field(default=False, description="head の Spec IR から消えた要求")
 
 
+class WaiverView(IRModel):
+    """規約の違反を免除している例外（期限付き。期限までに直す前提）。"""
+
+    exception_id: str
+    expires_on: date
+    reason: str
+    alternative: str = Field(description="代替策（直し方）")
+
+
 class PolicyView(IRModel):
     rule_id: str
     origin: PolicyOrigin
@@ -55,6 +64,13 @@ class PolicyView(IRModel):
     counts: VerdictCounts
     waived: int = Field(
         default=0, ge=0, description="例外（exceptions.yaml）で免除された finding の数"
+    )
+    exempted: bool = Field(
+        default=False,
+        description="違反がすべて例外で免除されている（免除中。違反でも適合でもない）",
+    )
+    waivers: list[WaiverView] = Field(
+        default_factory=list, description="免除している例外（重複なし）"
     )
 
 

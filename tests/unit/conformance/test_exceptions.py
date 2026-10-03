@@ -36,6 +36,8 @@ def test_valid_exception_waives_violation_and_gate_passes_with_exceptions() -> N
     fs = evaluate(co.SPEC, co.RESTORE_ADMIN_ONLY, co.DOMAIN)
     waivers = waivers_for(fs, exceptions(), date(2026, 9, 22))
     assert [w.requirement_id for w in waivers] == ["R-CANCEL-04"]
+    # 画面で「いつまでに・どう直すか」を出すため、期限と代替策（直し方）も持つ
+    assert waivers[0].expires_on == date(2026, 10, 31) and waivers[0].alternative
     gate = aggregate_gate(
         fs, {r.id: r.level for r in co.RULES}, waived_ids=frozenset(w.finding_id for w in waivers)
     )
