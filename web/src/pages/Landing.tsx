@@ -29,7 +29,7 @@ export function Landing() {
   return (
     <div id="top" className="min-h-screen">
       <LandingHeader />
-      <main className="mx-auto w-full max-w-6xl px-4 sm:px-6">
+      <main className="mx-auto w-full max-w-6xl px-4 [overflow-wrap:anywhere] sm:px-6">
         <section className="grid items-center gap-10 py-14 sm:py-20 lg:grid-cols-[minmax(0,1fr)_minmax(0,28rem)]">
           <div className="min-w-0">
             <p className="text-xs font-semibold tracking-[0.12em] text-primary">{HERO.eyebrow}</p>

@@ -16,11 +16,11 @@ export function CounterexamplePanel({ counterexample }: CounterexamplePanelProps
       </div>
       <p className="mt-2 text-ink-2">{counterexample.description}</p>
       {assignments.length > 0 && (
-        <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 font-mono text-xs">
+        <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 font-mono text-xs">
           {assignments.map(([name, value]) => (
             <div key={name} className="contents">
-              <dt className="text-ink-3">{name}</dt>
-              <dd className="text-foreground">{String(value)}</dd>
+              <dt className="text-ink-3 break-all">{name}</dt>
+              <dd className="min-w-0 text-foreground break-all">{String(value)}</dd>
             </div>
           ))}
         </dl>

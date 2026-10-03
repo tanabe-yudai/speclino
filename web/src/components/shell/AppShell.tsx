@@ -44,7 +44,8 @@ export function AppShell() {
   return (
     <MeContext.Provider value={value}>
       <TopBar onOpenPalette={() => setPaletteOpen(true)} />
-      <main className="mx-auto w-full max-w-6xl px-4 pt-6 pb-16 sm:px-6">
+      {/* 長いパスや ID（`::` や `/` を含み空白の無い文字列）でカードが押し広げられないよう、どこでも折り返せるようにする */}
+      <main className="mx-auto w-full max-w-6xl px-4 pt-6 pb-16 [overflow-wrap:anywhere] sm:px-6">
         {error && !me ? <ErrorState message={error} onRetry={reload} /> : <Outlet />}
       </main>
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />

@@ -190,7 +190,7 @@ function RunSummary({ run }: { run: ReviewRunDetail }) {
         <p className="text-sm text-ink-2">{gateReason}</p>
         {semanticDiff && <p className="text-xs text-ink-3">{semanticDiff}</p>}
 
-        <div className="flex flex-wrap gap-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <CountTile verdict="VIOLATED" count={counts.VIOLATED} />
           <CountTile verdict="REVIEW" count={counts.REVIEW} />
           <CountTile verdict="UNKNOWN" count={counts.UNKNOWN} />
@@ -234,7 +234,7 @@ function RunSummary({ run }: { run: ReviewRunDetail }) {
 
 function CountTile({ verdict, count }: { verdict: Verdict; count: number }) {
   return (
-    <div className="row flex min-w-[8rem] items-center gap-3 px-4 py-2.5">
+    <div className="row flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5">
       <span className="text-2xl font-bold tabular-nums">{count}</span>
       <VerdictBadge verdict={verdict} />
     </div>
