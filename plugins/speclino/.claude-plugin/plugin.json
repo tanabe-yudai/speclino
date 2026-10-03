@@ -1,0 +1,5 @@
+{
+  "name": "speclino",
+  "description": "SpecLino: 仕様とコードの意味差分を Z3 で検査する MCP サーバーと、使い方を教える Skill。",
+  "version": "0.1.0"
+}

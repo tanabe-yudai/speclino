@@ -23,6 +23,8 @@ COPY pyproject.toml uv.lock README.md ./
 COPY src/ ./src/
 # 本番の admin Job の `policy seed` が既定で読む規約パッケージ（S43）
 COPY .speclino/policy/ ./.speclino/policy/
+# MCP の instructions / prompt が読む SKILL.md の正本（Claude Code プラグインの配布物と同じファイル、S57）
+COPY plugins/ ./plugins/
 # 本番のマイグレーションは同じイメージの Cloud Run Job（speclino-migrate）で流す。
 COPY alembic.ini ./
 COPY migrations/ ./migrations/
