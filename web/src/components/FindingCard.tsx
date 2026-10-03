@@ -37,7 +37,7 @@ function RefList({ refs, preferSymbol, repoFullName, headSha }: RefListProps) {
       {refs.map((ref, index) => {
         const label = refLabel(ref, preferSymbol)
         return (
-          <li key={`${ref.path ?? ref.requirement_id ?? ref.symbol ?? index}-${index}`} className="truncate font-mono text-xs">
+          <li key={`${ref.path ?? ref.requirement_id ?? ref.symbol ?? index}-${index}`} className="font-mono text-xs break-all">
             {repoFullName && ref.path ? (
               <a
                 className="text-primary underline-offset-4 hover:underline"
@@ -73,7 +73,7 @@ export function FindingCard({ finding, repoFullName, headSha }: FindingCardProps
   return (
     <article className={cn('row space-y-4 p-5', finding.verdict === 'VIOLATED' && 'border-l-4 border-l-bad')}>
       <header className="flex flex-wrap items-center gap-2">
-        <code className="font-mono text-sm font-semibold">{finding.requirement_id}</code>
+        <code className="min-w-0 font-mono text-sm font-semibold break-all">{finding.requirement_id}</code>
         <VerdictBadge verdict={finding.verdict} />
         {base && base !== 'unchanged' && (
           <ToneBadge tone={BASE_HEAD_STATUS_TONE[base]}>base 比: {BASE_HEAD_STATUS_LABELS[base]}</ToneBadge>

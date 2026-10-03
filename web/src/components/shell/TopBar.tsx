@@ -24,10 +24,11 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
         <ProjectPill />
         {workspace && (
           <>
-            <NavLink to={paths.policies(workspace.slug)} className={navClass}>
+            {/* スマホ幅ではアカウントメニューに入れる（ピルの幅を残す） */}
+            <NavLink to={paths.policies(workspace.slug)} className={(s) => cn(navClass(s), 'hidden sm:inline-flex')}>
               規約
             </NavLink>
-            <NavLink to={paths.settings(workspace.slug)} className={navClass}>
+            <NavLink to={paths.settings(workspace.slug)} className={(s) => cn(navClass(s), 'hidden sm:inline-flex')}>
               設定
             </NavLink>
           </>
