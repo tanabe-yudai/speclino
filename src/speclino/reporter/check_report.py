@@ -55,22 +55,24 @@ def _truncate(text: str, limit: int) -> str:
 def render_check(
     findings: Findings, gate: GateResult, semantic_diff: SemanticDiff | None = None
 ) -> CheckText:
-    """title は「違反 n / 未検証 m / 適合 k（ゲート: ...）」、summary は 1500 文字以内。
+    """title は「違反 n / 要確認 r / 未検証 u / 適合 k（ゲート: ...）」、summary は 1500 文字以内。
+
+    判定は仕様の 4 値の名前で分けて出す（未検証と要確認を合算しない）。
 
     意味差分があれば summary に「新規違反 / 解消 / 判定不能化」の件数を添える（PoC 12.2）。
     """
     counts = findings.counts
-    unresolved = counts.UNKNOWN + counts.REVIEW
     gate_label = GATE_STATUS_LABELS[gate.status]
     title = (
-        f"違反 {counts.VIOLATED} / 未検証 {unresolved} / 適合 {counts.VERIFIED_IN_SCOPE}"
+        f"違反 {counts.VIOLATED} / 要確認 {counts.REVIEW} / 未検証 {counts.UNKNOWN} / "
+        f"適合 {counts.VERIFIED_IN_SCOPE}"
         f"（ゲート: {gate_label}）"
     )
 
     coverage = findings.coverage
     summary_lines = [
-        f"違反 {counts.VIOLATED}件 / 未検証 {unresolved}件"
-        f"（不明 {counts.UNKNOWN}・要確認 {counts.REVIEW}） / 適合 {counts.VERIFIED_IN_SCOPE}件",
+        f"違反 {counts.VIOLATED}件 / 要確認 {counts.REVIEW}件 / 未検証 {counts.UNKNOWN}件 / "
+        f"適合 {counts.VERIFIED_IN_SCOPE}件",
         f"ゲート: {gate_label} — {gate.reason}",
         "",
         f"要求数 {coverage.requirements_total} / 承認済み {coverage.requirements_approved} / "

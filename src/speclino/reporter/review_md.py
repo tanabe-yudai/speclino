@@ -21,7 +21,7 @@ from speclino.domain.semantic_diff import (
 VERDICT_LABELS: dict[Verdict, str] = {
     "VERIFIED_IN_SCOPE": "適合（確認範囲内）",
     "VIOLATED": "違反",
-    "UNKNOWN": "不明",
+    "UNKNOWN": "未検証",
     "REVIEW": "要確認",
 }
 

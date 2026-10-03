@@ -362,7 +362,7 @@ export const MOCK_REVIEW_MARKDOWN: Record<string, string> = {
 | --- | --- |
 | 適合（確認範囲内） | 1 |
 | 違反 | 1 |
-| 不明 | 1 |
+| 未検証 | 1 |
 | 要確認 | 1 |
 
 - ゲート: **失敗** — 必須ルールが非成立: R-CANCEL-04, R-CANCEL-06, R-CANCEL-07
@@ -400,7 +400,7 @@ export const MOCK_REVIEW_MARKDOWN: Record<string, string> = {
 | --- | --- |
 | 適合（確認範囲内） | 2 |
 | 違反 | 0 |
-| 不明 | 0 |
+| 未検証 | 0 |
 | 要確認 | 0 |
 
 - ゲート: **通過** — 必須ルールはすべて成立
