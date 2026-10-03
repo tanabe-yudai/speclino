@@ -23,6 +23,8 @@ describe('buildCommands', () => {
             latest_run: null,
             counts: null,
             unanalyzed: null,
+            status_counts: null,
+            state: null,
           },
         ],
       },

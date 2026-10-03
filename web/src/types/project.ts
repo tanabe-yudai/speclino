@@ -19,6 +19,18 @@ export interface ProjectRun {
 
 export type OverviewStatus = 'ok' | 'not_checked' | 'unavailable'
 
+/** プロジェクトの状態（要求と規約を合わせて、いちばん重い区分）。円グラフの区分と同じ。 */
+export type ProjectState = 'violated' | 'review' | 'unknown' | 'exempted' | 'ok'
+
+/** 要求と規約を合わせた 5 区分の件数（未解析は未検証、免除中は期限付きの例外で免除された規約）。 */
+export interface StatusCounts {
+  violated: number
+  review: number
+  unknown: number
+  exempted: number
+  ok: number
+}
+
 export interface ProjectSummary {
   id: string
   repo_full_name: string
@@ -27,6 +39,8 @@ export interface ProjectSummary {
   latest_run: ProjectRun | null
   counts: VerdictCounts | null
   unanalyzed: number | null
+  status_counts: StatusCounts | null
+  state: ProjectState | null
 }
 
 export interface RequirementView {

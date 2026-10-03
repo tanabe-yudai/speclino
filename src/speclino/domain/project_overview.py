@@ -18,6 +18,8 @@ from speclino.domain.run import ExecState, GateStatus
 ApprovalState = Literal["approved", "unapproved", "stale"]
 PolicyOrigin = Literal["team", "project"]
 OverviewStatus = Literal["ok", "not_checked", "unavailable"]
+# プロジェクトの状態（要求と規約を合わせて、いちばん重い区分）。円グラフの区分と同じ
+ProjectState = Literal["violated", "review", "unknown", "exempted", "ok"]
 
 
 class RunView(IRModel):
@@ -74,6 +76,20 @@ class PolicyView(IRModel):
     )
 
 
+class StatusCounts(IRModel):
+    """要求と規約を合わせた 5 区分の件数（円グラフと状態の見出しはこれ 1 つから作る）。
+
+    未解析・抽出しきれなかった要求は未検証に含める。免除中は、違反がすべて期限付きの例外で
+    免除されている規約（違反でも適合でもない）。
+    """
+
+    violated: int = 0
+    review: int = 0
+    unknown: int = 0
+    exempted: int = 0
+    ok: int = 0
+
+
 class ProjectSummary(IRModel):
     id: str
     repo_full_name: str
@@ -86,6 +102,12 @@ class ProjectSummary(IRModel):
     unanalyzed: int | None = Field(
         default=None,
         description="finding の無い要求と抽出しきれなかった要求の数。読めなければ None",
+    )
+    status_counts: StatusCounts | None = Field(
+        default=None, description="要求と規約を合わせた 5 区分の件数。読めなければ None"
+    )
+    state: ProjectState | None = Field(
+        default=None, description="いちばん重い区分。判定が 1 件も無ければ None"
     )
 
 

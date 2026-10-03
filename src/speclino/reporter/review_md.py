@@ -27,7 +27,7 @@ VERDICT_LABELS: dict[Verdict, str] = {
 
 GATE_STATUS_LABELS: dict[GateStatus, str] = {
     "pass": "通過",
-    "pass_with_exceptions": "例外付き通過",
+    "pass_with_exceptions": "通過（免除中あり）",
     "fail": "失敗",
 }
 
