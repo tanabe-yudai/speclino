@@ -10,7 +10,6 @@ import { LoadingState } from '@/components/LoadingState'
 import { HealthRing } from '@/components/project/HealthRing'
 import { useMe } from '@/hooks/useMe'
 import { useWorkspaceProjects } from '@/hooks/useWorkspaceProjects'
-import { healthRatio, healthTone } from '@/services/health'
 import { paths } from '@/services/paths'
 import { pickWorkspace } from '@/services/workspaces'
 import type { ProjectSummary } from '@/types/project'
@@ -22,10 +21,7 @@ function ProjectCard({ slug, project }: { slug: string; project: ProjectSummary 
   const c = project.counts
   return (
     <Link to={paths.project(slug, project.repo_full_name)} className="row flex min-w-0 items-center gap-4 p-5">
-      <HealthRing
-        ratio={c && project.unanalyzed !== null ? healthRatio(c, project.unanalyzed) : null}
-        tone={healthTone(project.latest_run?.gate_status ?? null)}
-      />
+      <HealthRing counts={project.unanalyzed !== null ? c : null} unanalyzed={project.unanalyzed ?? 0} />
       <div className="min-w-0 flex-1">
         <p className="truncate font-semibold">{name}</p>
         <p className="mt-0.5 truncate font-mono text-xs text-ink-3">{project.repo_full_name}</p>

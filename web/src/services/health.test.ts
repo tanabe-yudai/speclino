@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { healthPercent, healthRatio, healthTone } from './health'
+import { healthPercent, healthRatio, ringSegments } from './health'
 
 describe('healthRatio', () => {
   it('適合の割合', () => {
@@ -22,11 +22,19 @@ describe('healthPercent', () => {
   })
 })
 
-describe('healthTone', () => {
-  it('リングの色はゲートの結果に合わせる（要求が 100% でも例外付き通過なら緑にしない）', () => {
-    expect(healthTone('pass')).toBe('ok')
-    expect(healthTone('pass_with_exceptions')).toBe('rev')
-    expect(healthTone('fail')).toBe('bad')
-    expect(healthTone(null)).toBe('ok')
+describe('ringSegments', () => {
+  it('適合・要確認・未検証・違反・未解析の順に、件数の割合で円を区切る（0 件は出さない）', () => {
+    const segs = ringSegments({ VERIFIED_IN_SCOPE: 6, VIOLATED: 1, UNKNOWN: 0, REVIEW: 2 }, 1)
+    expect(segs).toEqual([
+      { kind: 'ok', from: 0, to: 60 },
+      { kind: 'rev', from: 60, to: 80 },
+      { kind: 'bad', from: 80, to: 90 },
+      { kind: 'none', from: 90, to: 100 },
+    ])
+  })
+  it('判定が無ければ空', () => {
+    expect(ringSegments(null, 0)).toEqual([])
+    expect(ringSegments({ VERIFIED_IN_SCOPE: 0, VIOLATED: 0, UNKNOWN: 0, REVIEW: 0 }, 0)).toEqual([])
   })
 })
+

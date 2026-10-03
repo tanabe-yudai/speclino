@@ -1,30 +1,44 @@
 import { cn } from '@/lib/utils'
-import { healthPercent } from '@/services/health'
-import type { VerdictTone } from '@/types/components'
+import { healthPercent, healthRatio, ringSegments, type RingKind } from '@/services/health'
+import type { VerdictCounts } from '@/types/project'
 
-/** 健康状態のリング（要求の適合の割合）。色はゲートの結果（tone）。ratio が null なら判定なし。 */
+const COLOR: Record<RingKind, string> = {
+  ok: 'var(--ok)',
+  rev: 'var(--rev)',
+  unk: 'var(--unk)',
+  bad: 'var(--bad)',
+  none: 'var(--muted)',
+}
+
+/**
+ * 要求の判定の内訳の円グラフ（適合・要確認・未検証・違反・未解析）。中央は適合率。
+ * counts が null か 0 件なら「—」。
+ */
 export function HealthRing({
-  ratio,
+  counts,
+  unanalyzed = 0,
   size = 'sm',
-  tone = 'ok',
 }: {
-  ratio: number | null
+  counts: VerdictCounts | null
+  unanalyzed?: number
   size?: 'sm' | 'lg'
-  tone?: Exclude<VerdictTone, 'unk'>
 }) {
-  const pct = ratio === null ? 0 : healthPercent(ratio)
+  const segments = ringSegments(counts, unanalyzed)
+  const ratio = healthRatio(counts, unanalyzed)
+  const pct = ratio === null ? null : healthPercent(ratio)
   const outer = size === 'lg' ? 'size-24' : 'size-12'
   const inner = size === 'lg' ? 'size-18 text-xl' : 'size-9 text-xs'
+  const background =
+    segments.length === 0
+      ? 'var(--muted)'
+      : `conic-gradient(${segments.map((s) => `${COLOR[s.kind]} ${s.from}% ${s.to}%`).join(', ')})`
+  const label =
+    counts === null || pct === null
+      ? '判定なし'
+      : `要求の判定: 適合 ${counts.VERIFIED_IN_SCOPE}・要確認 ${counts.REVIEW}・未検証 ${counts.UNKNOWN}・違反 ${counts.VIOLATED}・未解析 ${unanalyzed}（適合率 ${pct}%）`
   return (
-    <div
-      className={cn('grid shrink-0 place-items-center rounded-full', outer)}
-      style={{ background: ratio === null ? 'var(--muted)' : `conic-gradient(var(--${tone}) 0 ${pct}%, var(--muted) ${pct}% 100%)` }}
-      role="img"
-      aria-label={ratio === null ? '判定なし' : `要求の適合 ${pct}%`}
-    >
-      <span className={cn('grid place-items-center rounded-full bg-card font-bold', inner)}>
-        {ratio === null ? '—' : pct}
-      </span>
+    <div className={cn('grid shrink-0 place-items-center rounded-full', outer)} style={{ background }} role="img" aria-label={label}>
+      <span className={cn('grid place-items-center rounded-full bg-card font-bold', inner)}>{pct === null ? '—' : pct}</span>
     </div>
   )
 }
