@@ -348,6 +348,7 @@ SpecLino は自分自身のコードを自分の仕様で検査する。CI が�
 | [SPEC-TOOL-001](specs/SPEC-TOOL-001.md) | `ToolGateway.invoke` | 権限が無ければツールを実行せず監査に残す。予算超過でも同じ |
 | [SPEC-GATE-001](specs/SPEC-GATE-001.md) | `conformance.gate.decide_gate` | 検証集合が空・必須ルールが無い状態で「通過」を返さない |
 | [SPEC-RUN-001](specs/SPEC-RUN-001.md) | `services.run_freshness.should_publish` | 古い実行（superseded / 最新でない）の結果を公開しない |
+| [SPEC-TEST-002](specs/SPEC-TEST-002.md) | `agent.tools.test_run.decide_observation` | 宣言済みテストの成功・error・skipped・timeout は観測を別軸に記録するだけで、判定（VIOLATED）を上書きしない |
 
 規約は MAKE-001（`make setup/test/lint` が存在し空でない）、SPEC-FMT-001（仕様の書式）、
 CI-001（pull_request トリガー・必須ステップ・読取り専用権限。`echo make test` や

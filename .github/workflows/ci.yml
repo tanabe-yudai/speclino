@@ -64,7 +64,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-backend
-      # SpecLino 自身の仕様（SPEC-TOOL-001 / SPEC-GATE-001 / SPEC-RUN-001）と規約
+      # SpecLino 自身の仕様（SPEC-TOOL-001 / SPEC-GATE-001 / SPEC-RUN-001 / SPEC-TEST-002）と規約
       # （MAKE-001 / SPEC-FMT-001 / CI-001 / API-ERR-001）を、**CLI だけで**検査する
       # （pytest 側の selfcheck マーカーのテストも合わせて実行する。`make selfcheck` 参照）。
       #

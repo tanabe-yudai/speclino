@@ -75,6 +75,10 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# tests/fixtures は凍結した現物コピー（S50）。test_run.py のように名前が test_*.py と一致する
+# ものもあり、pytest のデフォルト収集パターンに引っかかって `ctx` フィクスチャ不足で落ちる
+# （フィクスチャであって実行対象のテストではない）。収集対象から外す。
+norecursedirs = ["fixtures"]
 markers = [
   "live: 実LLMを呼ぶ（CI除外）",
   "spec(id): 要求 id を振る舞いとして検証するテスト（Spec IR の tests に宣言する。SPEC-TEST-001 が突き合わせる）",

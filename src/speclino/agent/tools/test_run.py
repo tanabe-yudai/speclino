@@ -11,13 +11,18 @@
 `PYTHONPATH=/work/head` により `python -m pytest` がそれを実行し、本物のテストを走らせずに
 成功した junit を書ける（`PYTHONSAFEPATH=1` では防げない）。偽の失敗はゲートを厳しくする
 だけなので受け入れてよいが、偽の成功は違反を適合に変えてしまうので採らない。
+
+`decide_observation` は SpecLino 自身の解析対象（specs/SPEC-TEST-002.md、R-TEST-01〜03）なので
+対応構文だけで書く。各テストの結果を仕分ける `classify_statuses`（ループを使う）と分離している
+のは `conformance.gate` の `triage` / `decide_gate` の分割と同じ技法（S36）。
 """
 
 from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Literal
 
 from speclino.agent.gateway import ToolCall, ToolGateway, ToolRegistry
 from speclino.agent.tools.context import InvestigationContext
@@ -27,6 +32,59 @@ from speclino.domain.spec_ir import EventRequirement, Rule
 from speclino.trace.junit import TestOutcome, parse_junit
 
 TIMEOUT_S = 120
+
+
+@dataclass(frozen=True)
+class TestStatuses:
+    """宣言済みテストの実行結果を仕分けた結果。`decide_observation` はこれだけを見る
+    （timeout は別軸の信号なので外に残す。`conformance.gate.Triage` と同じ役割）。
+    """
+
+    has_failed: bool  # failed が1件以上ある
+    inconclusive: bool  # missing / error / skipped のいずれかが1件以上ある
+
+
+ObservationOutcome = Literal["inconclusive", "violated", "observed"]
+
+
+@dataclass(frozen=True)
+class Decision:
+    outcome: ObservationOutcome
+
+
+def classify_statuses(statuses: dict[str, str]) -> TestStatuses:
+    """各テストの結果を `decide_observation` が見る2つの事実に仕分ける（ループを使うので
+    対応構文の対象外。自己検証の対象は `decide_observation` 側だけ）。
+    """
+    return TestStatuses(
+        has_failed=any(s == "failed" for s in statuses.values()),
+        inconclusive=any(s in ("missing", "error", "skipped") for s in statuses.values()),
+    )
+
+
+def decide_observation(statuses: TestStatuses, timed_out: bool) -> Decision:
+    """R-TEST-01: 失敗が1件でもあれば（timeout・不明な結果が無い限り）VIOLATED。
+    R-TEST-02: 宣言済みテストが全て成功したら判定を変えない（観測は別軸に記録するだけ。
+    冒頭の docstring 参照）。R-TEST-03: error / skipped / timeout があれば、失敗の有無に
+    関わらず判定を変えない（実行できなかった証拠は判定に使わない）。
+    """
+    if timed_out or statuses.inconclusive:
+        return _inconclusive()
+    if statuses.has_failed:
+        return _violated()
+    return _observed()
+
+
+def _inconclusive() -> Decision:
+    return Decision("inconclusive")
+
+
+def _violated() -> Decision:
+    return Decision("violated")
+
+
+def _observed() -> Decision:
+    return Decision("observed")
 
 
 def _observed_category(rule: Rule) -> Category:
@@ -84,7 +142,8 @@ def test_run(ctx: InvestigationContext, args: dict[str, Any]) -> dict[str, Any]:
     current = next((f for f in ctx.findings.findings if f.requirement_id == rule_id), None)
     if current is None:
         return {"error": "no_finding", "rule_id": rule_id}
-    if result.timed_out or any(s in ("missing", "error", "skipped") for s in statuses.values()):
+    decision = decide_observation(classify_statuses(statuses), result.timed_out)
+    if decision.outcome == "inconclusive":
         updated = current.model_copy(
             update={
                 "next_steps": [
@@ -94,7 +153,7 @@ def test_run(ctx: InvestigationContext, args: dict[str, Any]) -> dict[str, Any]:
             }
         )
         verdict_note = "unchanged"
-    elif any(s == "failed" for s in statuses.values()):
+    elif decision.outcome == "violated":
         failed = [t for t, s in statuses.items() if s == "failed"]
         updated = current.model_copy(
             update={
@@ -159,4 +218,12 @@ def build_test_run_fn(gateway_ref: Callable[[], ToolGateway]) -> Callable[..., A
     return test_run
 
 
-__all__ = ["build_test_run_fn", "register_test_run", "test_run"]
+__all__ = [
+    "Decision",
+    "TestStatuses",
+    "build_test_run_fn",
+    "classify_statuses",
+    "decide_observation",
+    "register_test_run",
+    "test_run",
+]
