@@ -84,6 +84,7 @@ const EVENT_TYPE_META: Record<string, EventMeta> = {
   'tool.analyze_focus': { label: 'ツール実行: 重点再解析', group: 'tool' },
   'tool.repo_search': { label: 'ツール実行: リポジトリ検索', group: 'tool' },
   audit: { label: '監査記録', group: 'audit' },
+  spec_bot: { label: '仕様 PR bot', group: 'other' },
 }
 
 export function eventMeta(type: string): EventMeta {

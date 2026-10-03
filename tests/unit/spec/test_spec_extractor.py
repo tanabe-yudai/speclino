@@ -82,6 +82,7 @@ async def test_candidate_validates_and_keeps_ambiguities_as_diagnostics() -> Non
         MARKDOWN, "cancel_order", DOMAIN, BINDINGS, llm, spec_path="specs/orders-cancel.md"
     )
     assert llm.schemas and "rules" in llm.schemas[0]["properties"]
+    assert (result.input_tokens, result.output_tokens) == llm.usage, "費用ガード用に使用量を返す"
     assert result.errors == []
     [rule] = result.spec.rules
     assert rule.approval_ref is None and result.spec.approvals == []
