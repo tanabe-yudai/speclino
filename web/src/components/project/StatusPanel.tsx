@@ -5,7 +5,7 @@ import { VerdictBadge } from '@/components/app/VerdictBadge'
 import { formatDateTime, shortSha } from '@/services/format'
 import { explainGate, summarizePolicies } from '@/services/gateExplain'
 import { githubPrUrl } from '@/services/github'
-import { healthRatio } from '@/services/health'
+import { healthRatio, healthTone } from '@/services/health'
 import { paths } from '@/services/paths'
 import type { Verdict } from '@/types/finding'
 import type { ProjectOverview } from '@/types/project'
@@ -21,17 +21,26 @@ export function StatusPanel({ overview }: { overview: ProjectOverview }) {
   const gateNote = explainGate(run?.gate_status ?? null, policies)
   return (
     <Panel className="space-y-5">
-      <div className="flex flex-wrap items-center gap-5">
-        <HealthRing size="lg" ratio={healthRatio(counts, overview.unanalyzed)} />
+      {/* スマホではリングを上、件数のタイルを下の全幅に（横に詰めるとバッジがはみ出す） */}
+      <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
+        <div className="flex items-center gap-4 sm:flex-col sm:gap-1.5">
+          {/* 色はゲートの結果。要求が 100% でも例外付き通過・失敗なら緑にしない */}
+          <HealthRing
+            size="lg"
+            ratio={healthRatio(counts, overview.unanalyzed)}
+            tone={healthTone(run?.gate_status ?? null)}
+          />
+          <p className="text-xs text-ink-3">要求の適合率</p>
+        </div>
         <div className="min-w-0 flex-1 space-y-1.5">
           <p className="text-xs font-semibold text-ink-3">要求の判定</p>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {ORDER.map((v) => (
-            <div key={v} className="rounded-lg bg-secondary px-3 py-2">
-              <VerdictBadge verdict={v} />
-              <p className="mt-1 text-xl font-bold">{counts?.[v] ?? 0}</p>
-            </div>
-          ))}
+            {ORDER.map((v) => (
+              <div key={v} className="min-w-0 rounded-lg bg-secondary px-3 py-2">
+                <VerdictBadge verdict={v} className="max-w-full whitespace-normal" />
+                <p className="mt-1 text-xl font-bold">{counts?.[v] ?? 0}</p>
+              </div>
+            ))}
           </div>
         </div>
       </div>

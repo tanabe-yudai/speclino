@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { healthPercent, healthRatio } from './health'
+import { healthPercent, healthRatio, healthTone } from './health'
 
 describe('healthRatio', () => {
   it('適合の割合', () => {
@@ -19,5 +19,14 @@ describe('healthPercent', () => {
     expect(healthPercent(0.995)).toBe(99)
     expect(healthPercent(1)).toBe(100)
     expect(healthPercent(0)).toBe(0)
+  })
+})
+
+describe('healthTone', () => {
+  it('リングの色はゲートの結果に合わせる（要求が 100% でも例外付き通過なら緑にしない）', () => {
+    expect(healthTone('pass')).toBe('ok')
+    expect(healthTone('pass_with_exceptions')).toBe('rev')
+    expect(healthTone('fail')).toBe('bad')
+    expect(healthTone(null)).toBe('ok')
   })
 })
