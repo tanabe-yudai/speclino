@@ -110,11 +110,12 @@ def test_missing_denied_audit_violates_r_tool_01b(tmp_path: Path) -> None:
     assert v["R-TOOL-01"] == ("VERIFIED_IN_SCOPE", "conformant")
 
 
-# ---------------------------------------------------------------- S36: SPEC-GATE-001 / SPEC-RUN-001
+# ------------------------- S36: SPEC-GATE-001 / SPEC-RUN-001、S50: SPEC-TEST-002
 
 SELF_SPECS = {
     "gate_decide": ("SPEC-GATE-001.md", "gate_decide.spec-ir.json"),
     "run_freshness": ("SPEC-RUN-001.md", "run_freshness.spec-ir.json"),
+    "test_run_decide": ("SPEC-TEST-002.md", "test_run_decide.spec-ir.json"),
 }
 
 
@@ -138,6 +139,7 @@ def test_gate_and_run_specs_are_valid_and_verified(behavior: str) -> None:
 FROZEN_MODULES = {
     "conformance/gate.py": FIXTURES / "gate.py",
     "services/run_freshness.py": FIXTURES / "run_freshness.py",
+    "agent/tools/test_run.py": FIXTURES / "test_run.py",
 }
 
 
@@ -199,6 +201,20 @@ def test_publishing_superseded_run_violates_r_run_01(tmp_path: Path) -> None:
     assert v["R-RUN-03"] == ("VERIFIED_IN_SCOPE", "conformant")
 
 
+def test_passing_test_overwrites_verdict_violates_r_test_02(tmp_path: Path) -> None:
+    # S50 が直した元の不具合の再現: 宣言済みテストが全て成功したときに observed ではなく
+    # violated を返す（成功の観測が判定を上書きしてしまう）。
+    root = _copy_module(
+        tmp_path,
+        "agent/tools/test_run.py",
+        lambda s: s.replace("    return _observed()\n", "    return _violated()\n"),
+    )
+    v = _self_verdicts(root, "test_run_decide")
+    assert v["R-TEST-02"] == ("VIOLATED", "missing_effect")
+    assert v["R-TEST-01"] == ("VERIFIED_IN_SCOPE", "conformant")
+    assert v["R-TEST-03"] == ("VERIFIED_IN_SCOPE", "conformant")
+
+
 # ---------------------------------------------------------------- fixture drift
 
 # 現物（live）相対パス → 凍結コピー。上の検出テストが正しい「元」を変異させ続けているかを見張る。
@@ -206,9 +222,11 @@ FROZEN_TARGETS = {
     "src/speclino/agent/gateway.py": FROZEN_GATEWAY,
     "src/speclino/conformance/gate.py": FROZEN_MODULES["conformance/gate.py"],
     "src/speclino/services/run_freshness.py": FROZEN_MODULES["services/run_freshness.py"],
+    "src/speclino/agent/tools/test_run.py": FROZEN_MODULES["agent/tools/test_run.py"],
     "specs/ir/tool_gateway.spec-ir.json": FIXTURES / "tool_gateway.spec-ir.json",
     "specs/ir/gate_decide.spec-ir.json": FIXTURES / "gate_decide.spec-ir.json",
     "specs/ir/run_freshness.spec-ir.json": FIXTURES / "run_freshness.spec-ir.json",
+    "specs/ir/test_run_decide.spec-ir.json": FIXTURES / "test_run_decide.spec-ir.json",
 }
 
 

@@ -52,6 +52,11 @@ class Settings(BaseSettings):
     agent_enabled: bool = True
     agent_model: str = "gemini-3.8-flash"
     daily_cost_limit_usd: float = 3.0
+    # 仕様 PR bot（S46）: 仕様 Markdown を変える PR に Spec IR の候補をコメントする。
+    # Gemini の認証はエージェントと同じ（GOOGLE_GENAI_USE_VERTEXAI + ADC 等）。費用は
+    # daily_cost_limit_usd の枠を共有する。モデル未指定なら agent_model を使う
+    spec_bot_enabled: bool = True
+    spec_bot_model: str | None = None
     demo_rerun_limit_per_day: int = 20
 
     # 認証（S13）

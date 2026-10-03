@@ -84,6 +84,8 @@ class ExtractionResult:
     report: ValidationReport
     diagnostics: list[Diagnostic] = field(default_factory=list)  # 検証以外（曖昧・不正な候補）
     raw: str = ""
+    input_tokens: int = 0  # 費用ガードの記録用（LLM を呼んだときだけ非 0）
+    output_tokens: int = 0
 
     @property
     def errors(self) -> list[Diagnostic]:
@@ -199,8 +201,11 @@ async def extract_spec(
     spec_path: str | None = None,
 ) -> ExtractionResult:
     prompt = build_prompt(markdown, behavior_id, domain, bindings)
-    text = await llm.generate_json(prompt, proposal_schema())
-    return parse_proposal(text, behavior_id, markdown, domain, bindings, spec_path)
+    generated = await llm.generate_json(prompt, proposal_schema())
+    result = parse_proposal(generated.text, behavior_id, markdown, domain, bindings, spec_path)
+    result.input_tokens = generated.input_tokens
+    result.output_tokens = generated.output_tokens
+    return result
 
 
 def proposal_schema() -> dict[str, Any]:

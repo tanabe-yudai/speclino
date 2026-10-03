@@ -9,6 +9,8 @@ worker の手順（決定的オーケストレータ）:
   5 gate（フェイルクローズ）
   6 鮮度確認（AC-011）: superseded / 最新でなければ公開しない
   7 reporter → Check Run 更新、成果物保存、run_events / findings を DB に保存
+  8 仕様 PR bot（S46）: 仕様 Markdown が変わった PR に Spec IR の候補をコメント
+    （判定・Check Run には影響しない。`services/spec_pr_bot.py`）
 """
 
 from __future__ import annotations
@@ -52,6 +54,7 @@ from speclino.ports.blob_store import BlobStore
 from speclino.ports.code_host import CodeHost
 from speclino.ports.sandbox import Sandbox
 from speclino.ports.task_queue import TaskQueue
+from speclino.ports.text_llm import TextLlm
 from speclino.reporter.check_report import (
     COMMENT_MARKER,
     check_annotations,
@@ -71,6 +74,15 @@ from speclino.services.investigation import InvestigationResult, investigate
 from speclino.services.obligation_diff import effective_spec
 from speclino.services.project_settings import parse_stored
 from speclino.services.run_freshness import should_publish
+from speclino.services.spec_pr_bot import (
+    SPEC_BOT_EVENT,
+    SPEC_BOT_MARKER,
+    SpecBotInput,
+    collect_spec_changes,
+    generate_candidates,
+    render_no_changes_comment,
+    render_spec_bot_comment,
+)
 from speclino.services.workspaces import repository_mismatch
 from speclino.spec import load_spec_ir
 from speclino.telemetry import configure_tracing, span
@@ -91,6 +103,8 @@ class ReviewRunConfig:
     # 直書きせず、呼び出し可能なものとして注入する（実体は api/deps.py が DB から渡す）。
     # None なら従来どおりチーム規約を適用しない（.speclino/policy/ だけを実行する）
     resolve_team_policy: Callable[[str], Awaitable[PolicyRevision | None]] | None = None
+    # S46: 仕様 PR bot が候補を作る LLM。None なら bot を動かさない
+    spec_llm: TextLlm | None = None
 
 
 @dataclass
@@ -209,6 +223,7 @@ class ReviewRunService:
             project = await ProjectRepository(session).get(run.project_id)
             assert project is not None
             repo_full_name = project.repo_full_name
+            project_id = project.id
             github_repo_id = project.github_repo_id
             # チーム規約は登録先ワークスペースのもの。未登録（None）なら当てない（S53）
             team = project.team
@@ -275,6 +290,8 @@ class ReviewRunService:
         agent_events: list[dict[str, Any]] = []
         error: str | None = None
         artifacts_uri: str | None = None
+        spec_bot_input: SpecBotInput | None = None
+        spec_bot_error: str | None = None
         try:
             with tempfile.TemporaryDirectory(prefix="speclino-run-") as tmp:
                 tmpdir = Path(tmp)
@@ -286,6 +303,13 @@ class ReviewRunService:
                     if base_sha
                     else None
                 )
+                # 仕様 PR bot の入力（変更された仕様 Markdown）はスナップショットがある間に
+                # 集めておき、LLM の呼出しは Check の公開後に行う（判定を待たせない）
+                if self.config.spec_llm is not None and pr_number is not None:
+                    try:
+                        spec_bot_input = collect_spec_changes(base_root, head_root)
+                    except Exception as e:  # noqa: BLE001 - bot の失敗で run を落とさない
+                        spec_bot_error = f"{type(e).__name__}: {e}"[:500]
                 overrides, extra = _reconcile_specs(base_root, head_root, server_approvals)
                 team_policy: PolicyRevision | None = None
                 if self.config.resolve_team_policy is not None and team is not None:
@@ -541,6 +565,97 @@ class ReviewRunService:
                 "",
                 [],
             )
+
+        # 仕様 PR bot（S46）。古い run は出さない（新しい run が出す）。失敗しても run の
+        # 結果・Check は変えず、イベントに残すだけ
+        if fresh.publish and pr_number is not None and self.config.spec_llm is not None:
+            try:
+                if spec_bot_error is not None:
+                    raise RuntimeError(spec_bot_error)
+                if spec_bot_input is not None:
+                    await self._run_spec_bot(
+                        run_id, project_id, repo_full_name, pr_number, head_sha, spec_bot_input
+                    )
+            except Exception as e:  # noqa: BLE001 - bot の失敗は判定に影響させない
+                async with self.session_factory() as session, session.begin():
+                    await RunEventRepository(session).append(
+                        run_id,
+                        SPEC_BOT_EVENT,
+                        {"status": "error", "error": f"{type(e).__name__}: {e}"[:500]},
+                    )
+
+    async def _run_spec_bot(
+        self,
+        run_id: UUID,
+        project_id: UUID,
+        repo_full_name: str,
+        pr_number: int,
+        head_sha: str,
+        inp: SpecBotInput,
+    ) -> None:
+        """変更された仕様の候補をコメントする。状態は run_events（type=spec_bot）だけに持つ。
+
+        同じ PR の直前の記録と入力ハッシュが同じなら、コメントは最新なので Gemini を呼ばない
+        （承認や回答による再実行のたびに費用をかけない）。仕様の変更が無くなった head では、
+        以前に出したコメントだけを「変更なし」に更新する（無ければ何も出さない）。
+        """
+        assert self.config.spec_llm is not None
+        record = self._record_spec_bot
+        async with self.session_factory() as session:
+            last = await RunEventRepository(session).latest_for_pr(
+                project_id, pr_number, SPEC_BOT_EVENT
+            )
+        last_status = last.payload.get("status") if last else None
+        payload: dict[str, Any]
+        if not inp.targets:
+            if last_status in (None, "no_changes"):
+                return
+            if not await self._still_latest(run_id, project_id, pr_number):
+                await record(run_id, {"status": "stale", "input_hash": inp.input_hash})
+                return
+            await self.code_host.upsert_comment(
+                repo_full_name, pr_number, SPEC_BOT_MARKER, render_no_changes_comment(head_sha)
+            )
+            payload = {"status": "no_changes", "input_hash": inp.input_hash}
+        elif (
+            last is not None
+            and last_status in ("posted", "unchanged")
+            and last.payload.get("input_hash") == inp.input_hash
+        ):
+            payload = {"status": "unchanged", "input_hash": inp.input_hash}
+        else:
+            outcomes = await generate_candidates(
+                inp, self.config.spec_llm, self.cost_guard, str(run_id), datetime.now(UTC).date()
+            )
+            # 生成の間に同じ PR の新しい run ができていたら投稿しない（新しい run が出す。
+            # 古い head の候補で上書きしない）。鮮度は投稿の直前に取り直す
+            if not await self._still_latest(run_id, project_id, pr_number):
+                await record(run_id, {"status": "stale", "input_hash": inp.input_hash})
+                return
+            await self.code_host.upsert_comment(
+                repo_full_name,
+                pr_number,
+                SPEC_BOT_MARKER,
+                render_spec_bot_comment(outcomes, head_sha),
+            )
+            failed = [o for o in outcomes if o.result is None]
+            payload = {
+                # 失敗があれば次の run で作り直す（"posted" だけが再利用の対象）
+                "status": "failed" if failed else "posted",
+                "input_hash": inp.input_hash,
+                "targets": [o.target.path for o in outcomes],
+                "errors": [o.error for o in failed],
+            }
+        await record(run_id, payload)
+
+    async def _still_latest(self, run_id: UUID, project_id: UUID, pr_number: int) -> bool:
+        async with self.session_factory() as session:
+            latest = await ReviewRunRepository(session).latest_run_for_pr(project_id, pr_number)
+        return latest is None or latest.id == run_id
+
+    async def _record_spec_bot(self, run_id: UUID, payload: dict[str, Any]) -> None:
+        async with self.session_factory() as session, session.begin():
+            await RunEventRepository(session).append(run_id, SPEC_BOT_EVENT, payload)
 
 
 async def _collect_answers(

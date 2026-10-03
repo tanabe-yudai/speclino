@@ -16,7 +16,7 @@ from speclino.domain.policy import (
     PolicyRevision,
     PolicyRule,
 )
-from speclino.mcp_server.server import allowed_hosts, build_mcp
+from speclino.mcp_server.server import allowed_hosts, build_mcp, skill_body, skill_instructions
 from speclino.services.check_pipeline import _run_policies
 from speclino.services.mcp_context import read_context
 from speclino.settings import Settings
@@ -76,6 +76,24 @@ async def test_tools_are_exposed_in_process() -> None:
         "verification_start",
         "verification_get",
     }
+
+
+def test_skill_instructions_are_at_most_2kb() -> None:
+    """MCP の instructions は 2KB 以内（S57、完了条件）。"""
+    assert len(skill_instructions().encode("utf-8")) <= 2048
+
+
+@pytest.mark.asyncio
+async def test_prompt_returns_same_text_as_skill_md_body() -> None:
+    """`speclino_guide` prompt は SKILL.md 本文をそのまま返す（Claude Code 以外向け、S57）。
+
+    正本は 1 つ（`plugins/speclino/skills/speclino-spec-authoring/SKILL.md`）なので、
+    instructions とこの prompt が同じファイルからずれずに作られていることを確かめる。
+    """
+    async with Client(build_mcp(lambda: None)) as client:  # type: ignore[arg-type, return-value]
+        result = await client.get_prompt("speclino_guide")
+    [message] = result.messages
+    assert message.content.text == skill_body()  # type: ignore[union-attr]
 
 
 @pytest.mark.asyncio

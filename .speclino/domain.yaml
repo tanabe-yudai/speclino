@@ -15,11 +15,16 @@ variables:
   # run_freshness（SPEC-RUN-001）
   exec_state: ExecState
   is_latest: boolean
+  # test_run_decide（SPEC-TEST-002）: classify_statuses の仕分け結果 + timeout
+  test.has_failed: boolean
+  test.inconclusive: boolean
+  test.timed_out: boolean
 assumptions: []
 observation_scope:
   - ToolGateway.invoke 内の呼出しイベント（registry.execute / audit.*）と戻り値の種別
-  - decide_gate / should_publish 内の出口（操作）の呼出し有無と回数
+  - decide_gate / should_publish / decide_observation 内の出口（操作）の呼出し有無と回数
 out_of_scope:
   - ツール実装そのものの正しさ
   - 監査記録の永続化の成否
   - Findings の仕分け（triage）と最新 run の特定（DB 問合せ）
+  - 宣言済みテストの隔離実行そのもの、および各テスト結果の仕分け（classify_statuses）

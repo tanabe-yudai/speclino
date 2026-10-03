@@ -71,6 +71,21 @@ class CostGuard:
             return False, f"日次の費用枠 ${self.daily_limit_usd} に到達（使用 ${used:.4f}）"
         return True, f"残り ${self.daily_limit_usd - used:.4f}"
 
+    async def can_afford(self, today: date, worst_case_usd: Decimal) -> tuple[bool, str]:
+        """1 回の呼出しの最悪費用が、今日の残り枠に収まるか（S46 仕様 PR bot）。
+
+        `can_start` の固定の余裕（per_run_limit_usd）と違い、呼出しごとに見積もった上限で
+        判断する。呼出し後に実費を `record` しても、超過してからでは止められないため。
+        """
+        used = await self.ledger.total_for_day(today)
+        remaining = self.daily_limit_usd - used
+        if worst_case_usd > remaining:
+            return False, (
+                f"最悪の費用 ${worst_case_usd:.4f} が日次の残り枠 ${remaining:.4f}"
+                f"（枠 ${self.daily_limit_usd}）を超える"
+            )
+        return True, f"最悪 ${worst_case_usd:.4f} / 残り ${remaining:.4f}"
+
     async def record(
         self, today: date, run_id: str | None, model: str, input_tokens: int, output_tokens: int
     ) -> Decimal:
