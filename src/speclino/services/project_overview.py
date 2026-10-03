@@ -145,6 +145,7 @@ def build_policies(
 ) -> list[PolicyView]:
     blocking = set(gate.get("blocking_ids", [])) if gate else set()
     advisory = set(gate.get("advisory_ids", [])) if gate else set()
+    waived = set(gate.get("waived_ids", [])) if gate else set()
     grouped: dict[str, list[Finding]] = {}
     for f in findings:
         if is_policy_finding(f):
@@ -165,6 +166,7 @@ def build_policies(
                     has_verifier=rule.verifier is not None,
                     status=worst_verdict(f.verdict for f in fs),
                     counts=count_verdicts(f.verdict for f in fs),
+                    waived=sum(1 for f in fs if f.id in waived),
                 )
             )
             continue
@@ -179,6 +181,7 @@ def build_policies(
                 has_verifier=None,
                 status=worst_verdict(f.verdict for f in fs),
                 counts=count_verdicts(f.verdict for f in fs),
+                waived=sum(1 for f in fs if f.id in waived),
             )
         )
     return rows

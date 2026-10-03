@@ -205,3 +205,24 @@ def test_single_behavior_must_match_manifest(tmp_path: Path) -> None:
     _put(store, run_id, "spec-ir.json", spec)
     with pytest.raises(ArtifactsIncomplete):
         asyncio.run(load_spec_irs(store, run_id, ["refund"]))
+
+
+def test_policies_count_findings_waived_by_exceptions() -> None:
+    """例外で免除された規約の違反を数える（ゲートが「例外付き通過」になる理由を画面で示す）。"""
+    findings = [
+        _finding("MAKE-001:Makefile", "VIOLATED", behavior="policy:make_targets", fid="w1"),
+        _finding("MAKE-001:sub/Makefile", "VIOLATED", behavior="policy:make_targets", fid="w2"),
+        _finding(
+            "MAKE-001:x/Makefile", "VERIFIED_IN_SCOPE", behavior="policy:make_targets", fid="ok"
+        ),
+    ]
+    gate = {
+        "status": "pass_with_exceptions",
+        "blocking_ids": [],
+        "advisory_ids": [],
+        "waived_ids": ["w1"],
+    }
+    [row] = build_policies(findings, gate, None)
+    assert (row.status, row.waived) == ("VIOLATED", 1)
+    [no_gate] = build_policies(findings, None, None)
+    assert no_gate.waived == 0
