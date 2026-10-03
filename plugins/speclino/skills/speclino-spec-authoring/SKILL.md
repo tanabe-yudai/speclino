@@ -5,9 +5,14 @@ description: SpecLino で検査できる仕様（specs/*.md と Spec IR）を書
 
 # SpecLino の仕様を書く
 
+<!-- mcp-instructions:start -->
 SpecLino は「仕様（Spec IR）」と「コード（Code IR）」を Z3 で突き合わせ、要求ごとに
-VERIFIED_IN_SCOPE / VIOLATED / UNKNOWN / REVIEW を出す。LLM（あなた）は候補を書くだけで、
-判定と承認はしない。判定はエンジン、承認は人（`/speclino approve-spec`）が行う。
+VERIFIED_IN_SCOPE / VIOLATED / UNKNOWN / REVIEW の 4 値を出す。実装の前に `context_get` で
+語彙・既存の要求・チーム規約を読み、`verification_start` で検証を開始し、`verification_get` で
+結果を読む。LLM（あなた）は証拠を集め候補を書くだけで、判定も承認もしない。判定はエンジンだけが
+行う（verdict を書き換える手段は無い）。承認は人が PR コメントで行う（`/speclino approve-spec`）。
+承認済みの判定は書き換えない。
+<!-- mcp-instructions:end -->
 
 ## 0. チーム規約を読む（仕様を書く前にも、実装する前にも）
 

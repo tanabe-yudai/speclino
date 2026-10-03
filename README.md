@@ -238,7 +238,8 @@ uv run speclino spec-extract --spec examples/orders/specs/orders-cancel.md \
 LLM は候補を出すだけで**承認しない**（`approval_ref` は空）。「速やかに」のような曖昧語は
 確定させず `W_AMBIGUOUS` として残し、語彙で表せない要求は `W_UNEXTRACTED` に落とす。語彙外の
 変数を作れば検証器が `E_REF_UNDEFINED` で弾く。エディタから使う手順は
-[`skills/speclino-spec-authoring/SKILL.md`](skills/speclino-spec-authoring/SKILL.md)。
+[`plugins/speclino/skills/speclino-spec-authoring/SKILL.md`](plugins/speclino/skills/speclino-spec-authoring/SKILL.md)
+（Claude Code プラグインが配る Skill と同じファイル。[下の節](#claude-code-プラグインとして使う)）。
 
 ### 対象関数と bindings を追加する（`.speclino/bindings.yaml`）
 
@@ -282,6 +283,50 @@ operations:
 
 承認者はサーバー側設定（`projects.settings` / `SPECLINO_APPROVERS`）で検証する。PR 内の
 ファイルを書き換えても承認は増えない。
+
+## Claude Code プラグインとして使う
+
+SpecLino を clone せずに、[`plugins/speclino/`](plugins/speclino/) の Skill（仕様の書き方・
+検証結果の読み方）と MCP 接続（`context_get` / `verification_start` / `verification_get`）を
+Claude Code のプラグインとして入れられる（S57）。
+
+```sh
+claude plugin marketplace add <owner>/<repo>   # このリポジトリ
+claude plugin install speclino@speclino
+```
+
+`.mcp.json` は接続先とトークンをハード・コードしない。インストール前に環境変数を設定する:
+
+| 変数 | 値 |
+| --- | --- |
+| `SPECLINO_MCP_URL` | `https://<your-speclino>/mcp`（自分の SpecLino デプロイの URL） |
+| `SPECLINO_MCP_TOKEN` | ワークスペースの MCP トークン（`$WEB_URL/workspaces/<slug>/mcp-tokens` で owner が発行、`slmcp_…`） |
+
+### チームで共有する
+
+リポジトリの `.claude/settings.json` にコミットすると、clone した全員が同じプラグインを使う
+（各自 `claude plugin install` は必要。[プラグインのインストール範囲](https://code.claude.com/docs/en/plugins/install#choose-an-install-scope)参照）:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "speclino": {
+      "source": { "source": "github", "repo": "<owner>/<repo>" }
+    }
+  },
+  "enabledPlugins": {
+    "speclino@speclino": true
+  }
+}
+```
+
+`SPECLINO_MCP_URL` / `SPECLINO_MCP_TOKEN` はチームの秘密なので `.claude/settings.json` に書かず、
+各自のシェルや `.env`（コミットしない）で設定する。
+
+Claude Code 以外の MCP クライアントには、サーバーの `instructions`（2KB 以内の要点）と、
+`speclino_guide` prompt（SKILL.md 本文をそのまま返す）で同じ使い方を渡す。どちらも
+`plugins/speclino/skills/speclino-spec-authoring/SKILL.md` から読むので、Skill と内容がずれない
+（`src/speclino/mcp_server/server.py`）。
 
 ## UNKNOWN の読み方
 

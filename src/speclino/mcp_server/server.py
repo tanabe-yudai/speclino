@@ -11,13 +11,18 @@
   （`services/mcp_context.py`）
 - Streamable HTTP を FastAPI に `/mcp` としてマウントする（`mount_mcp`）。
   stateless / JSON 応答にして Cloud Run の複数インスタンスでも動くようにする
+- `instructions`（2KB 以内）と `speclino_guide` prompt（Claude Code 以外のクライアント向けに
+  SKILL.md 本文を返す）は、どちらも `plugins/speclino/skills/speclino-spec-authoring/SKILL.md`
+  （S57、Claude Code プラグインが配る Skill と同じファイル）から読む。二重に書かず正本を 1 つに保つ
 """
 
 from __future__ import annotations
 
+import re
 import uuid
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -42,16 +47,46 @@ FINDING_FIELDS = ("requirement_id", "verdict", "category", "severity", "message"
 # BearerAuth がリクエストに載せる、トークンのワークスペース（slug）の置き場所
 WORKSPACE_STATE_KEY = "mcp_workspace"
 
+# instructions / prompt の正本（プラグインが配る Skill と同じファイル。S57）
+SKILL_PATH = (
+    Path(__file__).resolve().parents[3]
+    / "plugins"
+    / "speclino"
+    / "skills"
+    / "speclino-spec-authoring"
+    / "SKILL.md"
+)
+# front matter を落とした本文の中で、短い概要（instructions 用）を区切るマーカー
+_FRONT_MATTER_RE = re.compile(r"\A---[ \t]*\r?\n.*?\r?\n---[ \t]*\r?\n?", re.DOTALL)
+_INSTRUCTIONS_RE = re.compile(
+    r"<!-- mcp-instructions:start -->\n(.*?)\n<!-- mcp-instructions:end -->", re.DOTALL
+)
+
+
+def skill_body() -> str:
+    """SKILL.md の本文（front matter を除いた全文）。`speclino_guide` prompt が返す値と同じ。"""
+    raw = SKILL_PATH.read_text(encoding="utf-8")
+    return _FRONT_MATTER_RE.sub("", raw, count=1).strip() + "\n"
+
+
+def skill_instructions() -> str:
+    """SKILL.md の `<!-- mcp-instructions -->` 区間から、MCP の instructions（2KB 以内）を作る。
+
+    手で別に書くと SKILL.md とずれるので、同じファイルの同じ段落をそのまま使う。
+    """
+    m = _INSTRUCTIONS_RE.search(SKILL_PATH.read_text(encoding="utf-8"))
+    if m is None:
+        raise ValueError(f"{SKILL_PATH} に <!-- mcp-instructions --> マーカーが無い")
+    return m.group(1).strip()
+
 
 def build_mcp(get_state: StateGetter) -> MCPServer:
-    mcp = MCPServer(
-        "speclino",
-        instructions=(
-            "SpecLino: 仕様（Spec IR）とコードの意味差分を Z3 で検査する。実装の前に context_get で"
-            "語彙・既存の要求・チーム規約を読み、verification_start で検証を開始し、"
-            "verification_get で結果を読む。判定（verdict）は変更できない。"
-        ),
-    )
+    mcp = MCPServer("speclino", instructions=skill_instructions())
+
+    @mcp.prompt()
+    def speclino_guide() -> str:
+        """SpecLino の使い方（SKILL.md 本文）。Claude Code 以外の MCP クライアント向け。"""
+        return skill_body()
 
     @mcp.tool()
     async def context_get(
@@ -199,4 +234,12 @@ def mount_mcp(
     return BearerAuth(app, get_state), mcp.session_manager.run
 
 
-__all__ = ["MCP_PATH", "BearerAuth", "allowed_hosts", "build_mcp", "mount_mcp"]
+__all__ = [
+    "MCP_PATH",
+    "BearerAuth",
+    "allowed_hosts",
+    "build_mcp",
+    "mount_mcp",
+    "skill_body",
+    "skill_instructions",
+]

@@ -1,0 +1,14 @@
+{
+  "name": "speclino",
+  "description": "SpecLino: 仕様とコードの意味差分を Z3 で検査する PR レビュー基盤のプラグイン。",
+  "owner": {
+    "name": "SpecLino"
+  },
+  "plugins": [
+    {
+      "name": "speclino",
+      "source": "./plugins/speclino",
+      "description": "SpecLino の Skill（仕様の書き方・検証結果の読み方）と MCP 接続（context_get / verification_start / verification_get）。"
+    }
+  ]
+}
