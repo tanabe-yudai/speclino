@@ -180,7 +180,7 @@ def test_review_md_orders_and_summarizes_verified() -> None:
     # 全件適合: VERIFIED の詳細セクションは表だけで、他の verdict の見出しは出ない
     assert "## 違反" not in text
     assert "## 要確認" not in text
-    assert "## 不明" not in text
+    assert "## 未検証" not in text
     assert "## 適合（確認範囲内）" in text
     assert "| 要求ID | 確認範囲 | 概要 |" in text
 
@@ -195,6 +195,17 @@ def test_render_check_title_and_summary_length() -> None:
     assert str(findings.counts.VIOLATED) in check.title
     assert str(findings.counts.VERIFIED_IN_SCOPE) in check.title
     assert "ゲート" in check.title
+    # 判定は仕様の 4 値の名前で分けて出す（未検証と要確認を合算しない。「不明」とは書かない）
+    c = findings.counts
+    assert (
+        f"違反 {c.VIOLATED} / 要確認 {c.REVIEW} / 未検証 {c.UNKNOWN} / 適合 {c.VERIFIED_IN_SCOPE}"
+        in check.title
+    )
+    assert check.summary.startswith(
+        f"違反 {c.VIOLATED}件 / 要確認 {c.REVIEW}件 / 未検証 {c.UNKNOWN}件 / "
+        f"適合 {c.VERIFIED_IN_SCOPE}件"
+    )
+    assert "不明" not in check.title + check.summary
     assert len(check.summary) <= 1500
     assert "R-CANCEL-04" in check.text
 
@@ -249,3 +260,15 @@ def test_annotations_respects_max_items() -> None:
         update={"findings": [patched if f.id == violated.id else f for f in findings.findings]}
     )
     assert check_annotations(patched_findings, max_items=0) == []
+
+
+def test_review_md_names_unknown_as_unverified() -> None:
+    """review.md の判定の名前は画面と同じ 4 値（UNKNOWN は「未検証」）。"""
+    from speclino.reporter.review_md import VERDICT_LABELS
+
+    assert VERDICT_LABELS == {
+        "VERIFIED_IN_SCOPE": "適合（確認範囲内）",
+        "VIOLATED": "違反",
+        "UNKNOWN": "未検証",
+        "REVIEW": "要確認",
+    }
