@@ -76,8 +76,8 @@ function ProjectBody({ slug, project }: { slug: string; project: ProjectSummary 
   const [, repo] = fullName.split('/')
   const header = (
     <header className="min-w-0">
-      <p className="truncate font-mono text-xs text-ink-3">{fullName}</p>
-      <h1 className="mt-1 truncate text-2xl font-bold tracking-tight">{repo}</h1>
+      <p className="font-mono text-xs break-all text-ink-3">{fullName}</p>
+      <h1 className="mt-1 text-2xl font-bold tracking-tight break-all">{repo}</h1>
     </header>
   )
 

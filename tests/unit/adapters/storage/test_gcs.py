@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from google.api_core.exceptions import NotFound
+from google.api_core.exceptions import Forbidden, NotFound
 
 from speclino.adapters.storage.gcs import GcsBlobStore
 
@@ -19,6 +19,8 @@ class _FakeBlob:
         self._store[self.name] = data
 
     def download_as_bytes(self) -> bytes:
+        if self.name.startswith("forbidden/"):
+            raise Forbidden(f"{self.name}: storage.objects.get denied")
         if self.name not in self._store:
             raise NotFound(f"{self.name} not found")
         return self._store[self.name]
@@ -86,3 +88,10 @@ def test_client_is_created_lazily() -> None:
     store = GcsBlobStore(BUCKET)
 
     assert store._client is None
+
+
+async def test_get_without_permission_raises_permission_error() -> None:
+    """読む権限が無い（403）ときは「無い」とは区別する。API は 404 ではなく 503 にする。"""
+    store = _store(_FakeClient())
+    with pytest.raises(PermissionError):
+        await store.get("forbidden/runs/x/review.md")

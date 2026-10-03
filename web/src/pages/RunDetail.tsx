@@ -168,9 +168,13 @@ function RunSummary({ run }: { run: ReviewRunDetail }) {
       <Panel className="space-y-5">
         <div className="flex flex-wrap items-start gap-4">
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-2xl font-bold tracking-tight">
-              {run.repo_full_name ?? '(リポジトリ不明)'}
-              {run.pr_number != null && <span className="text-ink-3">#{run.pr_number}</span>}
+            {/* オーナー名は小さく、リポジトリ名を大きく。どちらも省略せず折り返す */}
+            {run.repo_full_name && (
+              <p className="font-mono text-xs break-all text-ink-3">{run.repo_full_name.split('/')[0]}</p>
+            )}
+            <h1 className="text-2xl font-bold tracking-tight break-all">
+              {run.repo_full_name?.split('/')[1] ?? '(リポジトリ不明)'}
+              {run.pr_number != null && <span className="text-ink-3"> #{run.pr_number}</span>}
             </h1>
             <p className="mt-1 font-mono text-xs text-ink-3">
               head <span title={run.head_sha}>{shortSha(run.head_sha)}</span>

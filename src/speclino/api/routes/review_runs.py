@@ -153,7 +153,7 @@ async def get_events(
         ]
 
 
-@router.get("/{run_id}/artifacts/{name}", responses=error_responses(400, 404))
+@router.get("/{run_id}/artifacts/{name}", responses=error_responses(400, 404, 503))
 async def get_artifact(
     run_id: uuid.UUID,
     name: str,
@@ -168,6 +168,9 @@ async def get_artifact(
     await _require_visible_run(state, user, run_id)
     try:
         data = await state.blobs.get(f"runs/{run_id}/{name}")
+    except PermissionError as e:
+        # 成果物はあるが読めない（サービスアカウントの権限の設定ミス）。「無い」とは言わない
+        raise api_error(503, "artifact_unreadable", "成果物を読めない（権限の設定を確認）") from e
     except (FileNotFoundError, OSError) as e:
         raise api_error(404, "artifact_not_found", "成果物が無い") from e
     media = "application/json" if name.endswith(".json") else "text/markdown; charset=utf-8"
