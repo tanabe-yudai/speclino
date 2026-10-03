@@ -18,6 +18,12 @@ behaviors:
     variables:
       exec_state: exec_state
       is_latest: pure_call:speclino.services.run_freshness._is_latest
+  test_run_decide:
+    entrypoint: speclino.agent.tools.test_run.decide_observation
+    variables:
+      test.has_failed: statuses.has_failed
+      test.inconclusive: statuses.inconclusive
+      test.timed_out: timed_out
 operations:
   tool_execute:
     symbol: self.registry.execute
@@ -61,6 +67,18 @@ operations:
     argument_bindings: {}
   mark_not_latest:
     symbol: speclino.services.run_freshness._mark_not_latest
+    claim_scope: service_outcome
+    argument_bindings: {}
+  test_inconclusive:
+    symbol: speclino.agent.tools.test_run._inconclusive
+    claim_scope: service_outcome
+    argument_bindings: {}
+  test_violated:
+    symbol: speclino.agent.tools.test_run._violated
+    claim_scope: service_outcome
+    argument_bindings: {}
+  test_observed:
+    symbol: speclino.agent.tools.test_run._observed
     claim_scope: service_outcome
     argument_bindings: {}
 known_pure:

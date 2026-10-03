@@ -5,7 +5,8 @@
 ## なぜ凍結しているか
 
 デモ用のブランチは、わざと `src/speclino/agent/gateway.py` や `src/speclino/conformance/gate.py`
-の実装、あるいは `specs/ir/*.spec-ir.json` を壊して「SpecLino が違反を検出する」ことを見せます。
+や `src/speclino/agent/tools/test_run.py` の実装、あるいは `specs/ir/*.spec-ir.json` を壊して
+「SpecLino が違反を検出する」ことを見せます。
 
 `tests/unit/test_self_verification.py` の検出テスト（`test_execute_before_permission_check_violates_r_tool_01`
 など）は、正しい実装に対して「既知のアンカー文字列を置換して壊す」ことで違反シナリオを作ります。
@@ -23,9 +24,11 @@ Spec IR が読めず例外になったりして、**検出できているはず�
 - `gateway.py` ← `src/speclino/agent/gateway.py`
 - `gate.py` ← `src/speclino/conformance/gate.py`
 - `run_freshness.py` ← `src/speclino/services/run_freshness.py`
+- `test_run.py` ← `src/speclino/agent/tools/test_run.py`
 - `tool_gateway.spec-ir.json` ← `specs/ir/tool_gateway.spec-ir.json`
 - `gate_decide.spec-ir.json` ← `specs/ir/gate_decide.spec-ir.json`
 - `run_freshness.spec-ir.json` ← `specs/ir/run_freshness.spec-ir.json`
+- `test_run_decide.spec-ir.json` ← `specs/ir/test_run_decide.spec-ir.json`
 
 ## ドリフトはどのテストが検知するか
 
@@ -40,9 +43,11 @@ Spec IR が読めず例外になったりして、**検出できているはず�
 
 ```sh
 cp src/speclino/agent/gateway.py src/speclino/conformance/gate.py \
-   src/speclino/services/run_freshness.py tests/fixtures/selfcheck/
+   src/speclino/services/run_freshness.py src/speclino/agent/tools/test_run.py \
+   tests/fixtures/selfcheck/
 cp specs/ir/tool_gateway.spec-ir.json specs/ir/gate_decide.spec-ir.json \
-   specs/ir/run_freshness.spec-ir.json tests/fixtures/selfcheck/
+   specs/ir/run_freshness.spec-ir.json specs/ir/test_run_decide.spec-ir.json \
+   tests/fixtures/selfcheck/
 ```
 
 取り直したら、検出テスト（`pytest -m "not selfcheck"`）が新しいコピーでも通ることを確認します。

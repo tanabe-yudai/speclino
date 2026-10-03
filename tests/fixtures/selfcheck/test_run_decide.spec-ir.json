@@ -1,0 +1,175 @@
+{
+  "approvals": [
+    {
+      "approved_at": "2026-10-04T00:00:00Z",
+      "approver": "tanabe-yudai",
+      "evidence_url": null,
+      "id": "speclino-self-test-v1",
+      "ir_content_hash": "sha256:7eed3d97f18fa69f25baf711d906da21af1ea61229c558ed1e23633484dfcc73",
+      "source": "manual",
+      "spec_content_hash": "sha256:8ee5df3cebd36faabef4100ad8ea4af366175d2c5b1afe274a052f8415762490"
+    }
+  ],
+  "behavior_id": "test_run_decide",
+  "rules": [
+    {
+      "applicability": {
+        "args": [
+          {
+            "arg": {
+              "op": "ref",
+              "path": "before.test.timed_out"
+            },
+            "op": "not"
+          },
+          {
+            "arg": {
+              "op": "ref",
+              "path": "before.test.inconclusive"
+            },
+            "op": "not"
+          },
+          {
+            "op": "ref",
+            "path": "before.test.has_failed"
+          }
+        ],
+        "op": "and"
+      },
+      "approval_ref": "speclino-self-test-v1",
+      "assertion": {
+        "arguments_equal": {},
+        "count": {
+          "operator": "eq",
+          "value": 1
+        },
+        "event_kind": "call",
+        "kind": "event_requirement",
+        "operation_or_target": "test_violated",
+        "phase": "invoked"
+      },
+      "behavior_id": "test_run_decide",
+      "claim_scope": "service_outcome",
+      "id": "R-TEST-01",
+      "level": "mandatory",
+      "modality": "must",
+      "source_refs": [
+        {
+          "line_end": null,
+          "line_start": null,
+          "path": "specs/SPEC-TEST-002.md",
+          "requirement_id": "R-TEST-01",
+          "snapshot_id": "speclino-specs",
+          "symbol": null
+        }
+      ],
+      "tests": [],
+      "title": null
+    },
+    {
+      "applicability": {
+        "args": [
+          {
+            "arg": {
+              "op": "ref",
+              "path": "before.test.timed_out"
+            },
+            "op": "not"
+          },
+          {
+            "arg": {
+              "op": "ref",
+              "path": "before.test.inconclusive"
+            },
+            "op": "not"
+          },
+          {
+            "arg": {
+              "op": "ref",
+              "path": "before.test.has_failed"
+            },
+            "op": "not"
+          }
+        ],
+        "op": "and"
+      },
+      "approval_ref": "speclino-self-test-v1",
+      "assertion": {
+        "arguments_equal": {},
+        "count": {
+          "operator": "eq",
+          "value": 1
+        },
+        "event_kind": "call",
+        "kind": "event_requirement",
+        "operation_or_target": "test_observed",
+        "phase": "invoked"
+      },
+      "behavior_id": "test_run_decide",
+      "claim_scope": "service_outcome",
+      "id": "R-TEST-02",
+      "level": "mandatory",
+      "modality": "must",
+      "source_refs": [
+        {
+          "line_end": null,
+          "line_start": null,
+          "path": "specs/SPEC-TEST-002.md",
+          "requirement_id": "R-TEST-02",
+          "snapshot_id": "speclino-specs",
+          "symbol": null
+        }
+      ],
+      "tests": [],
+      "title": null
+    },
+    {
+      "applicability": {
+        "args": [
+          {
+            "op": "ref",
+            "path": "before.test.timed_out"
+          },
+          {
+            "op": "ref",
+            "path": "before.test.inconclusive"
+          }
+        ],
+        "op": "or"
+      },
+      "approval_ref": "speclino-self-test-v1",
+      "assertion": {
+        "arguments_equal": {},
+        "count": {
+          "operator": "eq",
+          "value": 1
+        },
+        "event_kind": "call",
+        "kind": "event_requirement",
+        "operation_or_target": "test_inconclusive",
+        "phase": "invoked"
+      },
+      "behavior_id": "test_run_decide",
+      "claim_scope": "service_outcome",
+      "id": "R-TEST-03",
+      "level": "mandatory",
+      "modality": "must",
+      "source_refs": [
+        {
+          "line_end": null,
+          "line_start": null,
+          "path": "specs/SPEC-TEST-002.md",
+          "requirement_id": "R-TEST-03",
+          "snapshot_id": "speclino-specs",
+          "symbol": null
+        }
+      ],
+      "tests": [],
+      "title": null
+    }
+  ],
+  "schema_version": "0.1",
+  "spec_content_hash": "sha256:8ee5df3cebd36faabef4100ad8ea4af366175d2c5b1afe274a052f8415762490",
+  "spec_snapshot_id": "speclino-specs",
+  "unextracted": []
+}
