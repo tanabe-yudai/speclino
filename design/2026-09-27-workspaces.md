@@ -172,6 +172,27 @@ S43（規約の UI）と S45（プロジェクト画面）はワークスペー�
   **取り消せたときだけ登録する**。拒否・例外の経路でも取り消しを試みる。値は例外の文面・ログ・監査・DB に出さない
 - **制約**: 本番の App は「Only on this account」なので、App 所有アカウントのリポジトリだけが登録できる
 
+## 8.4 S56（招待とメンバー管理）で実装した形
+
+- **表**: `workspace_invitations`（team, email（小文字）, role, token_hash, created_by, expires_at, accepted_at,
+  accepted_by, revoked_at）と `workspace_members.email`（表示用、NULL 可）を追加（マイグレーション 0007、追加だけ）。
+  `users` 表は作らない（メールは受諾時に確認済みのものだけを `workspace_members.email` に入れる）
+- **送信**: メールを送る仕組みは持たない。owner が作った招待リンク（`/invite#<token>`）を自分で相手に送る。
+  トークンは `slinv_` + 32 バイトの乱数、保存は SHA-256 だけ、発行時の応答に 1 回だけ出す。フラグメントに載せて
+  サーバーのアクセスログに残さず、プレビュー・受諾も POST の本文で送る
+- **期限と回数**: 7 日、1 回限り、owner が取り消せる。同じメールへの未使用の招待は新しい招待で取り消す（有効なリンクは 1 本）。
+  使えない招待（無い・期限切れ・使用済み・取り消し済み）は区別せず 404
+- **受諾の条件**: ID トークンの `email_verified` が true で、メールが招待の宛先と一致（大文字小文字を区別しない）。
+  未確認のメールを認めると、他人のメールでサインアップした第三者がリンクを手に入れたときに入れてしまう（フェイルクローズ）。
+  `scripts/create_test_user.sh`（`accounts:signUp`）で作る審査員のアカウントはメール未確認なので招待では入れない。
+  審査員は従来どおり管理 CLI（`workspace add-member`）で追加する。既にメンバーなら role は変えない
+- **role**: 変更・削除は owner だけ。owner でないメンバーは 403、非メンバーは 404。最後の owner は降格・削除できない（409）。
+  判定と書き込みはワークスペース行のロック（`TeamRepository.ensure_and_lock`）の中で行う
+- **監査**: `invitation.issue` / `invitation.revoke` / `invitation.accept` / `member.role_change` / `member.remove`。
+  拒否（owner でない・最後の owner・メール不一致・未確認）も `decision="denied"` で、rollback で消えない別トランザクションに残す
+- **API**: `/api/workspaces/{slug}/members`（GET・PATCH・DELETE）、`/api/workspaces/{slug}/invitations`（POST・GET・DELETE）、
+  `/api/invitations/preview`・`/api/invitations/accept`。UI は設定の「メンバー」タブと `/invite`
+
 ## 9. 判断の記録
 
 - **owner をチームとみなす案は捨てた**: 個人アカウントのリポジトリで成り立たない（ユーザー指摘）

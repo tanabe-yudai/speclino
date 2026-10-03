@@ -134,7 +134,8 @@ async def set_pr_approvers(
     """PR コメントの `/speclino approve-spec` を受け付ける GitHub ログイン名を置き換える。
 
     ワークスペースの approver ロール（チーム規約の承認、uid）とは別物で、project ごとの
-    `settings.approvers` に入る（S52 で全体共通の承認者を廃止したので、ここが唯一の経路）。
+    `settings.approvers` に入る（S52 で全体共通の承認者を廃止した）。S47 からは設定画面の API
+    （`services/project_settings.update_settings`、owner / approver だけ）からも変えられる。
     空リストなら誰も承認できない。project が無ければ `ValueError`。
     """
     project = await ProjectRepository(session).get_by_repo(repo_full_name)

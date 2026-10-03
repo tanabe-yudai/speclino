@@ -10,6 +10,10 @@ describe('loginReturnPath', () => {
     expect(loginReturnPath({ pathname: '/w/acme/settings', search: '?tab=tokens' })).toBe('/w/acme/settings?tab=tokens')
   })
 
+  it('フラグメント（招待リンクのトークン）を落とさずに戻す', () => {
+    expect(loginReturnPath({ pathname: '/invite', search: '', hash: '#slinv_abc' })).toBe('/invite#slinv_abc')
+  })
+
   it('クエリがなければパスだけ', () => {
     expect(loginReturnPath({ pathname: '/runs/1' })).toBe('/runs/1')
   })

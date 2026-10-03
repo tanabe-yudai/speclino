@@ -100,7 +100,12 @@ function ProjectBody({ slug, project }: { slug: string; project: ProjectSummary 
             {overview.status === 'not_checked' ? 'まだ検査されていません' : '最新の検査の成果物を読めませんでした'}
           </PanelTitle>
           {overview.status === 'not_checked' ? (
-            <p className="mt-1 text-sm text-ink-2">PR を開くと最初の検査が始まります。</p>
+            <p className="mt-1 text-sm text-ink-2">
+              PR を開くと最初の検査が始まります。{' '}
+              <Link className="text-primary underline-offset-4 hover:underline" to={paths.settings(slug, 'projects')}>
+                はじめ方を見る
+              </Link>
+            </p>
           ) : (
             overview.run && (
               <Link className="mt-2 inline-block text-sm text-primary hover:underline" to={paths.run(overview.run.id)}>

@@ -82,6 +82,64 @@ class IssuedMcpToken:
 
 
 @dataclass(frozen=True)
+class WorkspaceMemberView:
+    """メンバー一覧の 1 人分（S56）。
+
+    email は招待の受諾で入った確認済みのメールだけ（無ければ None）。
+    """
+
+    uid: str
+    email: str | None
+    role: WorkspaceRole
+    joined_at: datetime
+
+
+@dataclass(frozen=True)
+class InvitationInfo:
+    """招待の一覧・発行の応答に出す情報（S56）。平文のトークンもハッシュも含めない。"""
+
+    id: uuid.UUID
+    email: str
+    role: WorkspaceRole
+    created_by: str
+    created_at: datetime
+    expires_at: datetime
+    accepted_at: datetime | None
+    revoked_at: datetime | None
+
+
+@dataclass(frozen=True)
+class IssuedInvitation:
+    """発行直後だけ手に入る平文のトークン（保存しない）。招待リンクはこれから作る。"""
+
+    info: InvitationInfo
+    token: str
+
+
+@dataclass(frozen=True)
+class InvitationPreview:
+    """招待リンクを開いた人に見せる内容（受諾の前の確認）。"""
+
+    slug: str
+    name: str | None
+    email: str
+    role: WorkspaceRole
+    expires_at: datetime
+
+
+InvitationAcceptStatus = Literal["joined", "already_member"]
+
+
+@dataclass(frozen=True)
+class AcceptedInvitation:
+    """受諾の結果。already_member なら既存の role のまま（招待で上書きしない）。"""
+
+    slug: str
+    role: WorkspaceRole
+    status: InvitationAcceptStatus
+
+
+@dataclass(frozen=True)
 class AccessibleRepository:
     """GitHub App のユーザートークンで見えた、App がインストール済みのリポジトリ（S55）。
 
@@ -114,6 +172,12 @@ class RegisteredRepository:
 
 __all__ = [
     "APPROVER_ROLES",
+    "AcceptedInvitation",
+    "InvitationAcceptStatus",
+    "InvitationInfo",
+    "InvitationPreview",
+    "IssuedInvitation",
+    "WorkspaceMemberView",
     "AccessibleRepository",
     "RegisteredRepository",
     "RepositoryRegistration",

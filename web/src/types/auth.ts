@@ -24,4 +24,6 @@ export interface AuthContextValue {
 export interface LoginFrom {
   pathname: string
   search?: string
+  /** 招待リンクのトークンはフラグメントに載るので、これも持ち越す。 */
+  hash?: string
 }

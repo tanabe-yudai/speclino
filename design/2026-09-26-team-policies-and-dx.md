@@ -75,6 +75,24 @@ UI は**可視化と統治**であって、仕様の編集ではない。読み�
 | **設定** | `projects.settings`（fail_on / エージェント有効 / test_run 有効 / 承認者）を型付きで | 統治 |
 | **オンボーディング** | GitHub App を入れる → `.speclino/` を置く → PR を開く。各段階の到達状態 | 読み取り専用 |
 
+### 4.1 S47（オンボーディングと設定）で実装した形
+
+- **置き場所**: 設定画面（`/w/:slug/settings`）の「プロジェクト」タブに、project ごとの「はじめ方」と「設定」を並べる。
+  ホームとプロジェクト画面の「まだ検査されていない」からここへ案内する
+- **設定の型**: `domain/project_settings.ProjectSettings`（`fail_on` / `agent_enabled` / `test_run_enabled` /
+  `approvers`）。未定義のキーは拒否。`fail_on` は違反・未検証・要確認の 3 つから外せない（フェイルクローズを
+  設定で弱めさせない。表示は固定）。`approvers` は GitHub のログイン名（bot は不可、重複不可、50 人まで）
+- **効き方**: worker は run のたびに project の設定を読み、エージェントと test_run は「サーバ全体の設定 AND project の設定」
+  （project 側は止める方向にだけ効く）。保存値が型に合わなければ、両方を止めた安全側の値で動き、画面に出す
+- **権限**: 読むのはメンバー、変更は owner / approver（それ以外は 403 で、拒否も `project.settings` の監査に残る）。
+  非メンバー・別ワークスペースの project は 404。ただし `approvers`（webhook が approve-spec / answer / attest の
+  受付に使う）を変えられるのは owner だけ。approver が変えようとすると 403（`approvers_owner_only`、監査に残し何も書かない）。
+  approver が承認者を据え置いたまま他の項目を変えるのは通す。画面の承認者の編集欄は owner にだけ出す（codex レビューの指摘）
+- **オンボーディングの段階**: web は GitHub App の秘密鍵を持たない（worker だけ）ので、`.speclino/` を GitHub に直接
+  問い合わせない。手元の記録から導く: App は `projects.installation_id` があれば完了（無ければ未確認）、
+  `.speclino/` は完了した検査があれば完了・最新の検査が `domain.yaml` / `bindings.yaml` / Spec IR の不足で失敗していれば
+  「まだ」・それ以外は未確認、初回の検査は完了した検査があれば完了。推測で「ある」「無い」を出さない
+
 ## 5. 非目標（提出までにやらない）
 
 - 複数チーム・組織階層・ロール体系（承認者 ID の列挙で足りる）

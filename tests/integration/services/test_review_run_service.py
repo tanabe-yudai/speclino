@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -13,11 +14,13 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from speclino.adapters.localgit.local_code_host import LocalCodeHost
 from speclino.adapters.queue.inprocess import InProcessQueue
 from speclino.adapters.storage.fs import FileSystemBlobStore
+from speclino.agent.permissions import AgentPermissions
 from speclino.db.repositories import (
     ApprovalRepository,
     FindingRepository,
@@ -26,6 +29,7 @@ from speclino.db.repositories import (
     RunEventRepository,
 )
 from speclino.reporter.check_report import COMMENT_MARKER
+from speclino.services.investigation import InvestigationResult
 from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
 from speclino.spec import load_spec_ir
 from speclino.spec.spec_validator import rule_content_hash
@@ -366,3 +370,75 @@ async def test_a_run_is_not_executed_when_the_repository_id_changed(
         events = await RunEventRepository(s).list_for_run(run_id)
     assert "リポジトリ ID が登録時と違う" in events[-1].payload["error"]
     assert host.checks == {} and host.comments == []
+
+
+@pytest.mark.parametrize(
+    ("project_settings", "expect_called", "expect_test_run"),
+    [
+        ({}, True, True),
+        ({"agent_enabled": False}, False, None),
+        ({"test_run_enabled": False}, True, False),
+        ({"fail_on": ["VIOLATED"]}, False, None),  # 型に合わない保存値は安全側（止める）
+    ],
+)
+async def test_project_settings_gate_agent_and_test_run(
+    engine: AsyncEngine,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    project_settings: dict[str, object],
+    expect_called: bool,
+    expect_test_run: bool | None,
+) -> None:
+    """S47: project の設定でエージェントと test_run を止められる（サーバ全体の設定と AND）。"""
+    calls: list[AgentPermissions] = []
+
+    async def _fake(ctx, permissions, model, cost_ok):  # type: ignore[no-untyped-def]
+        calls.append(permissions)
+        return InvestigationResult(False, ctx.findings, reason="fake")
+
+    monkeypatch.setattr("speclino.services.review_run_service.investigate", _fake)
+    repo = f"e2e/settings-{uuid.uuid4().hex[:8]}"
+    await register_repo(engine, repo, {})
+    async with engine.begin() as conn:
+        await conn.execute(
+            sql_text("UPDATE projects SET settings = CAST(:s AS jsonb) WHERE repo_full_name = :r"),
+            {"s": json.dumps(project_settings), "r": repo},
+        )
+    root = tmp_path / "repo"
+    base, _head, _head2 = make_demo_repo(root)
+    # 対応外のループで UNKNOWN を作り、エージェントが起動する条件にする
+    git(root, "checkout", base, "--", "specs")
+    svc = root / "examples" / "orders" / "app" / "service.py"
+    svc.write_text(
+        svc.read_text().replace(
+            "    if user.is_admin:\n        inventory.restore(order.items)\n",
+            "    for item in order.items:\n        inventory.restore(item)\n",
+        )
+    )
+    git(root, "commit", "-qam", "head3: loop")
+    head3 = git(root, "rev-parse", "HEAD")
+    host = LocalCodeHost(repos={repo: root}, repo_ids={repo: repo_id_of(repo)})
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    holder: dict[str, ReviewRunService] = {}
+    queue = InProcessQueue(lambda rid: holder["svc"].execute(rid), immediate=True)
+    service = ReviewRunService(
+        factory,
+        host,
+        queue,
+        FileSystemBlobStore(tmp_path / "blobs"),
+        ReviewRunConfig(agent_enabled=True, permissions=AgentPermissions(test_run_enabled=True)),
+    )
+    holder["svc"] = service
+    run_id = await service.create_run(
+        project_id=await project_id_of(engine, repo),
+        head_sha=head3,
+        base_sha=base,
+        pr_number=1,
+        trigger="test",
+    )
+    async with factory() as session:
+        run = await ReviewRunRepository(session).get(run_id)
+        assert run is not None and run.exec_state == "completed"
+    assert bool(calls) is expect_called
+    if expect_called:
+        assert calls[0].test_run_enabled is expect_test_run
