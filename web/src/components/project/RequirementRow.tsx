@@ -40,8 +40,7 @@ export function RequirementRow({
 
   const summary = (
     <>
-      <code className="min-w-0 font-mono text-xs break-all">{req.id}</code>
-      <span className="min-w-0 flex-1 truncate text-sm">{req.title ?? '（題なし）'}</span>
+      <code className="min-w-0 flex-1 font-mono text-xs break-all">{req.id}</code>
       <span className="flex flex-wrap items-center gap-2">
         {req.removed && <ToneBadge tone="rev">削除</ToneBadge>}
         {req.approval !== 'approved' && <ToneBadge tone="rev">{APPROVAL_LABELS[req.approval]}</ToneBadge>}
@@ -51,8 +50,16 @@ export function RequirementRow({
     </>
   )
 
+  // 題は ID とバッジ（と開閉の矢印）の下の行に、省略せず折り返す（横に並べるとスマホで数文字しか見えない）
+  const title = <span className="w-full text-sm text-ink-2">{req.title ?? '（題なし）'}</span>
+
   if (!openable) {
-    return <li className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5">{summary}</li>
+    return (
+      <li className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5">
+        {summary}
+        {title}
+      </li>
+    )
   }
 
   return (
@@ -65,6 +72,7 @@ export function RequirementRow({
       >
         {summary}
         <ChevronDown className={cn('size-4 shrink-0 text-ink-3 transition-transform', open && 'rotate-180')} />
+        {title}
       </button>
       {open && (
         <div className="space-y-3 px-4 pb-4">

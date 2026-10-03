@@ -133,12 +133,20 @@
   body {
     @apply text-foreground font-sans antialiased;
     min-height: 100vh;
+    background: var(--bg);
+  }
+  /* 光の空間の背景は画面に固定した層に描く。iOS Safari は background-attachment: fixed を
+     無視してページ全体の高さに引き伸ばし、縦長のページで左上の光が巨大な図形になるため */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
     background:
       radial-gradient(60% 50% at 0% 0%, var(--glow-a), transparent 70%),
       radial-gradient(50% 45% at 100% 20%, var(--glow-b), transparent 70%),
-      radial-gradient(55% 45% at 40% 100%, var(--glow-c), transparent 70%),
-      var(--bg);
-    background-attachment: fixed;
+      radial-gradient(55% 45% at 40% 100%, var(--glow-c), transparent 70%);
   }
 }
 
