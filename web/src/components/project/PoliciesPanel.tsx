@@ -1,4 +1,5 @@
 import { Panel, PanelTitle } from '@/components/app/Panel'
+import { ToneBadge } from '@/components/app/ToneBadge'
 import { VerdictBadge } from '@/components/app/VerdictBadge'
 import { POLICY_LEVEL_LABELS } from '@/services/labels'
 import type { ProjectOverview } from '@/types/project'
@@ -28,6 +29,7 @@ export function PoliciesPanel({ overview }: { overview: ProjectOverview }) {
               <span className="text-xs text-ink-3">{p.origin === 'team' ? 'チーム' : 'プロジェクト'}</span>
               <span className="text-xs text-ink-3">{p.level ? POLICY_LEVEL_LABELS[p.level] : '—'}</span>
               <span className="text-xs text-ink-3">{verifierLabel(p.has_verifier)}</span>
+              {p.waived > 0 && <ToneBadge tone="rev">例外で免除 {p.waived}</ToneBadge>}
               {p.status ? (
                 <VerdictBadge verdict={p.status} />
               ) : (

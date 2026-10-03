@@ -51,6 +51,8 @@ export interface PolicyView {
   has_verifier: boolean | null
   status: Verdict | null
   counts: VerdictCounts
+  /** 例外（exceptions.yaml）で免除された finding の数 */
+  waived: number
 }
 
 export interface ProjectOverview {

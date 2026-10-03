@@ -53,6 +53,9 @@ class PolicyView(IRModel):
     has_verifier: bool | None
     status: Verdict | None = Field(description="None はこの検査で結果が無い")
     counts: VerdictCounts
+    waived: int = Field(
+        default=0, ge=0, description="例外（exceptions.yaml）で免除された finding の数"
+    )
 
 
 class ProjectSummary(IRModel):
