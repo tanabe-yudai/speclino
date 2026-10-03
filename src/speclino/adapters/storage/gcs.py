@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 
 import google.cloud.storage as storage
-from google.api_core.exceptions import NotFound
+from google.api_core.exceptions import Forbidden, NotFound
 
 
 class GcsBlobStore:
@@ -49,6 +49,9 @@ class GcsBlobStore:
                 # fs.py（FileSystemBlobStore）と同じ例外にそろえる。
                 # api/routes/review_runs.py の get_artifact の 404 がこれに依存する。
                 raise FileNotFoundError(key) from e
+            except Forbidden as e:
+                # 権限の設定ミスを「成果物が無い」と取り違えない（呼び出し側で 503 にする）
+                raise PermissionError(key) from e
             return data
 
         return await asyncio.to_thread(_get)

@@ -192,3 +192,20 @@ async def test_assembled_overview_is_cached_per_run(
     listing = (await c.get(f"/api/workspaces/{slug}/projects", headers=DEV)).json()
     assert second == first and listing[0]["status"] == "ok"
     assert reads == []
+
+
+async def test_unreadable_artifact_is_503_not_500(
+    ctx: Ctx, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """成果物のバケットを読む権限が無い（本番で web の SA に objectViewer が無かった）とき、
+    review.md は 500 ではなく 503 で理由を返す。"""
+    c, _, repo, base, head, _, _, _ = ctx
+    run_id = await _run(c, repo, head, base)
+
+    async def denied(self: FileSystemBlobStore, key: str) -> bytes:
+        raise PermissionError(key)
+
+    monkeypatch.setattr(FileSystemBlobStore, "get", denied)
+    res = await c.get(f"/api/review-runs/{run_id}/artifacts/review.md", headers=DEV)
+    assert res.status_code == 503, res.text
+    assert res.json()["error"]["code"] == "artifact_unreadable"

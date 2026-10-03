@@ -2,7 +2,8 @@
 # 「アーキテクチャ」節にある3サービスの IAM 構成表に従う。
 #
 #   web:      cloudsql.client / cloudtasks.enqueuer / tasks SA への serviceAccountUser /
-#             worker サービスへの run.invoker（run.tf、S54: MCP の context_get を委譲）
+#             worker サービスへの run.invoker（run.tf、S54: MCP の context_get を委譲） /
+#             成果物バケットへの storage.objectViewer（storage.tf、読むだけ）
 #             （secretAccessor は web 用 secret に限定するため secrets.tf 側で個別付与）
 #   worker:   cloudsql.client / secretAccessor（secrets.tf で個別付与）/ aiplatform.user /
 #             成果物バケットへの storage.objectAdmin（storage.tf） /
