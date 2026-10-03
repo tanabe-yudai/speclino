@@ -5,16 +5,20 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
 import uuid
+from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
+from speclino.adapters.llm.scripted import ScriptedJsonLlm
 from speclino.adapters.localgit.local_code_host import LocalCodeHost
 from speclino.adapters.queue.inprocess import InProcessQueue
 from speclino.adapters.storage.fs import FileSystemBlobStore
@@ -25,8 +29,10 @@ from speclino.db.repositories import (
     ReviewRunRepository,
     RunEventRepository,
 )
+from speclino.ports.text_llm import JsonGeneration, TextLlm
 from speclino.reporter.check_report import COMMENT_MARKER
 from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
+from speclino.services.spec_pr_bot import SPEC_BOT_MARKER
 from speclino.spec import load_spec_ir
 from speclino.spec.spec_validator import rule_content_hash
 from tests.integration.services.conftest import project_id_of, register_repo, repo_id_of
@@ -85,8 +91,6 @@ def make_demo_repo(root: Path) -> tuple[str, str, str]:
     git(root, "commit", "-qam", "head: restore only for admins")
     head = git(root, "rev-parse", "HEAD")
     # head2: 仕様（R-CANCEL-04）を IR から削除して通そうとする
-    import json
-
     ir_path = root / "specs" / "ir" / "cancel_order.spec-ir.json"
     data = json.loads(ir_path.read_text())
     data["rules"] = [r for r in data["rules"] if r["id"] != "R-CANCEL-04"]
@@ -366,3 +370,214 @@ async def test_a_run_is_not_executed_when_the_repository_id_changed(
         events = await RunEventRepository(s).list_for_run(run_id)
     assert "リポジトリ ID が登録時と違う" in events[-1].payload["error"]
     assert host.checks == {} and host.comments == []
+
+
+# ---------------------------------------------------------------- S46 仕様 PR bot
+_SPEC_PROPOSAL = json.dumps(
+    {
+        "rules": [],
+        "unextracted": [{"requirement_id": "R-CANCEL-08", "reason": "語彙で表せない"}],
+        "ambiguities": [
+            {"requirement_id": "R-CANCEL-08", "phrase": "適切に", "question": "何を返すか"}
+        ],
+    },
+    ensure_ascii=False,
+)
+
+
+class _BrokenJsonLlm:
+    model = "gemini-3.8-flash"
+
+    async def generate_json(self, prompt: str, schema: dict[str, object]) -> JsonGeneration:
+        raise RuntimeError("Gemini の認証情報が無い")
+
+
+def _spec_bot_service(
+    engine: AsyncEngine, tmp_path: Path, repo: str, llm: TextLlm | None
+) -> tuple[ReviewRunService, LocalCodeHost, str, str]:
+    """base と、仕様 Markdown に要求を 1 つ足した head を持つリポジトリ。"""
+    root = tmp_path / "repo"
+    base, _head, _head2 = make_demo_repo(root)
+    git(root, "checkout", "-q", base)
+    git(root, "checkout", "-q", "-b", "spec-pr")
+    md = root / "specs" / "orders-cancel.md"
+    md.write_text(md.read_text() + "\n### R-CANCEL-08\n\n適切にエラーを返す。\n")
+    git(root, "commit", "-qam", "spec: add R-CANCEL-08")
+    head = git(root, "rev-parse", "HEAD")
+    host = LocalCodeHost(repos={repo: root}, repo_ids={repo: repo_id_of(repo)})
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    holder: dict[str, ReviewRunService] = {}
+    queue = InProcessQueue(lambda rid: holder["svc"].execute(rid), immediate=True)
+    svc = ReviewRunService(
+        factory,
+        host,
+        queue,
+        FileSystemBlobStore(tmp_path / "blobs"),
+        ReviewRunConfig(agent_enabled=False, spec_llm=llm),
+    )
+    holder["svc"] = svc
+    return svc, host, base, head
+
+
+async def test_spec_pr_bot_comments_candidates_once_without_touching_the_gate(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    repo = f"e2e/spec-bot-{uuid.uuid4().hex[:8]}"
+    await register_repo(engine, repo, {})
+    llm = ScriptedJsonLlm(_SPEC_PROPOSAL)
+    svc, host, base, head = _spec_bot_service(engine, tmp_path, repo, llm)
+    project_id = await project_id_of(engine, repo)
+    run_ids = [
+        await svc.create_run(
+            project_id=project_id, head_sha=head, base_sha=base, pr_number=7, trigger="test"
+        )
+        for _ in range(2)
+    ]
+    bot = [c for c in host.comments if SPEC_BOT_MARKER in c["body"]]
+    assert len(bot) == 1, "push・再実行でコメントを積み上げない"
+    body = bot[0]["body"]
+    assert "specs/orders-cancel.md" in body and "W_AMBIGUOUS" in body and "W_UNEXTRACTED" in body
+    assert "| R-CANCEL-04 | 削除 |" in body, "既存 IR との差分を併記する"
+    assert len(llm.prompts) == 1, "入力が同じなら Gemini を呼び直さない"
+    assert COMMENT_MARKER not in body, "ゲートのコメントとは別のコメント"
+
+    # 同じ head を bot なし（別 PR）で検証した結果と run・Check が一致する。
+    # この head は本文だけを変えて IR を直していないので、run は E_SPEC_HASH_MISMATCH で
+    # 入力不正になる。その場合でも候補は出す（仕様 PR の最初の push が主な利用場面）
+    svc.config.spec_llm = None
+    ref_run = await svc.create_run(
+        project_id=project_id, head_sha=head, base_sha=base, pr_number=8, trigger="test"
+    )
+    async with async_sessionmaker(engine)() as s:
+        runs = ReviewRunRepository(s)
+        with_bot = await runs.get(run_ids[-1])
+        without = await runs.get(ref_run)
+        assert with_bot is not None and without is not None
+        assert (with_bot.exec_state, with_bot.gate_status) == (
+            without.exec_state,
+            without.gate_status,
+        )
+        assert with_bot.check_run_id is not None and without.check_run_id is not None
+        events = await RunEventRepository(s).list_for_run(run_ids[0])
+        events2 = await RunEventRepository(s).list_for_run(run_ids[1])
+    c1, c2 = host.checks[with_bot.check_run_id], host.checks[without.check_run_id]
+    assert (c1["conclusion"], c1["title"], c1["summary"]) == (
+        c2["conclusion"],
+        c2["title"],
+        c2["summary"],
+    )
+    [ev] = [e for e in events if e.type == "spec_bot"]
+    assert ev.payload["status"] == "posted"
+    [ev2] = [e for e in events2 if e.type == "spec_bot"]
+    assert ev2.payload["status"] == "unchanged"
+    # 仕様 IR はリポジトリに書かれていない（bot は提案だけ）
+    assert git(tmp_path / "repo", "status", "--porcelain") == ""
+
+
+async def test_spec_pr_bot_says_why_when_gemini_is_unavailable(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    repo = f"e2e/spec-bot-fail-{uuid.uuid4().hex[:8]}"
+    await register_repo(engine, repo, {})
+    svc, host, base, head = _spec_bot_service(engine, tmp_path, repo, _BrokenJsonLlm())
+    run_id = await svc.create_run(
+        project_id=await project_id_of(engine, repo),
+        head_sha=head,
+        base_sha=base,
+        pr_number=9,
+        trigger="test",
+    )
+    [bot] = [c for c in host.comments if SPEC_BOT_MARKER in c["body"]]
+    assert "候補を生成できなかった" in bot["body"] and "認証情報が無い" in bot["body"]
+    async with async_sessionmaker(engine)() as s:
+        events = await RunEventRepository(s).list_for_run(run_id)
+    [ev] = [e for e in events if e.type == "spec_bot"]
+    assert ev.payload["status"] == "failed", "失敗は次の run で作り直す"
+
+
+async def test_spec_pr_bot_stays_silent_without_spec_changes(
+    service: tuple[ReviewRunService, LocalCodeHost, str, str, str, str], engine: AsyncEngine
+) -> None:
+    svc, host, repo, base, head, _ = service
+    llm = ScriptedJsonLlm(_SPEC_PROPOSAL)
+    svc.config.spec_llm = llm
+    await svc.create_run(
+        project_id=await project_id_of(engine, repo),
+        head_sha=head,
+        base_sha=base,
+        pr_number=10,
+        trigger="test",
+    )
+    assert llm.prompts == []
+    assert not any(SPEC_BOT_MARKER in c["body"] for c in host.comments)
+
+
+class _OvertakenLlm(ScriptedJsonLlm):
+    """1 回目の生成中に、同じ PR の新しい run（別の head）を最後まで実行させる。"""
+
+    def __init__(self, response: str) -> None:
+        super().__init__(response)
+        self.on_first_call: Callable[[], Awaitable[object]] | None = None
+
+    async def generate_json(self, prompt: str, schema: dict[str, Any]) -> JsonGeneration:
+        hook, self.on_first_call = self.on_first_call, None
+        if hook is not None:
+            await hook()
+        return await super().generate_json(prompt, schema)
+
+
+async def test_stale_run_does_not_overwrite_the_newer_bot_comment(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """生成中に新しい run が完了・投稿したら、古い run は投稿しない。
+
+    古い head の候補で、新しい run のコメントを上書きしない。
+    """
+    repo = f"e2e/spec-bot-stale-{uuid.uuid4().hex[:8]}"
+    await register_repo(engine, repo, {})
+    llm = _OvertakenLlm(_SPEC_PROPOSAL)
+    svc, host, base, head = _spec_bot_service(engine, tmp_path, repo, llm)
+    root = tmp_path / "repo"
+    md = root / "specs" / "orders-cancel.md"
+    md.write_text(md.read_text() + "\n### R-CANCEL-09\n\n速やかに通知する。\n")
+    git(root, "commit", "-qam", "spec: add R-CANCEL-09")
+    newer = git(root, "rev-parse", "HEAD")
+    project_id = await project_id_of(engine, repo)
+
+    async def newer_run() -> object:
+        return await svc.create_run(
+            project_id=project_id, head_sha=newer, base_sha=base, pr_number=12, trigger="push"
+        )
+
+    llm.on_first_call = newer_run
+    old_run = await svc.create_run(
+        project_id=project_id, head_sha=head, base_sha=base, pr_number=12, trigger="test"
+    )
+    [bot] = [c for c in host.comments if SPEC_BOT_MARKER in c["body"]]
+    assert f"`{newer[:7]}`" in bot["body"], "新しい run の候補が残る"
+    assert f"`{head[:7]}`" not in bot["body"]
+    async with async_sessionmaker(engine)() as s:
+        events = await RunEventRepository(s).list_for_run(old_run)
+    [ev] = [e for e in events if e.type == "spec_bot"]
+    assert ev.payload["status"] == "stale"
+
+
+async def test_spec_pr_bot_clears_its_comment_when_the_spec_change_is_reverted(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    repo = f"e2e/spec-bot-revert-{uuid.uuid4().hex[:8]}"
+    await register_repo(engine, repo, {})
+    llm = ScriptedJsonLlm(_SPEC_PROPOSAL)
+    svc, host, base, head = _spec_bot_service(engine, tmp_path, repo, llm)
+    root = tmp_path / "repo"
+    git(root, "checkout", "-q", base, "--", "specs")
+    git(root, "commit", "-qam", "revert spec")
+    reverted = git(root, "rev-parse", "HEAD")
+    project_id = await project_id_of(engine, repo)
+    for sha in (head, reverted):
+        await svc.create_run(
+            project_id=project_id, head_sha=sha, base_sha=base, pr_number=11, trigger="test"
+        )
+    [bot] = [c for c in host.comments if SPEC_BOT_MARKER in c["body"]]
+    assert "変更はありません" in bot["body"], "古い候補を残さない"
+    assert len(llm.prompts) == 1

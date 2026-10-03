@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from speclino.adapters.github.app_auth import GitHubAppAuth
 from speclino.adapters.github.client import GitHubClient
 from speclino.adapters.github.user_oauth import GitHubUserOAuth
+from speclino.adapters.llm.gemini_json import GeminiJsonLlm
 from speclino.adapters.localgit.local_code_host import LocalCodeHost
 from speclino.adapters.queue.cloud_tasks import CloudTasksQueue
 from speclino.adapters.queue.inprocess import InProcessQueue
@@ -230,6 +231,13 @@ def build_state(settings: Settings) -> AppState:
             agent_enabled=settings.agent_enabled,
             sandbox=build_sandbox(settings),
             resolve_team_policy=make_team_policy_resolver(factory),
+            # Gemini のクライアントは初回呼出しで作る（web ロールや認証情報の無い環境でも
+            # 起動できる。認証が無ければ bot は理由をコメントに書く）
+            spec_llm=(
+                GeminiJsonLlm(settings.spec_bot_model or settings.agent_model)
+                if settings.spec_bot_enabled
+                else None
+            ),
         ),
         cost_guard=CostGuard(ledger, Decimal(str(settings.daily_cost_limit_usd))),
     )

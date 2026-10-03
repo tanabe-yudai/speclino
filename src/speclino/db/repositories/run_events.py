@@ -51,3 +51,21 @@ class RunEventRepository:
         stmt = select(RunEvent).where(RunEvent.run_id == run_id).order_by(RunEvent.seq)
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
+
+    async def latest_for_pr(
+        self, project_id: uuid.UUID, pr_number: int, type: str
+    ) -> RunEvent | None:
+        """同じ project・PR の run のうち、指定 type の最新のイベント（S46 の仕様 PR bot 用）。"""
+        stmt = (
+            select(RunEvent)
+            .join(ReviewRun, ReviewRun.id == RunEvent.run_id)
+            .where(
+                ReviewRun.project_id == project_id,
+                ReviewRun.pr_number == pr_number,
+                RunEvent.type == type,
+            )
+            .order_by(RunEvent.ts.desc(), RunEvent.seq.desc())
+            .limit(1)
+        )
+        result = await self._session.execute(stmt)
+        return result.scalars().first()

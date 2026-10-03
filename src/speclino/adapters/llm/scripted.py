@@ -10,6 +10,8 @@ from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
 from google.genai import types
 
+from speclino.ports.text_llm import JsonGeneration
+
 
 def call(name: str, **args: Any) -> types.Part:
     return types.Part.from_function_call(name=name, args=args)
@@ -55,12 +57,16 @@ class ScriptedLlm(BaseLlm):
 class ScriptedJsonLlm:
     """TextLlm ポートのテスト用実装。与えた JSON 文字列をそのまま返し、プロンプトを記録する。"""
 
-    def __init__(self, response: str) -> None:
+    model = "scripted"
+    max_output_tokens = 8192
+
+    def __init__(self, response: str, usage: tuple[int, int] = (1000, 200)) -> None:
         self.response = response
+        self.usage = usage
         self.prompts: list[str] = []
         self.schemas: list[dict[str, Any]] = []
 
-    async def generate_json(self, prompt: str, schema: dict[str, Any]) -> str:
+    async def generate_json(self, prompt: str, schema: dict[str, Any]) -> JsonGeneration:
         self.prompts.append(prompt)
         self.schemas.append(schema)
-        return self.response
+        return JsonGeneration(self.response, *self.usage)
