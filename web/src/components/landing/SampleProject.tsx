@@ -1,7 +1,6 @@
 import { Panel } from '@/components/app/Panel'
 import { ToneBadge } from '@/components/app/ToneBadge'
 import { HealthRing } from '@/components/project/HealthRing'
-import { healthRatio } from '@/services/health'
 import { NEXT_ACTION_KIND } from '@/services/labels'
 import { SAMPLE_PROJECT } from '@/services/landingContent'
 import { Sample } from './Sample'
@@ -12,7 +11,7 @@ export function SampleProject() {
   return (
     <Sample label="プロジェクト画面の見本: 健康状態と次にやること">
       <Panel className="flex flex-wrap items-start gap-4 p-4">
-        <HealthRing size="lg" ratio={healthRatio(c, SAMPLE_PROJECT.unanalyzed)} />
+        <HealthRing size="lg" counts={c} unanalyzed={SAMPLE_PROJECT.unanalyzed} />
         <div className="min-w-0 flex-1 space-y-2">
           <p className="font-semibold">{SAMPLE_PROJECT.name}</p>
           <p className="flex flex-wrap gap-x-3 text-xs">

@@ -5,7 +5,6 @@ import { VerdictBadge } from '@/components/app/VerdictBadge'
 import { formatDateTime, shortSha } from '@/services/format'
 import { explainGate, summarizePolicies } from '@/services/gateExplain'
 import { githubPrUrl } from '@/services/github'
-import { healthRatio, healthTone } from '@/services/health'
 import { paths } from '@/services/paths'
 import type { Verdict } from '@/types/finding'
 import type { ProjectOverview } from '@/types/project'
@@ -24,13 +23,9 @@ export function StatusPanel({ overview }: { overview: ProjectOverview }) {
       {/* スマホではリングを上、件数のタイルを下の全幅に（横に詰めるとバッジがはみ出す） */}
       <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
         <div className="flex items-center gap-4 sm:flex-col sm:gap-1.5">
-          {/* 色はゲートの結果。要求が 100% でも例外付き通過・失敗なら緑にしない */}
-          <HealthRing
-            size="lg"
-            ratio={healthRatio(counts, overview.unanalyzed)}
-            tone={healthTone(run?.gate_status ?? null)}
-          />
-          <p className="text-xs text-ink-3">要求の適合率</p>
+          {/* 内訳の円グラフ（色は下の件数のタイルと同じ）。中央は適合率 */}
+          <HealthRing size="lg" counts={counts} unanalyzed={overview.unanalyzed} />
+          <p className="text-xs text-ink-3">要求の判定の内訳</p>
         </div>
         <div className="min-w-0 flex-1 space-y-1.5">
           <p className="text-xs font-semibold text-ink-3">要求の判定</p>
