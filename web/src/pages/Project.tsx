@@ -123,7 +123,7 @@ function ProjectBody({ slug, project }: { slug: string; project: ProjectSummary 
           <StatusPanel overview={overview} />
         </div>
         <aside className="min-w-0 self-start lg:sticky lg:top-20 lg:col-start-2 lg:row-span-4 lg:row-start-1">
-          <NextActionsCard actions={nextActions(overview.requirements)} run={run} />
+          <NextActionsCard actions={nextActions(overview.requirements, overview.policies)} run={run} />
         </aside>
         <div className="min-w-0 lg:col-start-1">
           <RequirementsPanel

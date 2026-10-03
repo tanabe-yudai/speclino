@@ -33,6 +33,7 @@ from speclino.domain.project_overview import (
     ProjectSummary,
     RequirementView,
     RunView,
+    WaiverView,
 )
 from speclino.domain.semantic_diff import SemanticDiff
 from speclino.domain.spec_ir import Rule, SpecIR
@@ -146,6 +147,27 @@ def build_policies(
     blocking = set(gate.get("blocking_ids", [])) if gate else set()
     advisory = set(gate.get("advisory_ids", [])) if gate else set()
     waived = set(gate.get("waived_ids", [])) if gate else set()
+    raw_waivers = gate.get("waivers", []) if gate else []
+    waiver_by_finding = {
+        w["finding_id"]: WaiverView.model_validate(
+            {k: w[k] for k in ("exception_id", "expires_on", "reason", "alternative") if k in w}
+        )
+        for w in raw_waivers
+        if isinstance(w, dict) and "finding_id" in w
+    }
+
+    def _waivers(fs: list[Finding]) -> list[WaiverView]:
+        seen: dict[str, WaiverView] = {}
+        for f in fs:
+            w = waiver_by_finding.get(f.id)
+            if w is not None:
+                seen.setdefault(w.exception_id, w)
+        return sorted(seen.values(), key=lambda w: (w.expires_on, w.exception_id))
+
+    def _exempted(fs: list[Finding]) -> bool:
+        violated = [f for f in fs if f.verdict == "VIOLATED"]
+        return bool(violated) and all(f.id in waived for f in violated)
+
     grouped: dict[str, list[Finding]] = {}
     for f in findings:
         if is_policy_finding(f):
@@ -167,6 +189,8 @@ def build_policies(
                     status=worst_verdict(f.verdict for f in fs),
                     counts=count_verdicts(f.verdict for f in fs),
                     waived=sum(1 for f in fs if f.id in waived),
+                    exempted=_exempted(fs),
+                    waivers=_waivers(fs),
                 )
             )
             continue
@@ -182,6 +206,8 @@ def build_policies(
                 status=worst_verdict(f.verdict for f in fs),
                 counts=count_verdicts(f.verdict for f in fs),
                 waived=sum(1 for f in fs if f.id in waived),
+                exempted=_exempted(fs),
+                waivers=_waivers(fs),
             )
         )
     return rows

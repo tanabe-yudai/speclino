@@ -43,9 +43,12 @@ export function StatusPanel({ overview }: { overview: ProjectOverview }) {
         <span>未解析 {overview.unanalyzed}</span>
         <span>未承認 {overview.unapproved}</span>
         <span>
-          規約の違反 {policies.violated} 件{policies.waived > 0 && `（うち例外で免除 ${policies.waived} 件）`}
+          規約: 違反 {policies.violated} 件
+          {policies.exempted > 0 &&
+            ` · 免除中 ${policies.exempted} 件（最短の期限 ${policies.earliestExpiry ?? '—'}）`}
         </span>
       </p>
+      <p className="text-xs text-ink-3">適合は、検査器が確認した範囲（検査の詳細の「保証範囲」）での適合です。</p>
       {run && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t pt-4 text-sm">
           <span className="text-ink-3">最新の検査</span>

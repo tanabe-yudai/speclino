@@ -226,3 +226,41 @@ def test_policies_count_findings_waived_by_exceptions() -> None:
     assert (row.status, row.waived) == ("VIOLATED", 1)
     [no_gate] = build_policies(findings, None, None)
     assert no_gate.waived == 0
+
+
+def test_policies_marked_exempted_when_every_violation_is_waived() -> None:
+    """すべての違反が例外で免除された規約は「免除中」。期限と直し方を添える。"""
+    findings = [
+        _finding("MAKE-001:Makefile", "VIOLATED", behavior="policy:make_targets", fid="w1"),
+        _finding("CI-001:a.yml", "VIOLATED", behavior="policy:ci", fid="w2"),
+        _finding("CI-001:b.yml", "VIOLATED", behavior="policy:ci", fid="v3"),
+    ]
+    waiver = {
+        "finding_id": "w1",
+        "requirement_id": "MAKE-001:Makefile",
+        "exception_id": "EX-1",
+        "approver": "o",
+        "expires_on": "2026-12-01",
+        "reason": "r",
+        "alternative": "a",
+    }
+    waiver2 = {
+        **waiver,
+        "finding_id": "w2",
+        "requirement_id": "CI-001:a.yml",
+        "exception_id": "EX-2",
+    }
+    gate = {
+        "status": "fail",
+        "blocking_ids": ["v3"],
+        "advisory_ids": [],
+        "waived_ids": ["w1", "w2"],
+        "waivers": [waiver, waiver2],
+    }
+    rows = {p.rule_id: p for p in build_policies(findings, gate, None)}
+    make, ci = rows["MAKE-001"], rows["CI-001"]
+    assert make.exempted is True
+    assert [(w.exception_id, str(w.expires_on), w.alternative) for w in make.waivers] == [
+        ("EX-1", "2026-12-01", "a")
+    ]
+    assert ci.exempted is False and ci.waived == 1  # 1 件は免除されていない違反が残る

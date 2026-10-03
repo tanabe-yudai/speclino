@@ -368,6 +368,8 @@ class ReviewRunService:
                     validation=result.validation,
                     policy_findings=result.policy_findings,
                     semantic_diff=semantic,
+                    waived_finding_ids=result.waived_finding_ids,
+                    waivers=result.waivers,
                 )
                 paths = write_result(final, out_dir)
                 (out_dir / "agent-events.json").write_text(

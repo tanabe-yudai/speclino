@@ -53,6 +53,18 @@ export interface PolicyView {
   counts: VerdictCounts
   /** 例外（exceptions.yaml）で免除された finding の数 */
   waived: number
+  /** 違反がすべて例外で免除されている（免除中。違反でも適合でもない） */
+  exempted: boolean
+  waivers: WaiverView[]
+}
+
+/** 規約の違反を免除している例外（期限付き。期限までに直す前提）。 */
+export interface WaiverView {
+  exception_id: string
+  expires_on: string
+  reason: string
+  /** 代替策（直し方） */
+  alternative: string
 }
 
 export interface ProjectOverview {
@@ -72,7 +84,7 @@ export interface ProjectOverview {
 
 export type RequirementFilter = 'all' | 'violated' | 'unknown' | 'review' | 'unapproved'
 
-export type NextActionKind = 'violated' | 'stale' | 'review' | 'unknown' | 'unapproved'
+export type NextActionKind = 'violated' | 'stale' | 'review' | 'exempted' | 'unknown' | 'unapproved'
 
 export interface NextAction {
   kind: NextActionKind

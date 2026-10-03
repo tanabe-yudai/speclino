@@ -360,7 +360,7 @@ export const MOCK_REVIEW_MARKDOWN: Record<string, string> = {
 
 | 判定 | 件数 |
 | --- | --- |
-| 適合（確認範囲内） | 1 |
+| 適合 | 1 |
 | 違反 | 1 |
 | 未検証 | 1 |
 | 要確認 | 1 |
@@ -398,7 +398,7 @@ export const MOCK_REVIEW_MARKDOWN: Record<string, string> = {
 
 | 判定 | 件数 |
 | --- | --- |
-| 適合（確認範囲内） | 2 |
+| 適合 | 2 |
 | 違反 | 0 |
 | 未検証 | 0 |
 | 要確認 | 0 |

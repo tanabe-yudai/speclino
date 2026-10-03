@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from speclino.conformance.exceptions import Waiver
 from speclino.conformance.gate import GateResult
 from speclino.domain.code_ir import CodeIR
 from speclino.domain.finding import Findings
@@ -24,13 +25,28 @@ def _write_json(path: Path, data: object) -> None:
     path.write_text(json.dumps(data, **_JSON_KWARGS) + "\n", encoding="utf-8")
 
 
-def _gate_dict(gate: GateResult) -> dict[str, object]:
+def _gate_dict(gate: GateResult, waivers: list[Waiver] | None = None) -> dict[str, object]:
+    # ゲートで実際に免除された finding の分だけ（どの例外で・いつまで・どう直すか）を残す
+    waived = {f.id for f in gate.waived}
+    kept = sorted((w for w in waivers or [] if w.finding_id in waived), key=lambda w: w.finding_id)
     return {
         "status": gate.status,
         "reason": gate.reason,
         "blocking_ids": sorted(f.id for f in gate.blocking),
         "advisory_ids": sorted(f.id for f in gate.advisory),
         "waived_ids": sorted(f.id for f in gate.waived),
+        "waivers": [
+            {
+                "finding_id": w.finding_id,
+                "requirement_id": w.requirement_id,
+                "exception_id": w.exception_id,
+                "approver": w.approver,
+                "expires_on": w.expires_on.isoformat(),
+                "reason": w.reason,
+                "alternative": w.alternative,
+            }
+            for w in kept
+        ],
     }
 
 
@@ -42,6 +58,7 @@ def write_artifacts(
     findings: Findings,
     gate: GateResult | None,
     semantic_diff: SemanticDiff | None = None,
+    waivers: list[Waiver] | None = None,
 ) -> dict[str, Path]:
     """PoC 5.3 の出力ファイル一式を `out_dir` に書き、書いたパスの辞書を返す。
 
@@ -64,7 +81,7 @@ def write_artifacts(
         emit("code-ir.json", code.model_dump(mode="json"))
     emit("findings.json", findings.model_dump(mode="json"))
     if gate is not None:
-        emit("gate.json", _gate_dict(gate))
+        emit("gate.json", _gate_dict(gate, waivers))
     if semantic_diff is not None:
         emit("semantic-diff.json", semantic_diff.model_dump(mode="json"))
 
