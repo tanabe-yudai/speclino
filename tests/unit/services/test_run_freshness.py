@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from uuid import UUID, uuid4
 
 import pytest
@@ -76,3 +78,17 @@ def test_publish_property_is_true_only_for_publish_decision() -> None:
 def test_reason_is_always_non_empty(exec_state: ExecState, latest_run_id: UUID | None) -> None:
     """reason は UI と Check Run に表示されるため、どの分岐でも空にならない。"""
     assert check(exec_state, latest_run_id).reason
+
+
+def test_module_imports_without_z3() -> None:
+    """z3 が無い環境でもこのモジュールの依存を import できる（S60）。
+
+    サンドボックス用イメージ（docker/sandbox/Dockerfile）は z3 を同梱しない。ここが z3 を
+    引くと、Spec IR の tests に宣言した R-RUN 系のテストがそのイメージで収集できなくなる。
+    """
+    code = (
+        "import sys; sys.modules['z3'] = None\n"
+        "import speclino.domain.run, speclino.services.run_freshness\n"
+    )
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
+    assert proc.returncode == 0, proc.stderr

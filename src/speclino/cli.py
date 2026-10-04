@@ -26,7 +26,7 @@ from speclino.conformance.engine import EngineInputError
 from speclino.domain.code_ir import AnalysisLimits
 from speclino.domain.finding import Verdict
 from speclino.domain.workspace import WorkspaceRole
-from speclino.services import CheckInputError, CheckRequest, run_check, write_result
+from speclino.services.check_pipeline import CheckInputError, CheckRequest, run_check, write_result
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

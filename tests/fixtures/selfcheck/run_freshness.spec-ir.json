@@ -52,7 +52,9 @@
           "symbol": null
         }
       ],
-      "tests": [],
+      "tests": [
+        "tests/unit/services/test_run_freshness.py::test_superseded_is_never_published"
+      ],
       "title": null
     },
     {
@@ -150,7 +152,9 @@
           "symbol": null
         }
       ],
-      "tests": [],
+      "tests": [
+        "tests/unit/services/test_run_freshness.py::test_not_latest_run_is_not_published"
+      ],
       "title": null
     },
     {
@@ -257,7 +261,10 @@
           "symbol": null
         }
       ],
-      "tests": [],
+      "tests": [
+        "tests/unit/services/test_run_freshness.py::test_latest_run_is_published",
+        "tests/unit/services/test_run_freshness.py::test_unknown_latest_run_is_treated_as_latest"
+      ],
       "title": null
     }
   ],
