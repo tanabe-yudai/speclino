@@ -330,8 +330,15 @@ async def test_saving_keeps_known_ids_and_fills_legacy_settings(
     view = (await client.get(path, headers=_as("mem"))).json()
     assert view["approver_ids_missing"] is True
     assert view["approvers"] == [{"login": "octo-cat", "id": None}]
-    # approver（承認者は変えられない）の保存でも、据え置いた承認者の ID を補う
+    # approver（owner でない）の保存では ID を補わない。どの GitHub アカウントを承認者として
+    # 結び付けるかは承認者の変更と同じく owner だけが決める（改名後のログイン名の取得者を
+    # owner でない人が結び付けられないように）
     res = await client.put(path, json={**legacy, "agent_enabled": False}, headers=_as("appr"))
+    assert res.status_code == 200, res.text
+    assert res.json()["settings"].get("approver_ids", []) == []
+    assert res.json()["approver_ids_missing"] is True
+    # owner の保存で補う
+    res = await client.put(path, json=legacy, headers=_as("own"))
     assert res.status_code == 200, res.text
     assert res.json()["settings"]["approver_ids"] == [583231]
     assert res.json()["approver_ids_missing"] is False

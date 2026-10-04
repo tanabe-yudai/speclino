@@ -263,7 +263,12 @@ async def update_settings(
             },
         )
         raise ApproversOwnerOnly(f"{uid} は {slug} の PR の承認者を変更できない")
-    approver_ids = await resolve_approver_ids(users, settings.approvers, project.settings)
+    if role == "owner":
+        approver_ids = await resolve_approver_ids(users, settings.approvers, project.settings)
+    else:
+        # owner でない人（承認者は据え置き）は ID を引かない。どの GitHub アカウントを承認者として
+        # 結び付けるかは owner だけが決める。保存済みの ID をそのまま残す
+        approver_ids = list(parse_stored(project.settings).settings.approver_ids)
     before = parse_stored(project.settings)
     after = settings.model_copy(update={"approver_ids": approver_ids}).model_dump(mode="json")
     project.settings = after
