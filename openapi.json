@@ -1255,6 +1255,72 @@
         ]
       }
     },
+    "/api/review-runs/{run_id}/supplements": {
+      "get": {
+        "description": "エージェントからの補足（S59）。正式な回答ではない。見える run のものだけ返す。",
+        "operationId": "get_supplements_api_review_runs__run_id__supplements_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Supplements Api Review Runs  Run Id  Supplements Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Get Supplements",
+        "tags": [
+          "review-runs"
+        ]
+      }
+    },
     "/api/workspaces/{slug}/invitations": {
       "get": {
         "operationId": "list_invitations_api_workspaces__slug__invitations_get",

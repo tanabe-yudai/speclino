@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from speclino.a2a_server.auth import A2ABearerAuth, WorkspaceContextBuilder, owner_of
 from speclino.a2a_server.card import A2A_PATH, build_agent_card
 from speclino.a2a_server.executor import SkillHandler, SpecLinoExecutor
+from speclino.a2a_server.handlers import build_handlers
 from speclino.api.deps import AppState
 from speclino.domain.a2a import SkillId
 from speclino.settings import Settings
@@ -76,17 +77,29 @@ class LazyTaskStore(TaskStore):
         await self._store().delete(task_id, context)
 
 
-def _handlers(state: AppState) -> dict[SkillId, SkillHandler]:
-    """スキルの処理。テストは state.a2a_handlers で差し替える。"""
-    if state.a2a_handlers is not None:
-        return state.a2a_handlers
-    return {}  # 本物のスキルの組み立て（build_handlers）は Task 8 で入れる
+class _Handlers:
+    """スキルの処理。state.a2a_handlers があればそれ（テスト）、無ければ state から組み立てる。
+
+    組み立てた結果は state ごとに 1 回だけ作って使い回す。組み立てに失敗したら覚えない。
+    """
+
+    def __init__(self, get_state: Callable[[], AppState]) -> None:
+        self.get_state = get_state
+        self._built: tuple[AppState, dict[SkillId, SkillHandler]] | None = None
+
+    def __call__(self) -> dict[SkillId, SkillHandler]:
+        state = self.get_state()
+        if state.a2a_handlers is not None:
+            return state.a2a_handlers
+        if self._built is None or self._built[0] is not state:
+            self._built = (state, build_handlers(state))
+        return self._built[1]
 
 
 def mount_a2a(app: FastAPI, settings: Settings, get_state: Callable[[], AppState]) -> None:
     """静的配信の mount より前に呼ぶ（"/" の mount に `/a2a` を取られないように）。"""
     card = build_agent_card(settings.public_url.rstrip("/"))
-    executor = SpecLinoExecutor(lambda: _handlers(get_state()), lambda: get_state().session_factory)
+    executor = SpecLinoExecutor(_Handlers(get_state), lambda: get_state().session_factory)
     handler = DefaultRequestHandler(executor, LazyTaskStore(get_state), card)
     add_a2a_routes_to_fastapi(
         app,

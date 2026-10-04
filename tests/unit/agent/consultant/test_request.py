@@ -40,3 +40,15 @@ def test_front_matter_selects_skill_for_text_only_clients() -> None:
 def test_missing_or_unknown_skill_is_explained(text: str) -> None:
     with pytest.raises(SkillRequestError, match="spec_review"):
         parse_skill_request(_msg(new_text_part(text)))
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("1234567", "1234567"), ("0123456", "0123456"), ("1e10", "1e10"), ("12.50", "12.50")],
+)
+def test_front_matter_numbers_are_read_as_written_text(raw: str, expected: str) -> None:
+    """数字だけのコミット SHA を数として読み、型の誤りで分かりにくく断らない。"""
+    req = parse_skill_request(
+        _msg(new_text_part(f"---\nskill: requirement_consult\nrepo: o/r\ncommit: {raw}\n---\nQ"))
+    )
+    assert req.commit == expected

@@ -14,6 +14,7 @@ from speclino.a2a_server.executor import STATE_METADATA_KEY, SkillCall
 from speclino.agent.budget import BudgetState
 from speclino.agent.consultant.tools import ConsultDeps, consult_permissions, guarded
 from speclino.agent.gateway import ToolGateway, ToolRegistry
+from speclino.services.agent_supplements import RunNotInWorkspace
 
 SKIP_WORDS = ("skip", "スキップ", "わからない")
 _FINISHED_STATES = ("completed", "awaiting_answer")  # 要確認が残る検査は awaiting_answer で終わる
@@ -78,13 +79,16 @@ async def _clarify(call: SkillCall, deps: ConsultDeps, gateway: ToolGateway) -> 
             )
             return {"recorded": True}
 
-        result = await guarded(
-            gateway,
-            "supplement_record",
-            {"run_id": run_id, "requirement_id": item["requirement_id"]},
-            record,
-            truncate=False,
-        )
+        try:
+            result = await guarded(
+                gateway,
+                "supplement_record",
+                {"run_id": run_id, "requirement_id": item["requirement_id"]},
+                record,
+                truncate=False,
+            )
+        except RunNotInWorkspace as e:  # 質問の後に検査がワークスペースから外れた
+            raise _Stop("この検査はワークスペースに無いため、補足を記録できませんでした") from e
         if result.get("recorded") is not True:  # 門番が拒否した（記録していない）
             raise _Stop("補足を記録できませんでした")
         recorded.append(

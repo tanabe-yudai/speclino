@@ -169,3 +169,23 @@ async def test_recording_uses_run_id_from_state_and_reads_run_with_team() -> Non
     )
     await run_run_clarification(c2, deps)
     assert [r["run_id"] for r in recorded] == [str(RUN_ID)]
+
+
+async def test_run_left_workspace_before_recording_fails_cleanly() -> None:
+    """記録のときに run がワークスペースに無ければ、理由を返して失敗する（記録済みにしない）。"""
+    from speclino.services.agent_supplements import RunNotInWorkspace
+
+    deps, _ = deps_with(ONE_REVIEW_RUN)
+    deps.record_supplement = AsyncMock(side_effect=RunNotInWorkspace(str(RUN_ID)))
+    c1 = fake_call(skill="run_clarification", run_id=RUN_ID)
+    await run_run_clarification(c1, deps)
+    c2 = fake_call(
+        skill="run_clarification",
+        run_id=RUN_ID,
+        reply="意図はこう",
+        state=c1.updater.last_metadata()["speclino"],  # type: ignore[attr-defined]
+    )
+    await run_run_clarification(c2, deps)
+    assert c2.updater.calls[-1][0] == "failed"  # type: ignore[attr-defined]
+    assert "ワークスペースに無い" in c2.updater.last_text()  # type: ignore[attr-defined]
+    assert [e["tool"] for e in c2.audit.entries] == ["supplement_record"]

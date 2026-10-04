@@ -23,6 +23,20 @@ _EXPLAIN = (
 )
 
 
+class _TextNumberLoader(yaml.SafeLoader):
+    """数に見える値も書いたとおりの文字列で読む（数字だけのコミット SHA や先頭 0 を壊さない）。"""
+
+
+_TextNumberLoader.yaml_implicit_resolvers = {
+    first: [
+        (tag, regexp)
+        for tag, regexp in resolvers
+        if tag not in ("tag:yaml.org,2002:int", "tag:yaml.org,2002:float")
+    ]
+    for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+
+
 class SkillRequestError(ValueError):
     """スキルの指定が読めない。メッセージは相手にそのまま見せてよい文。"""
 
@@ -38,7 +52,7 @@ def parse_skill_request(message: Message) -> SkillRequest:
         if m is None:
             raise SkillRequestError(_EXPLAIN)
         try:
-            meta = yaml.safe_load(m.group(1))
+            meta = yaml.load(m.group(1), Loader=_TextNumberLoader)  # SafeLoader の派生
         except yaml.YAMLError as e:
             raise SkillRequestError(_EXPLAIN) from e
         if not isinstance(meta, dict):

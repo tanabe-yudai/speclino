@@ -43,6 +43,10 @@ class SkillCall:
 SkillHandler = Callable[[SkillCall], Awaitable[None]]
 
 
+class SkillsUnavailable(RuntimeError):
+    """スキルを組み立てられない（費用ガードが無い等）。メッセージは相手に見せてよい文。"""
+
+
 class SpecLinoExecutor(AgentExecutor):
     """入力の解釈・状態の読み戻し・スキルへの振り分け。判定はしない。
 
@@ -74,7 +78,12 @@ class SpecLinoExecutor(AgentExecutor):
         except SkillRequestError as e:
             await updater.failed(updater.new_agent_message([new_text_part(str(e))]))
             return
-        handler = self.get_handlers().get(request.skill)
+        try:
+            handlers = self.get_handlers()
+        except SkillsUnavailable as e:  # 計量なしで動かさず、理由を返して失敗にする
+            await updater.failed(updater.new_agent_message([new_text_part(str(e))]))
+            return
+        handler = handlers.get(request.skill)
         if handler is None:
             await updater.failed(
                 updater.new_agent_message([new_text_part(f"{request.skill} は使えません")])
