@@ -57,6 +57,24 @@ echo -n "<値>" | gcloud secrets versions add session-secret         --data-file
 アクセス権は secret 単位で付与済み（web: `github-webhook-secret` / `session-secret` /
 （legacy）`mcp-token`、worker: `github-app-private-key`）。
 
+## PR の terraform plan（`.github/workflows/terraform-plan.yml`）
+
+`infra/**` を変える PR で plan を流し、結果を PR コメント 1 件にまとめて更新する。apply は手で行う。
+読み取り専用の planner SA（`iam.tf` の `planner`）を WIF で使い、`-lock=false` で流す。
+
+- secret の値は refresh で読まない（`google_secret_manager_secret_version` のリソース・データソースが
+  無く、Cloud Run は `secret_key_ref` で参照するだけ）ので、`secretAccessor` は付けず refresh も行う
+- 課金アカウントへの `roles/billing.viewer` 付与は、課金アカウント管理者でないと apply できない
+- fork からの PR と、下の secret が無いあいだはジョブを飛ばす
+
+有効にする手順:
+
+1. `terraform apply`（planner SA・ロール・WIF の紐付けが増える）
+2. repository secret `GCP_PLANNER_SA` に `terraform output -raw planner_sa` の値を設定する
+3. repository secret `TF_PROD_TFVARS` に、手元の `terraform.tfvars` の中身をそのまま設定する
+   （`*.tfvars` は .gitignore 対象。ジョブはこれをランナー内で `terraform.tfvars` に書き出す。
+   PR コメントでは project ID と課金アカウント ID を伏せる）。tfvars を変えたら更新する
+
 ## 既知の TODO
 
 - `run.tf` の sandbox サービスは `launch_stage = "BETA"` と `sandbox_launcher = true` を
