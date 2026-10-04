@@ -158,6 +158,15 @@ class ConsultTools:
         self._identity = identity
         self._gateway = gateway
 
+    @property
+    def gateway(self) -> ToolGateway:
+        return self._gateway
+
+    @gateway.setter
+    def gateway(self, gateway: ToolGateway) -> None:
+        """Investigator を作った後で、その門番（監査・予算）に付け替える。"""
+        self._gateway = gateway
+
     async def spec_context(self, repo: str, ref: str = "HEAD") -> dict[str, Any]:
         """リポジトリの仕様の語彙とチーム規約（context）を返す。"""
         return await self.fetch_spec_context(repo, ref, truncate=True)
