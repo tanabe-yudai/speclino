@@ -13,10 +13,6 @@ from typing import TYPE_CHECKING, Annotated, get_args
 
 import httpx
 import typer
-from a2a.client import A2ACardResolver, ClientConfig, ClientFactory
-from a2a.helpers import get_artifact_text, get_message_text, new_data_part, new_text_part
-from a2a.types import Message, Role, SendMessageRequest, Task, TaskState
-from google.protobuf.json_format import MessageToDict
 from pydantic import ValidationError
 
 from speclino import __version__
@@ -29,6 +25,7 @@ from speclino.domain.workspace import WorkspaceRole
 from speclino.services import CheckInputError, CheckRequest, run_check, write_result
 
 if TYPE_CHECKING:
+    from a2a.types import Message, Task
     from sqlalchemy.ext.asyncio import AsyncSession
 
 app = typer.Typer(name="speclino", help="仕様–実装の意味差分レビュー基盤 CLI")
@@ -241,6 +238,10 @@ def _a2a_message(
     text: str, skill: str | None, fields: dict[str, str | None], task_id: str | None
 ) -> Message:
     """送るメッセージ。skill があれば DataPart で指定し、返信（task_id あり）は本文だけ。"""
+    # a2a-sdk は a2a-send でだけ読む（他のコマンドの起動を重くしない）
+    from a2a.helpers import new_data_part, new_text_part
+    from a2a.types import Message, Role
+
     parts = []
     if skill is not None and task_id is None:
         meta = {"skill": skill, **{k: v for k, v in fields.items() if v is not None}}
@@ -252,6 +253,10 @@ def _a2a_message(
 
 def _a2a_render(task: Task) -> list[str]:
     """タスクの状態・最後のエージェントの発言・成果物を表示用の行にする。"""
+    from a2a.helpers import get_artifact_text, get_message_text
+    from a2a.types import TaskState
+    from google.protobuf.json_format import MessageToDict
+
     state = TaskState.Name(task.status.state)
     lines = [
         f"state: {_A2A_STATE_NAMES.get(state, state)}",
@@ -275,6 +280,9 @@ def _a2a_render(task: Task) -> list[str]:
 
 
 async def _a2a_send(http: httpx.AsyncClient, message: Message) -> Task:
+    from a2a.client import A2ACardResolver, ClientConfig, ClientFactory
+    from a2a.types import SendMessageRequest
+
     card = await A2ACardResolver(http, str(http.base_url)).get_agent_card()
     client = ClientFactory(ClientConfig(streaming=False, httpx_client=http)).create(card)
     last = None
