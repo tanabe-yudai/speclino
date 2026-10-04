@@ -7,10 +7,10 @@ import uuid
 
 import pytest
 from a2a.server.context import ServerCallContext
-from a2a.server.tasks import DatabaseTaskStore
 from a2a.types import Task, TaskState, TaskStatus
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
+from speclino.a2a_server.mount import a2a_task_store
 from speclino.db.repositories import AgentSupplementRepository, ReviewRunRepository
 from tests.integration.services.conftest import E2E_TEAM, project_id_of, register_repo
 
@@ -63,9 +63,8 @@ async def test_add_and_list_supplements_in_order(engine: AsyncEngine) -> None:
 
 async def test_a2a_tasks_table_matches_sdk_model(engine: AsyncEngine) -> None:
     """SDK の DatabaseTaskStore が create_table=False でこの表を読み書きできる。"""
-    store = DatabaseTaskStore(
-        engine, create_table=False, table_name="a2a_tasks", owner_resolver=lambda ctx: "e2e-a2a"
-    )
+    # 同じプロセスで a2a_tasks の ORM クラスを 1 回しか定義できないので、本番と同じ組み立てを使う
+    store = a2a_task_store(engine, lambda ctx: "e2e-a2a")
     task = Task(
         id=str(uuid.uuid4()),
         context_id=str(uuid.uuid4()),

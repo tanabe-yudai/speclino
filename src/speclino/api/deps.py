@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 from fastapi import Request
@@ -37,6 +38,10 @@ from speclino.services.cost_guard import CostGuard, CostLedger
 from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
 from speclino.settings import Settings
 
+if TYPE_CHECKING:
+    from speclino.a2a_server.executor import SkillHandler
+    from speclino.domain.a2a import SkillId
+
 
 @dataclass
 class AppState:
@@ -52,6 +57,8 @@ class AppState:
     context_source: McpContextSource | None = None
     # GitHub App のユーザー認可（S55 のリポジトリ登録）。client_id / secret が無ければ None
     github_user_oauth: GitHubUserOAuth | None = None
+    # A2A のスキルの処理（S59）。None なら state から本物を組み立てる。テストで差し替える
+    a2a_handlers: dict[SkillId, SkillHandler] | None = None
 
 
 class _SessionLedger:
