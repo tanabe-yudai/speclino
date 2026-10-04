@@ -13,7 +13,7 @@
 #   deployer: run.developer / artifactregistry.writer / web・worker・sandbox SA への
 #             serviceAccountUser（GitHub Actions からのデプロイ用）
 #   planner:  読み取り専用（PR の terraform plan 用、.github/workflows/terraform-plan.yml）。
-#             viewer / iam.securityReviewer / storage.bucketViewer / serviceUsageConsumer /
+#             viewer / iam.securityReviewer / storage.bucketViewer /
 #             課金アカウントの billing.viewer / tfstate バケットの storage.objectViewer。
 #             書込み・actAs・secretAccessor は持たない
 
@@ -137,15 +137,15 @@ resource "google_service_account_iam_member" "deployer_actas" {
 #                                監視 / SA と project・AR・secret・Run の IAM ポリシーの読取り
 #   iam.securityReviewer         viewer に無い IAM ポリシーの読取り（storage.buckets.getIamPolicy など）
 #   storage.bucketViewer         成果物バケットのメタデータ（storage.buckets.get は viewer に無い）
-#   serviceusage.serviceUsageConsumer
-#                                provider の user_project_override（versions.tf）が quota project を
-#                                指定するため serviceusage.services.use が要る
+#
+# serviceusage.serviceUsageConsumer は付けない（quota・課金の消費を許すため）。terraform-plan.yml は
+# -var=user_project_override=false で流し、X-Goog-User-Project を送らない。SA の資格情報では
+# client-based API の quota project が SA の作られたプロジェクト（このプロジェクト）になる。
 locals {
   planner_project_roles = toset([
     "roles/viewer",
     "roles/iam.securityReviewer",
     "roles/storage.bucketViewer",
-    "roles/serviceusage.serviceUsageConsumer",
   ])
 }
 

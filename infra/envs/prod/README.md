@@ -59,21 +59,45 @@ echo -n "<値>" | gcloud secrets versions add session-secret         --data-file
 
 ## PR の terraform plan（`.github/workflows/terraform-plan.yml`）
 
-`infra/**` を変える PR で plan を流し、結果を PR コメント 1 件にまとめて更新する。apply は手で行う。
-読み取り専用の planner SA（`iam.tf` の `planner`）を WIF で使い、`-lock=false` で流す。
+`infra/**` を変える PR で 2 つのジョブを流す。apply は手で行う。
 
+- `validate`（自動）: `terraform fmt -check -recursive` と `terraform init -backend=false` → `terraform validate`。
+  secret・OIDC なし、`contents: read` のみ
+- `plan`（承認制）: environment `terraform-plan` の必須レビュアーが承認してから走る。読み取り専用の
+  planner SA（`iam.tf` の `planner`）を WIF で使い、`-lock=false -var=user_project_override=false` で
+  plan を流して結果を PR コメント 1 件にまとめて更新する
+
+`pull_request` では **PR 自身のワークフローと Terraform（provider・lock ファイルを含む）が動く**。承認者は
+ワークフロー・`*.tf`・`.terraform.lock.hcl` の差分を読み、planner の資格情報と tfvars を渡してよいと
+判断してから承認する（承認しなければ secret も OIDC の planner も渡らない）。`pull_request_target` は使わない。
+
+権限の境界:
+
+- WIF（`wif.tf`）は SA ごとに claim で絞る。planner は `attribute.environment/terraform-plan`、deployer は
+  `attribute.workflow_ref/<owner>/<repo>/.github/workflows/deploy.yml@refs/heads/main` だけ。PR で
+  書き換えたワークフローや他のブランチから deployer にはなれない
+- planner SA は書込み・actAs・`secretAccessor`・`serviceusage.services.use` を持たない。
+  `user_project_override=false` で流すため quota project のヘッダを送らない（SA の資格情報では SA の
+  プロジェクトが quota project になる）。手元のユーザー ADC では既定の `true` のまま使う
 - secret の値は refresh で読まない（`google_secret_manager_secret_version` のリソース・データソースが
-  無く、Cloud Run は `secret_key_ref` で参照するだけ）ので、`secretAccessor` は付けず refresh も行う
+  無く、Cloud Run は `secret_key_ref` で参照するだけ）
 - 課金アカウントへの `roles/billing.viewer` 付与は、課金アカウント管理者でないと apply できない
-- fork からの PR と、下の secret が無いあいだはジョブを飛ばす
+- fork からの PR と、environment secret が無いあいだは plan を飛ばす
 
-有効にする手順:
+有効にする手順（順番どおり）:
 
-1. `terraform apply`（planner SA・ロール・WIF の紐付けが増える）
-2. repository secret `GCP_PLANNER_SA` に `terraform output -raw planner_sa` の値を設定する
-3. repository secret `TF_PROD_TFVARS` に、手元の `terraform.tfvars` の中身をそのまま設定する
-   （`*.tfvars` は .gitignore 対象。ジョブはこれをランナー内で `terraform.tfvars` に書き出す。
-   PR コメントでは project ID と課金アカウント ID を伏せる）。tfvars を変えたら更新する
+1. GitHub の Settings → Environments で `terraform-plan` を作り、Required reviewers を設定する
+   （Deployment branches は PR のブランチで走らせるため制限しない）。apply より先に作る:
+   ワークフローが参照した時点で environment は保護なしで自動作成され、planner の WIF 紐付けが
+   ある状態で保護が無いと、承認なしで planner を使えてしまう
+2. `terraform apply`（planner SA・ロール・WIF の claim 対応と SA ごとの紐付け）
+3. environment `terraform-plan` の **environment secret**（repository secret ではない）に設定する
+   - `GCP_PLANNER_SA` = `terraform output -raw planner_sa`
+   - `TF_PROD_TFVARS` = 手元の `terraform.tfvars` の中身そのまま（`*.tfvars` は .gitignore 対象。
+     ジョブはランナー内で `terraform.tfvars` に書き出す。PR コメントでは project ID と課金アカウント ID を
+     伏せる）。tfvars を変えたら更新する
+4. deploy.yml は main から起動する（push、または main を選んだ workflow_dispatch）。他のブランチで
+   workflow_dispatch しても WIF で拒否される
 
 ## 既知の TODO
 

@@ -26,10 +26,12 @@ terraform {
 # provider は user_project_override = true のときしかヘッダを送らない。
 # 無いと Google 既定の共有プロジェクト（projects/764086051850）が consumer になり、
 # プロジェクト側で API を有効化していても 403 SERVICE_DISABLED になる。
+# SA の資格情報では不要なので、terraform-plan.yml は var.user_project_override = false で流す
+# （planner SA に serviceusage.services.use を持たせないため）。
 provider "google" {
   project               = var.project_id
   region                = var.region
-  user_project_override = true
+  user_project_override = var.user_project_override
   billing_project       = var.project_id
 }
 
@@ -38,6 +40,6 @@ provider "google" {
 provider "google-beta" {
   project               = var.project_id
   region                = var.region
-  user_project_override = true
+  user_project_override = var.user_project_override
   billing_project       = var.project_id
 }

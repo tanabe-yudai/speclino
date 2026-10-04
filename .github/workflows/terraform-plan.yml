@@ -1,7 +1,11 @@
 name: Terraform plan
 
-# infra/** を変える PR で infra/envs/prod の terraform plan を流し、結果を PR コメント 1 件に
-# まとめる（push のたびに同じコメントを更新する）。apply は手で行う（infra/envs/prod/README.md）。
+# infra/** を変える PR で infra/envs/prod を検査する。
+#   validate: 自動で走る。fmt -check と validate（backend なし）だけ。secret・OIDC なし、contents: read のみ
+#   plan:     environment terraform-plan（必須レビュアー）の承認後にだけ走る。planner SA（読み取り専用）で
+#             plan を流し、結果を PR コメント 1 件にまとめる（push のたびに同じコメントを更新する）
+# pull_request では PR 自身のワークフローと Terraform（provider を含む）が動くので、認証つきの plan は
+# 人が差分を読んでから承認する。pull_request_target は使わない。apply は手で行う（infra/envs/prod/README.md）。
 #
 # 規約 CI-001（読取り専用権限）は ci.yml だけが対象。PR コメントの書込みが要るので ci.yml とは分ける。
 on:
@@ -15,16 +19,49 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  id-token: write
   contents: read
-  pull-requests: write
 
 jobs:
+  validate:
+    name: validate (infra/envs/prod)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: infra/envs/prod
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.16.4"
+          terraform_wrapper: false
+
+      - name: Fmt
+        working-directory: infra
+        run: terraform fmt -check -recursive
+
+      - name: Validate
+        run: |
+          terraform init -input=false -backend=false -lockfile=readonly
+          terraform validate
+
   plan:
     name: plan (infra/envs/prod)
+    needs: validate
     # fork からの PR には id-token も secrets も渡らないので、認証できない。失敗にせず飛ばす。
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
+    # 必須レビュアーの承認まで待つ。WIF は planner SA をこの environment のジョブにだけ許す
+    # （infra/envs/prod/wif.tf）。GCP_PLANNER_SA / TF_PROD_TFVARS は environment secret に置く。
+    environment: terraform-plan
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
     defaults:
       run:
         working-directory: infra/envs/prod
@@ -32,13 +69,12 @@ jobs:
       PLANNER_SA: ${{ secrets.GCP_PLANNER_SA }}
       TFVARS: ${{ secrets.TF_PROD_TFVARS }}
     steps:
-      # planner SA（infra/envs/prod/iam.tf）を apply して secret を設定するまでは飛ばす
-      # （Dependabot の PR も secrets が渡らないのでここで止まる）。
+      # planner SA（infra/envs/prod/iam.tf）を apply して environment secret を設定するまでは飛ばす。
       - id: ready
         working-directory: .
         run: |
           if [ -z "${PLANNER_SA}" ] || [ -z "${TFVARS}" ]; then
-            echo "::notice::GCP_PLANNER_SA / TF_PROD_TFVARS が未設定のため terraform plan を飛ばす"
+            echo "::notice::environment terraform-plan の GCP_PLANNER_SA / TF_PROD_TFVARS が未設定のため terraform plan を飛ばす"
             echo "ok=false" >> "$GITHUB_OUTPUT"
           else
             echo "ok=true" >> "$GITHUB_OUTPUT"
@@ -46,6 +82,8 @@ jobs:
 
       - if: steps.ready.outputs.ok == 'true'
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - if: steps.ready.outputs.ok == 'true'
         uses: google-github-actions/auth@v3
@@ -84,6 +122,8 @@ jobs:
             -backend-config="prefix=envs/prod"
 
       # planner SA は読み取り専用なので state のロックを書けない（-lock=false）。
+      # user_project_override=false: X-Goog-User-Project を送らず、planner SA に
+      # serviceusage.services.use（quota・課金の消費）を持たせない（versions.tf）。
       # secret の値は refresh で読まない（secret_version のリソース・データソースが無い）ので
       # refresh は通常どおり行い、手作業の変更（drift）も plan に出す。
       - if: steps.ready.outputs.ok == 'true'
@@ -91,7 +131,8 @@ jobs:
         name: Plan
         run: |
           set +e
-          terraform plan -lock=false -input=false -no-color -detailed-exitcode > plan.txt 2>&1
+          terraform plan -lock=false -input=false -no-color -detailed-exitcode \
+            -var=user_project_override=false > plan.txt 2>&1
           code=$?
           set -e
           cat plan.txt
