@@ -16,7 +16,9 @@ import { paths } from '@/services/paths'
 import {
   ONBOARDING_STATE_LABELS,
   ONBOARDING_STEP_TITLES,
+  approverLabel,
   draftSettings,
+  needsResave,
   onboardingDone,
   settingsEqual,
 } from '@/services/projectSettings'
@@ -104,7 +106,7 @@ function SettingsForm({ slug, projectId }: { slug: string; projectId: string }) 
     testRunEnabled,
     approversText,
   })
-  const dirty = !settingsEqual(draft, view.settings) || view.stored_invalid
+  const dirty = !settingsEqual(draft, view.settings) || needsResave(view)
   const editable = view.can_edit
 
   function save() {
@@ -124,6 +126,11 @@ function SettingsForm({ slug, projectId }: { slug: string; projectId: string }) 
       {view.stored_invalid && (
         <p className="rounded-md bg-rev-bg px-3 py-2 text-sm text-rev">
           保存されている設定が読めないため、エージェントと test_run を止めた安全側の設定で動いています。保存し直してください。
+        </p>
+      )}
+      {view.approver_ids_missing && (
+        <p className="rounded-md bg-rev-bg px-3 py-2 text-sm text-rev">
+          承認者の GitHub ユーザー ID が未登録です。保存し直してください
         </p>
       )}
       <div className="space-y-1">
@@ -172,12 +179,19 @@ function SettingsForm({ slug, projectId }: { slug: string; projectId: string }) 
               />
             </>
           ) : (
+            <p className="text-sm font-medium">仕様の承認者（GitHub のログイン名）</p>
+          )}
+          {view.approvers.length > 0 ? (
             <>
-              <p className="text-sm font-medium">仕様の承認者（GitHub のログイン名）</p>
-              <p className="font-mono text-xs break-words text-ink-2">
-                {view.settings.approvers.length > 0 ? view.settings.approvers.join(', ') : '（未設定）'}
-              </p>
+              <ul className="font-mono text-xs break-words text-ink-2">
+                {view.approvers.map((a) => (
+                  <li key={a.login}>{approverLabel(a)}</li>
+                ))}
+              </ul>
+              <p className="text-xs text-ink-3">ログイン名を他人が取得していないか、ID を確かめてください</p>
             </>
+          ) : (
+            !view.can_edit_approvers && <p className="font-mono text-xs text-ink-2">（未設定）</p>
           )}
           <p className="text-xs text-ink-3">
             PR コメントの /speclino approve-spec・answer・attest を受け付ける人。空なら誰も承認できません。変更できるのはオーナーだけです。

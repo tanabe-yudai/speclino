@@ -106,9 +106,23 @@ def test_first_run_without_base_uses_head_approvals() -> None:
 def test_command_parsing_and_authorization() -> None:
     cmds = parse_commands("LGTM\n/speclino approve-spec sha256:" + "a" * 64 + "\n/speclino rerun")
     assert [c.kind for c in cmds] == ["approve-spec", "rerun"]
-    assert authorize_command(cmds[0], "tanabe-yudai", {"tanabe-yudai"}).accepted
-    assert not authorize_command(cmds[0], "someone", {"tanabe-yudai"}).accepted
-    assert authorize_command(cmds[1], "someone", set()).accepted
+    settings = {"approvers": ["tanabe-yudai"], "approver_ids": [111]}
+    assert authorize_command(cmds[0], "tanabe-yudai", author_id=111, settings=settings).accepted
+    assert not authorize_command(cmds[0], "someone", author_id=222, settings=settings).accepted
+    assert authorize_command(cmds[1], "someone", author_id=None, settings={}).accepted
     bad = parse_commands("/speclino approve-spec nothash")[0]
-    assert not authorize_command(bad, "tanabe-yudai", {"tanabe-yudai"}).accepted
+    assert not authorize_command(bad, "tanabe-yudai", author_id=111, settings=settings).accepted
+    # ID の無い既存の設定では、ログイン名が一致しても承認しない（S61 の見直し）
+    legacy = {"approvers": ["tanabe-yudai"]}
+    assert not authorize_command(cmds[0], "tanabe-yudai", author_id=111, settings=legacy).accepted
     assert parse_commands("nothing here") == []
+
+
+def test_command_authorization_matches_by_github_user_id() -> None:
+    """ID があれば ID で照合する。改名後に同じログイン名を取った別人（別 ID）は承認者ではない。"""
+    cmd = parse_commands("/speclino approve-spec sha256:" + "a" * 64)[0]
+    settings = {"approvers": ["tanabe-yudai"], "approver_ids": [111]}
+    assert authorize_command(cmd, "tanabe-yudai", author_id=111, settings=settings).accepted
+    assert authorize_command(cmd, "renamed-me", author_id=111, settings=settings).accepted
+    assert not authorize_command(cmd, "tanabe-yudai", author_id=999, settings=settings).accepted
+    assert not authorize_command(cmd, "tanabe-yudai", author_id=None, settings=settings).accepted

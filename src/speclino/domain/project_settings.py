@@ -28,13 +28,17 @@ class ProjectSettings(IRModel):
     - `fail_on`: ゲートを失敗にする判定。違反・未検証・要確認のどれも外せない（弱められない）
     - `agent_enabled` / `test_run_enabled`: 証拠を集める機能の project ごとの有効・無効。
       サーバ全体の設定（環境変数）で無効なら、ここで有効にしても動かない（AND で効く）
-    - `approvers`: PR コメントの `/speclino approve-spec` を受け付ける GitHub ログイン名
+    - `approvers`: PR コメントの `/speclino approve-spec` を受け付ける GitHub ログイン名（表示用）
+    - `approver_ids`: `approvers` と同じ順の GitHub ユーザー ID。照合はこちらで行う（ログイン名は
+      改名後に他人が取得できる）。サーバが保存のときに引いて埋める（送られてきた値は使わない）。
+      空・足りない（ID を保存する前の設定）なら、ID の無い承認者は承認できない（S61）
     """
 
     fail_on: list[GateFailVerdict] = Field(default_factory=lambda: list(REQUIRED_FAIL_ON))
     agent_enabled: bool = True
     test_run_enabled: bool = True
     approvers: list[str] = Field(default_factory=list, max_length=50)
+    approver_ids: list[int] = Field(default_factory=list, max_length=50)
 
     @field_validator("fail_on")
     @classmethod
@@ -61,11 +65,25 @@ class StoredProjectSettings(IRModel):
     invalid: bool = False
 
 
+class ApproverAccount(IRModel):
+    """承認者のログイン名と、保存済みの GitHub ユーザー ID（無ければ None）。
+
+    保存・補完は今そのログイン名を持つ人の ID を引くので、改名で手放されたログイン名を他人が
+    取っていれば他人の ID になる。画面で ID を確かめられるよう組で返す（S61）。
+    """
+
+    login: str
+    id: int | None
+
+
 class ProjectSettingsView(IRModel):
     """設定画面の 1 project 分。
 
     `can_edit` は owner / approver のとき True。
     `can_edit_approvers`（PR の承認者の変更）は owner だけ。
+    `approver_ids_missing` は、承認者がいるのに GitHub のユーザー ID が無い・足りない（保存し直しが
+    要る）とき True。ID の無い承認者は承認できない（S61）。
+    `approvers` は承認者のログイン名と ID の組（確認用の表示）。
     """
 
     project_id: uuid.UUID
@@ -74,6 +92,8 @@ class ProjectSettingsView(IRModel):
     stored_invalid: bool
     can_edit: bool
     can_edit_approvers: bool
+    approver_ids_missing: bool = False
+    approvers: list[ApproverAccount] = Field(default_factory=list)
 
 
 OnboardingStepId = Literal["app", "speclino", "first_run"]
@@ -102,6 +122,7 @@ class WorkspaceOnboarding(IRModel):
 
 __all__ = [
     "REQUIRED_FAIL_ON",
+    "ApproverAccount",
     "GateFailVerdict",
     "OnboardingState",
     "OnboardingStep",

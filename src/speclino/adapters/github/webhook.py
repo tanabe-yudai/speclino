@@ -114,6 +114,7 @@ def extract_comment(payload: dict[str, object]) -> IssueCommentRef | None:
         issue_number=issue_number,
         body=_as_str(comment.get("body")),
         author_login=_as_str(user.get("login")),
+        author_id=_as_int(user.get("id")),
         comment_url=_as_str(comment.get("html_url")),
         is_pull_request="pull_request" in issue,
     )

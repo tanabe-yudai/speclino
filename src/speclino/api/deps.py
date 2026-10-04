@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from speclino.adapters.github.app_auth import GitHubAppAuth
 from speclino.adapters.github.client import GitHubClient
+from speclino.adapters.github.user_lookup import PublicGitHubUserLookup
 from speclino.adapters.github.user_oauth import GitHubUserOAuth
 from speclino.adapters.llm.gemini_json import GeminiJsonLlm
 from speclino.adapters.localgit.local_code_host import LocalCodeHost
@@ -31,6 +32,7 @@ from speclino.db.session import make_engine, make_session_factory
 from speclino.domain.policy import PolicyRevision
 from speclino.ports.blob_store import BlobStore
 from speclino.ports.code_host import CodeHost
+from speclino.ports.github_users import GitHubUserLookup
 from speclino.ports.mcp_context import McpContextSource
 from speclino.ports.sandbox import Sandbox
 from speclino.ports.task_queue import TaskQueue
@@ -59,6 +61,8 @@ class AppState:
     github_user_oauth: GitHubUserOAuth | None = None
     # A2A のスキルの処理（S59）。None なら state から本物を組み立てる。テストで差し替える
     a2a_handlers: dict[SkillId, SkillHandler] | None = None
+    # 承認者のログイン名 → GitHub ユーザー ID（S61）。公開 API を認証なしで呼ぶので web でも使える
+    github_users: GitHubUserLookup = field(default_factory=PublicGitHubUserLookup)
 
 
 class _SessionLedger:
@@ -260,7 +264,16 @@ def build_state(settings: Settings) -> AppState:
         else None
     )
     return AppState(
-        settings, engine, factory, code_host, queue, blobs, service, context_source, user_oauth
+        settings,
+        engine,
+        factory,
+        code_host,
+        queue,
+        blobs,
+        service,
+        context_source,
+        user_oauth,
+        github_users=PublicGitHubUserLookup(api_base=settings.github_api_base),
     )
 
 

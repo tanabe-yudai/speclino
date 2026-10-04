@@ -44,6 +44,9 @@ class IssueCommentRef(_GitHubModel):
     issue_number: int
     body: str
     author_login: str
+    # コメントした人の GitHub ユーザー ID（`comment.user.id`）。承認者は ID で照合する（S61）。
+    # ペイロードに無ければ None（照合側で承認しない側に倒す）
+    author_id: int | None
     comment_url: str
     is_pull_request: bool
 

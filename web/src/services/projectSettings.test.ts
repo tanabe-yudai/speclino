@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { draftSettings, onboardingDone, parseApprovers, settingsEqual } from './projectSettings'
+import { approverLabel, draftSettings, needsResave, onboardingDone, parseApprovers, settingsEqual } from './projectSettings'
 import type { OnboardingStep, ProjectSettings, ProjectSettingsView } from '@/types/projectSettings'
 
 const base: ProjectSettings = {
@@ -50,6 +50,8 @@ describe('draftSettings', () => {
     stored_invalid: false,
     can_edit: true,
     can_edit_approvers: canEditApprovers,
+    approver_ids_missing: false,
+    approvers: [],
   })
   const input = { agentEnabled: false, testRunEnabled: true, approversText: 'octo, other' }
 
@@ -67,5 +69,30 @@ describe('draftSettings', () => {
   })
   it('owner の入力が不正なら理由を返す', () => {
     expect(draftSettings(view(true), { ...input, approversText: '-bad' }).error).not.toBeNull()
+  })
+})
+
+describe('needsResave', () => {
+  const view: ProjectSettingsView = {
+    project_id: 'p1',
+    repo_full_name: 'example-org/orders',
+    settings: { ...base, approvers: ['octo'] },
+    stored_invalid: false,
+    can_edit: true,
+    can_edit_approvers: true,
+    approver_ids_missing: false,
+    approvers: [],
+  }
+  it('読めない保存値と、承認者の GitHub ユーザー ID の未登録は保存し直しが要る', () => {
+    expect(needsResave(view)).toBe(false)
+    expect(needsResave({ ...view, stored_invalid: true })).toBe(true)
+    expect(needsResave({ ...view, approver_ids_missing: true })).toBe(true)
+  })
+})
+
+describe('approverLabel', () => {
+  it('ログイン名と GitHub ユーザー ID を並べ、未登録はそう示す', () => {
+    expect(approverLabel({ login: 'octo', id: 12345 })).toBe('octo（ID: 12345）')
+    expect(approverLabel({ login: 'octo', id: null })).toBe('octo（ID: 未登録）')
   })
 })
