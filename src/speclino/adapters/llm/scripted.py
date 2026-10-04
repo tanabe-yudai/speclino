@@ -55,13 +55,16 @@ class ScriptedLlm(BaseLlm):
 
 
 class ScriptedJsonLlm:
-    """TextLlm ポートのテスト用実装。与えた JSON 文字列をそのまま返し、プロンプトを記録する。"""
+    """TextLlm ポートのテスト用実装。与えた JSON 文字列をそのまま返し、プロンプトを記録する。
+
+    列を渡すと呼出しごとに順に返し、尽きたら最後を返す。
+    """
 
     model = "scripted"
     max_output_tokens = 8192
 
-    def __init__(self, response: str, usage: tuple[int, int] = (1000, 200)) -> None:
-        self.response = response
+    def __init__(self, response: str | list[str], usage: tuple[int, int] = (1000, 200)) -> None:
+        self.responses = [response] if isinstance(response, str) else list(response)
         self.usage = usage
         self.prompts: list[str] = []
         self.schemas: list[dict[str, Any]] = []
@@ -69,4 +72,5 @@ class ScriptedJsonLlm:
     async def generate_json(self, prompt: str, schema: dict[str, Any]) -> JsonGeneration:
         self.prompts.append(prompt)
         self.schemas.append(schema)
-        return JsonGeneration(self.response, *self.usage)
+        idx = min(len(self.prompts) - 1, len(self.responses) - 1)
+        return JsonGeneration(self.responses[idx], *self.usage)

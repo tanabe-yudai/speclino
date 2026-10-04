@@ -36,6 +36,8 @@ EXPECTED_TABLES = {
     "mcp_tokens",
     "repo_link_attempts",
     "workspace_invitations",
+    "a2a_tasks",
+    "agent_supplements",
 }
 
 

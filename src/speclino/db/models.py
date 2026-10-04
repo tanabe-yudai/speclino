@@ -22,8 +22,10 @@ from decimal import Decimal
 from typing import Any, Literal, get_args
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
+    Column,
     Date,
     DateTime,
     ForeignKey,
@@ -31,6 +33,8 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    Table,
+    Text,
     UniqueConstraint,
     func,
     text,
@@ -496,3 +500,45 @@ class CostLedgerEntry(Base):
     input_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
     output_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
     model: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class AgentSupplementRecord(Base):
+    """`agent_supplements`: A2A の議論で得た補足（S59）。正式な回答ではなく、検査の詳細に添える。"""
+
+    __tablename__ = "agent_supplements"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    team: Mapped[str] = mapped_column(String, nullable=False)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("review_runs.id"), nullable=False, index=True
+    )
+    requirement_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    token_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("mcp_tokens.id"), nullable=True
+    )
+    a2a_task_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+# a2a-sdk の DatabaseTaskStore(create_table=False, table_name="a2a_tasks") が読み書きする表。
+# 列は a2a.server.models.TaskMixin と同じ（SDK が ORM で扱うのでここは `create_all` 用の宣言のみ）。
+a2a_tasks = Table(
+    "a2a_tasks",
+    Base.metadata,
+    Column("id", String(36), primary_key=True),
+    Column("context_id", String(36), nullable=False),
+    Column("kind", String(16), nullable=False),
+    Column("owner", String(255), nullable=True),
+    Column("last_updated", DateTime, nullable=True),
+    Column("status", JSON, nullable=False),
+    Column("artifacts", JSON, nullable=True),
+    Column("history", JSON, nullable=True),
+    Column("protocol_version", String(16), nullable=True),
+    Column("metadata", JSON, nullable=True),
+    Index("ix_a2a_tasks_id", "id"),
+    Index("idx_a2a_tasks_owner_last_updated", "owner", "last_updated"),
+)

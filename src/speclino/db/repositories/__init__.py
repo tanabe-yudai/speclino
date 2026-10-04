@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from speclino.db.repositories.agent_supplements import AgentSupplementRepository
 from speclino.db.repositories.approvals import ApprovalRepository
 from speclino.db.repositories.audit import AuditRepository
 from speclino.db.repositories.cost_ledger import CostLedgerRepository
@@ -16,6 +17,7 @@ from speclino.db.repositories.teams import TeamRepository
 from speclino.db.repositories.webhook_deliveries import WebhookDeliveryRepository
 
 __all__ = [
+    "AgentSupplementRepository",
     "ApprovalRepository",
     "AuditRepository",
     "CostLedgerRepository",

@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     spec_bot_enabled: bool = True
     spec_bot_model: str | None = None
     demo_rerun_limit_per_day: int = 20
+    # A2A の議論役（S59）。web に A2A の入口を出すか。本番は Terraform の環境変数で true
+    a2a_enabled: bool = False
+    a2a_model: str | None = None  # 未指定なら agent_model
 
     # 認証（S13）
     auth_kind: Literal["dev", "identity_platform"] = "dev"
