@@ -36,14 +36,14 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from speclino.api.deps import AppState
 from speclino.db.models import Project
-from speclino.db.repositories import FindingRepository, ProjectRepository, ReviewRunRepository
+from speclino.db.repositories import ProjectRepository
 from speclino.domain.run import GitRef
 from speclino.services import mcp_tokens
 from speclino.services.mcp_context import ContextUnavailable, InProcessContextSource
+from speclino.services.run_view import run_view
 
 StateGetter = Callable[[], AppState]
 MCP_PATH = "/mcp"
-FINDING_FIELDS = ("requirement_id", "verdict", "category", "severity", "message", "next_steps")
 # BearerAuth がリクエストに載せる、トークンのワークスペース（slug）の置き場所
 WORKSPACE_STATE_KEY = "mcp_workspace"
 
@@ -135,24 +135,11 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
         state = get_state()
         workspace = _workspace(ctx)
         rid = uuid.UUID(run_id)
-        async with state.session_factory() as session:
-            run = await ReviewRunRepository(session).get(rid)
-            project = await session.get(Project, run.project_id) if run is not None else None
-            # トークンのワークスペースの run でなければ、無い場合と同じ応答にする
-            if run is None or project is None or project.team != workspace:
-                return {"error": "run_not_found", "run_id": run_id}
-            findings = await FindingRepository(session).list_for_run(rid)
-        manifest = run.manifest or {}
-        return {
-            "run_id": run_id,
-            "exec_state": run.exec_state,
-            "gate_status": run.gate_status,
-            "gate": manifest.get("gate"),
-            "semantic_diff": manifest.get("semantic_diff"),
-            "findings": [
-                {k: f.payload.get(k) for k in FINDING_FIELDS if k in f.payload} for f in findings
-            ],
-        }
+        view = await run_view(state.session_factory, rid, workspace)
+        # トークンのワークスペースの run でなければ、無い場合と同じ応答にする
+        if view is None:
+            return {"error": "run_not_found", "run_id": run_id}
+        return {**view, "run_id": run_id}
 
     return mcp
 
