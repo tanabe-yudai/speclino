@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -79,7 +80,9 @@ async def _echo(call: SkillCall) -> None:
 async def _app(
     engine: AsyncEngine,
     tmp_path: Path,
-    handlers: dict[SkillId, SkillHandler] | Callable[[AppState], dict[SkillId, SkillHandler]],
+    handlers: (
+        dict[SkillId, SkillHandler] | Callable[[AppState], dict[SkillId, SkillHandler] | None]
+    ),
     team: str = A2A_TEAM,
     host: LocalCodeHost | None = None,
     cost_guard: CostGuard | None = None,
@@ -87,6 +90,7 @@ async def _app(
     """ワークスペースとトークンを作り、A2A を有効にしたアプリとクライアントを返す。
 
     handlers は dict か、state を受けて dict を返す関数（本物の build_handlers を使うとき）。
+    関数が None を返せば上書きせず、executor が state から本物を組み立てる。
     """
     async with engine.begin() as conn:
         await conn.execute(
@@ -236,10 +240,25 @@ async def test_skills_fail_closed_without_cost_guard(engine: AsyncEngine, tmp_pa
             build_handlers(state, spec_llm=ScriptedJsonLlm("{}"), agent_model="scripted")
         return None  # executor に本物の組み立てをさせる
 
-    async with _app(engine, tmp_path, handlers=no_override) as (_, client):  # type: ignore[arg-type]
+    async with _app(engine, tmp_path, handlers=no_override) as (_, client):
         task = await _send(client, "---\nskill: spec_review\nrepo: o/r\n---\n本文")
     assert task.status.state == TaskState.TASK_STATE_FAILED
     assert "費用ガード" in get_message_text(task.status.message)
+
+
+async def test_handler_build_error_fails_task_with_reason(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """組み立てが想定外の例外で落ちても、タスクは理由つきの failed になる（SDK に投げない）。"""
+
+    def no_override(state: AppState) -> None:
+        return None
+
+    async with _app(engine, tmp_path, handlers=no_override) as (_, client):
+        with patch("speclino.a2a_server.mount.build_handlers", side_effect=RuntimeError("context")):
+            task = await _send(client, "---\nskill: spec_review\nrepo: o/r\n---\n本文")
+    assert task.status.state == TaskState.TASK_STATE_FAILED
+    assert get_message_text(task.status.message) == "処理に失敗しました: RuntimeError"
 
 
 def _artifact(task: Task, name: str) -> Artifact:
@@ -259,7 +278,7 @@ async def test_three_skills_end_to_end_with_real_handlers(
     """本物の build_handlers（LLM だけ台本）で 3 スキルを公式 SDK のクライアントから通す。"""
     team = f"e2e-a2a-{uuid.uuid4().hex[:8]}"
     repo = f"{team}/orders"
-    await register_repo(engine, repo, {}, team=team)
+    await register_repo(engine, repo, {"dev": "member"}, team=team)
     base, head, _ = make_demo_repo(tmp_path / "repo")
     host = LocalCodeHost(repos={repo: tmp_path / "repo"}, repo_ids={repo: repo_id_of(repo)})
     ScriptedLlm.reset()
@@ -277,7 +296,7 @@ async def test_three_skills_end_to_end_with_real_handlers(
 
     guard = CostGuard(_SessionLedger(async_sessionmaker(engine)), Decimal("1000"))
     async with _app(engine, tmp_path, handlers=real, team=team, host=host, cost_guard=guard) as (
-        _,
+        http,
         client,
     ):
         # 1. spec_review: 曖昧な点を聞き返し、答えると候補を返す
@@ -346,6 +365,17 @@ async def test_three_skills_end_to_end_with_real_handlers(
             clarified.status.message
         )
         assert _artifact_data(clarified, "supplements.json")[0]["requirement_id"] == "R-CANCEL-01"
+        # 補足は web の検査の詳細（Task 9 の API）でワークスペースのメンバーに見える
+        url = f"/api/review-runs/{run_id}/supplements"
+        shown = await http.get(url, headers={"X-Dev-User": "dev"})
+        assert shown.status_code == 200, shown.text
+        [supplement] = shown.json()["supplements"]
+        assert (supplement["requirement_id"], supplement["content"]) == (
+            "R-CANCEL-01",
+            "所有者だけが取り消せる意図",
+        )
+        outsider = await http.get(url, headers={"X-Dev-User": f"outsider-{uuid.uuid4().hex}"})
+        assert outsider.status_code == 404
     async with engine.connect() as conn:
         rows = (
             await conn.execute(
@@ -358,6 +388,6 @@ async def test_three_skills_end_to_end_with_real_handlers(
         ).all()
     assert [tuple(r) for r in rows] == [("R-CANCEL-01", "所有者だけが取り消せる意図", clarified.id)]
 
-    # 4. 3 つのタスクのどれにも門番の監査（a2a.tool）が残る
+    # 4. 4 つのタスクのどれにも門番の監査（a2a.tool）が残る
     for task in (reviewed, consulted, none_left, clarified):
         assert "a2a.tool" in await _audit_actions(engine, task.id), task.id

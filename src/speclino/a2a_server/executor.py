@@ -83,6 +83,14 @@ class SpecLinoExecutor(AgentExecutor):
         except SkillsUnavailable as e:  # 計量なしで動かさず、理由を返して失敗にする
             await updater.failed(updater.new_agent_message([new_text_part(str(e))]))
             return
+        except Exception as e:  # 組み立ての失敗も理由つきの failed にする（SDK に投げない）
+            logger.exception("a2a skills could not be built")
+            await updater.failed(
+                updater.new_agent_message(
+                    [new_text_part(f"処理に失敗しました: {type(e).__name__}")]
+                )
+            )
+            return
         handler = handlers.get(request.skill)
         if handler is None:
             await updater.failed(
