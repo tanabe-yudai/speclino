@@ -4,6 +4,7 @@ import { apiFetch } from './client'
 import { ApiError } from './errors'
 import { MOCK_EVENTS, MOCK_REVIEW_MARKDOWN, MOCK_RUNS, MOCK_RUN_DETAILS } from './mock/fixtures'
 import type { RunEvent } from '../types/events'
+import type { AgentSupplement, SupplementsResponse } from '../types/supplement'
 import type { RerunResponse, ReviewRunDetail, ReviewRunSummary } from '../types/run'
 
 const USE_MOCK = import.meta.env.VITE_MOCK === '1'
@@ -28,6 +29,13 @@ export async function getRun(id: string): Promise<ReviewRunDetail> {
 export async function getRunEvents(id: string): Promise<RunEvent[]> {
   if (USE_MOCK) return MOCK_EVENTS[id] ?? []
   return apiFetch<RunEvent[]>(`/api/review-runs/${id}/events`)
+}
+
+/** エージェントからの補足（S59）。正式な回答ではない。モックでは補足なし。 */
+export async function getSupplements(id: string): Promise<AgentSupplement[]> {
+  if (USE_MOCK) return []
+  const res = await apiFetch<SupplementsResponse>(`/api/review-runs/${id}/supplements`)
+  return res.supplements
 }
 
 export async function getReviewMarkdown(id: string): Promise<string> {

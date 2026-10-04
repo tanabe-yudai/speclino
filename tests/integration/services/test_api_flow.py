@@ -22,7 +22,10 @@ from speclino.adapters.queue.inprocess import InProcessQueue
 from speclino.adapters.storage.fs import FileSystemBlobStore
 from speclino.api.app import create_app
 from speclino.api.deps import AppState
+from speclino.db.repositories.mcp_tokens import McpTokenRepository
+from speclino.domain.a2a import TokenIdentity
 from speclino.reporter.check_report import COMMENT_MARKER
+from speclino.services import agent_supplements, mcp_tokens
 from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
 from speclino.settings import Settings
 from speclino.spec import load_spec_ir
@@ -269,3 +272,48 @@ async def test_non_members_see_nothing_and_cannot_start_runs(
     me = (await c.get("/api/me")).json()
     assert me["uid"] == "dev"
     assert {"slug": "e2e-ws", "name": None, "role": "member"} in me["workspaces"]
+
+
+async def test_supplements_api_lists_own_workspace_and_hides_others(
+    client: tuple[httpx.AsyncClient, str, str, str, str, LocalCodeHost], engine: AsyncEngine
+) -> None:
+    """S59: 補足の一覧は run が見える人にだけ返る。見えない run は get_run と同じ 404。"""
+    c, repo, base, head, _, _ = client
+    raw, headers = signed(pr_payload(repo, head, base, 6), "pull_request")
+    run_id = uuid.UUID(
+        (await c.post("/webhooks/github", content=raw, headers=headers)).json()["run_id"]
+    )
+    path = f"/api/review-runs/{run_id}/supplements"
+    assert (await c.get(path)).json() == {"supplements": []}
+
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as s, s.begin():
+        token = await McpTokenRepository(s).create(
+            team="e2e-ws",
+            name="claude-code",
+            token_hash=mcp_tokens.hash_token(mcp_tokens.TOKEN_PREFIX + uuid.uuid4().hex),
+            created_by="t",
+        )
+        await agent_supplements.record(
+            s,
+            identity=TokenIdentity(team="e2e-ws", token_id=token.id),
+            run_id=run_id,
+            requirement_id="R-1",
+            question="なぜ？",
+            content="リトライで吸収",
+            a2a_task_id="task-1",
+        )
+
+    res = await c.get(path)
+    assert res.status_code == 200
+    items = res.json()["supplements"]
+    assert len(items) == 1
+    assert items[0]["requirement_id"] == "R-1"
+    assert items[0]["content"] == "リトライで吸収"
+    assert items[0]["source"] == "claude-code"
+
+    # 所属していない人からは、存在しない run と同じ 404
+    outsider = {"X-Dev-User": "outsider"}
+    assert (await c.get(path, headers=outsider)).status_code == 404
+    await register_repo(engine, "e2e/other-ws-sup", {"outsider": "owner"}, team="e2e-other")
+    assert (await c.get(path, headers=outsider)).status_code == 404
