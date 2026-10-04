@@ -22,19 +22,19 @@ jobs:
     # GCP 骨組み（S12）の apply 後に repository variable DEPLOY_ENABLED=true を設定するまで、
     # push では走らせない（secrets が無い状態で失敗し続けるのを避ける）
     if: github.event_name == 'workflow_dispatch' || vars.DEPLOY_ENABLED == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # WIF: infra/envs/prod/wif.tf の workload identity pool / provider と
       # deployer サービスアカウントを使う。長期キーは持たない。
       - id: auth
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
           service_account: ${{ secrets.GCP_DEPLOYER_SA }}
 
-      - uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@v3
 
       - run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 

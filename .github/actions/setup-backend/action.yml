@@ -3,7 +3,8 @@ description: バックエンド（Python / uv）の依存を用意する（ス�
 runs:
   using: composite
   steps:
-    - uses: astral-sh/setup-uv@v6
+    # setup-uv は v8 から major タグ（@v10 など）を出さない（immutable release のみ）ので版まで固定する
+    - uses: astral-sh/setup-uv@v10.2.0
       with:
         enable-cache: true
     - run: uv sync --all-groups
