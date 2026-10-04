@@ -14,6 +14,63 @@ VERIFIED_IN_SCOPE / VIOLATED / UNKNOWN / REVIEW の 4 値を出す。実装の�
 承認済みの判定は書き換えない。
 <!-- mcp-instructions:end -->
 
+## SpecLino エージェントに相談する（A2A）
+
+仕様の書き方や判定の理由を、関数呼び出しではなく会話で相談したいときは、SpecLino の議論役
+（A2A のエージェント）に聞く。役割は次のとおり分ける。
+
+- **A2A（会話）**: 仕様の下書きのレビュー、要求の意味や判定の理由の説明、検査の後の聞き取り。
+  あいまいな点は質問が返り（入力待ち）、同じタスクに文章で答えると続きが進む
+- **MCP（関数呼び出し）**: `context_get` / `verification_start` / `verification_get`。
+  語彙の取得と検証の実行・結果の読み取りは、こちらで行う
+
+接続先は Agent Card（`https://<your-host>/.well-known/agent-card.json`、認証不要）に書いてある。
+`/a2a` への送信にはワークスペースの MCP トークン（`slmcp_…`）を Bearer で付ける。
+
+スキルは、メッセージの本文の先頭に YAML front matter を書いて選ぶ（DataPart で
+`{"skill": ...}` を送れるクライアントはそれでもよい）。本文は front matter の後ろに続ける。
+
+`spec_review`（仕様の Markdown の下書きを検証し、候補・診断・修正案を返す。書き込みはしない）:
+
+```text
+---
+skill: spec_review
+repo: owner/name
+behavior: orders.cancel
+path: specs/orders.md
+---
+### R-CANCEL-01
+注文は発送前ならキャンセルできる
+```
+
+`requirement_consult`（要求の意味・判定の理由を説明する。`commit` を付けると検査を起動する）:
+
+```text
+---
+skill: requirement_consult
+repo: owner/name
+requirement_id: R-CANCEL-01
+commit: 0123abc
+---
+この要求は発送済みの注文にも効く？
+```
+
+`run_clarification`（検査の「要確認」の点を質問し、答えを補足として記録する）:
+
+```text
+---
+skill: run_clarification
+run_id: 00000000-0000-0000-0000-000000000000
+---
+要確認の点を聞かせて
+```
+
+入力待ちに返信するときは、スキルを指定し直さず、返ってきた `task_id` / `context_id` を付けて
+本文だけを送る。
+
+**補足は正式な回答ではない。** 聞き取りで記録した補足は判定にもゲートにも効かない。判定は
+検査器だけが行い、承認は人が PR で行う。
+
 ## 0. チーム規約を読む（仕様を書く前にも、実装する前にも）
 
 チームの規約（Makefile の必須ターゲット、仕様の書式、層の依存制約など）は SpecLino が正本を持ち、
