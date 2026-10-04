@@ -17,7 +17,9 @@ from speclino.agent.gateway import ToolGateway, ToolRegistry
 from speclino.services.agent_supplements import RunNotInWorkspace
 
 SKIP_WORDS = ("skip", "スキップ", "わからない")
+MAX_ANSWER_CHARS = 4000  # 1 件の答えの上限
 _FINISHED_STATES = ("completed", "awaiting_answer")  # 要確認が残る検査は awaiting_answer で終わる
+_ENDED_STATES = ("failed", "cancelled", "superseded")  # 結果を出さずに終わった検査
 _DISCLAIMER = (
     "補足は正式な回答ではありません。要確認を解消するのは人の `/speclino answer` だけです。"
 )
@@ -62,11 +64,16 @@ async def _clarify(call: SkillCall, deps: ConsultDeps, gateway: ToolGateway) -> 
     run_id = str(
         call.state["run_id"]
     )  # 質問を出した検査。2 回目以降の request の run_id は使わない
-    answer = (call.reply or "").strip()
+    content = call.reply or ""
+    if len(content) > MAX_ANSWER_CHARS:  # 記録する前に断る（補足に長文を溜めない）
+        raise _Stop(
+            f"答えが長すぎます（{len(content)} 文字、上限 {MAX_ANSWER_CHARS} 文字）。"
+            "補足は記録していません"
+        )
+    answer = content.strip()
     if answer.lower() not in SKIP_WORDS and answer:
         item = questions[index]
         identity = call.identity
-        content = call.reply or ""
 
         async def record() -> dict[str, Any]:
             await deps.record_supplement(
@@ -110,7 +117,7 @@ async def _clarify(call: SkillCall, deps: ConsultDeps, gateway: ToolGateway) -> 
 
 async def _load_questions(
     call: SkillCall, deps: ConsultDeps, gateway: ToolGateway
-) -> list[dict[str, str]]:
+) -> list[dict[str, str | None]]:
     run_id = call.request.run_id
     if run_id is None:
         raise _Stop("run_id を指定してください")
@@ -124,21 +131,30 @@ async def _load_questions(
         raise _Stop("この検査はワークスペースに無い")
     if "error" in view:
         raise _Stop(f"検査を読めません: {view.get('reason', view['error'])}")
-    if view.get("exec_state") not in _FINISHED_STATES:
+    exec_state = view.get("exec_state")
+    if exec_state in _ENDED_STATES:
+        raise _Stop(
+            f"この検査は失敗・取り消し・置き換えで終わっていて（{exec_state}）、"
+            "聞き取りの対象になりません"
+        )
+    if exec_state not in _FINISHED_STATES:
         raise _Stop("検査が終わっていない")
     reviews = sorted(
         (f for f in view.get("findings", []) if f.get("verdict") == "REVIEW"),
         key=lambda f: str(f.get("requirement_id")),
     )
-    return [
-        {
-            "requirement_id": str(f["requirement_id"]),
-            "question": (
-                f"{f['requirement_id']}: {f.get('message', '')}。意図や根拠を教えてください"
-            ),
-        }
-        for f in reviews
-    ]
+    questions: list[dict[str, str | None]] = []
+    for f in reviews:
+        rid = f.get("requirement_id")
+        label = rid if rid is not None else "（要求 ID なし）"
+        questions.append(
+            {
+                # 要求に紐づかない Finding は None のまま（"None" という ID にしない）
+                "requirement_id": None if rid is None else str(rid),
+                "question": f"{label}: {f.get('message', '')}。意図や根拠を教えてください",
+            }
+        )
+    return questions
 
 
 async def _ask(call: SkillCall, state: dict[str, Any]) -> None:
@@ -154,7 +170,7 @@ async def _ask(call: SkillCall, state: dict[str, Any]) -> None:
     )
 
 
-async def _finish(call: SkillCall, recorded: list[dict[str, str]], headline: str) -> None:
+async def _finish(call: SkillCall, recorded: list[dict[str, str | None]], headline: str) -> None:
     updater = call.updater
     await updater.add_artifact([new_data_part(recorded)], name="supplements.json")
     summary = f"## SpecLino: 検査後の聞き取り\n\n- {headline}\n\n> {_DISCLAIMER}"
@@ -162,4 +178,4 @@ async def _finish(call: SkillCall, recorded: list[dict[str, str]], headline: str
     await updater.complete(updater.new_agent_message([new_text_part(summary)]))
 
 
-__all__ = ["SKIP_WORDS", "run_run_clarification"]
+__all__ = ["MAX_ANSWER_CHARS", "SKIP_WORDS", "run_run_clarification"]

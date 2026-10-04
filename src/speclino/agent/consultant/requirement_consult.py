@@ -16,7 +16,7 @@ from typing import Any
 from a2a.helpers import new_data_part, new_text_part
 
 from speclino.a2a_server.executor import STATE_METADATA_KEY, SkillCall
-from speclino.agent.app import InvestigationLog, Investigator
+from speclino.agent.app import Investigator
 from speclino.agent.budget import BudgetState
 from speclino.agent.consultant.tools import (
     ConsultDeps,
@@ -24,16 +24,26 @@ from speclino.agent.consultant.tools import (
     consult_permissions,
     guarded,
 )
-from speclino.agent.gateway import ToolGateway, ToolRegistry
+from speclino.agent.gateway import MAX_RESULT_CHARS, ToolGateway, ToolRegistry
+from speclino.agent.permissions import AgentPermissions
 from speclino.db.models import Project
 from speclino.db.repositories import ProjectRepository
+from speclino.domain.a2a import CostReservation
+from speclino.services.cost_guard import CostGuard
 
 INSTRUCTION_PATH = Path(__file__).resolve().parents[1] / "instructions" / "consultant_v1.md"
-# 1 回の LLM 呼出しの入力・出力トークンの上限の見積もり（費用枠の最悪値に使う）
-CONSULT_WORST_CASE_TOKENS = (40_000, 4_000)
+CONSULT_MAX_OUTPUT_TOKENS = 2048  # 1 回の LLM 呼出しの出力の上限（モデルに渡す）
+MAX_QUESTION_CHARS = 4000  # 質問の本文の上限（費用の最悪値の見積もりを抑える）
 # 待ちを終える検査の状態（要確認が残る検査は awaiting_answer で終わる）
 _DONE_STATES = frozenset({"completed", "awaiting_answer", "failed", "cancelled", "superseded"})
-_DISCLAIMER = "判定は verification.json の検査器の結果です。議論役は判定・承認をしません。"
+_DISCLAIMER_VERIFIED = (
+    "判定は verification.json の検査器の結果だけです。議論役は判定・承認をしません。"
+    "承認は PR で人が行います。"
+)
+_DISCLAIMER_NO_RUN = (
+    "検査は実行していません（commit の指定が無いため）。この答えは判定ではなく、判定は検査器だけが"
+    "出します。議論役は判定・承認をしません。承認は PR で人が行います。"
+)
 
 
 class _Stop(Exception):
@@ -64,13 +74,19 @@ async def _consult(call: SkillCall, deps: ConsultDeps, gateway: ToolGateway) -> 
     question = req.text.strip()
     if not question:
         raise _Stop("質問の本文が空です")
+    if len(req.text) > MAX_QUESTION_CHARS:
+        raise _Stop(f"質問が長すぎます（{len(req.text)} 文字、上限 {MAX_QUESTION_CHARS} 文字）")
+    # commit の有無に関わらず、トークンのワークスペースのリポジトリにだけ答える（LLM を呼ぶ前に）
+    project = await find_project(deps, req.repo)
+    if project is None or project.team != call.identity.team:
+        raise _Stop(f"{req.repo} はこのワークスペースに登録されていません")
 
     run_id: uuid.UUID | None = None
     view: dict[str, Any] | None = None
     if (call.state or {}).get("run_id"):  # 再送: 起動済みの検査の続きを確かめる
         run_id = uuid.UUID(str((call.state or {})["run_id"]))
     elif req.commit:
-        run_id = await _start_verification(call, deps, gateway, req.repo, req.commit)
+        run_id = await _start_verification(call, deps, gateway, project, req.repo, req.commit)
     if run_id is not None:
         view = await _wait(call, deps, run_id)
         if view is None:
@@ -79,11 +95,13 @@ async def _consult(call: SkillCall, deps: ConsultDeps, gateway: ToolGateway) -> 
 
 
 async def _start_verification(
-    call: SkillCall, deps: ConsultDeps, gateway: ToolGateway, repo: str, commit: str
+    call: SkillCall,
+    deps: ConsultDeps,
+    gateway: ToolGateway,
+    project: Project,
+    repo: str,
+    commit: str,
 ) -> uuid.UUID:
-    project = await find_project(deps, repo)
-    if project is None or project.team != call.identity.team:
-        raise _Stop(f"{repo} はこのワークスペースに登録されていません")
     project_id = project.id
 
     async def start() -> dict[str, Any]:
@@ -144,16 +162,20 @@ async def _answer(
 ) -> None:
     perms = consult_permissions()
     model_name = str(getattr(deps.agent_model, "model", deps.agent_model))
+    instruction = INSTRUCTION_PATH.read_text(encoding="utf-8")
+    tools = ConsultTools(deps, call.identity, gateway)
+    findings = await tools.run_findings(str(run_id)) if run_id is not None else None
+    prompt = _prompt(question, repo, call.request.requirement_id, run_id, findings)
+
     worst = Decimal(0)
     if deps.cost_guard is not None:
-        worst = deps.cost_guard.estimate(
-            model_name,
-            CONSULT_WORST_CASE_TOKENS[0] * perms.max_llm_calls,
-            CONSULT_WORST_CASE_TOKENS[1] * perms.max_llm_calls,
-        )
+        worst = worst_case_cost(deps.cost_guard, model_name, perms, instruction, prompt)
     today = deps.today()
-    if deps.budget is not None:  # 本番: 最悪の費用を先に台帳へ予約する
-        ok, reason = await deps.budget.reserve(today, model_name, worst)
+    budget = deps.budget
+    reservation: CostReservation | None = None
+    if budget is not None:  # 本番: 最悪の費用を先に台帳へ予約する
+        reservation, reason = await budget.reserve(today, model_name, worst)
+        ok = reservation is not None
     elif deps.cost_guard is not None:
         ok, reason = await deps.cost_guard.can_afford(today, worst)
     else:  # ローカルとテスト
@@ -161,25 +183,29 @@ async def _answer(
     if not ok:
         raise _Stop(f"費用ガードにより停止: {reason}")
 
-    # 待ちが終わってから作る（Investigator の時間の上限が待ちの間に進まないように）
-    tools = ConsultTools(deps, call.identity, gateway)
-    inv = Investigator(
-        permissions=perms,
-        registry=ToolRegistry(),
-        tool_fns=list(tools.functions()),
-        instruction=INSTRUCTION_PATH.read_text(encoding="utf-8"),
-        model=deps.agent_model,
-        audit=call.audit,
-    )
-    tools.gateway = inv.gateway  # モデルの道具の呼出しを Investigator の予算で数える
+    # 予約の後は、どう終わっても（例外・取り消しを含む）予約と同じ日に精算する
+    tokens = (0, 0)
     try:
-        findings = await tools.run_findings(str(run_id)) if run_id is not None else None
-        log = await inv.run(_prompt(question, repo, call.request.requirement_id, run_id, findings))
-    except Exception:
-        if deps.budget is not None:
-            await deps.budget.settle(today, model_name, worst, 0, 0)
-        raise
-    await _settle(deps, today, model_name, worst, run_id, log)
+        # 待ちが終わってから作る（Investigator の時間の上限が待ちの間に進まないように）
+        inv = Investigator(
+            permissions=perms,
+            registry=ToolRegistry(),
+            tool_fns=list(tools.functions()),
+            instruction=instruction,
+            model=deps.agent_model,
+            audit=call.audit,
+            max_output_tokens=CONSULT_MAX_OUTPUT_TOKENS,
+        )
+        tools.gateway = inv.gateway  # モデルの道具の呼出しを Investigator の予算で数える
+        log = await inv.run(prompt)
+        tokens = (log.input_tokens, log.output_tokens)
+    finally:
+        if budget is not None and reservation is not None:
+            await budget.settle(reservation, *tokens)
+    if budget is None and deps.cost_guard is not None:
+        await deps.cost_guard.record(
+            today, str(run_id) if run_id is not None else None, model_name, *tokens
+        )
 
     stop = log.budget.get("stop_reason")
     if stop:
@@ -187,32 +213,31 @@ async def _answer(
     if not log.final_text.strip():
         raise _Stop("議論役が答えを返しませんでした")
 
+    # 免責は answer.md そのものにも書く（成果物だけが転送されても判定と取り違えないように）
+    disclaimer = _DISCLAIMER_VERIFIED if view is not None else _DISCLAIMER_NO_RUN
+    answer = f"{log.final_text}\n\n> {disclaimer}"
     updater = call.updater
-    await updater.add_artifact([new_text_part(log.final_text)], name="answer.md")
+    await updater.add_artifact([new_text_part(answer)], name="answer.md")
     if view is not None:
         await updater.add_artifact([new_data_part(view)], name="verification.json")
-    message = f"{log.final_text}\n\n> {_DISCLAIMER}"
-    await updater.complete(updater.new_agent_message([new_text_part(message)]))
+    await updater.complete(updater.new_agent_message([new_text_part(answer)]))
 
 
-async def _settle(
-    deps: ConsultDeps,
-    today: Any,
-    model_name: str,
-    worst: Decimal,
-    run_id: uuid.UUID | None,
-    log: InvestigationLog,
-) -> None:
-    if deps.budget is not None:
-        await deps.budget.settle(today, model_name, worst, log.input_tokens, log.output_tokens)
-    elif deps.cost_guard is not None:
-        await deps.cost_guard.record(
-            today,
-            str(run_id) if run_id is not None else None,
-            model_name,
-            log.input_tokens,
-            log.output_tokens,
-        )
+def worst_case_cost(
+    cost_guard: CostGuard, model: str, perms: AgentPermissions, instruction: str, prompt: str
+) -> Decimal:
+    """1 回の相談の最悪の費用。文字数 ≒ トークン数として見積もる。
+
+    1 回の LLM 呼出しの入力は 指示 ＋ プロンプト ＋ 道具の結果（1 件 MAX_RESULT_CHARS まで）を
+    上限まで積んだもの、出力は CONSULT_MAX_OUTPUT_TOKENS（モデルに渡す上限）。これを LLM 呼出しの
+    上限の回数ぶん積む。
+    """
+    input_per_call = len(instruction) + len(prompt) + perms.max_tool_calls * MAX_RESULT_CHARS
+    return cost_guard.estimate(
+        model,
+        perms.max_llm_calls * input_per_call,
+        perms.max_llm_calls * CONSULT_MAX_OUTPUT_TOKENS,
+    )
 
 
 def _prompt(
@@ -240,4 +265,10 @@ def _prompt(
     return "\n".join(lines)
 
 
-__all__ = ["CONSULT_WORST_CASE_TOKENS", "find_project", "run_requirement_consult"]
+__all__ = [
+    "CONSULT_MAX_OUTPUT_TOKENS",
+    "MAX_QUESTION_CHARS",
+    "find_project",
+    "run_requirement_consult",
+    "worst_case_cost",
+]

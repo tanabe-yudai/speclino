@@ -143,3 +143,18 @@ def test_wrong_token_fails_with_message(monkeypatch: pytest.MonkeyPatch) -> None
     )
     assert result.exit_code != 0
     assert "slmcp_wrong" not in result.output
+
+
+def test_unreadable_file_exits_2_without_traceback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("SPECLINO_TOKEN", TOKEN)
+    missing = tmp_path / "missing.md"
+    result = runner.invoke(cli.app, ["a2a-send", "--url", "http://test", "--file", str(missing)])
+    assert result.exit_code == 2
+    assert "missing.md" in result.output
+    assert not isinstance(result.exception, OSError)
+
+
+def test_client_waits_long_enough_for_slow_skills() -> None:
+    assert cli._client("http://test", TOKEN).timeout.read == 360.0

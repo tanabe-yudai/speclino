@@ -47,6 +47,7 @@ class Investigator:
     model: str | BaseLlm = DEFAULT_MODEL
     audit: InMemoryAudit = field(default_factory=InMemoryAudit)
     extra_plugins: list[BasePlugin] = field(default_factory=list)
+    max_output_tokens: int | None = None  # 1 回の LLM 呼出しの出力の上限（None はモデルの既定）
 
     def __post_init__(self) -> None:
         self.budget = BudgetState(self.permissions.max_tool_calls, self.permissions.max_seconds)
@@ -57,6 +58,11 @@ class Investigator:
             model=self.model,
             instruction=self.instruction,
             tools=list(self.tool_fns),
+            generate_content_config=(
+                types.GenerateContentConfig(max_output_tokens=self.max_output_tokens)
+                if self.max_output_tokens is not None
+                else None
+            ),
         )
         self.app = App(name=APP_NAME, root_agent=agent, plugins=[self.plugin, *self.extra_plugins])
 
@@ -78,7 +84,10 @@ class Investigator:
                 log.events.append(_event_to_dict(event))
                 if event.usage_metadata is not None:
                     log.input_tokens += event.usage_metadata.prompt_token_count or 0
-                    log.output_tokens += event.usage_metadata.candidates_token_count or 0
+                    # 課金される出力は候補と思考の合計
+                    log.output_tokens += (event.usage_metadata.candidates_token_count or 0) + (
+                        event.usage_metadata.thoughts_token_count or 0
+                    )
                     log.llm_calls += 1
                 if event.content and event.content.parts:
                     texts = [p.text for p in event.content.parts if p.text]

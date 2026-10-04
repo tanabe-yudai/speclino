@@ -48,7 +48,7 @@ async def record(
         a2a_task_id=a2a_task_id,
     )
     await AuditRepository(session).record(
-        f"mcp_token:{identity.token_id}",
+        f"a2a:{identity.token_id}",  # persist_audit（a2a.tool）と同じ書き方
         "a2a.supplement",
         str(run_id),
         "recorded",

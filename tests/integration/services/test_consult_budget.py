@@ -33,30 +33,44 @@ async def day(engine: AsyncEngine) -> AsyncIterator[date]:
         await conn.execute(sql_text("DELETE FROM cost_ledger WHERE model = :m"), {"m": MODEL})
 
 
-def _budget(engine: AsyncEngine, limit: str = "1") -> ConsultBudget:
-    guard = CostGuard(ledger=InMemoryLedger([]), daily_limit_usd=Decimal(limit))
+def _budget(engine: AsyncEngine, limit: str = "1", per_run: str = "0") -> ConsultBudget:
+    guard = CostGuard(
+        ledger=InMemoryLedger([]),
+        daily_limit_usd=Decimal(limit),
+        per_run_limit_usd=Decimal(per_run),
+    )
     return ConsultBudget(async_sessionmaker(engine, expire_on_commit=False), guard)
 
 
 async def test_parallel_reserves_never_exceed_limit(engine: AsyncEngine, day: date) -> None:
     budget = _budget(engine)
     results = await asyncio.gather(*(budget.reserve(day, MODEL, Decimal("0.4")) for _ in range(5)))
-    assert sum(1 for ok, _ in results if ok) == 2
+    assert sum(1 for r, _ in results if r is not None) == 2
+
+
+async def test_reserve_leaves_headroom_for_one_pipeline_run(engine: AsyncEngine, day: date) -> None:
+    """パイプライン（can_start が per_run_limit_usd の余裕で判定する）の 1 回分を残す。"""
+    budget = _budget(engine, limit="1", per_run="0.5")
+    reservation, reason = await budget.reserve(day, MODEL, Decimal("0.6"))
+    assert reservation is None and "パイプライン" in reason
+    assert (await budget.reserve(day, MODEL, Decimal("0.5")))[0] is not None
 
 
 async def test_settle_returns_unused_reservation(engine: AsyncEngine, day: date) -> None:
     budget = _budget(engine)
-    assert (await budget.reserve(day, MODEL, Decimal("0.6")))[0]
-    assert not (await budget.reserve(day, MODEL, Decimal("0.6")))[0]
+    first, _ = await budget.reserve(day, MODEL, Decimal("0.6"))
+    assert first is not None
+    assert (await budget.reserve(day, MODEL, Decimal("0.6")))[0] is None
     # 実費はほぼ 0（scripted 以外の既定単価でも微小）→ 予約が戻って次が通る
-    await budget.settle(day, MODEL, Decimal("0.6"), 10, 10)
-    assert (await budget.reserve(day, MODEL, Decimal("0.6")))[0]
+    await budget.settle(first, 10, 10)
+    assert (await budget.reserve(day, MODEL, Decimal("0.6")))[0] is not None
 
 
 async def test_settle_with_zero_usage_releases_everything(engine: AsyncEngine, day: date) -> None:
     budget = _budget(engine)
-    assert (await budget.reserve(day, MODEL, Decimal("0.9")))[0]
-    await budget.settle(day, MODEL, Decimal("0.9"), 0, 0)
+    reservation, _ = await budget.reserve(day, MODEL, Decimal("0.9"))
+    assert reservation is not None
+    await budget.settle(reservation, 0, 0)
     async with engine.connect() as conn:
         total = (
             await conn.execute(

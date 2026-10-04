@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
-from datetime import date
-from decimal import Decimal
+from datetime import date, timedelta
 from typing import Any
 
 import pytest
@@ -16,17 +16,19 @@ from speclino.agent.consultant.spec_review import (
     render_revision_diff,
     run_spec_review,
 )
-from speclino.agent.consultant.tools import ConsultBudget, ConsultTools
+from speclino.agent.consultant.tools import ConsultTools
 from speclino.ports.text_llm import JsonGeneration
-from speclino.services.cost_guard import CostGuard, InMemoryLedger
+from speclino.services.cost_guard import CostGuard
 from speclino.services.spec_pr_bot import MAX_SPEC_CHARS
 from speclino.spec.loader import content_hash
 from tests.unit.agent.consultant.fakes import (
     ORDERS,
+    LedgerBudget,
     demo_context,
     dumps,
     fake_call,
     fake_deps,
+    priced_guard,
     stub_fetch_spec_context,
 )
 
@@ -97,27 +99,14 @@ class RaisingLlm:
         raise RuntimeError("gemini down")
 
 
-class ReserveOnce(ConsultBudget):
-    """1 回目の予約だけ通す。予約と精算を記録する。"""
-
-    def __init__(self) -> None:
-        self.reserved: list[Decimal] = []
-        self.settled: list[tuple[Decimal, int, int]] = []
-
-    async def reserve(self, today: date, model: str, worst_usd: Decimal) -> tuple[bool, str]:
-        if self.reserved:
-            return False, "日次の残り枠を超える"
-        self.reserved.append(worst_usd)
-        return True, "ok"
-
-    async def settle(
-        self, today: date, model: str, worst_usd: Decimal, input_tokens: int, output_tokens: int
-    ) -> None:
-        self.settled.append((worst_usd, input_tokens, output_tokens))
+class CancelledLlm(RaisingLlm):
+    async def generate_json(self, prompt: str, schema: dict[str, Any]) -> JsonGeneration:
+        self.prompts.append(prompt)
+        raise asyncio.CancelledError
 
 
 def _guard() -> CostGuard:
-    return CostGuard(InMemoryLedger([]), Decimal("3"))
+    return priced_guard("3")
 
 
 def _names(call: Any) -> list[str]:
@@ -208,7 +197,7 @@ async def test_missing_vocabulary_fails() -> None:
 
 async def test_cost_guard_stops_revision_but_keeps_extraction() -> None:
     deps = fake_deps(llm=ScriptedJsonLlm([CLEAR, REVISION]), cost_guard=_guard())
-    budget = ReserveOnce()
+    budget = LedgerBudget(allow=1)
     deps.budget = budget
     call = fake_call(text=SPEC_MD)
     await run_spec_review(call, deps)
@@ -221,9 +210,7 @@ async def test_cost_guard_stops_revision_but_keeps_extraction() -> None:
 
 async def test_cost_guard_refusing_extraction_fails() -> None:
     deps = fake_deps(llm=ScriptedJsonLlm(CLEAR), cost_guard=_guard())
-    budget = ReserveOnce()
-    budget.reserved.append(Decimal(0))  # 1 回目から断る
-    deps.budget = budget
+    deps.budget = LedgerBudget(allow=0)  # 1 回目から断る
     call = fake_call(text=SPEC_MD)
     await run_spec_review(call, deps)
     up: Any = call.updater
@@ -234,12 +221,54 @@ async def test_cost_guard_refusing_extraction_fails() -> None:
 async def test_llm_exception_settles_reservation_to_zero_and_fails() -> None:
     llm = RaisingLlm()
     deps = fake_deps(llm=llm, cost_guard=_guard())
-    budget = ReserveOnce()
+    budget = LedgerBudget()
     deps.budget = budget
     call = fake_call(text=SPEC_MD)
     await run_spec_review(call, deps)
     assert call.updater.calls[-1][0] == "failed"  # type: ignore[attr-defined]
-    assert budget.settled == [(budget.reserved[0], 0, 0)]
+    assert budget.settled == [(budget.reserved[0], 0, 0)] and budget.net == 0
+    assert _names(call) == []
+
+
+async def test_cancelled_extraction_releases_reservation() -> None:
+    deps = fake_deps(llm=CancelledLlm(), cost_guard=_guard())
+    budget = LedgerBudget()
+    deps.budget = budget
+    call = fake_call(text=SPEC_MD)
+    with pytest.raises(asyncio.CancelledError):
+        await run_spec_review(call, deps)
+    assert budget.settled == [(budget.reserved[0], 0, 0)] and budget.net == 0
+    # 取り消しでも門番の監査は残る
+    assert [e["tool"] for e in call.audit.entries][-1] == "spec_extract"
+
+
+async def test_each_reservation_reads_today_once() -> None:
+    """予約と精算は同じ日に付ける（日付をまたいでも別の日に精算しない）。"""
+    days: list[date] = []
+
+    def today() -> date:
+        days.append(date(2026, 10, 4) + timedelta(days=len(days)))
+        return days[-1]
+
+    deps = fake_deps(llm=ScriptedJsonLlm([CLEAR, REVISION]), cost_guard=_guard())
+    deps.today = today
+    budget = LedgerBudget()
+    deps.budget = budget
+    await run_spec_review(fake_call(text=SPEC_MD), deps)
+    assert len(budget.reserved) == 2 and len(days) == 2
+
+
+async def test_broken_extraction_settles_and_skips_revision() -> None:
+    llm = ScriptedJsonLlm(["not json", REVISION])
+    deps = fake_deps(llm=llm, cost_guard=_guard())
+    budget = LedgerBudget()
+    deps.budget = budget
+    call = fake_call(text=SPEC_MD)
+    await run_spec_review(call, deps)
+    up: Any = call.updater
+    assert up.calls[-1][0] == "failed" and "仕様の抽出結果の形式が不正でした" in up.last_text()
+    assert len(llm.prompts) == 1  # 修正案の LLM を呼ばない
+    assert budget.settled == [(budget.reserved[0], 1000, 200)]
     assert _names(call) == []
 
 
@@ -247,16 +276,10 @@ async def test_llm_exception_settles_reservation_to_zero_and_fails() -> None:
 async def test_broken_llm_fails_without_presenting_partial_result(llm: Any) -> None:
     call = fake_call(text=SPEC_MD)
     await run_spec_review(call, fake_deps(llm=llm))
-    # 壊れた JSON は E_CANDIDATE_INVALID の診断つきで「候補なし」を返す（判定ではない）。例外は失敗
+    # 壊れた JSON も例外も失敗にし、空の候補を結果として見せない
     up: Any = call.updater
-    last = up.calls[-1][0]
-    assert last in ("failed", "complete")
-    if last == "complete":
-        assert up.artifact_json("spec-ir-candidate.json")["rules"] == []
-        codes = [d["code"] for d in up.artifact_json("diagnostics.json")]
-        assert "E_CANDIDATE_INVALID" in codes
-    else:
-        assert _names(call) == []
+    assert up.calls[-1][0] == "failed"
+    assert _names(call) == []
 
 
 def _two_behaviors() -> dict[str, Any]:

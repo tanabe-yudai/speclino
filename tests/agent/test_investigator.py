@@ -15,6 +15,16 @@ from speclino.agent.permissions import AgentPermissions
 from speclino.services.cost_guard import CostGuard, InMemoryLedger
 
 
+class ThinkingLlm(ScriptedLlm):
+    """思考のトークン（thoughts_token_count）も返す台本の LLM。"""
+
+    async def generate_content_async(self, llm_request: Any, stream: bool = False) -> Any:
+        async for response in super().generate_content_async(llm_request, stream):
+            assert response.usage_metadata is not None
+            response.usage_metadata.thoughts_token_count = 50
+            yield response
+
+
 def build(
     steps: list[list[Any]], perms: AgentPermissions | None = None
 ) -> tuple[Investigator, list[str]]:
@@ -64,6 +74,36 @@ async def test_allowed_tool_call_flows_through_gateway() -> None:
     assert log.budget["tool_calls"] == 1
     assert [e["decision"] for e in inv.audit.entries] == ["allowed"]
     assert log.llm_calls == 2 and log.input_tokens == 2000
+
+
+async def test_max_output_tokens_is_passed_only_when_set() -> None:
+    inv, _ = build([[text("完了")]])
+    await inv.run("x")
+    assert ScriptedLlm.requests[0].config.max_output_tokens is None
+    ScriptedLlm.reset()
+    limited = Investigator(
+        permissions=AgentPermissions(),
+        registry=ToolRegistry(),
+        tool_fns=[],
+        instruction="調査せよ",
+        model=ScriptedLlm(steps=[[text("完了")]]),
+        max_output_tokens=2048,
+    )
+    await limited.run("x")
+    assert ScriptedLlm.requests[0].config.max_output_tokens == 2048
+
+
+async def test_output_tokens_include_thoughts() -> None:
+    ScriptedLlm.reset()
+    inv = Investigator(
+        permissions=AgentPermissions(),
+        registry=ToolRegistry(),
+        tool_fns=[],
+        instruction="調査せよ",
+        model=ThinkingLlm(steps=[[text("完了")]]),
+    )
+    log = await inv.run("x")
+    assert log.output_tokens == 200 + 50  # 課金される出力 = 候補 + 思考
 
 
 async def test_honeypot_is_denied_by_plugin_and_never_executed() -> None:

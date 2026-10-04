@@ -30,7 +30,7 @@ from speclino.agent.permissions import AgentPermissions
 from speclino.db.repositories import ProjectRepository
 from speclino.db.repositories.audit import AuditRepository
 from speclino.db.repositories.cost_ledger import CostLedgerRepository
-from speclino.domain.a2a import TokenIdentity
+from speclino.domain.a2a import CostReservation, TokenIdentity
 from speclino.ports.mcp_context import McpContextSource
 from speclino.ports.text_llm import TextLlm
 from speclino.services.cost_guard import CostGuard
@@ -76,8 +76,11 @@ class ConsultDeps:
 class ConsultBudget:
     """Gemini 呼出しの日次の費用枠の予約。並行のリクエストが同じ残額を見て枠を超えないようにする。
 
-    `reserve` は 1 つのトランザクションの中で advisory lock を取り、合計 ＋ 最悪の費用が枠に
-    収まるときだけ最悪の費用を台帳に先に書く。`settle` は実費との差（負にもなる）を足して精算する。
+    `reserve` は 1 つのトランザクションの中で advisory lock を取り、合計 ＋ 最悪の費用 ＋
+    パイプライン 1 回分の余裕（`per_run_limit_usd`）が枠に収まるときだけ最悪の費用を台帳に先に書く。
+    余裕を残すのは、同じ台帳を使う検査のパイプラインが `can_start` でその余裕を見て判定するため
+    （議論役が枠を使い切ると検査が始められなくなる）。`settle` は予約と同じ日に、実費との差
+    （負にもなる）を足して精算する。
     """
 
     def __init__(
@@ -86,7 +89,10 @@ class ConsultBudget:
         self._session_factory = session_factory
         self._guard = cost_guard
 
-    async def reserve(self, today: date, model: str, worst_usd: Decimal) -> tuple[bool, str]:
+    async def reserve(
+        self, today: date, model: str, worst_usd: Decimal
+    ) -> tuple[CostReservation | None, str]:
+        """予約できれば (予約, 説明)、できなければ (None, 理由)。"""
         async with self._session_factory() as session, session.begin():
             await session.execute(
                 sql_text("SELECT pg_advisory_xact_lock(:k)"), {"k": _COST_LOCK_KEY}
@@ -94,22 +100,30 @@ class ConsultBudget:
             ledger = CostLedgerRepository(session)
             used = await ledger.total_for_day(today)
             limit = self._guard.daily_limit_usd
-            if used + worst_usd > limit:
-                return False, (
-                    f"最悪の費用 ${worst_usd:.4f} が日次の残り枠 ${limit - used:.4f}"
-                    f"（枠 ${limit}）を超える"
+            headroom = self._guard.per_run_limit_usd
+            if used + worst_usd + headroom > limit:
+                return None, (
+                    f"最悪の費用 ${worst_usd:.4f} とパイプライン 1 回分の余裕 ${headroom}"
+                    f" が日次の残り枠 ${limit - used:.4f}（枠 ${limit}）を超える"
                 )
             await ledger.add(today, None, worst_usd, 0, 0, model)
-            return True, f"最悪 ${worst_usd:.4f} / 残り ${limit - used - worst_usd:.4f}"
+            return CostReservation(day=today, model=model, worst_usd=worst_usd), (
+                f"最悪 ${worst_usd:.4f} / 残り ${limit - used - worst_usd:.4f}"
+            )
 
     async def settle(
-        self, today: date, model: str, worst_usd: Decimal, input_tokens: int, output_tokens: int
+        self, reservation: CostReservation, input_tokens: int, output_tokens: int
     ) -> None:
-        """予約を実費に直す。LLM が例外で終わったときは (0, 0) で予約を丸ごと戻す。"""
-        actual = self._guard.estimate(model, input_tokens, output_tokens)
+        """予約を実費に直す。LLM が例外・取り消しで終わったときは (0, 0) で予約を丸ごと戻す。"""
+        actual = self._guard.estimate(reservation.model, input_tokens, output_tokens)
         async with self._session_factory() as session, session.begin():
             await CostLedgerRepository(session).add(
-                today, None, actual - worst_usd, input_tokens, output_tokens, model
+                reservation.day,
+                None,
+                actual - reservation.worst_usd,
+                input_tokens,
+                output_tokens,
+                reservation.model,
             )
 
 
@@ -133,7 +147,7 @@ async def guarded(
     started = time.monotonic()
     try:
         result = await fn()
-    except Exception as e:
+    except BaseException as e:  # 取り消し（CancelledError）も監査に残してから投げ直す
         gateway.audit.record_allowed(
             call,
             ToolResult(ok=False, payload={"error": type(e).__name__}),

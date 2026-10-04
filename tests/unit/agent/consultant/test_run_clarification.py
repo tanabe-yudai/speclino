@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from speclino.agent.consultant import run_clarification as rc
-from speclino.agent.consultant.run_clarification import run_run_clarification
+from speclino.agent.consultant.run_clarification import MAX_ANSWER_CHARS, run_run_clarification
 from speclino.agent.consultant.tools import ConsultDeps
 from speclino.domain.a2a import TokenIdentity
 from tests.unit.agent.consultant.fakes import fake_call, fake_deps
@@ -34,7 +34,7 @@ def deps_with(run: dict[str, Any] | None) -> tuple[ConsultDeps, list[dict[str, A
     return deps, recorded
 
 
-def pairs(recorded: list[dict[str, Any]]) -> list[tuple[str, str]]:
+def pairs(recorded: list[dict[str, Any]]) -> list[tuple[str | None, str]]:
     return [(r["requirement_id"], r["content"]) for r in recorded]
 
 
@@ -99,6 +99,49 @@ async def test_unfinished_run_and_missing_run_id_fail() -> None:
     nid = fake_call(skill="run_clarification")
     await run_run_clarification(nid, deps)
     assert nid.updater.calls[-1][0] == "failed"  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("state", ["failed", "cancelled", "superseded"])
+async def test_ended_run_fails_with_honest_reason(state: str) -> None:
+    deps, _ = deps_with({"exec_state": state, "findings": ONE_REVIEW_RUN["findings"]})
+    call = fake_call(skill="run_clarification", run_id=RUN_ID)
+    await run_run_clarification(call, deps)
+    assert call.updater.calls[-1][0] == "failed"  # type: ignore[attr-defined]
+    text = call.updater.last_text()  # type: ignore[attr-defined]
+    assert "失敗・取り消し・置き換え" in text and "終わっていない" not in text
+
+
+async def test_requirement_id_none_stays_none() -> None:
+    deps, recorded = deps_with(
+        {
+            "exec_state": "completed",
+            "findings": [{"requirement_id": None, "verdict": "REVIEW", "message": "規約の扱い"}],
+        }
+    )
+    c1 = fake_call(skill="run_clarification", run_id=RUN_ID)
+    await run_run_clarification(c1, deps)
+    state = c1.updater.last_metadata()["speclino"]  # type: ignore[attr-defined]
+    assert state["questions"][0]["requirement_id"] is None
+    c2 = fake_call(skill="run_clarification", run_id=RUN_ID, reply="意図", state=state)
+    await run_run_clarification(c2, deps)
+    assert pairs(recorded) == [(None, "意図")]
+    assert c2.updater.artifact_json("supplements.json")[0]["requirement_id"] is None  # type: ignore[attr-defined]
+
+
+async def test_overlong_answer_fails_without_recording() -> None:
+    deps, recorded = deps_with(ONE_REVIEW_RUN)
+    c1 = fake_call(skill="run_clarification", run_id=RUN_ID)
+    await run_run_clarification(c1, deps)
+    c2 = fake_call(
+        skill="run_clarification",
+        run_id=RUN_ID,
+        reply="x" * (MAX_ANSWER_CHARS + 1),
+        state=c1.updater.last_metadata()["speclino"],  # type: ignore[attr-defined]
+    )
+    await run_run_clarification(c2, deps)
+    assert c2.updater.calls[-1][0] == "failed"  # type: ignore[attr-defined]
+    assert str(MAX_ANSWER_CHARS) in c2.updater.last_text()  # type: ignore[attr-defined]
+    assert recorded == [] and c2.audit.entries == []
 
 
 async def test_no_review_findings_completes() -> None:

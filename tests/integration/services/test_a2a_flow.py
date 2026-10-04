@@ -321,7 +321,9 @@ async def test_three_skills_end_to_end_with_real_handlers(
         assert consulted.status.state == TaskState.TASK_STATE_COMPLETED, get_message_text(
             consulted.status.message
         )
-        assert get_artifact_text(_artifact(consulted, "answer.md")) == answer
+        answer_md = get_artifact_text(_artifact(consulted, "answer.md"))
+        assert answer_md.startswith(answer)
+        assert "verification.json" in answer_md and "PR で人が" in answer_md  # 免責を本体に持つ
         verification = _artifact_data(consulted, "verification.json")
         assert verification["exec_state"] in ("completed", "awaiting_answer"), verification
         violated = [f for f in verification["findings"] if f["verdict"] == "VIOLATED"]

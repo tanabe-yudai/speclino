@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -45,3 +46,13 @@ class AgentSupplementView(BaseModel):
     content: str
     created_at: datetime
     source: str = Field(description="どのエージェント（トークン名）から来たか")
+
+
+class CostReservation(BaseModel):
+    """日次の費用枠に先に書いた最悪の費用。精算は同じ日・同じモデルで行う。"""
+
+    model_config = ConfigDict(frozen=True)
+
+    day: date
+    model: str
+    worst_usd: Decimal

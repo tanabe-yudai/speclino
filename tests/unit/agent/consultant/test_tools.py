@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import Callable
 from datetime import date
@@ -122,6 +123,17 @@ async def test_exception_in_tool_is_audited_then_raised() -> None:
     last = gw.audit.entries[-1]  # type: ignore[attr-defined]
     assert last["decision"] == "allowed"
     assert gw.budget.snapshot()["tool_calls"] == 1
+
+
+async def test_cancelled_tool_is_audited_then_raised() -> None:
+    gw = _gateway()
+
+    async def cancelled() -> dict[str, Any]:
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await guarded(gw, "run_findings", {}, cancelled)
+    assert [e["decision"] for e in gw.audit.entries] == ["allowed"]  # type: ignore[attr-defined]
 
 
 async def test_run_findings_of_other_workspace_is_not_found() -> None:

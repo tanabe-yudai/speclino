@@ -233,7 +233,7 @@ def _client(
         base_url=url.rstrip("/"),
         headers={"Authorization": f"Bearer {token}"},
         transport=transport,
-        timeout=300.0,
+        timeout=360.0,  # 検査待ち（サーバ側で最大 180 秒）＋ 議論役（最大 120 秒）を待てるように
     )
 
 
@@ -320,7 +320,11 @@ def a2a_send(
     if not url:
         typer.echo("--url に SpecLino のベース URL を指定してください", err=True)
         raise typer.Exit(code=2)
-    body = file.read_text(encoding="utf-8") if file is not None else text
+    try:
+        body = file.read_text(encoding="utf-8") if file is not None else text
+    except OSError as e:
+        typer.echo(f"--file を読めません: {file}: {e.strerror or type(e).__name__}", err=True)
+        raise typer.Exit(code=2) from e
     fields = {
         "repo": repo,
         "behavior": behavior,

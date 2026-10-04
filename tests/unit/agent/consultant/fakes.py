@@ -7,6 +7,7 @@ import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -14,9 +15,10 @@ from unittest.mock import AsyncMock, MagicMock
 from a2a.helpers import get_data_parts, get_text_parts
 
 from speclino.a2a_server.executor import SkillCall
-from speclino.agent.consultant.tools import ConsultDeps, ConsultTools, guarded
+from speclino.agent.consultant.tools import ConsultBudget, ConsultDeps, ConsultTools, guarded
 from speclino.agent.gateway import InMemoryAudit
-from speclino.domain.a2a import SkillRequest, TokenIdentity
+from speclino.domain.a2a import CostReservation, SkillRequest, TokenIdentity
+from speclino.services.cost_guard import CostGuard, InMemoryLedger
 from speclino.services.mcp_context import read_context
 
 ORDERS = Path(__file__).resolve().parents[4] / "examples" / "orders"
@@ -148,6 +150,41 @@ def fake_deps(
         load_run_view=AsyncMock(return_value=None),
         record_supplement=AsyncMock(),
     )
+
+
+# scripted の単価は 0 なので、予約の戻し忘れが台帳の差に出るよう単価を付ける
+PRICED_SCRIPTED = {"scripted": (Decimal("1"), Decimal("1"))}
+
+
+def priced_guard(limit: str = "10") -> CostGuard:
+    return CostGuard(InMemoryLedger([]), Decimal(limit), pricing=PRICED_SCRIPTED)
+
+
+class LedgerBudget(ConsultBudget):
+    """予約と精算を記録する偽の台帳。allow 回だけ予約を通す。net は台帳の正味の増減。"""
+
+    def __init__(self, allow: int = 99) -> None:
+        self.allow = allow
+        self._guard = priced_guard()
+        self.reserved: list[Decimal] = []
+        self.settled: list[tuple[Decimal, int, int]] = []
+        self.net = Decimal(0)
+
+    async def reserve(
+        self, today: date, model: str, worst_usd: Decimal
+    ) -> tuple[CostReservation | None, str]:
+        if len(self.reserved) >= self.allow:
+            return None, "日次の残り枠を超える"
+        self.reserved.append(worst_usd)
+        self.net += worst_usd
+        return CostReservation(day=today, model=model, worst_usd=worst_usd), "ok"
+
+    async def settle(
+        self, reservation: CostReservation, input_tokens: int, output_tokens: int
+    ) -> None:
+        self.settled.append((reservation.worst_usd, input_tokens, output_tokens))
+        actual = self._guard.estimate(reservation.model, input_tokens, output_tokens)
+        self.net += actual - reservation.worst_usd
 
 
 def dumps(value: Any) -> str:

@@ -75,6 +75,14 @@ class _Stop(Exception):
     """手順を失敗で終える（理由は相手に返してよい）。"""
 
 
+class _BudgetRefused(_Stop):
+    """費用枠の予約を断られた（LLM は呼んでいない）。"""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(f"費用ガードにより停止: {reason}")
+        self.reason = reason
+
+
 async def run_spec_review(call: SkillCall, deps: ConsultDeps) -> None:
     """仕様のレビュー。入力待ち・完了・失敗のどれかで終える。監査は executor が残す。"""
     perms = consult_permissions()
@@ -136,17 +144,16 @@ async def _review(
             "output_tokens": gen.output_tokens,
         }
 
-    worst = _worst(deps, llm, prompt)
-    ok, reason = await _reserve(deps, llm, worst)
-    if not ok:
-        raise _Stop(f"費用ガードにより停止: {reason}")
     try:
-        out = await _metered(deps, llm, worst, gateway, {"behavior": behavior}, extract)
+        out = await _metered(deps, llm, prompt, gateway, {"behavior": behavior}, extract)
     except _Stop:
         raise
     except Exception as e:
         raise _Stop(f"仕様の抽出に失敗しました: {type(e).__name__}") from e
     result = parse_proposal(out["text"], behavior, markdown, domain, bindings, spec_path=req.path)
+    if any(d.code == "E_CANDIDATE_INVALID" and d.path == "proposal" for d in result.errors):
+        # 抽出の応答そのものが壊れている。空の候補を結果として見せず、修正案も作らない
+        raise _Stop("仕様の抽出結果の形式が不正でした")
 
     asks = _ambiguity_questions(result)
     if asks and round_ < MAX_REVIEW_ROUNDS:
@@ -239,12 +246,6 @@ def _answers_section(questions: list[list[str]], answers: list[str]) -> str:
     return "\n".join(lines)
 
 
-async def _reserve(deps: ConsultDeps, llm: TextLlm, worst: Decimal) -> tuple[bool, str]:
-    if deps.budget is None:  # ローカルとテスト。本番は常に設定する
-        return True, "費用の確認なし"
-    return await deps.budget.reserve(deps.today(), llm.model, worst)
-
-
 def _worst(deps: ConsultDeps, llm: TextLlm, prompt: str) -> Decimal:
     if deps.cost_guard is None:
         return Decimal(0)
@@ -254,26 +255,31 @@ def _worst(deps: ConsultDeps, llm: TextLlm, prompt: str) -> Decimal:
 async def _metered(
     deps: ConsultDeps,
     llm: TextLlm,
-    worst: Decimal,
+    prompt: str,
     gateway: ToolGateway,
     args: dict[str, Any],
     fn: Callable[[], Awaitable[dict[str, Any]]],
 ) -> dict[str, Any]:
-    """予約済みの Gemini 呼出しを門番（spec_extract）に通し、終わったら実費で精算する。"""
+    """Gemini 呼出しを 1 回、費用枠の予約・門番（spec_extract）・精算で包む。
+
+    予約できなければ `_BudgetRefused`（LLM は呼ばない）。予約の後は例外・取り消しを含む
+    どの終わり方でも、予約と同じ日に精算する（実費が分からなければ (0, 0) で戻す）。
+    """
+    budget = deps.budget
+    reservation = None
+    if budget is not None:  # ローカルとテストは None。本番は常に設定する
+        reservation, reason = await budget.reserve(
+            deps.today(), llm.model, _worst(deps, llm, prompt)
+        )
+        if reservation is None:
+            raise _BudgetRefused(reason)
+    tokens = (0, 0)
     try:
         out = await guarded(gateway, "spec_extract", args, fn, truncate=False)
-    except Exception:
-        if deps.budget is not None:
-            await deps.budget.settle(deps.today(), llm.model, worst, 0, 0)
-        raise
-    if deps.budget is not None:
-        await deps.budget.settle(
-            deps.today(),
-            llm.model,
-            worst,
-            int(out.get("input_tokens", 0)),
-            int(out.get("output_tokens", 0)),
-        )
+        tokens = (int(out.get("input_tokens", 0)), int(out.get("output_tokens", 0)))
+    finally:
+        if budget is not None and reservation is not None:
+            await budget.settle(reservation, *tokens)
     if out.get("error"):  # 門番が拒否した（実行していない）
         raise _Stop(f"門番が拒否しました: {out.get('reason', out['error'])}")
     return out
@@ -314,13 +320,11 @@ async def _revision(
             "output_tokens": gen.output_tokens,
         }
 
-    worst = _worst(deps, llm, prompt)
-    ok, reason = await _reserve(deps, llm, worst)
-    if not ok:
-        return "", f"費用ガードにより修正案を作りませんでした: {reason}"
     try:
-        out = await _metered(deps, llm, worst, gateway, {"purpose": "revision"}, revise)
+        out = await _metered(deps, llm, prompt, gateway, {"purpose": "revision"}, revise)
         edits = _parse_edits(out["text"])
+    except _BudgetRefused as e:
+        return "", f"費用ガードにより修正案を作りませんでした: {e.reason}"
     except _Stop as e:
         return "", f"修正案を作りませんでした: {e}"
     except (json.JSONDecodeError, ValidationError, ValueError) as e:
