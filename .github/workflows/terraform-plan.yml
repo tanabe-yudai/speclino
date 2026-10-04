@@ -1,0 +1,169 @@
+name: Terraform plan
+
+# infra/** を変える PR で infra/envs/prod の terraform plan を流し、結果を PR コメント 1 件に
+# まとめる（push のたびに同じコメントを更新する）。apply は手で行う（infra/envs/prod/README.md）。
+#
+# 規約 CI-001（読取り専用権限）は ci.yml だけが対象。PR コメントの書込みが要るので ci.yml とは分ける。
+on:
+  pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/terraform-plan.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  plan:
+    name: plan (infra/envs/prod)
+    # fork からの PR には id-token も secrets も渡らないので、認証できない。失敗にせず飛ばす。
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: infra/envs/prod
+    env:
+      PLANNER_SA: ${{ secrets.GCP_PLANNER_SA }}
+      TFVARS: ${{ secrets.TF_PROD_TFVARS }}
+    steps:
+      # planner SA（infra/envs/prod/iam.tf）を apply して secret を設定するまでは飛ばす
+      # （Dependabot の PR も secrets が渡らないのでここで止まる）。
+      - id: ready
+        working-directory: .
+        run: |
+          if [ -z "${PLANNER_SA}" ] || [ -z "${TFVARS}" ]; then
+            echo "::notice::GCP_PLANNER_SA / TF_PROD_TFVARS が未設定のため terraform plan を飛ばす"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.ready.outputs.ok == 'true'
+        uses: actions/checkout@v7
+
+      - if: steps.ready.outputs.ok == 'true'
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_PLANNER_SA }}
+
+      - if: steps.ready.outputs.ok == 'true'
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.16.4"
+          # 出力は自分でファイルに取る（ラッパーの stdout 出力は使わない）
+          terraform_wrapper: false
+
+      # terraform.tfvars は .gitignore 対象（環境固有値）なので secret から作る。ランナーの中だけに置く。
+      # 値は秘密ではないが、PR コメントには project ID と課金アカウント ID を伏せて載せる。
+      - if: steps.ready.outputs.ok == 'true'
+        name: Write tfvars
+        run: |
+          printf '%s\n' "${TFVARS}" > terraform.tfvars
+          for key in project_id billing_account; do
+            value=$(sed -n "s/^${key} *= *\"\([^\"]*\)\".*/\1/p" terraform.tfvars)
+            if [ -n "${value}" ]; then
+              echo "::add-mask::${value}"
+            fi
+          done
+
+      - if: steps.ready.outputs.ok == 'true'
+        name: Init
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          # tfstate バケットは infra/bootstrap が "<project_id>-tfstate" の名前で作る
+          terraform init -input=false -lockfile=readonly \
+            -backend-config="bucket=${GCP_PROJECT_ID}-tfstate" \
+            -backend-config="prefix=envs/prod"
+
+      # planner SA は読み取り専用なので state のロックを書けない（-lock=false）。
+      # secret の値は refresh で読まない（secret_version のリソース・データソースが無い）ので
+      # refresh は通常どおり行い、手作業の変更（drift）も plan に出す。
+      - if: steps.ready.outputs.ok == 'true'
+        id: plan
+        name: Plan
+        run: |
+          set +e
+          terraform plan -lock=false -input=false -no-color -detailed-exitcode > plan.txt 2>&1
+          code=$?
+          set -e
+          cat plan.txt
+          echo "exitcode=${code}" >> "$GITHUB_OUTPUT"
+
+      - if: steps.ready.outputs.ok == 'true' && steps.plan.outputs.exitcode != ''
+        name: Comment on PR
+        uses: actions/github-script@v9
+        env:
+          EXITCODE: ${{ steps.plan.outputs.exitcode }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- speclino-terraform-plan -->';
+            const dir = 'infra/envs/prod';
+            let plan = fs.readFileSync(`${dir}/plan.txt`, 'utf8');
+
+            // project ID と課金アカウント ID を伏せる（API で投稿する本文はログのマスクが効かない）
+            const tfvars = fs.readFileSync(`${dir}/terraform.tfvars`, 'utf8');
+            const secrets = [process.env.GCP_PROJECT_ID];
+            const billing = tfvars.match(/^billing_account\s*=\s*"([^"]*)"/m);
+            if (billing) secrets.push(billing[1]);
+            for (const s of secrets.filter(Boolean)) plan = plan.split(s).join('***');
+
+            const code = process.env.EXITCODE;
+            const summaryLine = plan.split('\n').find((l) =>
+              /^(Plan:|No changes\.|Changes to Outputs:)/.test(l.trim()));
+            const status = code === '0' ? '変更なし'
+              : code === '2' ? '変更あり'
+              : '失敗';
+            const summary = code === '1' ? 'terraform plan が失敗した（下の出力を参照）'
+              : (summaryLine ?? '').trim();
+
+            // コメント本文の上限は 65,536 文字。残りの枠に収まるよう末尾を切る
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const limit = 60000;
+            let body = plan;
+            let note = '';
+            if (body.length > limit) {
+              body = body.slice(0, limit);
+              note = `\n\n出力が長いため先頭 ${limit} 文字で切った。全文は [実行ログ](${runUrl}) を見る。`;
+            }
+
+            const text = [
+              marker,
+              `### Terraform plan（infra/envs/prod）: ${status}`,
+              '',
+              summary ? `**${summary}**` : '',
+              '',
+              `commit ${context.payload.pull_request.head.sha.slice(0, 7)} ・ [実行ログ](${runUrl}) ・ apply は手で行う`,
+              '',
+              '<details><summary>plan の出力</summary>',
+              '',
+              '```',
+              body,
+              '```',
+              '</details>',
+              note,
+            ].join('\n');
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const mine = comments.find((c) => c.user?.type === 'Bot' && c.body?.includes(marker));
+            if (mine) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body: text });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body: text });
+            }
+
+      # plan の失敗（exitcode 1）はコメントを残したうえでジョブを失敗にする
+      - if: steps.ready.outputs.ok == 'true' && steps.plan.outputs.exitcode == '1'
+        working-directory: .
+        run: exit 1

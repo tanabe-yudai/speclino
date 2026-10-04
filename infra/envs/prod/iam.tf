@@ -12,6 +12,10 @@
 #   tasks:    worker サービスへの run.invoker（run.tf、Cloud Tasks の OIDC トークン発行用 SA）
 #   deployer: run.developer / artifactregistry.writer / web・worker・sandbox SA への
 #             serviceAccountUser（GitHub Actions からのデプロイ用）
+#   planner:  読み取り専用（PR の terraform plan 用、.github/workflows/terraform-plan.yml）。
+#             viewer / iam.securityReviewer / storage.bucketViewer / serviceUsageConsumer /
+#             課金アカウントの billing.viewer / tfstate バケットの storage.objectViewer。
+#             書込み・actAs・secretAccessor は持たない
 
 locals {
   service_accounts = {
@@ -20,6 +24,7 @@ locals {
     sandbox  = "speclino-sandbox"
     tasks    = "speclino-tasks"
     deployer = "speclino-deployer"
+    planner  = "speclino-planner"
   }
 }
 
@@ -120,4 +125,50 @@ resource "google_service_account_iam_member" "deployer_actas" {
   service_account_id = google_service_account.this[each.value].name
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${google_service_account.this["deployer"].email}"
+}
+
+# --- planner（GitHub Actions の terraform plan、読み取り専用） ------------------
+# apply は手で行う（README）。PR では plan だけを流すので、state と管理対象の読み取りに
+# 必要な最小のロールに絞る。secret の値は refresh で読まない（secret のコンテナと IAM、
+# Cloud Run の secret_key_ref は参照だけで、secret_version のリソース・データソースは無い）
+# ため secretAccessor は付けない。
+#
+#   viewer                       Cloud Run / Tasks / AR / Secret のメタデータ / WIF / Identity Platform /
+#                                監視 / SA と project・AR・secret・Run の IAM ポリシーの読取り
+#   iam.securityReviewer         viewer に無い IAM ポリシーの読取り（storage.buckets.getIamPolicy など）
+#   storage.bucketViewer         成果物バケットのメタデータ（storage.buckets.get は viewer に無い）
+#   serviceusage.serviceUsageConsumer
+#                                provider の user_project_override（versions.tf）が quota project を
+#                                指定するため serviceusage.services.use が要る
+locals {
+  planner_project_roles = toset([
+    "roles/viewer",
+    "roles/iam.securityReviewer",
+    "roles/storage.bucketViewer",
+    "roles/serviceusage.serviceUsageConsumer",
+  ])
+}
+
+resource "google_project_iam_member" "planner" {
+  for_each = local.planner_project_roles
+
+  project = var.project_id
+  role    = each.value
+  member  = "serviceAccount:${google_service_account.this["planner"].email}"
+}
+
+# google_billing_budget（budget.tf）の refresh は課金アカウント側の billing.budgets.get が要る。
+# 課金アカウントへの IAM 付与は課金アカウント管理者でないと apply できない。
+resource "google_billing_account_iam_member" "planner_billing_viewer" {
+  billing_account_id = var.billing_account
+  role               = "roles/billing.viewer"
+  member             = "serviceAccount:${google_service_account.this["planner"].email}"
+}
+
+# tfstate バケットは infra/bootstrap が "<project_id>-tfstate" の名前で作る（ここでは管理しない）。
+# plan は -lock=false で流すので、ロックファイルの書込み権限は要らない。
+resource "google_storage_bucket_iam_member" "planner_tfstate_viewer" {
+  bucket = "${var.project_id}-tfstate"
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.this["planner"].email}"
 }
