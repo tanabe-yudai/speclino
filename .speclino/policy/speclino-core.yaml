@@ -138,3 +138,94 @@ rules:
         helper_symbol: api_error
     on_missing_input: unknown
     exceptions_allowed: true
+
+  # ---- 構成の規約（S60）。CLAUDE.md から移した。検証器が無いので助言（advisory）で、
+  # 判定は作らない（VerifierRegistry._run_rule）。エージェントは MCP の context_get でも読める。
+  - id: ARCH-001
+    version: "1.0.0"
+    level: advisory
+    title: "domain/ には型定義だけを置き、ロジックを書かないこと"
+    text: >
+      src/speclino/domain/ は pydantic モデルと enum の型定義だけを置く。振る舞いは services/・
+      conformance/・analysis/ などに書く。schemas/*.schema.json は domain/ のモデルから生成し、
+      手で編集しない。
+    applies_to:
+      paths:
+        - "src/speclino/domain/**/*.py"
+        - "schemas/*.schema.json"
+      languages: []
+    source:
+      doc: CLAUDE.md
+      anchor: "構成と規約"
+    on_missing_input: unknown
+    exceptions_allowed: true
+  - id: ARCH-002
+    version: "1.0.0"
+    level: advisory
+    title: "検査器（conformance/）と解析器（analysis/）は LLM と adapters に依存しないこと"
+    text: >
+      src/speclino/conformance/ と src/speclino/analysis/ は google.*・speclino.agent・
+      speclino.adapters を import しない。手書きの IR だけで単体試験できること。判定は決定的な
+      検査器だけが行い、LLM の出力で判定を変えない。
+    applies_to:
+      paths:
+        - "src/speclino/conformance/**/*.py"
+        - "src/speclino/analysis/**/*.py"
+      languages: []
+    source:
+      doc: CLAUDE.md
+      anchor: "構成と規約"
+    on_missing_input: unknown
+    exceptions_allowed: true
+  - id: ARCH-003
+    version: "1.0.0"
+    level: advisory
+    title: "ビジネスロジックを api/ と web/ に置かず、TypeScript の型は web/src/types/ に分けること"
+    text: >
+      ビジネスロジックは services/・conformance/・analysis/ に集約し、src/speclino/api/ と web/ の
+      画面には置かない。web の処理は web/src/services/ に、型は web/src/types/ に置く。
+    applies_to:
+      paths:
+        - "src/speclino/api/**/*.py"
+        - "web/src/**/*.ts"
+        - "web/src/**/*.tsx"
+      languages: []
+    source:
+      doc: CLAUDE.md
+      anchor: "構成と規約"
+    on_missing_input: unknown
+    exceptions_allowed: true
+  - id: ARCH-004
+    version: "1.0.0"
+    level: advisory
+    title: "静的解析で対象リポジトリのモジュールを import せず、IR の式を eval しないこと"
+    text: >
+      解析は対象リポジトリのソースを読むだけにし、モジュールを import して実行しない。IR の式は
+      解釈器で評価し、Python の eval / exec に渡さない。
+    applies_to:
+      paths:
+        - "src/speclino/**/*.py"
+      languages: []
+    source:
+      doc: CLAUDE.md
+      anchor: "構成と規約"
+    on_missing_input: unknown
+    exceptions_allowed: true
+  - id: VERDICT-001
+    version: "1.0.0"
+    level: advisory
+    title: "判定は 4 値を正直に保ち、ゲートはフェイルクローズにすること"
+    text: >
+      判定は VERIFIED_IN_SCOPE / VIOLATED / UNKNOWN / REVIEW の 4 値。解析できないものを違反と
+      表示せず、適合とも表示しない。ゲートは必須ルールに UNKNOWN / REVIEW が残れば失敗にする。
+    applies_to:
+      paths:
+        - "src/speclino/**/*.py"
+        - "web/src/**/*.ts"
+        - "web/src/**/*.tsx"
+      languages: []
+    source:
+      doc: CLAUDE.md
+      anchor: "構成と規約"
+    on_missing_input: unknown
+    exceptions_allowed: true

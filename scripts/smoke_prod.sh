@@ -33,6 +33,22 @@ ok "/health ($body)"
   fail "ディープリンクが index.html にフォールバックしない"
 ok "SPA とディープリンク"
 
+# 2b) フロントエンドのビルドに Firebase の authDomain が埋め込まれているか
+#     （2026-09-28: Actions の変数が空のままビルドされ、ログインできなくなった）。
+#     値そのものは固定せず、<名前>.firebaseapp.com / .web.app の形だけ見る
+html=$(curl -sf --max-time 30 "$WEB_URL/") || fail "index.html を取得できない"
+bundles=$(grep -oE '/assets/[^"]+\.js' <<<"$html" | sort -u) || true
+[[ -n "$bundles" ]] || fail "index.html から JS バンドルを見つけられない"
+auth_domain=""
+while read -r path; do
+  js=$(curl -sf --max-time 60 "$WEB_URL$path") || fail "バンドル $path を取得できない"
+  found=$(grep -oE "authDomain:[\`\"'][A-Za-z0-9.-]+\.(firebaseapp\.com|web\.app)[\`\"']" <<<"$js" | head -n1) || true
+  if [[ -n "$found" ]]; then auth_domain="$found"; break; fi
+done <<<"$bundles"
+[[ -n "$auth_domain" ]] ||
+  fail "バンドルに authDomain（*.firebaseapp.com / *.web.app）が無い。Actions の変数 VITE_FIREBASE_AUTH_DOMAIN を確認してビルドし直す"
+ok "フロントエンドに authDomain が埋め込まれている（${auth_domain}）"
+
 # 3) 認証が要るエンドポイントは 401（ErrorResponse 形式）
 code=$(curl -so /tmp/smoke_api.json -w '%{http_code}' "$WEB_URL/api/review-runs")
 case "$code" in

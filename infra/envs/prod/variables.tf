@@ -144,3 +144,12 @@ variable "github_client_id" {
   type        = string
   default     = ""
 }
+
+variable "user_project_override" {
+  description = <<-EOT
+    provider の user_project_override（versions.tf）。手元のユーザー ADC では true が要る。
+    SA の資格情報で流す terraform-plan.yml は false にし、planner SA に serviceusage.services.use を持たせない。
+  EOT
+  type        = bool
+  default     = true
+}

@@ -257,6 +257,12 @@ async def test_budget_reserves_worst_case_and_settles_actual() -> None:
     assert await guard.ledger.total_for_day(date(2026, 10, 4)) == Decimal(0)
 
 
+def test_output_cap_leaves_room_beyond_thinking() -> None:
+    """Gemini の max_output_tokens は思考のトークンを含む。2048 では思考だけで尽き、答えが空に
+    なりうるので、仕様ボット（GeminiJsonLlm）と同じ桁の上限にする（S60）。"""
+    assert CONSULT_MAX_OUTPUT_TOKENS >= 8192
+
+
 async def test_budget_refusal_fails_before_running_agent() -> None:
     h = harness(model=ScriptedLlm(steps=[[text("x")]]), cost_guard=_guard())
     h.deps.budget = LedgerBudget(allow=0)

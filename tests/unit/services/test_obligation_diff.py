@@ -126,3 +126,30 @@ def test_command_authorization_matches_by_github_user_id() -> None:
     assert authorize_command(cmd, "renamed-me", author_id=111, settings=settings).accepted
     assert not authorize_command(cmd, "tanabe-yudai", author_id=999, settings=settings).accepted
     assert not authorize_command(cmd, "tanabe-yudai", author_id=None, settings=settings).accepted
+
+
+def test_server_approval_takes_the_head_spec_hash() -> None:
+    """コメントでの承認は本文のハッシュを持たないので、head の本文のハッシュで補う。
+
+    補わないと、検証器が `sha256:unknown` と今の本文を比べて E_SPEC_HASH_MISMATCH にし、
+    コメントで承認した要求の変更が検査を通らない（PR #100 で発覚）。
+    """
+    changed = co.RULES[3].model_copy(update={"applicability": and_(co.IS_ADMIN, co.PENDING)})
+    head = BASE.model_copy(
+        update={
+            "rules": [*BASE.rules[:3], changed, *BASE.rules[4:]],
+            "spec_content_hash": "sha256:head-spec",
+        }
+    )
+    approval = ApprovalRecord(
+        id="pr-comment:1",
+        approver="tanabe-yudai",
+        approved_at=datetime(2026, 9, 22, tzinfo=UTC),
+        source="pr_comment",
+        spec_content_hash="sha256:unknown",
+        ir_content_hash=rule_content_hash(changed),
+    )
+    spec, _, _ = effective_spec(BASE, head, [approval])
+    rule = next(r for r in spec.rules if r.id == "R-CANCEL-04")
+    attached = next(a for a in spec.approvals if a.id == rule.approval_ref)
+    assert attached.spec_content_hash == "sha256:head-spec"
