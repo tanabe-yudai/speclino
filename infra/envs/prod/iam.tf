@@ -1,7 +1,7 @@
 # サービスアカウントと IAM。ロール構成は design/2026-09-22-hackathon-plan.md の
 # 「アーキテクチャ」節にある3サービスの IAM 構成表に従う。
 #
-#   web:      cloudsql.client / cloudtasks.enqueuer / tasks SA への serviceAccountUser /
+#   web:      cloudsql.client / aiplatform.user（S59: A2A の議論役）/ cloudtasks.enqueuer / tasks SA への serviceAccountUser /
 #             worker サービスへの run.invoker（run.tf、S54: MCP の context_get を委譲） /
 #             成果物バケットへの storage.objectViewer（storage.tf、読むだけ）
 #             （secretAccessor は web 用 secret に限定するため secrets.tf 側で個別付与）
@@ -64,6 +64,13 @@ resource "google_project_iam_member" "worker_aiplatform_user" {
   project = var.project_id
   role    = "roles/aiplatform.user"
   member  = "serviceAccount:${google_service_account.this["worker"].email}"
+}
+
+# web の A2A の議論役（ADK + Gemini）が Vertex AI を呼ぶ
+resource "google_project_iam_member" "web_aiplatform_user" {
+  project = var.project_id
+  role    = "roles/aiplatform.user"
+  member  = "serviceAccount:${google_service_account.this["web"].email}"
 }
 
 resource "google_project_iam_member" "worker_logging_writer" {

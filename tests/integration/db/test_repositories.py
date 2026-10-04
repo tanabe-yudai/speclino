@@ -254,3 +254,21 @@ async def test_a_legacy_row_without_an_id_is_not_adopted_by_name(session: AsyncS
     )
     assert resolved.id != legacy.id and resolved.github_repo_id == 990301
     assert evicted == ["acme/legacy"]
+
+
+async def test_supersede_open_runs_ignores_runs_without_pr(
+    session: AsyncSession, project_id: uuid.UUID
+) -> None:
+    """PR の無い run（手動・MCP・A2A）同士は打ち切らない。"""
+    repo = ReviewRunRepository(session)
+    first = await repo.create(
+        project_id=project_id, pr_number=None, head_sha="a" * 40, base_sha=None, trigger="mcp"
+    )
+    second = await repo.create(
+        project_id=project_id, pr_number=None, head_sha="b" * 40, base_sha=None, trigger="a2a"
+    )
+
+    assert await repo.supersede_open_runs(project_id, None, except_run_id=second.id) == 0
+
+    await session.refresh(first)
+    assert first.exec_state == "queued"

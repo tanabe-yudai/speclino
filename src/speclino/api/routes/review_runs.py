@@ -19,6 +19,7 @@ from speclino.db.models import ReviewRun
 from speclino.db.repositories import FindingRepository, RunEventRepository
 from speclino.domain.run import GitRef
 from speclino.domain.workspace import AuthUser
+from speclino.services import agent_supplements
 from speclino.services.demo_rerun import RerunNotFound, demo_rerun
 from speclino.services.workspaces import (
     WorkspaceNotFound,
@@ -115,6 +116,19 @@ async def get_run(
             **_run_view(run, project.repo_full_name),
             "findings": [f.payload for f in findings],
         }
+
+
+@router.get("/{run_id}/supplements", responses=error_responses(404))
+async def get_supplements(
+    run_id: uuid.UUID,
+    state: AppState = Depends(get_state),
+    user: AuthUser = Depends(require_user),
+) -> dict[str, Any]:
+    """エージェントからの補足（S59）。正式な回答ではない。見える run のものだけ返す。"""
+    await _require_visible_run(state, user, run_id)
+    async with state.session_factory() as session:
+        views = await agent_supplements.list_for_run(session, run_id=run_id)
+    return {"supplements": [v.model_dump(mode="json") for v in views]}
 
 
 @router.post("/{run_id}/rerun", status_code=202, responses=error_responses(404, 429))

@@ -84,6 +84,7 @@ locals {
   web_env = merge(local.web_queue_env, local.web_github_oauth_env, {
     SPECLINO_AUTH_KIND           = "identity_platform"
     SPECLINO_FIREBASE_PROJECT_ID = var.project_id
+    SPECLINO_A2A_ENABLED         = "true"
   })
 
   # GitHub App のユーザー認可（S55 のリポジトリ登録）。Client ID は秘密ではない

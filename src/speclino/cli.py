@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+import os
+import uuid
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Annotated, get_args
 
+import httpx
 import typer
+from a2a.client import A2ACardResolver, ClientConfig, ClientFactory
+from a2a.helpers import get_artifact_text, get_message_text, new_data_part, new_text_part
+from a2a.types import Message, Role, SendMessageRequest, Task, TaskState
+from google.protobuf.json_format import MessageToDict
 from pydantic import ValidationError
 
 from speclino import __version__
@@ -39,7 +48,6 @@ def _in_transaction[T](work: Callable[[AsyncSession], Awaitable[T]]) -> T:
 
     `ValueError` は拒否として終了コード 2 とメッセージにする。
     """
-    import asyncio
 
     from speclino.db.session import make_engine, make_session_factory
     from speclino.settings import Settings
@@ -205,6 +213,145 @@ def schemas(
         typer.echo(str(path))
 
 
+_A2A_STATE_NAMES = {
+    "TASK_STATE_SUBMITTED": "SUBMITTED",
+    "TASK_STATE_WORKING": "WORKING",
+    "TASK_STATE_INPUT_REQUIRED": "INPUT_REQUIRED",
+    "TASK_STATE_COMPLETED": "COMPLETED",
+    "TASK_STATE_FAILED": "FAILED",
+    "TASK_STATE_CANCELED": "CANCELED",
+    "TASK_STATE_REJECTED": "REJECTED",
+    "TASK_STATE_AUTH_REQUIRED": "AUTH_REQUIRED",
+}
+
+
+def _client(
+    url: str, token: str, transport: httpx.AsyncBaseTransport | None = None
+) -> httpx.AsyncClient:
+    """A2A サーバへの HTTP クライアント（Bearer 付き）。transport はテストで差し替える。"""
+    return httpx.AsyncClient(
+        base_url=url.rstrip("/"),
+        headers={"Authorization": f"Bearer {token}"},
+        transport=transport,
+        timeout=360.0,  # 検査待ち（サーバ側で最大 180 秒）＋ 議論役（最大 120 秒）を待てるように
+    )
+
+
+def _a2a_message(
+    text: str, skill: str | None, fields: dict[str, str | None], task_id: str | None
+) -> Message:
+    """送るメッセージ。skill があれば DataPart で指定し、返信（task_id あり）は本文だけ。"""
+    parts = []
+    if skill is not None and task_id is None:
+        meta = {"skill": skill, **{k: v for k, v in fields.items() if v is not None}}
+        parts.append(new_data_part(meta))
+    if text:
+        parts.append(new_text_part(text))
+    return Message(role=Role.ROLE_USER, message_id=uuid.uuid4().hex, parts=parts)
+
+
+def _a2a_render(task: Task) -> list[str]:
+    """タスクの状態・最後のエージェントの発言・成果物を表示用の行にする。"""
+    state = TaskState.Name(task.status.state)
+    lines = [
+        f"state: {_A2A_STATE_NAMES.get(state, state)}",
+        f"task_id: {task.id}",
+        f"context_id: {task.context_id}",
+    ]
+    if task.status.HasField("message"):
+        lines.append(f"message: {get_message_text(task.status.message)}")
+    for artifact in task.artifacts:
+        lines.append(f"artifact: {artifact.name}")
+        text = get_artifact_text(artifact)
+        if text:
+            lines.append(text)
+        lines.extend(
+            json.dumps(d, ensure_ascii=False, indent=2)
+            for part in artifact.parts
+            if part.HasField("data")
+            for d in [MessageToDict(part.data)]
+        )
+    return lines
+
+
+async def _a2a_send(http: httpx.AsyncClient, message: Message) -> Task:
+    card = await A2ACardResolver(http, str(http.base_url)).get_agent_card()
+    client = ClientFactory(ClientConfig(streaming=False, httpx_client=http)).create(card)
+    last = None
+    async for event in client.send_message(SendMessageRequest(message=message)):
+        last = event
+    if last is None or not last.HasField("task"):
+        raise RuntimeError("サーバからタスクが返らなかった")
+    return last.task
+
+
+@app.command("a2a-send")
+def a2a_send(
+    text: Annotated[str, typer.Argument(help="本文（質問・返信・仕様の Markdown）")] = "",
+    url: Annotated[str, typer.Option("--url", help="SpecLino のベース URL")] = "",
+    skill: Annotated[
+        str | None,
+        typer.Option(help="spec_review / requirement_consult / run_clarification"),
+    ] = None,
+    repo: Annotated[str | None, typer.Option(help="owner/name")] = None,
+    behavior: Annotated[str | None, typer.Option(help="spec_review の対象の振る舞い")] = None,
+    path: Annotated[str | None, typer.Option(help="spec_review の書き込み先の候補パス")] = None,
+    requirement_id: Annotated[
+        str | None, typer.Option(help="requirement_consult の要求 ID")
+    ] = None,
+    commit: Annotated[
+        str | None, typer.Option(help="requirement_consult の検査対象のコミット")
+    ] = None,
+    run_id: Annotated[str | None, typer.Option(help="run_clarification の検査 ID")] = None,
+    task_id: Annotated[str | None, typer.Option(help="入力待ちへの返信先のタスク")] = None,
+    context_id: Annotated[str | None, typer.Option(help="入力待ちへの返信先の文脈")] = None,
+    file: Annotated[Path | None, typer.Option(help="本文を読むファイル（front matter 可）")] = None,
+) -> None:
+    """A2A のエージェントにメッセージを送る。トークンは環境変数 SPECLINO_TOKEN から読む。"""
+    token = os.environ.get("SPECLINO_TOKEN")
+    if not token:
+        typer.echo(
+            "環境変数 SPECLINO_TOKEN にワークスペースの MCP トークン（slmcp_...）を"
+            "設定してください。"
+            "トークンは引数では受け付けない（シェルの履歴に残るため）",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    if not url:
+        typer.echo("--url に SpecLino のベース URL を指定してください", err=True)
+        raise typer.Exit(code=2)
+    try:
+        body = file.read_text(encoding="utf-8") if file is not None else text
+    except OSError as e:
+        typer.echo(f"--file を読めません: {file}: {e.strerror or type(e).__name__}", err=True)
+        raise typer.Exit(code=2) from e
+    fields = {
+        "repo": repo,
+        "behavior": behavior,
+        "path": path,
+        "requirement_id": requirement_id,
+        "commit": commit,
+        "run_id": run_id,
+    }
+    message = _a2a_message(body, skill, fields, task_id)
+    if task_id:
+        message.task_id = task_id
+    if context_id:
+        message.context_id = context_id
+
+    async def _run() -> Task:
+        async with _client(url, token) as http:
+            return await _a2a_send(http, message)
+
+    try:
+        task = asyncio.run(_run())
+    except Exception as e:  # 接続・認証・プロトコルの失敗。理由の型だけ見せ、トークンは出さない
+        typer.echo(f"送信に失敗した: {type(e).__name__}: {str(e).replace(token, '***')}", err=True)
+        raise typer.Exit(code=1) from e
+    for line in _a2a_render(task):
+        typer.echo(line)
+
+
 def main() -> None:
     app()
 
@@ -263,7 +410,6 @@ def spec_extract(
     終了コード: 0=候補が検証を通った（警告は表示）/ 2=候補に誤り（語彙外の参照など）または
     入力不正。候補は approval_ref 無しで出力され、承認は `/speclino approve-spec` で行う。
     """
-    import asyncio
     import json
 
     from speclino.adapters.llm.gemini_json import GeminiJsonLlm

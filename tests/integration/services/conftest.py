@@ -115,12 +115,18 @@ async def engine() -> AsyncIterator[AsyncEngine]:
             ("questions", "run_id", rid),
             ("cost_ledger", "run_id", rid),
             ("audit_events", "run_id", rid),
+            ("agent_supplements", "run_id", rid),
             ("review_runs", "project_id", pid),
             ("approvals", "project_id", pid),
             ("projects", "id", pid),
         ):
             await conn.execute(sql_text(f"DELETE FROM {table} WHERE {col} IN ({sub})"))
         # チーム規約・ワークスペースのテストは e2e- で始まるチームを使う
+        await conn.execute(sql_text("DELETE FROM a2a_tasks WHERE owner LIKE 'e2e-%'"))
+        # A2A の監査は run に紐づかない（target がワークスペース）
+        await conn.execute(
+            sql_text("DELETE FROM audit_events WHERE action LIKE 'a2a.%' AND target LIKE 'e2e-%'")
+        )
         for table in (
             "mcp_tokens",
             "repo_link_attempts",

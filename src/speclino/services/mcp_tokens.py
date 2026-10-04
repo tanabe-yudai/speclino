@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from speclino.db.models import McpTokenRecord
 from speclino.db.repositories.audit import AuditRepository
 from speclino.db.repositories.mcp_tokens import McpTokenRepository
+from speclino.domain.a2a import TokenIdentity
 from speclino.domain.workspace import IssuedMcpToken, McpTokenInfo
 from speclino.services.workspaces import WorkspaceNotFound, require_owner
 
@@ -54,8 +55,8 @@ async def revoke(session: AsyncSession, *, slug: str, token_id: uuid.UUID, actor
     )
 
 
-async def authenticate(session: AsyncSession, token: str) -> str | None:
-    """有効なトークンならそのワークスペースの slug。無い・失効済みなら None（区別しない）。"""
+async def authenticate_identity(session: AsyncSession, token: str) -> TokenIdentity | None:
+    """有効なトークンの身元（ワークスペースとトークン ID）。無い・失効済みは None。"""
     if not token.startswith(TOKEN_PREFIX):
         return None
     repo = McpTokenRepository(session)
@@ -63,7 +64,13 @@ async def authenticate(session: AsyncSession, token: str) -> str | None:
     if record is None:
         return None
     await repo.touch(record.id)
-    return record.team
+    return TokenIdentity(team=record.team, token_id=record.id)
+
+
+async def authenticate(session: AsyncSession, token: str) -> str | None:
+    """有効なトークンならそのワークスペースの slug。無い・失効済みなら None（区別しない）。"""
+    identity = await authenticate_identity(session, token)
+    return identity.team if identity else None
 
 
 def _info(record: McpTokenRecord) -> McpTokenInfo:
@@ -81,6 +88,7 @@ __all__ = [
     "TOKEN_PREFIX",
     "WorkspaceNotFound",
     "authenticate",
+    "authenticate_identity",
     "hash_token",
     "issue",
     "list_tokens",

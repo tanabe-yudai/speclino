@@ -328,6 +328,28 @@ Claude Code 以外の MCP クライアントには、サーバーの `instructio
 `plugins/speclino/skills/speclino-spec-authoring/SKILL.md` から読むので、Skill と内容がずれない
 （`src/speclino/mcp_server/server.py`）。
 
+## A2A で議論役に相談する
+
+仕様のレビュー（`spec_review`）・要求の相談（`requirement_consult`）・検査の後の聞き取り
+（`run_clarification`）は、A2A のエージェントとして会話で使える。Agent Card は
+`https://<your-host>/.well-known/agent-card.json`（認証不要）、JSON-RPC は `/a2a`。
+認証はワークスペースの MCP トークン（`slmcp_…`）を Bearer で付ける。サーバ側は
+`SPECLINO_A2A_ENABLED=true` で有効になる。判定は検査器だけが行い、聞き取りの補足は正式な
+回答ではない（承認は PR で人が行う）。
+
+最小のクライアント（トークンは環境変数だけで受け、引数には取らない）:
+
+```sh
+export SPECLINO_TOKEN=slmcp_...
+uv run speclino a2a-send --url https://<your-host> --skill requirement_consult \
+  --repo <owner>/<name> --requirement-id R-CANCEL-01 "この要求は発送済みの注文にも効く？"
+# state: INPUT_REQUIRED のときは、表示された task_id / context_id を付けて返信する
+uv run speclino a2a-send --url https://<your-host> --task-id <task_id> --context-id <context_id> "回答"
+```
+
+テキストしか送れないクライアントは、本文の先頭に YAML front matter（`skill: ...`）を書く。
+書き方は Agent Card の `examples` と `plugins/speclino/skills/speclino-spec-authoring/SKILL.md` を参照。
+
 ## UNKNOWN の読み方
 
 UNKNOWN は「壊れている」でも「大丈夫」でもなく、**この道具では確認できなかった**という報告。

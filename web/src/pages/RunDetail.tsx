@@ -2,13 +2,14 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { getReviewMarkdown, getRun, getRunEvents } from '../api/reviewRuns'
+import { getReviewMarkdown, getRun, getRunEvents, getSupplements } from '../api/reviewRuns'
 import { ApiError } from '../api/errors'
 import { ErrorState } from '../components/ErrorState'
 import { FindingCard } from '../components/FindingCard'
 import { LoadingState } from '../components/LoadingState'
 import { RerunButton } from '../components/RerunButton'
 import { ScopeBlock } from '../components/ScopeBlock'
+import { SupplementList } from '../components/SupplementList'
 import { Timeline } from '../components/Timeline'
 import { describeGateReason } from '../services/gate'
 import { formatDateTime, shortSha } from '../services/format'
@@ -24,6 +25,7 @@ import { collectScopeAndAssumptions, collectUnresolvedItems, countByVerdict, gro
 import type { RunEvent } from '../types/events'
 import type { RerunResponse, ReviewRunDetail } from '../types/run'
 import type { Verdict } from '../types/finding'
+import type { AgentSupplement } from '../types/supplement'
 
 type Tab = 'timeline' | 'markdown'
 
@@ -45,6 +47,7 @@ export function RunDetail() {
 function RunDetailView({ id }: { id: string }) {
   const [run, setRun] = useState<ReviewRunDetail | null>(null)
   const [events, setEvents] = useState<RunEvent[] | null>(null)
+  const [supplements, setSupplements] = useState<AgentSupplement[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
 
   const [tab, setTab] = useState<Tab>('timeline')
@@ -61,6 +64,10 @@ function RunDetailView({ id }: { id: string }) {
       .catch((err: unknown) => {
         setLoadError(err instanceof ApiError ? err.message : 'run の取得に失敗しました')
       })
+    // 補足は付随情報。取れなくても本体の表示は止めない（取れなければ前回の表示を保つ）
+    getSupplements(id)
+      .then(setSupplements)
+      .catch(() => {})
   }, [id])
 
   useEffect(() => {
@@ -122,7 +129,7 @@ function RunDetailView({ id }: { id: string }) {
 
           <section className="space-y-4">
             <h2 className="text-lg font-semibold tracking-tight">判定結果</h2>
-            <FindingsByVerdict run={run} />
+            <FindingsByVerdict run={run} supplements={supplements} />
           </section>
 
           <Tabs value={tab} onValueChange={(v) => selectTab(v as Tab)}>
@@ -245,7 +252,7 @@ function CountTile({ verdict, count }: { verdict: Verdict; count: number }) {
   )
 }
 
-function FindingsByVerdict({ run }: { run: ReviewRunDetail }) {
+function FindingsByVerdict({ run, supplements }: { run: ReviewRunDetail; supplements: AgentSupplement[] }) {
   if (run.findings.length === 0) {
     return <p className="text-sm text-ink-3">この検査にはまだ所見がありません（実行中、または未完了の可能性があります）。</p>
   }
@@ -262,7 +269,12 @@ function FindingsByVerdict({ run }: { run: ReviewRunDetail }) {
               {items.length} 件
             </h3>
             {items.map((finding) => (
-              <FindingCard key={finding.id} finding={finding} repoFullName={run.repo_full_name} headSha={run.head_sha} />
+              <div key={finding.id} className="space-y-2">
+                <FindingCard finding={finding} repoFullName={run.repo_full_name} headSha={run.head_sha} />
+                {verdict === 'REVIEW' && (
+                  <SupplementList supplements={supplements.filter((s) => s.requirement_id === finding.requirement_id)} />
+                )}
+              </div>
             ))}
           </div>
         )

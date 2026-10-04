@@ -69,7 +69,12 @@ class ReviewRunRepository:
     async def supersede_open_runs(
         self, project_id: uuid.UUID, pr_number: int | None, except_run_id: uuid.UUID
     ) -> int:
-        """同一 PR の未完了 run（queued/running/awaiting_answer）を superseded にする。"""
+        """同一 PR の未完了 run（queued/running/awaiting_answer）を superseded にする。
+
+        PR の無い run（手動・MCP・A2A）は「同一 PR」が無いので何もしない。
+        """
+        if pr_number is None:
+            return 0
         stmt = (
             update(ReviewRun)
             .where(
