@@ -5,6 +5,8 @@
 - ただし `approvers`（PR コメントの approve-spec / answer / attest を受け付ける GitHub ログイン名。
   webhook がこれを信じる）を変えられるのは owner だけ。approver が自分や協力者を足せると、仕様の
   承認や人の証拠を注入できてしまう。approver が承認者を据え置いたまま他の項目を変えるのは通す
+- 承認者は保存のとき GitHub のユーザー ID（`approver_ids`）も引いて一緒に保存し、照合は ID で
+  行う（S61、`services/approvers.py`）。ID を引けないログイン名があれば保存を断る
 - オンボーディング: 「GitHub App を入れる → `.speclino/` を置く → PR を開く」の各段階を、web の
   役割が既に持っているデータ（`projects.installation_id`・run の状態・失敗の理由）だけから導く。
   `.speclino/` の有無を直接確かめるには GitHub App の秘密鍵が要り、鍵は worker だけが持つ
@@ -18,6 +20,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping
 
 from pydantic import ValidationError
 from sqlalchemy import select
@@ -26,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from speclino.db.models import Project, ReviewRun, RunEvent
 from speclino.db.repositories.audit import AuditRepository
 from speclino.domain.project_settings import (
+    ApproverAccount,
     OnboardingStep,
     ProjectOnboarding,
     ProjectSettings,
@@ -34,6 +38,7 @@ from speclino.domain.project_settings import (
     WorkspaceOnboarding,
 )
 from speclino.domain.workspace import APPROVER_ROLES, WorkspaceRole
+from speclino.ports.github_users import GitHubUserLookup, GitHubUserLookupError
 from speclino.services.workspaces import NotPermitted, WorkspaceNotFound, record_denial, role_of
 
 # 保存値が型に合わないときの値: ゲートは既定のまま、証拠を増やす機能だけを止める（安全側）。
@@ -58,6 +63,18 @@ def parse_stored(raw: dict[str, object]) -> StoredProjectSettings:
         return StoredProjectSettings(settings=ProjectSettings.model_validate(raw))
     except ValidationError:
         return StoredProjectSettings(settings=LOCKED_DOWN, invalid=True)
+
+
+def approver_ids_missing(raw: Mapping[str, object]) -> bool:
+    """承認者がいるのに、その GitHub ユーザー ID が無い・足りないか（設定画面の警告。S61）。
+
+    ID の無い承認者は承認できない（`services/approvers.is_approver`）ので、保存し直しを促す。
+    """
+    stored = parse_stored(dict(raw))
+    if stored.invalid:
+        return False
+    s = stored.settings
+    return bool(s.approvers) and len(s.approver_ids) != len(s.approvers)
 
 
 def derive_onboarding(
@@ -129,6 +146,57 @@ class ApproversOwnerOnly(NotPermitted):
     """owner でない人が PR の承認者（`approvers`）を変えようとした。"""
 
 
+class UnknownGitHubLogin(ValueError):
+    """GitHub のユーザー ID を引けなかったログイン名がある（保存を断る）。"""
+
+    def __init__(self, logins: list[str]) -> None:
+        super().__init__(f"GitHub のユーザーが見つからない: {', '.join(logins)}")
+        self.logins = logins
+
+
+class GitHubLookupFailed(RuntimeError):
+    """GitHub にユーザー ID を問い合わせられなかった（レート制限・通信の失敗）。"""
+
+
+async def resolve_approver_ids(
+    users: GitHubUserLookup, approvers: list[str], stored: dict[str, object]
+) -> list[int]:
+    """`approvers` と同じ順の GitHub ユーザー ID。
+
+    保存済みのログイン名と ID の組はそのまま使い、新しいログイン名だけ GitHub に問い合わせる。
+    引き直すと、改名後に同じログイン名を取った別人の ID にすり替わりうるため。
+    """
+    known: dict[str, int] = {}
+    parsed = parse_stored(stored)
+    if not parsed.invalid and len(parsed.settings.approver_ids) == len(parsed.settings.approvers):
+        known = dict(zip(parsed.settings.approvers, parsed.settings.approver_ids, strict=True))
+    ids: list[int] = []
+    unknown: list[str] = []
+    for login in approvers:
+        if login in known:
+            ids.append(known[login])
+            continue
+        try:
+            user_id = await users.user_id(login)
+        except GitHubUserLookupError as e:
+            raise GitHubLookupFailed(str(e)) from e
+        if user_id is None:
+            unknown.append(login)
+        else:
+            ids.append(user_id)
+    if unknown:
+        raise UnknownGitHubLogin(unknown)
+    return ids
+
+
+def _approver_accounts(s: ProjectSettings) -> list[ApproverAccount]:
+    """ログイン名と ID の組。ID が揃っていなければ（未登録）ID は None。"""
+    ids: list[int | None] = list(s.approver_ids)
+    if len(ids) != len(s.approvers):
+        ids = [None] * len(s.approvers)
+    return [ApproverAccount(login=lg, id=i) for lg, i in zip(s.approvers, ids, strict=True)]
+
+
 def _view(project: Project, role: WorkspaceRole) -> ProjectSettingsView:
     stored = parse_stored(project.settings)
     return ProjectSettingsView(
@@ -138,6 +206,8 @@ def _view(project: Project, role: WorkspaceRole) -> ProjectSettingsView:
         stored_invalid=stored.invalid,
         can_edit=role in APPROVER_ROLES,
         can_edit_approvers=role == "owner",
+        approver_ids_missing=approver_ids_missing(project.settings),
+        approvers=_approver_accounts(stored.settings),
     )
 
 
@@ -155,10 +225,15 @@ async def update_settings(
     uid: str,
     project_id: uuid.UUID,
     settings: ProjectSettings,
+    users: GitHubUserLookup,
     audit_factory: async_sessionmaker[AsyncSession] | None = None,
 ) -> ProjectSettingsView:
     """設定を置き換える。owner / approver 以外は `NotPermitted`、owner 以外が `approvers` を
-    変えようとしたら `ApproversOwnerOnly`（どちらも拒否を監査に残し、何も書かない）。"""
+    変えようとしたら `ApproversOwnerOnly`（どちらも拒否を監査に残し、何も書かない）。
+
+    `approver_ids` は送られてきた値を使わず、`approvers` から引いて埋める（S61）。引けない
+    ログイン名があれば `UnknownGitHubLogin`、問い合わせに失敗したら `GitHubLookupFailed`
+    （どちらも何も書かない）。"""
     role = await _member_role(session, slug, uid)
     project = await _project_in(session, slug, project_id)
     if role not in APPROVER_ROLES:
@@ -188,8 +263,14 @@ async def update_settings(
             },
         )
         raise ApproversOwnerOnly(f"{uid} は {slug} の PR の承認者を変更できない")
+    if role == "owner":
+        approver_ids = await resolve_approver_ids(users, settings.approvers, project.settings)
+    else:
+        # owner でない人（承認者は据え置き）は ID を引かない。どの GitHub アカウントを承認者として
+        # 結び付けるかは owner だけが決める。保存済みの ID をそのまま残す
+        approver_ids = list(parse_stored(project.settings).settings.approver_ids)
     before = parse_stored(project.settings)
-    after = settings.model_dump(mode="json")
+    after = settings.model_copy(update={"approver_ids": approver_ids}).model_dump(mode="json")
     project.settings = after
     await session.flush()
     await AuditRepository(session).record(
@@ -268,11 +349,15 @@ async def workspace_onboarding(
 __all__ = [
     "LOCKED_DOWN",
     "ApproversOwnerOnly",
+    "GitHubLookupFailed",
     "NotPermitted",
+    "UnknownGitHubLogin",
     "WorkspaceNotFound",
+    "approver_ids_missing",
     "derive_onboarding",
     "get_settings",
     "parse_stored",
+    "resolve_approver_ids",
     "update_settings",
     "workspace_onboarding",
 ]

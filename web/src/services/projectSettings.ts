@@ -1,6 +1,7 @@
 /** project の設定とオンボーディングの表示ロジック（S47）。コンポーネントには埋め込まない。 */
 
 import type {
+  ApproverAccount,
   OnboardingState,
   OnboardingStep,
   OnboardingStepId,
@@ -44,6 +45,16 @@ export function settingsEqual(a: ProjectSettings, b: ProjectSettings): boolean {
     a.fail_on.join(',') === b.fail_on.join(',') &&
     a.approvers.join(',') === b.approvers.join(',')
   )
+}
+
+/** 承認者の確認用の表示（`login（ID: 12345）`）。ID が未登録なら「未登録」。 */
+export function approverLabel(a: ApproverAccount): string {
+  return `${a.login}（ID: ${a.id ?? '未登録'}）`
+}
+
+/** 保存し直しが要るか（読めない保存値・承認者の GitHub ユーザー ID の未登録）。変更が無くても保存できる。 */
+export function needsResave(view: ProjectSettingsView): boolean {
+  return view.stored_invalid || view.approver_ids_missing
 }
 
 export interface SettingsInput {

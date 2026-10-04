@@ -17,15 +17,28 @@ from speclino.db.models import Base
 _DATABASE_URL = os.environ.get("SPECLINO_DATABASE_URL")
 
 
+def login_id(login: str) -> int:
+    """テスト用の GitHub ユーザー ID（ログイン名から決まる固定値）。コメントのペイロードも使う。"""
+    return zlib.crc32(f"user:{login}".encode())
+
+
 async def set_project_approvers(engine: AsyncEngine, repo: str, approvers: list[str]) -> None:
-    """project の承認者を設定する（PR コマンドの承認者は project ごとの設定だけ。S52）。"""
+    """project の承認者を設定する（PR コマンドの承認者は project ごとの設定だけ。S52）。
+
+    照合は GitHub のユーザー ID だけで行うので（S61）、`login_id` の ID も一緒に保存する。
+    """
     async with engine.begin() as conn:
         result = await conn.execute(
             sql_text(
-                "UPDATE projects SET settings = jsonb_set(settings, '{approvers}', "
-                "CAST(:approvers AS jsonb)) WHERE repo_full_name = :repo"
+                "UPDATE projects SET settings = settings || CAST(:patch AS jsonb) "
+                "WHERE repo_full_name = :repo"
             ),
-            {"approvers": json.dumps(approvers), "repo": repo},
+            {
+                "patch": json.dumps(
+                    {"approvers": approvers, "approver_ids": [login_id(a) for a in approvers]}
+                ),
+                "repo": repo,
+            },
         )
         assert result.rowcount == 1, f"{repo} の project が無い"
 

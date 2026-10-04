@@ -30,7 +30,12 @@ from speclino.services.review_run_service import ReviewRunConfig, ReviewRunServi
 from speclino.settings import Settings
 from speclino.spec import load_spec_ir
 from speclino.spec.spec_validator import rule_content_hash
-from tests.integration.services.conftest import register_repo, repo_id_of, set_project_approvers
+from tests.integration.services.conftest import (
+    login_id,
+    register_repo,
+    repo_id_of,
+    set_project_approvers,
+)
 from tests.integration.services.test_review_run_service import make_demo_repo
 
 
@@ -81,13 +86,17 @@ def pr_payload(
     }
 
 
-def comment_payload(repo: str, number: int, body: str, login: str) -> dict[str, Any]:
+def comment_payload(
+    repo: str, number: int, body: str, login: str, user_id: int | None = None
+) -> dict[str, Any]:
+    # 既定の ID は `login_id`（`set_project_approvers` が保存する ID と同じ）
+    user: dict[str, Any] = {"login": login, "id": login_id(login) if user_id is None else user_id}
     return {
         "action": "created",
         "installation": {"id": 1},
         "repository": {"full_name": repo, "id": repo_id_of(repo)},
         "issue": {"number": number, "pull_request": {"url": "x"}},
-        "comment": {"body": body, "user": {"login": login}, "html_url": "https://c/1"},
+        "comment": {"body": body, "user": user, "html_url": "https://c/1"},
     }
 
 
@@ -202,6 +211,32 @@ async def test_approve_spec_comment_triggers_rerun(
             )
         ).scalar_one()
     assert settings["approvers"] == ["approver"]
+
+
+async def test_approve_spec_comment_matches_approver_by_github_id(
+    client: tuple[httpx.AsyncClient, str, str, str, str, LocalCodeHost], engine: AsyncEngine
+) -> None:
+    """承認者の ID が保存されていれば ID で照合する（S61）。旧ログイン名を取った別人は通らない。"""
+    c, repo, base, _, head2, _ = client
+    raw, headers = signed(pr_payload(repo, head2, base, 3), "pull_request")
+    await c.post("/webhooks/github", content=raw, headers=headers)
+    async with engine.begin() as conn:
+        await conn.execute(
+            sql_text(
+                "UPDATE projects SET settings = settings || "
+                '\'{"approvers": ["approver"], "approver_ids": [111]}\'::jsonb '
+                "WHERE repo_full_name = :r"
+            ),
+            {"r": repo},
+        )
+    base_hash = rule_content_hash(_base_rule("R-CANCEL-04"))
+    cmd = f"/speclino approve-spec removed:{base_hash}"
+    raw, headers = signed(comment_payload(repo, 3, cmd, "approver", user_id=999), "issue_comment")
+    res = (await c.post("/webhooks/github", content=raw, headers=headers)).json()
+    assert res["status"] == "handled" and res["commands"][0]["accepted"] is False, res
+    raw, headers = signed(comment_payload(repo, 3, cmd, "renamed", user_id=111), "issue_comment")
+    res = (await c.post("/webhooks/github", content=raw, headers=headers)).json()
+    assert res["status"] == "queued", res
 
 
 async def test_manual_start_and_healthz(

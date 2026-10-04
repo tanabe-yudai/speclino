@@ -31,6 +31,8 @@ from speclino.domain.workspace import (
     WorkspaceSummary,
 )
 from speclino.ports.code_host import CodeHost
+from speclino.ports.github_users import GitHubUserLookup
+from speclino.services.project_settings import resolve_approver_ids
 
 # 管理 CLI / Cloud Run Job からの操作の actor（人手の承認ではなく管理者の操作のため固定値）。
 ADMIN_ACTOR = "admin-cli"
@@ -129,7 +131,7 @@ async def add_project(session: AsyncSession, *, slug: str, repo_full_name: str) 
 
 
 async def set_pr_approvers(
-    session: AsyncSession, *, repo_full_name: str, logins: list[str]
+    session: AsyncSession, *, repo_full_name: str, logins: list[str], users: GitHubUserLookup
 ) -> None:
     """PR コメントの `/speclino approve-spec` を受け付ける GitHub ログイン名を置き換える。
 
@@ -137,20 +139,61 @@ async def set_pr_approvers(
     `settings.approvers` に入る（S52 で全体共通の承認者を廃止した）。S47 からは設定画面の API
     （`services/project_settings.update_settings`、owner / approver だけ）からも変えられる。
     空リストなら誰も承認できない。project が無ければ `ValueError`。
+
+    照合は GitHub のユーザー ID だけで行う（S61）ので、ログイン名から ID を引き直して一緒に
+    保存する（古い承認者の ID は使わない）。引けないログイン名があれば `UnknownGitHubLogin`
+    （`ValueError`）、問い合わせに失敗したら `GitHubLookupFailed`（どちらも何も書かない）。
     """
     project = await ProjectRepository(session).get_by_repo(repo_full_name)
     if project is None:
         raise ValueError(f"project が存在しない: {repo_full_name}")
+    approver_ids = await resolve_approver_ids(users, logins, {})
     before = list(project.settings.get("approvers", []))
-    project.settings = {**project.settings, "approvers": logins}
+    project.settings = {**project.settings, "approvers": logins, "approver_ids": approver_ids}
     await session.flush()
     await AuditRepository(session).record(
         actor=ADMIN_ACTOR,
         action="project.set_pr_approvers",
         target=repo_full_name,
         decision="set",
-        detail={"before": before, "after": logins},
+        detail={"before": before, "after": logins, "approver_ids": approver_ids},
     )
+
+
+async def backfill_approver_ids(
+    session: AsyncSession, *, repo_full_name: str, users: GitHubUserLookup, apply: bool = False
+) -> list[tuple[str, int]]:
+    """保存済みの承認者（ログイン名）に GitHub のユーザー ID を補う（S61）。
+
+    ログイン名と ID の組を返す。`apply` が False なら引くだけで書かない（確認用）。ID は今その
+    ログイン名を持つ人のものなので、改名で手放されたログイン名を他人が取っていれば他人の ID になる。
+    組を人が確かめてから `apply=True` で保存する。
+
+    ID の無い設定では誰も承認者にならないので、既存の project の移行に使う。既に揃っている
+    ログイン名と ID の組はそのまま使う（引き直すと、改名後に同じログイン名を取った別人の ID に
+    すり替わりうる）。引けないログイン名があれば `UnknownGitHubLogin`（`ValueError`）。
+    保存値が型に合わなければ `ValueError`（設定画面で保存し直す）。
+    """
+    project = await ProjectRepository(session).get_by_repo(repo_full_name)
+    if project is None:
+        raise ValueError(f"project が存在しない: {repo_full_name}")
+    approvers = project.settings.get("approvers", [])
+    if not isinstance(approvers, list) or not all(isinstance(a, str) for a in approvers):
+        raise ValueError(f"{repo_full_name} の承認者の保存値が読めない。設定画面で保存し直す")
+    approver_ids = await resolve_approver_ids(users, approvers, project.settings)
+    pairs = list(zip(approvers, approver_ids, strict=True))
+    if not apply:
+        return pairs
+    project.settings = {**project.settings, "approver_ids": approver_ids}
+    await session.flush()
+    await AuditRepository(session).record(
+        actor=ADMIN_ACTOR,
+        action="project.backfill_approver_ids",
+        target=repo_full_name,
+        decision="filled",
+        detail={"approvers": approvers, "approver_ids": approver_ids},
+    )
+    return pairs
 
 
 async def backfill_repo_ids(session: AsyncSession, code_host: CodeHost) -> list[BackfillResult]:
@@ -256,6 +299,7 @@ __all__ = [
     "ADMIN_ACTOR",
     "add_member",
     "add_project",
+    "backfill_approver_ids",
     "backfill_repo_ids",
     "create_workspace",
     "list_workspaces",

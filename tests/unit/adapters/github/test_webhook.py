@@ -162,7 +162,7 @@ def _comment_payload(
         "comment": {
             "body": "/speclino approve-spec sha256:abc",
             "html_url": "https://github.com/acme/widgets/issues/9#issuecomment-1",
-            "user": {"login": "reviewer"},
+            "user": {"login": "reviewer", "id": 5150},
         },
     }
 
@@ -176,6 +176,7 @@ def test_extract_comment_on_pull_request() -> None:
     assert ref.issue_number == 9
     assert ref.body == "/speclino approve-spec sha256:abc"
     assert ref.author_login == "reviewer"
+    assert ref.author_id == 5150
     assert ref.comment_url == "https://github.com/acme/widgets/issues/9#issuecomment-1"
     assert ref.is_pull_request is True
 
@@ -184,6 +185,16 @@ def test_extract_comment_on_plain_issue() -> None:
     ref = extract_comment(_comment_payload())
     assert ref is not None
     assert ref.is_pull_request is False
+
+
+def test_extract_comment_without_user_id_has_no_author_id() -> None:
+    """ID の無いペイロードは author_id=None（承認しない側に倒すのは照合側）。"""
+    payload = _comment_payload()
+    comment = payload["comment"]
+    assert isinstance(comment, dict)
+    comment["user"] = {"login": "reviewer"}
+    ref = extract_comment(payload)
+    assert ref is not None and ref.author_id is None
 
 
 def test_extract_comment_ignores_non_created_action() -> None:

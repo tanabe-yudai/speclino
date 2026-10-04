@@ -105,10 +105,20 @@ async def test_add_member_replaces_role(engine: AsyncEngine) -> None:
     assert [r.decision for r in rows] == ["set", "set"]
 
 
+class _FakeUsers:
+    """`GET /users/{login}` の代わり。"""
+
+    def __init__(self, ids: dict[str, int]) -> None:
+        self.ids = ids
+
+    async def user_id(self, login: str) -> int | None:
+        return self.ids.get(login)
+
+
 async def test_set_pr_approvers_replaces_the_list_and_keeps_other_settings(
     engine: AsyncEngine,
 ) -> None:
-    """PR コメントの承認者（GitHub ログイン名）を置き換え、監査に前後を残す。"""
+    """PR コメントの承認者（GitHub ログイン名）を置き換え、ID も引き直して保存する。"""
     repo = _repo()
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session, session.begin():
@@ -116,22 +126,73 @@ async def test_set_pr_approvers_replaces_the_list_and_keeps_other_settings(
             Project(
                 repo_full_name=repo,
                 default_branch="main",
-                settings={"approvers": ["old"], "other": 1},
+                settings={"approvers": ["old"], "approver_ids": [5], "other": 1},
             )
         )
+    users = _FakeUsers({"alice": 77})
     async with factory() as session, session.begin():
-        await workspace_admin.set_pr_approvers(session, repo_full_name=repo, logins=["alice"])
+        await workspace_admin.set_pr_approvers(
+            session, repo_full_name=repo, logins=["alice"], users=users
+        )
 
     async with factory() as session:
         project = await ProjectRepository(session).get_by_repo(repo)
     assert project is not None
-    assert project.settings == {"approvers": ["alice"], "other": 1}
+    # ID が無いと誰も承認者にならないので、ログイン名から引いて一緒に保存する（S61）
+    assert project.settings == {"approvers": ["alice"], "approver_ids": [77], "other": 1}
     rows = await _audit_rows(factory, "project.set_pr_approvers", repo)
-    assert rows[0].detail == {"before": ["old"], "after": ["alice"]}
+    assert rows[0].detail == {"before": ["old"], "after": ["alice"], "approver_ids": [77]}
 
     with pytest.raises(ValueError, match="project が存在しない"):
         async with factory() as session, session.begin():
-            await workspace_admin.set_pr_approvers(session, repo_full_name="e2e/nope", logins=[])
+            await workspace_admin.set_pr_approvers(
+                session, repo_full_name="e2e/nope", logins=[], users=users
+            )
+    with pytest.raises(ValueError, match="GitHub のユーザーが見つからない"):
+        async with factory() as session, session.begin():
+            await workspace_admin.set_pr_approvers(
+                session, repo_full_name=repo, logins=["ghost"], users=users
+            )
+
+
+async def test_backfill_approver_ids_fills_ids_for_stored_logins(engine: AsyncEngine) -> None:
+    """ID の無い既存の設定に、今の承認者のログイン名から ID を補う（S61 の移行）。"""
+    repo = _repo()
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session, session.begin():
+        session.add(
+            Project(repo_full_name=repo, default_branch="main", settings={"approvers": ["alice"]})
+        )
+    # 引けないログイン名があれば何も書かずに断る
+    with pytest.raises(ValueError, match="GitHub のユーザーが見つからない"):
+        async with factory() as session, session.begin():
+            await workspace_admin.backfill_approver_ids(
+                session, repo_full_name=repo, users=_FakeUsers({})
+            )
+    # 既定は確認だけ（書かない）。今のログイン名の持ち主の ID を、ログイン名と組で返す
+    async with factory() as session, session.begin():
+        pairs = await workspace_admin.backfill_approver_ids(
+            session, repo_full_name=repo, users=_FakeUsers({"alice": 77})
+        )
+    assert pairs == [("alice", 77)]
+    async with factory() as session:
+        project = await ProjectRepository(session).get_by_repo(repo)
+    assert project is not None and project.settings == {"approvers": ["alice"]}
+    assert await _audit_rows(factory, "project.backfill_approver_ids", repo) == []
+
+    async with factory() as session, session.begin():
+        pairs = await workspace_admin.backfill_approver_ids(
+            session, repo_full_name=repo, users=_FakeUsers({"alice": 77}), apply=True
+        )
+    assert pairs == [("alice", 77)]
+    async with factory() as session:
+        project = await ProjectRepository(session).get_by_repo(repo)
+    assert project is not None and project.settings == {
+        "approvers": ["alice"],
+        "approver_ids": [77],
+    }
+    rows = await _audit_rows(factory, "project.backfill_approver_ids", repo)
+    assert rows[0].detail == {"approvers": ["alice"], "approver_ids": [77]}
 
 
 async def test_add_member_rejects_missing_workspace(engine: AsyncEngine) -> None:

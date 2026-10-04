@@ -37,13 +37,16 @@ export async function getOnboarding(slug: string): Promise<WorkspaceOnboarding> 
 
 export async function getProjectSettings(slug: string, projectId: string): Promise<ProjectSettingsView> {
   if (USE_MOCK) {
+    const settings = mockSettings[projectId] ?? MOCK_SETTINGS
     return {
       project_id: projectId,
       repo_full_name: 'example-org/orders',
-      settings: mockSettings[projectId] ?? MOCK_SETTINGS,
+      settings,
       stored_invalid: false,
       can_edit: true,
       can_edit_approvers: true,
+      approver_ids_missing: false,
+      approvers: settings.approvers.map((login) => ({ login, id: null })),
     }
   }
   return apiFetch<ProjectSettingsView>(`${base(slug)}/projects/${encodeURIComponent(projectId)}/settings`)

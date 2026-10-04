@@ -132,8 +132,8 @@ async def _handle_comment(
     # 触れられる）。コメントからは project を作らない: 見つからなければ承認者はいない。
     project = await ProjectRepository(session).get_by_github_id(cm.repo_id)
     # 承認者は project ごとの設定だけ。全体共通の承認者は、どのリポジトリでも承認できて
-    # しまうため持たない（S52）。
-    approvers = set(project.settings.get("approvers", [])) if project is not None else set()
+    # しまうため持たない（S52）。照合はコメントした人の GitHub ユーザー ID で行う（S61）。
+    settings = project.settings if project is not None else {}
     audit = AuditRepository(session)
     latest = (
         await ReviewRunRepository(session).latest_run_for_pr(project.id, cm.issue_number)
@@ -141,7 +141,9 @@ async def _handle_comment(
         else None
     )
     for cmd in commands:
-        decision = authorize_command(cmd, cm.author_login, approvers)
+        decision = authorize_command(
+            cmd, cm.author_login, author_id=cm.author_id, settings=settings
+        )
         await audit.record(
             cm.author_login,
             f"command.{cmd.kind}",
