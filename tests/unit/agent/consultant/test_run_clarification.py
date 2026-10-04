@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import dataclasses
 import uuid
 from typing import Any
 from unittest.mock import AsyncMock
 
+import pytest
+
+from speclino.agent.consultant import run_clarification as rc
 from speclino.agent.consultant.run_clarification import run_run_clarification
 from speclino.agent.consultant.tools import ConsultDeps
 from speclino.domain.a2a import TokenIdentity
@@ -123,3 +127,45 @@ async def test_injection_in_answer_is_stored_as_text_only() -> None:
     allowed = {e["tool"] for e in c1.audit.entries + c2.audit.entries if e["decision"] == "allowed"}
     assert allowed == {"run_findings", "supplement_record"}
     assert all(e["decision"] == "allowed" for e in c2.audit.entries)
+
+
+async def test_denied_supplement_record_fails_and_records_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    deps, recorded = deps_with(ONE_REVIEW_RUN)
+    c1 = fake_call(skill="run_clarification", run_id=RUN_ID)
+    await run_run_clarification(c1, deps)
+    orig = rc.consult_permissions
+
+    def no_record() -> Any:
+        p = orig()
+        return dataclasses.replace(p, allowed_tools=p.allowed_tools - {"supplement_record"})
+
+    monkeypatch.setattr(rc, "consult_permissions", no_record)
+    c2 = fake_call(
+        skill="run_clarification",
+        run_id=RUN_ID,
+        reply="答え",
+        state=c1.updater.last_metadata()["speclino"],  # type: ignore[attr-defined]
+    )
+    await run_run_clarification(c2, deps)
+    assert c2.updater.calls[-1][0] == "failed"  # type: ignore[attr-defined]
+    assert "記録できませんでした" in c2.updater.last_text()  # type: ignore[attr-defined]
+    assert recorded == []
+    assert [e["decision"] for e in c2.audit.entries] == ["denied"]
+
+
+async def test_recording_uses_run_id_from_state_and_reads_run_with_team() -> None:
+    deps, recorded = deps_with(ONE_REVIEW_RUN)
+    c1 = fake_call(skill="run_clarification", run_id=RUN_ID)
+    await run_run_clarification(c1, deps)
+    deps.load_run_view.assert_awaited_once_with(RUN_ID, c1.identity.team)  # type: ignore[attr-defined]
+    other = uuid.uuid4()
+    c2 = fake_call(
+        skill="run_clarification",
+        run_id=other,
+        reply="答え",
+        state=c1.updater.last_metadata()["speclino"],  # type: ignore[attr-defined]
+    )
+    await run_run_clarification(c2, deps)
+    assert [r["run_id"] for r in recorded] == [str(RUN_ID)]

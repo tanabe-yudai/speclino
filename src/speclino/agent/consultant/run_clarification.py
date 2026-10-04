@@ -44,12 +44,23 @@ async def _clarify(call: SkillCall, deps: ConsultDeps, gateway: ToolGateway) -> 
         if not questions:
             await _finish(call, [], "要確認の点はありません。")
             return
-        await _ask(call, {"index": 0, "questions": questions, "recorded": []})
+        await _ask(
+            call,
+            {
+                "run_id": str(call.request.run_id),
+                "index": 0,
+                "questions": questions,
+                "recorded": [],
+            },
+        )
         return
 
     questions = list(call.state["questions"])
     index = int(call.state["index"])
     recorded = list(call.state["recorded"])
+    run_id = str(
+        call.state["run_id"]
+    )  # 質問を出した検査。2 回目以降の request の run_id は使わない
     answer = (call.reply or "").strip()
     if answer.lower() not in SKIP_WORDS and answer:
         item = questions[index]
@@ -59,7 +70,7 @@ async def _clarify(call: SkillCall, deps: ConsultDeps, gateway: ToolGateway) -> 
         async def record() -> dict[str, Any]:
             await deps.record_supplement(
                 identity=identity,
-                run_id=call.request.run_id,
+                run_id=run_id,
                 requirement_id=item["requirement_id"],
                 question=item["question"],
                 content=content,
@@ -67,13 +78,15 @@ async def _clarify(call: SkillCall, deps: ConsultDeps, gateway: ToolGateway) -> 
             )
             return {"recorded": True}
 
-        await guarded(
+        result = await guarded(
             gateway,
             "supplement_record",
-            {"run_id": str(call.request.run_id), "requirement_id": item["requirement_id"]},
+            {"run_id": run_id, "requirement_id": item["requirement_id"]},
             record,
             truncate=False,
         )
+        if result.get("recorded") is not True:  # 門番が拒否した（記録していない）
+            raise _Stop("補足を記録できませんでした")
         recorded.append(
             {
                 "requirement_id": item["requirement_id"],
@@ -83,7 +96,10 @@ async def _clarify(call: SkillCall, deps: ConsultDeps, gateway: ToolGateway) -> 
         )
     index += 1
     if index < len(questions):
-        await _ask(call, {"index": index, "questions": questions, "recorded": recorded})
+        await _ask(
+            call,
+            {"run_id": run_id, "index": index, "questions": questions, "recorded": recorded},
+        )
         return
     await _finish(call, recorded, f"補足を {len(recorded)} 件記録しました。")
 
