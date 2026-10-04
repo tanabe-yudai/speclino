@@ -20,26 +20,28 @@ permissions:
   # 読取りだけなので規約 CI-001（書込み権限の禁止）には反しない。
   pull-requests: read
 
+# runs-on は ubuntu-latest にしない。ubuntu-latest は 2026-10-19 から Ubuntu 26 に切り替わり、
+# 締切（10/15）直前に実行環境が変わるのを避けるため 24.04 に固定する（deploy.yml も同じ）。
 jobs:
   lint:
     name: lint (backend)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-backend
       - run: make lint
 
   typecheck:
     name: typecheck (backend)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-backend
       - run: make typecheck
 
   test:
     name: test (backend)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:17-alpine
@@ -53,16 +55,16 @@ jobs:
     env:
       SPECLINO_DATABASE_URL: postgresql+asyncpg://speclino:speclino@localhost:5432/speclino
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-backend
       - run: uv run alembic upgrade head
       - run: make test
 
   self-check:
     name: self-check (cli, no agent)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-backend
       # SpecLino 自身の仕様（SPEC-TOOL-001 / SPEC-GATE-001 / SPEC-RUN-001 / SPEC-TEST-002）と規約
       # （MAKE-001 / SPEC-FMT-001 / CI-001 / API-ERR-001）を、**CLI だけで**検査する
@@ -76,48 +78,48 @@ jobs:
 
   lint-frontend:
     name: lint (frontend)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-frontend
       - run: npm run lint
         working-directory: web
 
   typecheck-frontend:
     name: typecheck (frontend)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-frontend
       - run: npm run typecheck
         working-directory: web
 
   test-frontend:
     name: test (frontend)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-frontend
       - run: npm test
         working-directory: web
 
   build-frontend:
     name: build (frontend)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-frontend
       - run: npm run build
         working-directory: web
 
   secrets:
     name: secrets (gitleaks)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # PR コメントとジョブ要約の投稿には write が要るが、CI-001 は読取り専用しか

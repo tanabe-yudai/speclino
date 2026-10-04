@@ -14,7 +14,6 @@ from starlette.responses import Response
 from starlette.routing import Route
 from starlette.types import Scope
 
-from speclino.a2a_server.mount import mount_a2a
 from speclino.api.deps import AppState, build_state
 from speclino.api.errors import error_responses, install_error_handlers
 from speclino.api.routes import (
@@ -114,8 +113,11 @@ def create_app(settings: Settings, state: AppState | None = None) -> FastAPI:
         app.include_router(sandbox_runner.router)
     if mcp_app is not None:
         app.router.routes.append(Route(MCP_PATH, endpoint=mcp_app, name="mcp"))
-    # A2A（S59）: Agent Card と `/a2a`。state はリクエストのときに引く（ここではまだ無い）
+    # A2A（S59）: Agent Card と `/a2a`。state はリクエストのときに引く（ここではまだ無い）。
+    # a2a-sdk と ADK は有効なときだけ読む（worker / sandbox の起動を重くしない）
     if settings.a2a_enabled and settings.role in ("web", "all"):
+        from speclino.a2a_server.mount import mount_a2a
+
         mount_a2a(app, settings, lambda: app.state.speclino)
     # 静的配信の mount は "/" 配下を全て受けるので、全ルーターの後に置く（先に置くと
     # role=all のとき /internal/tasks が 405 になる）

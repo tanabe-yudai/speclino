@@ -31,13 +31,11 @@
 
 ## 構成と規約
 
-- `src/speclino/domain/` — 型定義のみ（pydantic / enum）。ロジックを書かない。
-- `src/speclino/conformance/`（検査器・ゲート）と `src/speclino/analysis/`（path_analyzer）は **LLM・adapters に依存しない**。`google.*` / `agent` / `adapters` の import はテストで禁止。手書き IR だけで単体試験できること。
-- ビジネスロジックは `services/` `conformance/` `analysis/` に集約し、`api/` と `web/` に置かない。
-- Python 3.12、`uv`、ruff、mypy strict。TypeScript は `web/src/types/` に型を分離。
-- `schemas/*.schema.json` は `domain/` の pydantic モデルから生成する（手で編集しない）。
-- 静的解析で対象リポジトリのモジュールを import しない。IR の式を `eval` しない。
-- 判定は 4 値（VERIFIED_IN_SCOPE / VIOLATED / UNKNOWN / REVIEW）を正直に保つ。ゲートは必須ルールに UNKNOWN / REVIEW が残れば失敗（フェイルクローズ）。解析できないものを違反と表示しない。
+- **コードの規約の正本は SpecLino のプロジェクト規約**（`.speclino/policy/speclino-core.yaml`）。実装前に読む。MCP の `context_get` でも、チーム規約と合わせて読める。主なもの:
+  - `ARCH-001` domain/ は型だけ／`ARCH-002` conformance/・analysis/ は LLM・adapters に依存しない／`ARCH-003` ロジックを api/・web/ に置かない／`ARCH-004` 対象を import・eval しない／`VERDICT-001` 判定 4 値とフェイルクローズ
+  - 機械検証つき: `MAKE-001`・`SPEC-FMT-001`・`SPEC-TEST-001`・`CI-001`・`API-ERR-001`
+  - 規約を変えるときは、このファイルを PR で変える（ここに規約を書き足さない）
+- Python 3.12、`uv`、ruff、mypy strict。
 - Conventional Commits。**コミット・プッシュはユーザー承認後**。
 
 ## 確認が必要な操作
