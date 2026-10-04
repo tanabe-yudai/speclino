@@ -160,6 +160,10 @@ class ConsultTools:
 
     async def spec_context(self, repo: str, ref: str = "HEAD") -> dict[str, Any]:
         """リポジトリの仕様の語彙とチーム規約（context）を返す。"""
+        return await self.fetch_spec_context(repo, ref, truncate=True)
+
+    async def fetch_spec_context(self, repo: str, ref: str, *, truncate: bool) -> dict[str, Any]:
+        """spec_context の本体。手順の側は truncate=False で語彙を切らずに受け取る。"""
 
         async def run() -> dict[str, Any]:
             async with self._deps.session_factory() as session:
@@ -171,7 +175,9 @@ class ConsultTools:
             except ContextUnavailable as e:
                 return {"error": str(e)}
 
-        return await guarded(self._gateway, "spec_context", {"repo": repo, "ref": ref}, run)
+        return await guarded(
+            self._gateway, "spec_context", {"repo": repo, "ref": ref}, run, truncate=truncate
+        )
 
     async def run_findings(self, run_id: str) -> dict[str, Any]:
         """検査（run）の状態・ゲート結果・Finding（反例を含む）を返す。"""
