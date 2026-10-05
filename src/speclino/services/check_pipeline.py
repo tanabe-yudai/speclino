@@ -80,11 +80,15 @@ from speclino.spec import (
     rules_content_hash,
     validate_spec_ir,
 )
+from speclino.verifiers.api_conventions import ApiConventionsVerifier
 from speclino.verifiers.api_error_format import ApiErrorFormatVerifier
 from speclino.verifiers.base import Snapshot
 from speclino.verifiers.ci_required import CiRequiredVerifier
+from speclino.verifiers.error_message_format import ErrorMessageFormatVerifier
 from speclino.verifiers.exceptions import load_policy_exceptions
+from speclino.verifiers.lint_preset import LintPresetVerifier
 from speclino.verifiers.make_targets import MakeTargetsVerifier
+from speclino.verifiers.naming_identifiers import NamingIdentifiersVerifier
 from speclino.verifiers.registry import VerifierRegistry
 from speclino.verifiers.snapshot import DirectorySnapshot
 from speclino.verifiers.spec_format import SpecFormatVerifier
@@ -667,6 +671,10 @@ def _policy_registry() -> VerifierRegistry:
     registry.register(SpecTestsVerifier())
     registry.register(CiRequiredVerifier())
     registry.register(ApiErrorFormatVerifier())
+    registry.register(ApiConventionsVerifier())
+    registry.register(NamingIdentifiersVerifier())
+    registry.register(ErrorMessageFormatVerifier())
+    registry.register(LintPresetVerifier())
     return registry
 
 

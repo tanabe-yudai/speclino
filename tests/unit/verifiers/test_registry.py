@@ -119,3 +119,17 @@ def test_matched_rule_without_registered_verifier_raises(
     registry = VerifierRegistry()
     with pytest.raises(LookupError):
         registry.run_package(_package(rule), _empty_exceptions(), DirectorySnapshot(root=tmp_path))
+
+
+def test_policy_registry_registers_s69_verifiers() -> None:
+    from speclino.services.check_pipeline import _policy_registry
+
+    registry = _policy_registry()
+    for verifier_id in (
+        "api.error_format",
+        "api.conventions",
+        "naming.identifiers",
+        "error_message.format",
+        "lint.preset",
+    ):
+        assert registry.get(verifier_id) is not None
