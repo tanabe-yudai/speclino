@@ -76,6 +76,8 @@ async def preview_spec(
     try:
         body = PreviewRequest.model_validate_json(raw)
     except ValidationError as e:
-        raise api_error(422, "validation_error", str(e.errors(include_url=False))) from e
+        # 入力（本文）を応答に返さない
+        errors = e.errors(include_input=False, include_url=False)
+        raise api_error(422, "validation_error", str(errors)) from e
     result = preview(body.markdown, domain=body.domain, legacy_ir=body.legacy_ir)
     return result.model_dump(mode="json")

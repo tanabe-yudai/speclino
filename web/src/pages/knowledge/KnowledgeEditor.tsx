@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ApiError } from '@/api/errors'
@@ -23,6 +23,7 @@ import { useWorkspaceProjects } from '@/hooks/useWorkspaceProjects'
 import {
   KIND_LABELS,
   activeRevision,
+  contentAfterSave,
   describeKnowledgeError,
   editBase,
   emptyContent,
@@ -95,6 +96,12 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [conflict, setConflict] = useState(false)
+  const [resetKey, setResetKey] = useState(0)
+  // 保存の応答の時点の本文（送信後の入力を含む）を読むため
+  const latest = useRef(content)
+  useEffect(() => {
+    latest.current = content
+  }, [content])
 
   const active = activeRevision(initial.revisions)
   const artifactName = base.base?.name ?? null
@@ -118,6 +125,7 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
     if (saveBlock) return
     setSaving(true)
     setSaveError(null)
+    const sent = content
     const request = id
       ? saveDraft(slug, id, base.expectedRevision as number, base.expectedHash as string, content)
       : createArtifact(slug, kind, name, content)
@@ -130,7 +138,12 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
         }
         setDraft(rev)
         setBase({ base: rev, expectedRevision: rev.revision, expectedHash: rev.content_hash })
-        setContent(toEditable(rev.content))
+        // 保存中に入力した文字は消さない（そのときは dirty のまま残る）
+        const next = contentAfterSave(sent, latest.current, rev)
+        if (next.replaced) {
+          setContent(next.content)
+          setResetKey((k) => k + 1)
+        }
       })
       .catch((err: unknown) => {
         const described = describeKnowledgeError(err)
@@ -173,6 +186,7 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
           dirty={dirty}
           previewErrors={previewErrors}
           previewPending={content.kind === 'spec' && (previewPending || (!preview && !previewError))}
+          previewFailed={content.kind === 'spec' && !!previewError}
           onApproved={onReload}
           onConflict={() => setConflict(true)}
         />
@@ -207,9 +221,10 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
             previewError={previewError}
             previewPending={previewPending}
             onInvalidChange={setPaneInvalid}
+            resetKey={resetKey}
           />
         )}
-        {content.kind === 'skill' && <SkillEditorPane content={content} onChange={setContent} onInvalidChange={setPaneInvalid} />}
+        {content.kind === 'skill' && <SkillEditorPane content={content} onChange={setContent} onInvalidChange={setPaneInvalid} resetKey={resetKey} />}
         {content.kind === 'instructions' && <InstructionsEditorPane content={content} onChange={setContent} />}
 
         <div className="sticky bottom-0 z-10 -mx-4 flex flex-wrap items-center gap-3 border-t bg-background/80 px-4 py-3 backdrop-blur-md sm:-mx-6 sm:px-6">
@@ -227,7 +242,7 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
         </div>
       </form>
 
-      <ConflictDialog open={conflict} ownText={revisionText(content, new Map())} onReload={onReload} onClose={() => setConflict(false)} />
+      <ConflictDialog open={conflict} ownText={dirty ? revisionText(content, new Map()) : ''} onReload={onReload} onClose={() => setConflict(false)} />
     </div>
   )
 }

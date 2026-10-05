@@ -113,3 +113,11 @@ async def test_bad_body_is_422(ctx: Ctx) -> None:
     assert res.status_code == 422
     res = await c.post(_url(slug), json={"markdown": "x", "compiled": {}}, headers=MEMBER)
     assert res.status_code == 422
+
+
+async def test_422_does_not_echo_the_input(ctx: Ctx) -> None:
+    c, slug = ctx
+    secret = "do-not-echo-" + uuid.uuid4().hex
+    res = await c.post(_url(slug), json={"markdown": 1, "extra": secret}, headers=MEMBER)
+    assert res.status_code == 422
+    assert secret not in res.text

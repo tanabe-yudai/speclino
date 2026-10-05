@@ -3,6 +3,7 @@ import { ApiError } from '@/api/errors'
 import {
   activeRevision,
   approvalState,
+  contentAfterSave,
   describeKnowledgeError,
   editBase,
   emptyContent,
@@ -85,7 +86,7 @@ describe('isSameContent', () => {
 
 describe('approvalState', () => {
   const draft = rev({ status: 'draft', revision: 2, author: 'u1' })
-  const base = { uid: 'u2', draft, dirty: false, previewErrors: 0, previewPending: false }
+  const base = { uid: 'u2', draft, dirty: false, previewErrors: 0, previewPending: false, previewFailed: false }
 
   it('hides the button from members', () => {
     expect(approvalState({ ...base, role: 'member' }).visible).toBe(false)
@@ -97,6 +98,8 @@ describe('approvalState', () => {
     const spec = rev({ ...draft, kind: 'spec' })
     expect(approvalState({ ...base, role: 'owner', draft: spec, previewErrors: 2 }).reason).toBe('診断にエラーが 2 件あります')
     expect(approvalState({ ...base, role: 'owner', draft: spec, previewPending: true }).reason).toBe('保存した本文の診断を確かめています')
+    expect(approvalState({ ...base, role: 'owner', draft: spec, previewFailed: true }).reason).toBe('診断を取得できませんでした')
+    expect(approvalState({ ...base, role: 'owner', draft: spec, previewFailed: true }).enabled).toBe(false)
     expect(approvalState({ ...base, role: 'owner' })).toEqual({ visible: true, enabled: true, reason: null, selfApproval: false })
   })
 
@@ -135,5 +138,21 @@ describe('revisionText', () => {
     expect(revisionText(rev({}).content, names)).toBe('スコープ: ワークスペース全体\n対象: AGENTS.md\n\nx')
     const skill = { kind: 'skill' as const, skill_md: 'S', files: { 'b.md': 'B', 'a.md': 'A' }, scope: { workspace: false, projects: ['p1', 'p2'] } }
     expect(revisionText(skill, names)).toBe('スコープ: org/a, p2\n\n=== SKILL.md\nS\n\n=== a.md\nA\n\n=== b.md\nB')
+  })
+})
+
+describe('contentAfterSave', () => {
+  const sent = rev({}).content
+  const saved = rev({ revision: 2, status: 'draft', content: { ...sent, body: 'x（サーバの正規形）' } as typeof sent })
+
+  it('takes the server content when nothing was typed while saving', () => {
+    expect(contentAfterSave(sent, { ...sent }, saved)).toEqual({ content: saved.content, replaced: true })
+  })
+
+  it('keeps what was typed while saving (stays dirty against the saved revision)', () => {
+    const typed = { ...sent, body: 'x と追記' } as typeof sent
+    const r = contentAfterSave(sent, typed, saved)
+    expect(r).toEqual({ content: typed, replaced: false })
+    expect(isSameContent(r.content, toEditable(saved.content))).toBe(false)
   })
 })

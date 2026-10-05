@@ -104,6 +104,7 @@ function RevisionsBody({ slug, kind, id }: { slug: string; kind: ArtifactKind; i
         dirty={false}
         previewErrors={countErrors(draftPreview.preview?.parse_result.diagnostics ?? [])}
         previewPending={kind === 'spec' && !draftPreview.preview && !draftPreview.error}
+        previewFailed={kind === 'spec' && !!draftPreview.error}
         onApproved={reload}
         onConflict={() => setConflict(true)}
       />

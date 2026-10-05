@@ -100,6 +100,8 @@ export interface ApprovalInput {
   /** spec のとき: 保存した本文のプレビューのエラー数 */
   previewErrors: number
   previewPending: boolean
+  /** spec のとき: プレビュー API が失敗した（診断が分からないので承認させない） */
+  previewFailed: boolean
 }
 
 /** 承認のボタン。承認するのは保存済みの下書き（サーバが番号と hash で照合する）。 */
@@ -110,6 +112,7 @@ export function approvalState(input: ApprovalInput): ApprovalState {
   if (!input.draft) return blocked('承認する下書きがありません')
   if (input.dirty) return blocked('保存していない変更があります。保存してから承認します')
   if (input.draft.kind === 'spec') {
+    if (input.previewFailed) return blocked('診断を取得できませんでした')
     if (input.previewPending) return blocked('保存した本文の診断を確かめています')
     if (input.previewErrors > 0) return blocked(`診断にエラーが ${input.previewErrors} 件あります`)
   }
@@ -165,4 +168,16 @@ export function revisionText(content: ArtifactContent, projectNames: Map<string,
       return [`${head}\n\n=== SKILL.md\n${content.skill_md}`, ...files].join('\n\n')
     }
   }
+}
+
+/**
+ * 保存の応答を受けたときの本文。送信から応答までに入力があれば、それを消さずに残す
+ * （base だけが進み、画面は dirty のまま）。入力が無ければサーバの内容に揃える。
+ */
+export function contentAfterSave(
+  sent: ArtifactContent,
+  current: ArtifactContent,
+  saved: ArtifactRevision,
+): { content: ArtifactContent; replaced: boolean } {
+  return isSameContent(sent, current) ? { content: toEditable(saved.content), replaced: true } : { content: current, replaced: false }
 }

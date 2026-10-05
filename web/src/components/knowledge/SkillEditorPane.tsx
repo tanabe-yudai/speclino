@@ -22,8 +22,14 @@ function problemsOf(entries: FileEntry[]): (string | null)[] {
 }
 
 /** スキル（SKILL.md と付属ファイル）。frontmatter とパスは画面で先に確かめ、正はサーバの検証。 */
-export function SkillEditorPane({ content, onChange, onInvalidChange }: ContentEditorProps<SkillContent> & PaneValidity) {
+export function SkillEditorPane({ content, onChange, onInvalidChange, resetKey }: ContentEditorProps<SkillContent> & PaneValidity) {
   const [entries, setEntries] = useState<FileEntry[]>(() => toEntries(content.files))
+  // 保存の応答で本文がサーバの内容に揃ったら、付属ファイルの欄も作り直す
+  const [seenReset, setSeenReset] = useState(resetKey)
+  if (seenReset !== resetKey) {
+    setSeenReset(resetKey)
+    setEntries(toEntries(content.files))
+  }
   const frontmatter = checkSkillFrontmatter(content.skill_md)
   const pathProblems = problemsOf(entries)
 

@@ -64,6 +64,7 @@ export interface ApprovalPanelProps {
   dirty: boolean
   previewErrors: number
   previewPending: boolean
+  previewFailed: boolean
   onApproved: (generation: number) => void
   onConflict: () => void
 }
@@ -90,6 +91,8 @@ export interface ConflictDialogProps {
 export interface PaneValidity {
   /** 欄の内容が読めず、保存・プレビューに使えない（JSON・付属ファイルのパス） */
   onInvalidChange: (invalid: boolean) => void
+  /** 保存の応答で本文をサーバの内容に揃えるたびに増える。欄の文字列（JSON・付属ファイル）を作り直す合図 */
+  resetKey: number
 }
 
 export interface SpecSideDiffProps {

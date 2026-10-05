@@ -14,11 +14,18 @@ import type { PaneValidity, SpecPaneProps } from '@/types/specEditor'
 const pretty = (v: unknown) => (v === null || (Array.isArray(v) && v.length === 0) ? '' : JSON.stringify(v, null, 2))
 
 /** 仕様エディタ（設計 9 章）: 左に本文、右に図・正規形・診断・要求の追跡。 */
-export function SpecEditorPane({ content, onChange, preview, previewError, previewPending, onInvalidChange }: SpecPaneProps & PaneValidity) {
+export function SpecEditorPane({ content, onChange, preview, previewError, previewPending, onInvalidChange, resetKey }: SpecPaneProps & PaneValidity) {
   const textarea = useRef<HTMLTextAreaElement>(null)
   const [tab, setTab] = useState('diagnostics')
   const [domainText, setDomainText] = useState(() => pretty(content.domain))
   const [legacyText, setLegacyText] = useState(() => pretty(content.legacy_ir))
+  // 保存の応答で本文がサーバの内容に揃ったら、JSON 欄もそれに合わせて作り直す（編集中は揃えないので上書きしない）
+  const [seenReset, setSeenReset] = useState(resetKey)
+  if (seenReset !== resetKey) {
+    setSeenReset(resetKey)
+    setDomainText(pretty(content.domain))
+    setLegacyText(pretty(content.legacy_ir))
+  }
   const domain = parseJsonField(domainText, 'object')
   const legacy = parseJsonField(legacyText, 'array')
 

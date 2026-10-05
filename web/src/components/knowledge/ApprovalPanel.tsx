@@ -14,13 +14,13 @@ import type { ApprovalPanelProps } from '@/types/specEditor'
  * 保存済みの下書きの承認（設計 3.2）。承認者が見た番号と content_hash をサーバが照合する。
  * ボタンは owner / approver にだけ出し、作者本人なら自己承認の印が残ることを先に伝える。
  */
-export function ApprovalPanel({ slug, draft, dirty, previewErrors, previewPending, onApproved, onConflict }: ApprovalPanelProps) {
+export function ApprovalPanel({ slug, draft, dirty, previewErrors, previewPending, previewFailed, onApproved, onConflict }: ApprovalPanelProps) {
   const { me } = useMe()
   const workspace = useCurrentWorkspace()
   const [confirming, setConfirming] = useState(false)
   const [approving, setApproving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const state = approvalState({ role: workspace?.role ?? null, uid: me?.uid ?? null, draft, dirty, previewErrors, previewPending })
+  const state = approvalState({ role: workspace?.role ?? null, uid: me?.uid ?? null, draft, dirty, previewErrors, previewPending, previewFailed })
 
   if (!draft) return null
 
