@@ -16,6 +16,7 @@ describe('paths', () => {
     expect(paths.workspace('acme team')).toBe('/w/acme%20team')
   })
   it('知識は種類ごとのパスにする', () => {
+    expect(paths.knowledgeRoot('ws')).toBe('/w/ws/knowledge')
     expect(paths.knowledge('ws')).toBe('/w/ws/knowledge/specs')
     expect(paths.knowledge('ws', 'skill')).toBe('/w/ws/knowledge/skills')
     expect(paths.knowledgeNew('ws', 'instructions')).toBe('/w/ws/knowledge/instructions/new')

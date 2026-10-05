@@ -10,6 +10,9 @@ import { HomeRedirect } from './pages/HomeRedirect'
 import { Landing } from './pages/Landing'
 import { Login } from './pages/Login'
 import { Policies } from './pages/Policies'
+import { KnowledgeEditor } from './pages/knowledge/KnowledgeEditor'
+import { KnowledgeIndex, KnowledgeList } from './pages/knowledge/KnowledgeList'
+import { KnowledgeRevisions } from './pages/knowledge/KnowledgeRevisions'
 import { Project } from './pages/Project'
 import { RunDetail } from './pages/RunDetail'
 import { Settings } from './pages/Settings'
@@ -32,6 +35,11 @@ function App() {
             <Route path="/w/:slug" element={<Home />} />
             <Route path="/w/:slug/p/:owner/:repo" element={<Project />} />
             <Route path="/w/:slug/policies" element={<Policies />} />
+            <Route path="/w/:slug/knowledge" element={<KnowledgeIndex />} />
+            <Route path="/w/:slug/knowledge/:section" element={<KnowledgeList />} />
+            <Route path="/w/:slug/knowledge/:section/new" element={<KnowledgeEditor />} />
+            <Route path="/w/:slug/knowledge/:section/:id" element={<KnowledgeEditor />} />
+            <Route path="/w/:slug/knowledge/:section/:id/revisions" element={<KnowledgeRevisions />} />
             <Route path="/w/:slug/settings" element={<Settings />} />
             <Route path="/runs/:id" element={<RunDetail />} />
             <Route path="/github/callback" element={<GithubCallback />} />

@@ -139,3 +139,30 @@ export function describeKnowledgeError(err: unknown): { kind: KnowledgeErrorKind
       return { kind: 'other', message: err.message }
   }
 }
+
+/** 編集の土台にする内容。承認済みの spec の compiled は下書きに入れられない（送ると 422）ので外す。 */
+export function toEditable(content: ArtifactContent): ArtifactContent {
+  return content.kind === 'spec' && content.compiled !== null ? { ...content, compiled: null } : content
+}
+
+function scopeLine(scope: ArtifactScope, projectNames: Map<string, string>): string {
+  if (scope.workspace) return 'スコープ: ワークスペース全体'
+  return `スコープ: ${scope.projects.map((p) => projectNames.get(p) ?? p).join(', ')}`
+}
+
+/** 改訂の差分に使う 1 つの本文（スコープ・対象・付属ファイルも行として並べ、変更が差分に出るようにする）。 */
+export function revisionText(content: ArtifactContent, projectNames: Map<string, string>): string {
+  const head = scopeLine(content.scope, projectNames)
+  switch (content.kind) {
+    case 'spec':
+      return `${head}\n\n${content.markdown}`
+    case 'instructions':
+      return `${head}\n対象: ${TARGET_LABELS[content.target]}\n\n${content.body}`
+    case 'skill': {
+      const files = Object.keys(content.files)
+        .sort()
+        .map((path) => `=== ${path}\n${content.files[path]}`)
+      return [`${head}\n\n=== SKILL.md\n${content.skill_md}`, ...files].join('\n\n')
+    }
+  }
+}

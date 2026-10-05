@@ -67,3 +67,36 @@ export interface ApprovalPanelProps {
   onApproved: (generation: number) => void
   onConflict: () => void
 }
+
+export interface KnowledgeNavProps {
+  slug: string
+  current: ArtifactKind
+}
+
+export interface DiffViewProps {
+  before: string
+  after: string
+  label: string
+}
+
+export interface ConflictDialogProps {
+  open: boolean
+  /** 読み直すと消える自分の本文（コピーの対象） */
+  ownText: string
+  onReload: () => void
+  onClose: () => void
+}
+
+export interface PaneValidity {
+  /** 欄の内容が読めず、保存・プレビューに使えない（JSON・付属ファイルのパス） */
+  onInvalidChange: (invalid: boolean) => void
+}
+
+export interface SpecSideDiffProps {
+  label: string
+  /** 前の改訂があるか */
+  previous: boolean
+  /** undefined = まだ変換中、null = 診断にエラーがあり変換できない */
+  before: string | null | undefined
+  after: string | null | undefined
+}

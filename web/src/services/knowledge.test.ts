@@ -8,7 +8,9 @@ import {
   emptyContent,
   isSameContent,
   parseSection,
+  revisionText,
   scopeProblem,
+  toEditable,
 } from './knowledge'
 import type { ArtifactRevision, ArtifactScope } from '@/types/knowledge'
 
@@ -115,5 +117,23 @@ describe('describeKnowledgeError', () => {
     expect(describeKnowledgeError(new ApiError(422, '名前が不正', 'invalid_artifact'))).toEqual({ kind: 'invalid', message: '名前が不正' })
     expect(describeKnowledgeError(new ApiError(409, 'x', 'artifact_exists')).message).toBe('同じ名前の知識が既にあります')
     expect(describeKnowledgeError(new Error('boom')).kind).toBe('other')
+  })
+})
+
+describe('toEditable', () => {
+  it('drops the compiled IR from an approved spec (drafts must not carry it)', () => {
+    const spec = { kind: 'spec' as const, markdown: 'm', domain: null, legacy_ir: [], scope: { workspace: false, projects: ['p'] }, compiled: { parser_version: 'x', source_hash: 's', ir_hash: 'i', requirements: [] } }
+    expect(toEditable(spec)).toEqual({ ...spec, compiled: null })
+    const instr = rev({}).content
+    expect(toEditable(instr)).toBe(instr)
+  })
+})
+
+describe('revisionText', () => {
+  const names = new Map([['p1', 'org/a']])
+  it('puts scope, target and every file into one text for the diff', () => {
+    expect(revisionText(rev({}).content, names)).toBe('スコープ: ワークスペース全体\n対象: AGENTS.md\n\nx')
+    const skill = { kind: 'skill' as const, skill_md: 'S', files: { 'b.md': 'B', 'a.md': 'A' }, scope: { workspace: false, projects: ['p1', 'p2'] } }
+    expect(revisionText(skill, names)).toBe('スコープ: org/a, p2\n\n=== SKILL.md\nS\n\n=== a.md\nA\n\n=== b.md\nB')
   })
 })
