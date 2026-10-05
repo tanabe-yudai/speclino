@@ -47,7 +47,13 @@ terraform apply
 echo -n "<値>" | gcloud secrets versions add github-app-private-key --data-file=- --project=<project_id>
 echo -n "<値>" | gcloud secrets versions add github-webhook-secret  --data-file=- --project=<project_id>
 echo -n "<値>" | gcloud secrets versions add session-secret         --data-file=- --project=<project_id>
+openssl rand -hex 32 | tr -d '\n' | gcloud secrets versions add bundle-signing-key --data-file=- --project=<project_id>
 ```
+
+`bundle-signing-key`（知識の bundle・lock の署名鍵）は、値を投入してから tfvars に
+`mount_bundle_signing_key = true` を書いて apply する。web・worker・admin Job に
+`SPECLINO_BUNDLE_SIGNING_KEY` として注入される。順序と鍵の更新は
+`docs/runbooks/knowledge-registry-cutover.md`。
 
 `mcp-token` には値を投入しない。S54 以降、MCP の認証はワークスペース単位のトークン（DB の
 `mcp_tokens`、ハッシュだけ保存）に切り替え、`/workspaces/<slug>/mcp-tokens` で owner が発行する
@@ -55,7 +61,7 @@ echo -n "<値>" | gcloud secrets versions add session-secret         --data-file
 ロールバック期間が過ぎるまで残す（消すと secret 自体が削除対象になり戻せなくなるため）。
 
 アクセス権は secret 単位で付与済み（web: `github-webhook-secret` / `session-secret` /
-（legacy）`mcp-token`、worker: `github-app-private-key`）。
+（legacy）`mcp-token`、worker: `github-app-private-key`、両方: `database-url` / `bundle-signing-key`）。
 
 ## PR の terraform plan（`.github/workflows/terraform-plan.yml`）
 

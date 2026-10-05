@@ -375,6 +375,27 @@ resource "google_cloud_run_v2_job" "admin" {
           }
         }
 
+        # 本番の設定で動かす（未設定だと env=local になり、bundle を開発鍵で署名してしまう）
+        env {
+          name  = "SPECLINO_ENV"
+          value = "prod"
+        }
+
+        # rebundle-all・import-specs など bundle を作る管理コマンドが署名に使う
+        # （worker SA は bundle-signing-key の secretAccessor を持つ。secrets.tf）
+        dynamic "env" {
+          for_each = local.bundle_signing_env
+          content {
+            name = env.key
+            value_source {
+              secret_key_ref {
+                secret  = google_secret_manager_secret.this[env.value].secret_id
+                version = "latest"
+              }
+            }
+          }
+        }
+
         # backfill-repo-ids が installation token を取るのに要る。worker サービスと同じ
         # Secret Manager の秘密を同じ環境変数名で渡す。
         env {

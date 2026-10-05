@@ -4,6 +4,11 @@
 #   echo -n "<値>" | gcloud secrets versions add github-app-private-key --data-file=- --project=<project_id>
 #   echo -n "<値>" | gcloud secrets versions add github-webhook-secret  --data-file=- --project=<project_id>
 #   echo -n "<値>" | gcloud secrets versions add session-secret         --data-file=- --project=<project_id>
+#   openssl rand -hex 32 | tr -d '\n' | gcloud secrets versions add bundle-signing-key --data-file=- --project=<project_id>
+#
+# bundle-signing-key は知識の bundle・lock の署名鍵（S62・S68）。値を投入してから
+# tfvars の mount_bundle_signing_key = true にする（バージョンの無い secret を注入すると
+# リビジョンが起動できない。手順は docs/runbooks/knowledge-registry-cutover.md）。
 #
 # mcp-token は S54 で env への注入をやめた（MCP の認証はワークスペース単位のトークンに
 # 切り替え、UI（/workspaces/<slug>/mcp-tokens）で owner が発行する。DB の mcp_tokens テーブル
@@ -28,7 +33,15 @@ locals {
     # Cloud SQL の接続 URL（パスワードを含むため tfvars ではなくここに置く）。
     # web も run の一覧・詳細を DB から読むので両方に許可する（iam.tf の cloudsql.client も両方）。
     "database-url" = ["web", "worker"]
+    # 知識の bundle・lock の署名鍵（S62・S68）。web は承認で bundle を作って署名し、
+    # worker は run で bundle と PR の lock.json の署名を検証する
+    "bundle-signing-key" = ["web", "worker"]
   }
+
+  # 署名鍵は値の投入を待ってから注入する（github-app-client-secret と同じ理由）
+  bundle_signing_env = var.mount_bundle_signing_key ? {
+    SPECLINO_BUNDLE_SIGNING_KEY = "bundle-signing-key"
+  } : {}
 
   # Cloud Run の環境変数として参照する秘密（役割 → 環境変数名 → secret_id）。
   # 値は state に入らない（参照だけを宣言する）。mount_secrets = false のあいだは
@@ -44,11 +57,15 @@ locals {
       var.github_client_id == "" ? {} : {
         SPECLINO_GITHUB_CLIENT_SECRET = "github-app-client-secret"
       },
+      local.bundle_signing_env,
     )
-    worker = {
-      SPECLINO_GITHUB_PRIVATE_KEY = "github-app-private-key"
-      SPECLINO_DATABASE_URL       = "database-url"
-    }
+    worker = merge(
+      {
+        SPECLINO_GITHUB_PRIVATE_KEY = "github-app-private-key"
+        SPECLINO_DATABASE_URL       = "database-url"
+      },
+      local.bundle_signing_env,
+    )
     sandbox = {}
   }
 
