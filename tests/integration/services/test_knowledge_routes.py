@@ -220,19 +220,38 @@ async def test_errors_are_mapped(ctx: Ctx) -> None:
         json={
             "kind": "spec",
             "name": "orders",
-            "content": {"kind": "spec", "markdown": "# 仕様", "scope": {"projects": [pid]}},
+            "content": {
+                "kind": "spec",
+                "markdown": "# 仕様\n\n```mermaid\n%%@ id: s\nsequenceDiagram\n    par\n```\n",
+                "scope": {"projects": [pid]},
+            },
         },
         headers=MEMBER,
     )
     assert spec.status_code == 200, spec.text
     s = spec.json()
-    # parser が入るまでは spec を承認できない
+    # 図に誤りがある spec は承認できない（S63 の parser が診断する）
     res = await c.post(
         f"/api/workspaces/{slug}/artifacts/{s['artifact_id']}/approve",
         json={"expected_revision": 1, "expected_hash": s["content_hash"]},
         headers=OWNER,
     )
     assert res.status_code == 422 and res.json()["error"]["code"] == "spec_not_compilable"
+    plain = await c.post(
+        f"/api/workspaces/{slug}/artifacts",
+        json={
+            "kind": "spec",
+            "name": "plain",
+            "content": {"kind": "spec", "markdown": "# 仕様\n", "scope": {"projects": [pid]}},
+        },
+        headers=MEMBER,
+    )
+    approved = await c.post(
+        f"/api/workspaces/{slug}/artifacts/{plain.json()['artifact_id']}/approve",
+        json={"expected_revision": 1, "expected_hash": plain.json()["content_hash"]},
+        headers=OWNER,
+    )
+    assert approved.status_code == 200, approved.text
 
     a = await _create(c, slug, "agents-a")
     b = (
