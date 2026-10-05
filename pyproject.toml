@@ -42,6 +42,7 @@ dev = [
   "respx",
   "types-PyYAML",
   "types-jsonschema",
+  "hypothesis>=6.168.3",
 ]
 
 [build-system]
