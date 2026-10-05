@@ -6,8 +6,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from speclino.domain.finding import Finding
 from speclino.verifiers.lint_preset import LintPresetVerifier
 from speclino.verifiers.snapshot import DirectorySnapshot
@@ -161,7 +159,7 @@ def test_unparsable_config_is_unknown(
         make_rule,
         write_files,
         {".eslintrc.json": "{oops"},
-        {"tool": "eslint", "config_path": ".eslintrc.json"},
+        {"tool": "eslint", "config_path": ".eslintrc.json", "required_rules": ["semi"]},
     )
     assert findings[0].verdict == "UNKNOWN"
 
@@ -196,27 +194,126 @@ def test_missing_ci_follows_on_missing_input(
     assert [f.verdict for f in findings] == ["VIOLATED", "UNKNOWN"]
 
 
-def test_invalid_params_raise_value_error(
+def _assert_invalid_params(findings: list[Finding]) -> None:
+    assert len(findings) == 1
+    assert findings[0].verdict == "UNKNOWN"
+    assert findings[0].category == "unsupported_analysis"
+    assert findings[0].requirement_id == "LINT-001"
+    assert "パラメーターが不正" in findings[0].message
+
+
+def test_invalid_params_are_unknown_not_raised(
     tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
 ) -> None:
-    with pytest.raises(ValueError):
-        _run(tmp_path, make_rule, write_files, {}, {"tool": "pylint", "config_path": "x"})
-    with pytest.raises(ValueError):
-        _run(
-            tmp_path,
-            make_rule,
-            write_files,
-            {},
-            {"tool": "ruff", "config_path": "x", "ci_command_pattern": "a"},
-        )
-    with pytest.raises(ValueError):
-        _run(
-            tmp_path,
-            make_rule,
-            write_files,
-            {},
-            {"tool": "ruff", "config_path": "x", "ci_glob": "a", "ci_command_pattern": "(["},
-        )
+    for params in (
+        {"tool": "pylint", "config_path": "x", "required_rules": ["F"]},
+        {"tool": "ruff", "config_path": "x", "ci_command_pattern": "a"},  # ci_glob なし
+        {"tool": "ruff", "config_path": "x", "ci_glob": "a", "ci_command_pattern": "(["},
+        {"tool": "ruff", "config_path": "x"},  # 検査項目なし
+        {"tool": "ruff", "config_path": "x", "required_rules": ["F"], "typo": 1},
+        {**RUFF_PARAMS, "ci_command_pattern": "a" * 257},
+    ):
+        _assert_invalid_params(_run(tmp_path, make_rule, write_files, {}, params))
+
+
+def _ruff(
+    tmp_path: Path,
+    make_rule: MakeRule,
+    write_files: WriteFiles,
+    toml: str,
+    required: list[str],
+) -> Finding:
+    params = {"tool": "ruff", "config_path": "pyproject.toml", "required_rules": required}
+    return _run(tmp_path, make_rule, write_files, {"pyproject.toml": toml}, params)[0]
+
+
+def test_ruff_prefix_requires_digit_after_selector(
+    tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
+) -> None:
+    # 既定の select（F を含む）は別のリンター FBT を含まない
+    f = _ruff(tmp_path, make_rule, write_files, "[tool.ruff]\n", ["FBT001"])
+    assert f.verdict == "VIOLATED"
+    f = _ruff(tmp_path, make_rule, write_files, '[tool.ruff.lint]\nselect = ["B"]\n', ["BLE001"])
+    assert f.verdict == "VIOLATED"
+    f = _ruff(tmp_path, make_rule, write_files, '[tool.ruff.lint]\nselect = ["E"]\n', ["EM101"])
+    assert f.verdict == "VIOLATED"
+    # 数字が続くなら接頭辞、PL は Pylint の子リンターを含む
+    f = _ruff(tmp_path, make_rule, write_files, '[tool.ruff.lint]\nselect = ["PL"]\n', ["PLR0913"])
+    assert f.verdict == "VERIFIED_IN_SCOPE"
+    f = _ruff(tmp_path, make_rule, write_files, '[tool.ruff.lint]\nselect = ["B"]\n', ["B006"])
+    assert f.verdict == "VERIFIED_IN_SCOPE"
+
+
+def test_ruff_all_has_lowest_specificity(
+    tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
+) -> None:
+    f = _ruff(
+        tmp_path,
+        make_rule,
+        write_files,
+        '[tool.ruff.lint]\nselect = ["ALL"]\nignore = ["E"]\n',
+        ["E501"],
+    )
+    assert f.verdict == "VIOLATED"
+    f = _ruff(
+        tmp_path,
+        make_rule,
+        write_files,
+        '[tool.ruff.lint]\nselect = ["E"]\nignore = ["ALL"]\n',
+        ["E501"],
+    )
+    assert f.verdict == "VIOLATED"
+    f = _ruff(tmp_path, make_rule, write_files, '[tool.ruff.lint]\nselect = ["ALL"]\n', ["E501"])
+    assert f.verdict == "VERIFIED_IN_SCOPE"
+
+
+def test_ruff_extend_makes_unselected_rules_unknown(
+    tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
+) -> None:
+    base = 'extend = "../base.toml"\n[lint]\nextend-select = ["I"]\nignore = ["E501"]\n'
+    for required, verdict in (
+        ("I001", "VERIFIED_IN_SCOPE"),
+        ("B006", "UNKNOWN"),
+        ("E501", "VIOLATED"),
+    ):
+        params = {"tool": "ruff", "config_path": "ruff.toml", "required_rules": [required]}
+        findings = _run(tmp_path, make_rule, write_files, {"ruff.toml": base}, params)
+        # E501 は select に無いが明示的に ignore されている
+        assert findings[0].verdict == verdict, required
+    # 継承があると select 省略時の既定は仮定しない
+    params = {"tool": "ruff", "config_path": "ruff.toml", "required_rules": ["F401"]}
+    findings = _run(tmp_path, make_rule, write_files, {"ruff.toml": base}, params)
+    assert findings[0].verdict == "UNKNOWN"
+
+
+def test_eslint_extends_makes_unlisted_rules_unknown(
+    tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
+) -> None:
+    cfg = json.dumps({"extends": "eslint:recommended", "rules": {"no-var": "error", "semi": "off"}})
+    for required, verdict in (
+        ("no-var", "VERIFIED_IN_SCOPE"),
+        ("quotes", "UNKNOWN"),
+        ("semi", "VIOLATED"),
+    ):
+        params = {"tool": "eslint", "config_path": ".eslintrc.json", "required_rules": [required]}
+        findings = _run(tmp_path, make_rule, write_files, {".eslintrc.json": cfg}, params)
+        assert findings[0].verdict == verdict, required
+
+
+def test_two_ci_timeouts_stop_after_first(
+    tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
+) -> None:
+    step = "      - run: " + "a" * 40 + "!\n"
+    ci = "jobs:\n  a:\n    steps:\n" + step * 5
+    params = {**RUFF_PARAMS, "required_rules": [], "ci_command_pattern": "(a|aa)+$"}
+    findings = _run(
+        tmp_path,
+        make_rule,
+        write_files,
+        {"pyproject.toml": RUFF_OK, ".github/workflows/ci.yml": ci},
+        params,
+    )
+    assert findings[1].verdict == "UNKNOWN"
 
 
 def test_catastrophic_ci_pattern_times_out_to_unknown(
@@ -233,11 +330,3 @@ def test_catastrophic_ci_pattern_times_out_to_unknown(
     )
     assert findings[1].verdict == "UNKNOWN"
     assert "タイムアウト" in findings[1].message
-
-
-def test_too_long_pattern_is_rejected(
-    tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
-) -> None:
-    params = {**RUFF_PARAMS, "ci_command_pattern": "a" * 257}
-    with pytest.raises(ValueError):
-        _run(tmp_path, make_rule, write_files, {}, params)
