@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     gcs_bucket: str | None = None
     code_host_kind: Literal["github", "local"] = "github"
     local_repos: dict[str, Path] = {}  # code_host_kind=local のとき repo_full_name → パス
+    # code_host_kind=local のとき repo_full_name → リポジトリ ID（project の github_repo_id と
+    # 照合される。無いリポジトリの project は ID の照合で run が失敗する）
+    local_repo_ids: dict[str, int] = {}
 
     # サンドボックス（test_run、S31/S38）: docker はローカル、cloud_run は本番の Cloud Run sandboxes
     sandbox_kind: Literal["disabled", "docker", "cloud_run"] = "disabled"
