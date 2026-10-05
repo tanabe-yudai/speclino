@@ -23,8 +23,8 @@ from speclino.db.repositories.audit import AuditRepository
 from speclino.domain.assessment import Attestation, Disposition
 from speclino.domain.finding import Finding, Findings
 from speclino.domain.workspace import APPROVER_ROLES
-from speclino.services.workspaces import WorkspaceNotFound, role_of
 from speclino.services.llm_policies import CONTENT_HASH_REF, FINGERPRINT_REF
+from speclino.services.workspaces import WorkspaceNotFound, role_of
 
 CONFIG_CHANGE_REQUIREMENT_ID = "KNOWLEDGE-BINDINGS-001"
 
