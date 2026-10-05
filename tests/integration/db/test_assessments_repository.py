@@ -1,0 +1,107 @@
+"""`llm_assessments` / `attestations` の repository（S70）。実 PostgreSQL が必要。"""
+
+from __future__ import annotations
+
+import os
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
+
+import pytest
+import pytest_asyncio
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from speclino.db.models import Base
+from speclino.db.repositories.assessments import AssessmentRepository, AttestationRepository
+from speclino.domain.assessment import AssessmentKey, AssessmentRecord, ItemVerdict
+
+_DATABASE_URL = os.environ.get("SPECLINO_DATABASE_URL")
+_HASH = "sha256:" + "a" * 64
+_OTHER = "sha256:" + "b" * 64
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(_DATABASE_URL is None, reason="SPECLINO_DATABASE_URL が未設定"),
+]
+
+
+@pytest_asyncio.fixture
+async def session() -> AsyncIterator[AsyncSession]:
+    assert _DATABASE_URL is not None
+    engine = create_async_engine(_DATABASE_URL)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    async with engine.connect() as conn:
+        trans = await conn.begin()
+        s = async_sessionmaker(bind=conn, expire_on_commit=False)()
+        await s.execute(
+            text("INSERT INTO teams (team, approvers) VALUES ('ws-a', '[]'), ('ws-b', '[]')")
+        )
+        try:
+            yield s
+        finally:
+            await s.close()
+            await trans.rollback()
+    await engine.dispose()
+
+
+def _record(outcome: str = "issue") -> AssessmentRecord:
+    return AssessmentRecord(
+        key=AssessmentKey(
+            policy_revision=2,
+            rule_id="ERRMSG-NEXT",
+            unit_hash=_HASH,
+            model="m",
+            prompt_version="v1+abc",
+        ),
+        unit_symbol="app/api.py::f",
+        items=[
+            ItemVerdict(item_id="next", outcome=outcome, votes=[True, True, False], quote="q")  # type: ignore[arg-type]
+        ],
+        created_at=datetime(2026, 10, 5, tzinfo=UTC),
+    )
+
+
+async def test_assessment_round_trip_and_first_record_wins(session: AsyncSession) -> None:
+    repo = AssessmentRepository(session)
+    assert await repo.get(_record().key) is None
+    await repo.put(_record())
+    await repo.put(_record("no_issue"))  # 同じキーは上書きしない
+    got = await repo.get(_record().key)
+    assert got == _record()
+
+
+async def test_attestation_upsert_and_workspace_isolation(session: AsyncSession) -> None:
+    repo = AttestationRepository(session)
+    first = await repo.upsert(
+        workspace="ws-a",
+        fingerprint="R:i:1",
+        content_hash=_HASH,
+        disposition="attested",
+        actor="u1",
+    )
+    assert first.disposition == "attested"
+    changed = await repo.upsert(
+        workspace="ws-a",
+        fingerprint="R:i:1",
+        content_hash=_HASH,
+        disposition="acknowledged_violation",
+        actor="u2",
+    )
+    assert (changed.disposition, changed.actor) == ("acknowledged_violation", "u2")
+    await repo.upsert(
+        workspace="ws-a",
+        fingerprint="R:i:1",
+        content_hash=_OTHER,
+        disposition="attested",
+        actor="u1",
+    )
+    await repo.upsert(
+        workspace="ws-b", fingerprint="R:i:1", content_hash=_HASH, disposition="attested", actor="x"
+    )
+    rows = await repo.list_for_workspace("ws-a")
+    assert [(r.content_hash, r.disposition) for r in rows] == [
+        (_HASH, "acknowledged_violation"),
+        (_OTHER, "attested"),
+    ]
+    assert {r.workspace for r in rows} == {"ws-a"}

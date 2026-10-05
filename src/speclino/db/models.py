@@ -667,6 +667,53 @@ class KnowledgeFetchRecord(Base):
     )
 
 
+class LlmAssessmentRecord(Base):
+    """`llm_assessments`: LLM 支援の規約の評価の記録（S70）。キーが同じなら LLM を呼ばない。
+
+    `key` は `AssessmentKey.as_str()`、`key_fields` はその各欄（記録から型を復元する）。不変で、
+    同じキーは最初の記録が正本（replay はこれで再評価する）。
+    """
+
+    __tablename__ = "llm_assessments"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    key: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    key_fields: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    unit_symbol: Mapped[str] = mapped_column(String, nullable=False)
+    items: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AttestationRecord(Base):
+    """`attestations`: 人の確定（S70）。指紋と内容の hash に結びつき、内容が変われば効かない。
+
+    同じ (workspace, fingerprint, content_hash) は最新の処置で上書きする（取り消し・変更は監査に
+    残る）。actor は SpecLino の uid、または PR コメントなら `github:<login>`。
+    """
+
+    __tablename__ = "attestations"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace",
+            "fingerprint",
+            "content_hash",
+            name="uq_attestations_workspace_fingerprint_hash",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace: Mapped[str] = mapped_column(
+        String, ForeignKey("teams.team"), nullable=False, index=True
+    )
+    fingerprint: Mapped[str] = mapped_column(String, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String, nullable=False)
+    disposition: Mapped[str] = mapped_column(String, nullable=False)
+    actor: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 # a2a-sdk の DatabaseTaskStore(create_table=False, table_name="a2a_tasks") が読み書きする表。
 # 列は a2a.server.models.TaskMixin と同じ（SDK が ORM で扱うのでここは `create_all` 用の宣言のみ）。
 a2a_tasks = Table(
