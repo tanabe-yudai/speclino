@@ -21,9 +21,9 @@ BINDINGS = Bindings(
     },
     operations={
         "inventory_reserve": _op("shop.inventory.InventoryService.reserve"),
-        "inventory_restore": _op("shop.inventory.restore"),
         # 図の名前をキーにした上書き（同じシンボルの別名）
         "InventoryService.restore": _op("shop.inventory.restore"),
+        "inventory_restore": _op("shop.inventory.restore"),
         "a_charge": _op("shop.pay.PaymentGateway.charge"),
         "b_charge": _op("other.PaymentGateway.charge"),
     },
@@ -36,7 +36,7 @@ def test_operation_name_match_by_symbol_tail() -> None:
 
 
 def test_operation_override_resolves_to_the_analyzers_id() -> None:
-    # 上書きのキーは同じシンボルの別名。Code IR のイベントの ID（先に書かれた方）にそろえる
+    # 上書きのキーは同じシンボルの別名。Code IR のイベントの ID（解析器と同じく後に書かれた方）
     assert R.operation("InventoryService.restore") == "inventory_restore"
 
 

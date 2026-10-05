@@ -404,7 +404,7 @@ async def test_spec_with_errors_cannot_be_approved(ws: Ws) -> None:
 
 
 async def test_default_compiler_is_the_uml_parser(ws: Ws) -> None:
-    """S65: 既定の compiler は S63 の compile_spec。誤りのある図は承認できず、正しい本文は承認できる。"""
+    """S65: 既定の compiler は S63 の compile_spec。誤りのある図は承認できない。"""
     bad = "# 仕様\n\n```mermaid\n%%@ id: s\nsequenceDiagram\n    par\n```\n"
     aid = await _create(ws, "spec", "uml", _spec(_projects(ws.p1), markdown=bad))
     async with ws.f() as s:

@@ -9,8 +9,8 @@
 
 - 操作 `<Class>.<method>`: bindings の operations に同じキーがあればそのシンボル、無ければシンボルが
   `.<Class>.<method>` で終わる（または一致する）operation が 1 つだけのときそのシンボル。最後に
-  `Bindings.operation_by_symbol` で解析器が実際に使う操作 ID にそろえる（同じシンボルに別名の
-  キーがあっても、Code IR のイベントと同じ ID になる）。見つからない・複数なら None（UNKNOWN）
+  解析器が実際に使う操作 ID（同じシンボルのキーのうち最後のもの）にそろえる（別名のキーがあっても
+  Code IR のイベントと同じ ID になる）。見つからない・複数なら None（UNKNOWN）
 - 入口 `<Class>.<method>`: behaviors に同じキーがあればそれ、無ければ entrypoint が
   `.<Class>.<method>` で終わる behavior が 1 つだけのときそれ。見つからなければ None（UNKNOWN）
 
@@ -65,8 +65,16 @@ class OperationResolver:
             if len(symbols) != 1:
                 return None
             symbol = next(iter(symbols))
-        found = self.bindings.operation_by_symbol(symbol)
-        return found[0] if found is not None else None
+        return self._analyzer_operation_id(symbol)
+
+    def _analyzer_operation_id(self, symbol: str) -> str:
+        """解析器が Code IR のイベントに付ける操作 ID。
+
+        path_analyzer は `{ob.symbol: (op_id, ob) for op_id, ob in operations.items()}` で引くので、
+        同じシンボルに別名のキーが複数あれば最後のものになる。それに合わせる（ずれると「呼んで
+        いない」の偽の VIOLATED になる。test_check_pipeline_bundle で解析器との一致を確かめる）。
+        """
+        return [op_id for op_id, ob in self.bindings.operations.items() if ob.symbol == symbol][-1]
 
     def behavior(self, entry: str) -> str | None:
         if entry in self.bindings.behaviors:
