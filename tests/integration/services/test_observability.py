@@ -7,15 +7,23 @@ from __future__ import annotations
 
 import os
 import uuid
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from speclino.adapters.localgit.local_code_host import LocalCodeHost
+from speclino.adapters.queue.inprocess import InProcessQueue
+from speclino.adapters.storage.fs import FileSystemBlobStore
+from speclino.api.app import create_app
+from speclino.api.deps import AppState
 from speclino.db.models import (
     ArtifactRecord,
     ArtifactRevisionRecord,
@@ -32,6 +40,8 @@ from speclino.domain.finding import Category, Finding, Verdict
 from speclino.domain.observability import LlmUsageStats, RulePoint
 from speclino.services.knowledge_sync import LOCK_REQUIREMENT_ID
 from speclino.services.observability import workspace_health
+from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
+from speclino.settings import Settings
 from tests.integration.services.conftest import project_id_of, register_repo
 
 pytestmark = [
@@ -490,3 +500,45 @@ async def test_empty_workspace_is_unmeasured(engine: AsyncEngine) -> None:
     assert p.formalization is None and p.binding is None
     assert p.unknown_breakdown is None and p.latest_run is None
     assert h.fetches == [] and h.trend_runs == [] and h.rules == [] and h.llm is None
+
+
+# ---- REST ----------------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def client(engine: AsyncEngine, tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    host = LocalCodeHost(repos={})
+    queue = InProcessQueue(lambda rid: None, immediate=False)  # type: ignore[arg-type,return-value]
+    blobs = FileSystemBlobStore(tmp_path / "blobs")
+    settings = Settings(env="local", role="all")
+    service = ReviewRunService(factory, host, queue, blobs, ReviewRunConfig(agent_enabled=False))
+    app = create_app(settings, AppState(settings, engine, factory, host, queue, blobs, service))
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c,
+    ):
+        yield c
+
+
+async def test_api_member_sees_health(world: World, client: httpx.AsyncClient) -> None:
+    r = await client.get(
+        f"/api/workspaces/{world.ws}/observability", headers={"X-Dev-User": "member1"}
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["workspace"] == world.ws and body["current_generation"] == 2
+    a = next(p for p in body["projects"] if p["repo_full_name"] == f"e2e/{world.ws}-a")
+    assert a["formalization"]["numerator"] == 2 and a["formalization"]["denominator"] == 3
+    b = next(p for p in body["projects"] if p["repo_full_name"] == f"e2e/{world.ws}-b")
+    assert b["formalization"] is None and b["binding"] is None
+
+
+async def test_api_hides_other_workspace(world: World, client: httpx.AsyncClient) -> None:
+    # 別のワークスペースの owner・存在しないワークスペースは 404（存在を漏らさない）
+    r = await client.get(
+        f"/api/workspaces/{world.ws}/observability", headers={"X-Dev-User": "owner9"}
+    )
+    assert r.status_code == 404
+    r = await client.get("/api/workspaces/e2e-none/observability", headers={"X-Dev-User": "owner9"})
+    assert r.status_code == 404
