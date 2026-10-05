@@ -105,7 +105,10 @@ def test_level_from_requirement_rows() -> None:
     assert {s.id: s.level for s in c.structure}["vocab#OrderService"] == "mandatory"
     assert c.state_machines[0].level == "mandatory"
     # advisory の行だけが参照するクラス → advisory
-    md = FULL.replace("| R2 | advisory | 取消は返金する | cancel-flow#r |", "| R2 | advisory | x | vocab#OrderService |")
+    md = FULL.replace(
+        "| R2 | advisory | 取消は返金する | cancel-flow#r |",
+        "| R2 | advisory | x | vocab#OrderService |",
+    )
     c2 = compile_spec(md, domain=None, legacy_ir=[]).compiled
     assert c2 is not None
     assert {s.id: s.level for s in c2.structure}["vocab#OrderService"] == "advisory"
@@ -138,7 +141,9 @@ def test_guards_are_type_checked_with_domain() -> None:
     ok = compile_spec(FULL, domain=domain, legacy_ir=[])
     assert ok.compiled is not None, ok.diagnostics
     bad = FULL.replace("before.order.qty > 0", "before.order.paid > 0")
-    assert "E_GUARD_TYPE" in [d.code for d in compile_spec(bad, domain=domain, legacy_ir=[]).diagnostics]
+    assert "E_GUARD_TYPE" in [
+        d.code for d in compile_spec(bad, domain=domain, legacy_ir=[]).diagnostics
+    ]
     mismatch = DomainSpec(enums={"OrderStatus": ["PENDING"]})
     codes = [d.code for d in compile_spec(CLASSES, domain=mismatch, legacy_ir=[]).diagnostics]
     assert codes == ["E_ENUM_MISMATCH"]
@@ -249,7 +254,9 @@ def test_too_many_diagrams_and_tokens() -> None:
 
 
 def test_many_requirement_tables_finish_quickly() -> None:
-    table = "| ID | level | 要求 | 形式化 |\n| --- | --- | --- | --- |\n| R | mandatory | x | - |\n\n"
+    table = (
+        "| ID | level | 要求 | 形式化 |\n| --- | --- | --- | --- |\n| R | mandatory | x | - |\n\n"
+    )
     md = table * (200 * 1024 // len(table.encode()))
     start = time.perf_counter()
     compile_spec(md, domain=None, legacy_ir=[])
