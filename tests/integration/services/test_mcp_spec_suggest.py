@@ -32,6 +32,7 @@ from speclino.services.review_run_service import ReviewRunConfig, ReviewRunServi
 from speclino.settings import Settings
 from tests.integration.services.conftest import project_id_of, register_repo
 from tests.integration.services.test_mcp_flow import _issue as issue_mcp_token
+from tests.integration.services.test_spec_suggest_routes import clear_scripted_ledger
 from tests.unit.services.suggest_samples import BAD, FULL, RESPONSE
 
 pytestmark = [
@@ -61,16 +62,19 @@ async def _client(
     app = create_app(
         settings, AppState(settings, engine, f, host, queue, blobs, service, spec_suggest_llm=llm)
     )
-    async with (
-        app.router.lifespan_context(app),
-        httpx2.AsyncClient(
-            transport=httpx2.ASGITransport(app=app),
-            base_url="http://localhost",
-            headers={"Authorization": f"Bearer {token}"},
-        ) as http,
-        Client(streamable_http_client("http://localhost/mcp", http_client=http)) as client,
-    ):
-        yield client
+    try:
+        async with (
+            app.router.lifespan_context(app),
+            httpx2.AsyncClient(
+                transport=httpx2.ASGITransport(app=app),
+                base_url="http://localhost",
+                headers={"Authorization": f"Bearer {token}"},
+            ) as http,
+            Client(streamable_http_client("http://localhost/mcp", http_client=http)) as client,
+        ):
+            yield client
+    finally:
+        await clear_scripted_ledger(engine)
 
 
 def _text(result: Any) -> str:

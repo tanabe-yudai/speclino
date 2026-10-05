@@ -17,6 +17,7 @@ from pathlib import Path
 import httpx
 import pytest
 import pytest_asyncio
+from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from speclino.adapters.llm.scripted import ScriptedJsonLlm
@@ -75,11 +76,20 @@ async def _make(engine: AsyncEngine, tmp_path: Path, limit: str | None) -> Async
     llm = ScriptedJsonLlm(RESPONSE)
     state = AppState(settings, engine, factory, host, queue, blobs, service, spec_suggest_llm=llm)
     app = create_app(settings, state)
-    async with (
-        app.router.lifespan_context(app),
-        httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c,
-    ):
-        yield Ctx(c, slug, state, llm)
+    try:
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c,
+        ):
+            yield Ctx(c, slug, state, llm)
+    finally:
+        await clear_scripted_ledger(engine)
+
+
+async def clear_scripted_ledger(engine: AsyncEngine) -> None:
+    """台本の LLM の予約・精算を台帳から消す（今日の合計を見る他のテストに残さない）。"""
+    async with engine.begin() as conn:
+        await conn.execute(sql_text("DELETE FROM cost_ledger WHERE model = 'scripted'"))
 
 
 @pytest_asyncio.fixture
