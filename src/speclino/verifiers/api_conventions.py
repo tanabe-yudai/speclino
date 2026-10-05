@@ -21,9 +21,10 @@
 ``app`` / ``api`` / ``router`` で終わるものに限る（``@cache.get("k")`` のような無関係な呼び出しを
 ルートと誤認しないため）。
 
-UNKNOWN になるもの: パスが文字列リテラルでないデコレーター、``prefix=`` を渡している
-ファイル（ルーターの接頭辞を静的に合成できないため ``version_prefix`` と ``/`` ルートの
-複数形は判定できない）、OpenAPI が無い・解析できない・構文エラー。確定できる違反があれば
+UNKNOWN になるもの: パスが文字列リテラルでないデコレーター、受け手が同じファイルの
+``FastAPI()`` 由来の変数でないデコレーターの ``version_prefix``（APIRouter は接頭辞が変わり得る）、
+OpenAPI の解析不能・形式不正（paths が無い）、構文エラー。OpenAPI が無い・対象が 0 件のときは
+``on_missing_input`` に従う。確定できる違反があれば
 VIOLATED を優先する。
 
 Finding は OpenAPI で 1 件、``api_glob`` の各ファイルで 1 件。requirement_id は
@@ -41,7 +42,13 @@ from typing import Any
 from speclino.domain.finding import Category, Finding, Verdict
 from speclino.domain.policy import PolicyRule
 from speclino.domain.policy_params import ApiConventionsParams
-from speclino.verifiers._findings import make_finding, parse_params, unknown_finding
+from speclino.verifiers._findings import (
+    invalid_params_finding,
+    make_finding,
+    missing_input_finding,
+    parse_params,
+    unknown_finding,
+)
 from speclino.verifiers.base import Snapshot
 
 VERIFIER_ID = "api.conventions"
@@ -129,11 +136,17 @@ def _receiver_name(node: ast.expr) -> str | None:
 
 def _check_source(tree: ast.Module, params: ApiConventionsParams) -> _Outcome:
     outcome = _Outcome()
-    # ルーターの prefix= は静的に合成しない。ある場合は版の接頭辞を判定できない。
-    has_prefix = any(
-        isinstance(n, ast.Call) and any(k.arg == "prefix" for k in n.keywords)
-        for n in ast.walk(tree)
-    )
+    # 版の接頭辞を判定できるのは、同じファイルで ``FastAPI()`` から作った変数が受け手のときだけ。
+    # APIRouter などは ``prefix=`` や ``include_router(prefix=)`` で接頭辞が変わるため判定しない。
+    fastapi_apps = {
+        target.id
+        for stmt in ast.walk(tree)
+        if isinstance(stmt, ast.Assign)
+        and isinstance(stmt.value, ast.Call)
+        and _receiver_name(stmt.value.func) == "FastAPI"
+        for target in stmt.targets
+        if isinstance(target, ast.Name)
+    }
     for node in ast.walk(tree):
         if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             continue
@@ -160,11 +173,14 @@ def _check_source(tree: ast.Module, params: ApiConventionsParams) -> _Outcome:
                     path_node.value,
                     method,
                     deco.lineno,
-                    check_prefix=not has_prefix,
+                    check_prefix=isinstance(deco.func.value, ast.Name)
+                    and deco.func.value.id in fastapi_apps,
                 )
-                if has_prefix and params.version_prefix is not None:
+                if params.version_prefix is not None and not (
+                    isinstance(deco.func.value, ast.Name) and deco.func.value.id in fastapi_apps
+                ):
                     outcome.unknowns.append(
-                        f"{label}: ルーターの prefix= があり、版の接頭辞を判定できません"
+                        f"{label}: FastAPI() 由来でない受け手のため版の接頭辞を判定できません"
                     )
             else:
                 outcome.unknowns.append(f"{label}: パスが文字列リテラルでないため判定できません")
@@ -220,23 +236,31 @@ class ApiConventionsVerifier:
     version = VERIFIER_VERSION
 
     def run(self, rule: PolicyRule, snapshot: Snapshot) -> list[Finding]:
-        params = parse_params(ApiConventionsParams, rule)
+        try:
+            params = parse_params(ApiConventionsParams, rule)
+        except ValueError as e:
+            return [invalid_params_finding(rule, e)]
         findings: list[Finding] = []
+        files = snapshot.glob(params.api_glob) if params.api_glob is not None else []
         if params.openapi_path is not None:
-            findings.append(self._check_openapi(rule, snapshot, params.openapi_path, params))
-        if params.api_glob is not None:
-            for path in snapshot.glob(params.api_glob):
-                findings.append(self._check_file(rule, snapshot, path, params))
+            openapi = self._check_openapi(rule, snapshot, params.openapi_path, params)
+            if openapi is not None:
+                findings.append(openapi)
+        if params.openapi_path is None and not files:
+            missing = missing_input_finding(
+                rule, snapshot, str(params.api_glob), "対象の Python ソース"
+            )
+            return [missing] if missing is not None else []
+        for path in files:
+            findings.append(self._check_file(rule, snapshot, path, params))
         return findings
 
     def _check_openapi(
         self, rule: PolicyRule, snapshot: Snapshot, path: str, params: ApiConventionsParams
-    ) -> Finding:
+    ) -> Finding | None:
         text = snapshot.read_text(path)
         if text is None:
-            return unknown_finding(
-                rule, snapshot, path, f"{path} が無いため確認できません", "ファイルなし"
-            )
+            return missing_input_finding(rule, snapshot, path, "OpenAPI")
         try:
             spec = json.loads(text)
         except json.JSONDecodeError as e:
@@ -249,6 +273,14 @@ class ApiConventionsVerifier:
                 snapshot,
                 path,
                 f"{path} の形式が不正です（トップレベルがオブジェクトでない）",
+                "形式不正",
+            )
+        if not isinstance(spec.get("paths"), dict):
+            return unknown_finding(
+                rule,
+                snapshot,
+                path,
+                f"{path} の形式が不正です（paths が無い、またはオブジェクトでない）",
                 "形式不正",
             )
         return _finding(rule, snapshot, path, _check_openapi(spec, params), "OpenAPI")

@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
-
-import pytest
 
 from speclino.domain.finding import Finding
 from speclino.verifiers.error_message_format import ErrorMessageFormatVerifier
@@ -94,7 +93,7 @@ def test_en_language_and_default_call_names(
     assert findings[0].verdict == "VERIFIED_IN_SCOPE"
 
 
-def test_fstring_checks_constant_parts_only(
+def test_fstring_period_violation_from_constant_parts(
     tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
 ) -> None:
     findings = _run(
@@ -102,17 +101,76 @@ def test_fstring_checks_constant_parts_only(
         make_rule,
         write_files,
         "api_error(1, code='a', message=f'{x} failed.')\n",
-        {"language": "ja", "forbid_trailing_period": True, "require_code": True},
+        {"forbid_trailing_period": True},
     )
     assert findings[0].verdict == "VIOLATED"
+
+
+def test_fstring_with_placeholder_pattern_is_unknown(
+    tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
+) -> None:
     findings = _run(
         tmp_path,
         make_rule,
         write_files,
         "api_error(1, code='a', message=f'{x} を保存')\n",
-        {"pattern": ".+", "language": "ja"},
+        {"pattern": ".+"},
     )
-    assert findings[0].verdict == "UNKNOWN"  # pattern は埋め込み式があると判定不能
+    assert findings[0].verdict == "UNKNOWN"
+
+
+def test_fstring_ja_without_japanese_constants_is_unknown(
+    tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
+) -> None:
+    # 定数部分に日本語が無く、埋め込み式が日本語かもしれない -> 偽の VIOLATED / VERIFIED にしない
+    findings = _run(
+        tmp_path,
+        make_rule,
+        write_files,
+        "api_error(1, code='a', message=f'{msg}')\napi_error(1, code='a', message=f'{a}: {b}')\n",
+        {"language": "ja"},
+    )
+    assert findings[0].verdict == "UNKNOWN"
+    assert findings[0].category == "unsupported_analysis"
+    # 定数部分に日本語があれば確定
+    findings = _run(
+        tmp_path,
+        make_rule,
+        write_files,
+        "api_error(1, code='a', message=f'{x} を保存')\n",
+        {"language": "ja"},
+    )
+    assert findings[0].verdict == "VERIFIED_IN_SCOPE"
+    # en は定数部分の非 ASCII で違反が確定する
+    findings = _run(
+        tmp_path,
+        make_rule,
+        write_files,
+        "api_error(1, code='a', message=f'{x} を保存')\n",
+        {"language": "en"},
+    )
+    assert findings[0].verdict == "VIOLATED"
+
+
+def test_fstring_without_placeholder_is_like_a_literal(
+    tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
+) -> None:
+    ok = _run(
+        tmp_path,
+        make_rule,
+        write_files,
+        "api_error(1, code='a', message=f'保存しました')\n",
+        {"pattern": ".+しました", "language": "ja"},
+    )
+    assert ok[0].verdict == "VERIFIED_IN_SCOPE"
+    bad = _run(
+        tmp_path,
+        make_rule,
+        write_files,
+        "api_error(1, code='a', message=f'保存')\n",
+        {"pattern": ".+しました"},
+    )
+    assert bad[0].verdict == "VIOLATED"
 
 
 def test_non_literal_message_is_unknown_and_violation_wins(
@@ -142,20 +200,39 @@ def test_positional_only_message_is_unknown(
     assert findings[0].verdict == "UNKNOWN"
 
 
-def test_syntax_error_is_unknown_and_no_input_has_no_findings(
+def test_syntax_error_is_unknown(
     tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
 ) -> None:
     assert _run(tmp_path, make_rule, write_files, "def (:\n")[0].verdict == "UNKNOWN"
-    assert _run(tmp_path / "empty", make_rule, write_files, None) == []
 
 
-def test_invalid_params_raise_value_error(
+def test_no_target_follows_on_missing_input(
     tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
 ) -> None:
-    with pytest.raises(ValueError):
-        _run(tmp_path, make_rule, write_files, None, {"pattern": "(["})
-    with pytest.raises(ValueError):
-        _run(tmp_path, make_rule, write_files, None, {"language": "fr"})
+    for on_missing, expected in (
+        ("violation", ["VIOLATED"]),
+        ("unknown", ["UNKNOWN"]),
+        ("skipped", []),
+    ):
+        rule = make_rule(
+            id="ERRMSG-001",
+            verifier_id="error_message.format",
+            paths=["src/**/*.py"],
+            params=PARAMS,
+            on_missing_input=on_missing,
+        )
+        findings = ErrorMessageFormatVerifier().run(rule, DirectorySnapshot(root=tmp_path))
+        assert [f.verdict for f in findings] == expected
+
+
+def test_invalid_params_are_unknown_not_raised(
+    tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
+) -> None:
+    for params in ({"pattern": "(["}, {"language": "fr"}, {}, {"pattern": "a" * 300}):
+        findings = _run(tmp_path, make_rule, write_files, None, params)
+        assert [f.verdict for f in findings] == ["UNKNOWN"]
+        assert findings[0].requirement_id == "ERRMSG-001"
+        assert "パラメーターが不正" in findings[0].message
 
 
 def test_catastrophic_pattern_times_out_to_unknown(
@@ -165,5 +242,13 @@ def test_catastrophic_pattern_times_out_to_unknown(
     findings = _run(tmp_path, make_rule, write_files, src, {"pattern": "(a|aa)+$"})
     assert findings[0].verdict == "UNKNOWN"
     assert "タイムアウト" in (findings[0].actual or "")
-    with pytest.raises(ValueError):
-        _run(tmp_path, make_rule, write_files, src, {"pattern": "a" * 300})
+
+
+def test_timeout_aborts_remaining_matches_in_file(
+    tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
+) -> None:
+    src = "".join(f"api_error(1, code='a', message='{'a' * 40}!')\n" for _ in range(10))
+    start = time.monotonic()
+    findings = _run(tmp_path, make_rule, write_files, src, {"pattern": "(a|aa)+$"})
+    assert time.monotonic() - start < 0.5  # 10 回ぶんのタイムアウトを待たない
+    assert findings[0].verdict == "UNKNOWN"

@@ -36,7 +36,7 @@ from speclino.domain.common import SourceRef
 from speclino.domain.finding import Finding, Severity
 from speclino.domain.policy import PolicyRule
 from speclino.domain.policy_params import ApiErrorFormatParams
-from speclino.verifiers._findings import parse_params
+from speclino.verifiers._findings import invalid_params_finding, parse_params
 from speclino.verifiers.base import Snapshot
 
 VERIFIER_ID = "api.error_format"
@@ -172,7 +172,10 @@ class ApiErrorFormatVerifier:
     version = VERIFIER_VERSION
 
     def run(self, rule: PolicyRule, snapshot: Snapshot) -> list[Finding]:
-        params = parse_params(ApiErrorFormatParams, rule)
+        try:
+            params = parse_params(ApiErrorFormatParams, rule)
+        except ValueError as e:
+            return [invalid_params_finding(rule, e)]
 
         findings = [
             self._check_openapi(
@@ -236,6 +239,19 @@ class ApiErrorFormatVerifier:
                 category="unsupported_analysis",
                 severity=severity,
                 message=f"{openapi_path} の形式が不正です（トップレベルがオブジェクトでない）",
+                actual="形式不正",
+                claim_scope="persisted_state",
+            )
+
+        if not isinstance(spec.get("paths"), dict):
+            return Finding(
+                id=f"policy:{requirement_id}",
+                requirement_id=requirement_id,
+                behavior_id=f"policy:{rule.verifier_ref.id}",
+                verdict="UNKNOWN",
+                category="unsupported_analysis",
+                severity=severity,
+                message=f"{openapi_path} の形式が不正です（paths が不正）",
                 actual="形式不正",
                 claim_scope="persisted_state",
             )

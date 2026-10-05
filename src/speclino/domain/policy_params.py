@@ -30,6 +30,8 @@ def _validate_pattern(value: str) -> str:
 
 RegexPattern = Annotated[str, AfterValidator(_validate_pattern)]
 
+HTTP_METHOD_NAMES = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
+
 
 class ApiErrorFormatParams(IRModel):
     """`api.error_format`。"""
@@ -56,9 +58,20 @@ class ApiConventionsParams(IRModel):
     require_response_model: bool = False
 
     @model_validator(mode="after")
-    def _needs_an_input(self) -> ApiConventionsParams:
+    def _validate(self) -> ApiConventionsParams:
         if self.openapi_path is None and self.api_glob is None:
             raise ValueError("openapi_path と api_glob の少なくとも一方が必要です")
+        if not (
+            self.path_case
+            or self.require_plural_collections
+            or self.version_prefix
+            or self.allowed_methods
+            or self.require_response_model
+        ):
+            raise ValueError("検査項目が 1 つも指定されていません")
+        for method in self.allowed_methods or []:
+            if method.upper() not in HTTP_METHOD_NAMES:
+                raise ValueError(f"allowed_methods に HTTP メソッド名以外があります: {method}")
         return self
 
 
@@ -71,6 +84,14 @@ class NamingIdentifiersParams(IRModel):
     module: RegexPattern | None = None
     forbidden_words: list[str] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def _needs_a_check(self) -> NamingIdentifiersParams:
+        if not (
+            self.function or self.class_ or self.constant or self.module or self.forbidden_words
+        ):
+            raise ValueError("検査項目が 1 つも指定されていません")
+        return self
+
 
 class ErrorMessageFormatParams(IRModel):
     """`error_message.format`。"""
@@ -81,6 +102,12 @@ class ErrorMessageFormatParams(IRModel):
     require_code: bool = False
     forbid_trailing_period: bool = False
     language: Literal["ja", "en"] | None = None
+
+    @model_validator(mode="after")
+    def _needs_a_check(self) -> ErrorMessageFormatParams:
+        if not (self.pattern or self.require_code or self.forbid_trailing_period or self.language):
+            raise ValueError("検査項目が 1 つも指定されていません")
+        return self
 
 
 class LintPresetParams(IRModel):
@@ -93,7 +120,9 @@ class LintPresetParams(IRModel):
     ci_command_pattern: RegexPattern | None = None
 
     @model_validator(mode="after")
-    def _ci_pattern_needs_glob(self) -> LintPresetParams:
+    def _validate(self) -> LintPresetParams:
         if self.ci_command_pattern is not None and self.ci_glob is None:
             raise ValueError("ci_command_pattern には ci_glob が必要です")
+        if not self.required_rules and self.ci_command_pattern is None:
+            raise ValueError("required_rules か ci_command_pattern のどちらかが必要です")
         return self

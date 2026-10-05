@@ -31,11 +31,13 @@ from speclino.domain.finding import Finding
 from speclino.domain.policy import PolicyRule
 from speclino.domain.policy_params import NamingIdentifiersParams
 from speclino.verifiers._findings import (
+    invalid_params_finding,
     make_finding,
+    missing_input_finding,
     parse_params,
     unknown_finding,
 )
-from speclino.verifiers._safe_regex import RegexTimeout, compile_param, fullmatch
+from speclino.verifiers._safe_regex import RegexMatcher, RegexTimeout, compile_param
 from speclino.verifiers.base import Snapshot
 
 VERIFIER_ID = "naming.identifiers"
@@ -58,7 +60,10 @@ class NamingIdentifiersVerifier:
     version = VERIFIER_VERSION
 
     def run(self, rule: PolicyRule, snapshot: Snapshot) -> list[Finding]:
-        params = parse_params(NamingIdentifiersParams, rule)
+        try:
+            params = parse_params(NamingIdentifiersParams, rule)
+        except ValueError as e:
+            return [invalid_params_finding(rule, e)]
         patterns = {
             kind: compile_param(pattern)
             for kind, pattern in (
@@ -71,11 +76,13 @@ class NamingIdentifiersVerifier:
         }
         forbidden = {w.lower() for w in params.forbidden_words}
         paths = sorted({p for g in rule.applies_to.paths for p in snapshot.glob(g)})
-        return [
-            self._check_file(rule, snapshot, p, patterns, forbidden)
-            for p in paths
-            if p.endswith(".py")
-        ]
+        py_paths = [p for p in paths if p.endswith(".py")]
+        if not py_paths:
+            missing = missing_input_finding(
+                rule, snapshot, ", ".join(rule.applies_to.paths) or rule.id, "対象の Python ソース"
+            )
+            return [missing] if missing is not None else []
+        return [self._check_file(rule, snapshot, p, patterns, forbidden) for p in py_paths]
 
     def _check_file(
         self,
@@ -92,6 +99,7 @@ class NamingIdentifiersVerifier:
                 rule, snapshot, path, f"{path}: 構文解析に失敗しました", "解析エラー"
             )
 
+        matcher = RegexMatcher()
         details: list[str] = []
         timeouts: list[str] = []
         lines: list[int] = []
@@ -102,7 +110,7 @@ class NamingIdentifiersVerifier:
             problems: list[str] = []
             pattern = patterns.get(kind)
             try:
-                if pattern is not None and not fullmatch(pattern, name.lstrip("_")):
+                if pattern is not None and not matcher.fullmatch(pattern, name.lstrip("_")):
                     problems.append(f"{kind} '{name}' が {pattern.pattern} に合いません")
             except RegexTimeout as e:
                 timeouts.append(f"{kind} '{name[:50]}': {e}")
@@ -144,7 +152,7 @@ class NamingIdentifiersVerifier:
                 "constraint_mismatch",
                 f"{path}: 命名規則に合わない識別子が {len(details)} 件あります",
                 expected=expected,
-                actual="\n".join(details),
+                actual="\n".join([*details, *(f"（判定不能: {u}）" for u in timeouts)]),
                 lines=sorted(set(lines)),
             )
         if timeouts:

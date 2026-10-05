@@ -18,8 +18,10 @@ params:
 メッセージの形ごとの扱い:
 
 - 文字列リテラル: すべての検査を行う。
-- f 文字列: 定数部分だけで ``language`` と文末を検査する。``pattern`` は埋め込み式があると判定
-  不能。文末が埋め込み式なら文末は判定不能。
+- 埋め込み式の無い f 文字列: 文字列リテラルと同じ。
+- 埋め込み式のある f 文字列: 定数部分だけで検査する。``pattern`` は判定不能。文末が埋め込み式なら
+  文末は判定不能。``ja`` は定数部分に日本語があれば確定、無ければ判定不能（埋め込み式が日本語かも
+  しれない）。``en`` は定数部分に ASCII 以外があれば違反。
 - それ以外（変数・呼び出し・連結）: その呼び出しは判定不能。
 
 確定した違反があれば VIOLATED を優先し、無ければ判定不能が 1 つでもあれば UNKNOWN。
@@ -37,11 +39,13 @@ from speclino.domain.finding import Finding
 from speclino.domain.policy import PolicyRule
 from speclino.domain.policy_params import ErrorMessageFormatParams
 from speclino.verifiers._findings import (
+    invalid_params_finding,
     make_finding,
+    missing_input_finding,
     parse_params,
     unknown_finding,
 )
-from speclino.verifiers._safe_regex import RegexTimeout, compile_param, fullmatch
+from speclino.verifiers._safe_regex import RegexMatcher, RegexTimeout, compile_param
 from speclino.verifiers.base import Snapshot
 
 VERIFIER_ID = "error_message.format"
@@ -64,12 +68,19 @@ class ErrorMessageFormatVerifier:
     version = VERIFIER_VERSION
 
     def run(self, rule: PolicyRule, snapshot: Snapshot) -> list[Finding]:
-        params = parse_params(ErrorMessageFormatParams, rule)
+        try:
+            params = parse_params(ErrorMessageFormatParams, rule)
+        except ValueError as e:
+            return [invalid_params_finding(rule, e)]
         pattern = compile_param(params.pattern) if params.pattern else None
         paths = sorted({p for g in rule.applies_to.paths for p in snapshot.glob(g)})
-        return [
-            self._check_file(rule, snapshot, p, params, pattern) for p in paths if p.endswith(".py")
-        ]
+        py_paths = [p for p in paths if p.endswith(".py")]
+        if not py_paths:
+            missing = missing_input_finding(
+                rule, snapshot, ", ".join(rule.applies_to.paths) or rule.id, "対象の Python ソース"
+            )
+            return [missing] if missing is not None else []
+        return [self._check_file(rule, snapshot, p, params, pattern) for p in py_paths]
 
     def _check_file(
         self,
@@ -86,6 +97,7 @@ class ErrorMessageFormatVerifier:
                 rule, snapshot, path, f"{path}: 構文解析に失敗しました", "解析エラー"
             )
 
+        matcher = RegexMatcher()
         violations: list[str] = []
         unknowns: list[str] = []
         lines: list[int] = []
@@ -95,7 +107,7 @@ class ErrorMessageFormatVerifier:
             if not (isinstance(node, ast.Call) and _call_name(node.func) in names):
                 continue
             label = f"行 {node.lineno} {_call_name(node.func)}(...)"
-            bad = self._check_call(node, label, params, pattern, unknowns)
+            bad = _check_call(node, label, params, pattern, matcher, unknowns)
             if bad:
                 violations.extend(bad)
                 lines.append(node.lineno)
@@ -135,89 +147,87 @@ class ErrorMessageFormatVerifier:
             actual="違反なし",
         )
 
-    def _check_call(
-        self,
-        call: ast.Call,
-        label: str,
-        params: ErrorMessageFormatParams,
-        pattern: regex.Pattern[str] | None,
-        unknowns: list[str],
-    ) -> list[str]:
-        bad: list[str] = []
-        keywords = {k.arg: k.value for k in call.keywords if k.arg is not None}
-        if params.require_code and "code" not in keywords:
-            if any(k.arg is None for k in call.keywords):
-                unknowns.append(f"{label}: **kwargs があり code= を判定できません")
-            else:
-                bad.append(f"{label}: code= がありません")
 
-        message = keywords.get(params.message_arg, keywords.get("detail"))
-        if message is None:
-            unknowns.append(f"{label}: メッセージをキーワード引数で渡していないため判定できません")
-            return bad
+def _check_call(
+    call: ast.Call,
+    label: str,
+    params: ErrorMessageFormatParams,
+    pattern: regex.Pattern[str] | None,
+    matcher: RegexMatcher,
+    unknowns: list[str],
+) -> list[str]:
+    bad: list[str] = []
+    keywords = {k.arg: k.value for k in call.keywords if k.arg is not None}
+    if params.require_code and "code" not in keywords:
+        if any(k.arg is None for k in call.keywords):
+            unknowns.append(f"{label}: **kwargs があり code= を判定できません")
+        else:
+            bad.append(f"{label}: code= がありません")
 
+    message = keywords.get(params.message_arg, keywords.get("detail"))
+    if message is None:
+        unknowns.append(f"{label}: メッセージをキーワード引数で渡していないため判定できません")
+        return bad
+
+    try:
         if isinstance(message, ast.Constant) and isinstance(message.value, str):
-            text = message.value
-            try:
-                bad.extend(self._check_text(label, text, params, pattern))
-            except RegexTimeout as e:
-                unknowns.append(f"{label}: {e}")
+            bad.extend(_check_text(label, message.value, params, pattern, matcher))
         elif isinstance(message, ast.JoinedStr):
-            self._check_joined(message, label, params, bad, unknowns)
+            _check_joined(message, label, params, pattern, matcher, bad, unknowns)
         else:
             unknowns.append(f"{label}: メッセージが文字列リテラルでないため判定できません")
-        return bad
-
-    @staticmethod
-    def _check_text(
-        label: str,
-        text: str,
-        params: ErrorMessageFormatParams,
-        pattern: regex.Pattern[str] | None,
-    ) -> list[str]:
-        bad: list[str] = []
-        if pattern is not None and not fullmatch(pattern, text):
-            bad.append(f"{label}: '{text}' が {pattern.pattern} に合いません")
-        if params.forbid_trailing_period and text.endswith(_TRAILING_PERIODS):
-            bad.append(f"{label}: '{text}' の文末に句点・ピリオドがあります")
-        bad.extend(_language_problem(label, text, params))
-        return bad
-
-    @staticmethod
-    def _check_joined(
-        message: ast.JoinedStr,
-        label: str,
-        params: ErrorMessageFormatParams,
-        bad: list[str],
-        unknowns: list[str],
-    ) -> None:
-        constants = [
-            v.value
-            for v in message.values
-            if isinstance(v, ast.Constant) and isinstance(v.value, str)
-        ]
-        has_placeholder = any(isinstance(v, ast.FormattedValue) for v in message.values)
-        text = "".join(constants)
-        if not has_placeholder:  # 埋め込み式の無い f 文字列は文字列リテラルと同じ
-            bad.extend(ErrorMessageFormatVerifier._check_text(label, text, params, None))
-            if params.pattern is not None:
-                unknowns.append(f"{label}: f 文字列のため pattern を判定できません")
-            return
-        if params.pattern is not None:
-            unknowns.append(f"{label}: 埋め込み式があるため pattern を判定できません")
-        if params.forbid_trailing_period:
-            last = message.values[-1] if message.values else None
-            if isinstance(last, ast.Constant) and isinstance(last.value, str):
-                if last.value.endswith(_TRAILING_PERIODS):
-                    bad.append(f"{label}: メッセージの文末に句点・ピリオドがあります")
-            else:
-                unknowns.append(f"{label}: 文末が埋め込み式のため文末を判定できません")
-        bad.extend(_language_problem(label, text, params))
+    except RegexTimeout as e:
+        unknowns.append(f"{label}: {e}")
+    return bad
 
 
-def _language_problem(label: str, text: str, params: ErrorMessageFormatParams) -> list[str]:
+def _check_text(
+    label: str,
+    text: str,
+    params: ErrorMessageFormatParams,
+    pattern: regex.Pattern[str] | None,
+    matcher: RegexMatcher,
+) -> list[str]:
+    bad: list[str] = []
+    if pattern is not None and not matcher.fullmatch(pattern, text):
+        bad.append(f"{label}: '{text}' が {pattern.pattern} に合いません")
+    if params.forbid_trailing_period and text.endswith(_TRAILING_PERIODS):
+        bad.append(f"{label}: '{text}' の文末に句点・ピリオドがあります")
     if params.language == "ja" and not _JAPANESE_RE.search(text):
-        return [f"{label}: '{text}' に日本語が含まれていません"]
+        bad.append(f"{label}: '{text}' に日本語が含まれていません")
     if params.language == "en" and not text.isascii():
-        return [f"{label}: '{text}' に ASCII 以外の文字が含まれています"]
-    return []
+        bad.append(f"{label}: '{text}' に ASCII 以外の文字が含まれています")
+    return bad
+
+
+def _check_joined(
+    message: ast.JoinedStr,
+    label: str,
+    params: ErrorMessageFormatParams,
+    pattern: regex.Pattern[str] | None,
+    matcher: RegexMatcher,
+    bad: list[str],
+    unknowns: list[str],
+) -> None:
+    constants = [
+        v.value for v in message.values if isinstance(v, ast.Constant) and isinstance(v.value, str)
+    ]
+    text = "".join(constants)
+    if not any(isinstance(v, ast.FormattedValue) for v in message.values):
+        # 埋め込み式の無い f 文字列は文字列リテラルと同じ
+        bad.extend(_check_text(label, text, params, pattern, matcher))
+        return
+    if pattern is not None:
+        unknowns.append(f"{label}: 埋め込み式があるため pattern を判定できません")
+    if params.forbid_trailing_period:
+        last = message.values[-1]
+        if isinstance(last, ast.Constant) and isinstance(last.value, str):
+            if last.value.endswith(_TRAILING_PERIODS):
+                bad.append(f"{label}: メッセージの文末に句点・ピリオドがあります")
+        else:
+            unknowns.append(f"{label}: 文末が埋め込み式のため文末を判定できません")
+    if params.language == "ja" and not _JAPANESE_RE.search(text):
+        # 定数部分に日本語があれば確定。無ければ埋め込み式が日本語かもしれず判定できない
+        unknowns.append(f"{label}: 定数部分に日本語が無く、埋め込み式の内容を判定できません")
+    if params.language == "en" and not text.isascii():
+        bad.append(f"{label}: メッセージの定数部分に ASCII 以外の文字が含まれています")

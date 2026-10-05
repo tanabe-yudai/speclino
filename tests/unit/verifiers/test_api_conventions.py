@@ -6,8 +6,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from speclino.domain.finding import Finding
 from speclino.verifiers.api_conventions import ApiConventionsVerifier
 from speclino.verifiers.snapshot import DirectorySnapshot
@@ -25,11 +23,11 @@ BASE: dict[str, Any] = {
 }
 
 GOOD_ROUTES = (
-    "from fastapi import APIRouter\n"
-    "router = APIRouter()\n\n"
-    "@router.get('/v1/user-accounts/{account_id}', response_model=dict)\n"
+    "from fastapi import FastAPI\n"
+    "app = FastAPI()\n\n"
+    "@app.get('/v1/user-accounts/{account_id}', response_model=dict)\n"
     "def read(account_id: str): ...\n\n"
-    "@router.post('/v1/user-accounts', response_model=dict)\n"
+    "@app.post('/v1/user-accounts', response_model=dict)\n"
     "def create(): ...\n"
 )
 
@@ -159,18 +157,30 @@ def test_non_literal_path_is_unknown(
     assert findings[0].category == "unsupported_analysis"
 
 
-def test_router_prefix_makes_version_prefix_unknown(
+def test_version_prefix_only_judged_for_fastapi_apps(
     tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
 ) -> None:
-    src = (
+    params = {**BASE, "openapi_path": None}
+    router_src = (
         "router = APIRouter(prefix='/v1')\n"
         "@router.get('/things', response_model=dict)\n"
         "def a(): ...\n"
     )
-    findings = _run(
-        tmp_path, make_rule, write_files, {"api/x.py": src}, {**BASE, "openapi_path": None}
-    )
+    findings = _run(tmp_path, make_rule, write_files, {"api/x.py": router_src}, params)
     assert findings[0].verdict == "UNKNOWN"
+    app_src = "app = FastAPI()\n@app.get('/things', response_model=dict)\ndef a(): ...\n"
+    findings = _run(tmp_path, make_rule, write_files, {"api/x.py": app_src}, params)
+    assert findings[0].verdict == "VIOLATED"
+    assert "/v1 で始まっていません" in (findings[0].actual or "")
+    # 接頭辞を求めない設定なら、APIRouter でも他の検査は確定する
+    findings = _run(
+        tmp_path,
+        make_rule,
+        write_files,
+        {"api/x.py": router_src},
+        {**params, "version_prefix": None},
+    )
+    assert findings[0].verdict == "VERIFIED_IN_SCOPE"
 
 
 def test_violation_wins_over_unknown(
@@ -184,11 +194,9 @@ def test_violation_wins_over_unknown(
     assert "判定不能" in (findings[0].actual or "")
 
 
-def test_missing_and_unparsable_inputs_are_unknown(
+def test_unparsable_inputs_are_unknown(
     tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
 ) -> None:
-    findings = _run(tmp_path, make_rule, write_files, {})
-    assert [f.verdict for f in findings] == ["UNKNOWN"]
     findings = _run(
         tmp_path,
         make_rule,
@@ -199,10 +207,60 @@ def test_missing_and_unparsable_inputs_are_unknown(
     assert all(f.category == "unsupported_analysis" for f in findings)
 
 
-def test_invalid_params_raise_value_error(
+def test_openapi_without_paths_is_unknown(
     tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
 ) -> None:
-    with pytest.raises(ValueError):
-        _run(tmp_path, make_rule, write_files, {}, {"path_case": "kebab"})  # 入力なし
-    with pytest.raises(ValueError):
-        _run(tmp_path, make_rule, write_files, {}, {**BASE, "path_case": "camel"})
+    for body in ('{"openapi": "3.1.0"}', '{"paths": []}'):
+        findings = _run(
+            tmp_path,
+            make_rule,
+            write_files,
+            {"openapi.json": body},
+            {**BASE, "api_glob": None},
+        )
+        assert findings[0].verdict == "UNKNOWN"
+        assert findings[0].category == "unsupported_analysis"
+
+
+def test_missing_inputs_follow_on_missing_input(
+    tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
+) -> None:
+    for on_missing, expected in (
+        ("violation", ["VIOLATED"]),
+        ("unknown", ["UNKNOWN"]),
+        ("skipped", []),
+    ):
+        rule = make_rule(
+            id="API-CONV-001",
+            verifier_id="api.conventions",
+            paths=["openapi.json"],
+            params=BASE,
+            on_missing_input=on_missing,
+        )
+        findings = ApiConventionsVerifier().run(rule, DirectorySnapshot(root=tmp_path))
+        assert [f.verdict for f in findings] == expected  # openapi も api_glob も無い
+    # api_glob だけの設定で対象 0 件
+    rule = make_rule(
+        id="API-CONV-001",
+        verifier_id="api.conventions",
+        paths=["api/**/*.py"],
+        params={**BASE, "openapi_path": None},
+        on_missing_input="unknown",
+    )
+    findings = ApiConventionsVerifier().run(rule, DirectorySnapshot(root=tmp_path))
+    assert [f.verdict for f in findings] == ["UNKNOWN"]
+
+
+def test_invalid_params_are_unknown_not_raised(
+    tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
+) -> None:
+    for params in (
+        {"path_case": "kebab"},  # 入力なし
+        {**BASE, "path_case": "camel"},
+        {"openapi_path": "openapi.json"},  # 検査項目なし
+        {**BASE, "allowed_methods": ["fetch"]},
+    ):
+        findings = _run(tmp_path, make_rule, write_files, {}, params)
+        assert [f.verdict for f in findings] == ["UNKNOWN"]
+        assert findings[0].requirement_id == "API-CONV-001"
+        assert "パラメーターが不正" in findings[0].message

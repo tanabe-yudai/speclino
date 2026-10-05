@@ -5,8 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from speclino.domain.finding import Finding
 from speclino.verifiers.naming_identifiers import NamingIdentifiersVerifier
 from speclino.verifiers.snapshot import DirectorySnapshot
@@ -110,19 +108,38 @@ def test_syntax_error_is_unknown(
     assert findings[0].category == "unsupported_analysis"
 
 
-def test_no_matching_file_yields_no_findings(
+def test_no_target_follows_on_missing_input(
     tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
 ) -> None:
-    assert _run(tmp_path, make_rule, write_files, {"docs/readme.md": "x"}) == []
+    write_files(tmp_path, {"docs/readme.md": "x"})
+    for on_missing, expected in (("violation", "VIOLATED"), ("unknown", "UNKNOWN")):
+        rule = make_rule(
+            id="NAME-001",
+            verifier_id="naming.identifiers",
+            paths=["src/**/*.py"],
+            params=PARAMS,
+            on_missing_input=on_missing,
+        )
+        findings = NamingIdentifiersVerifier().run(rule, DirectorySnapshot(root=tmp_path))
+        assert [f.verdict for f in findings] == [expected]
+    rule = make_rule(
+        id="NAME-001",
+        verifier_id="naming.identifiers",
+        paths=["src/**/*.py"],
+        params=PARAMS,
+        on_missing_input="skipped",
+    )
+    assert NamingIdentifiersVerifier().run(rule, DirectorySnapshot(root=tmp_path)) == []
 
 
-def test_invalid_params_raise_value_error(
+def test_invalid_params_are_unknown_not_raised(
     tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
 ) -> None:
-    with pytest.raises(ValueError):
-        _run(tmp_path, make_rule, write_files, {}, {"function": "[a-"})
-    with pytest.raises(ValueError):
-        _run(tmp_path, make_rule, write_files, {}, {"funtion": "x"})
+    for params in ({"function": "[a-"}, {"funtion": "x"}, {}, {"function": "a" * 257}):
+        findings = _run(tmp_path, make_rule, write_files, {}, params)
+        assert [f.verdict for f in findings] == ["UNKNOWN"]
+        assert findings[0].requirement_id == "NAME-001"
+        assert "パラメーターが不正" in findings[0].message
 
 
 def test_catastrophic_pattern_times_out_to_unknown(
@@ -141,5 +158,13 @@ def test_overlong_identifier_is_unknown_and_long_pattern_rejected(
     src = f"def {'a' * 1001}(): ...\n"
     findings = _run(tmp_path, make_rule, write_files, {"src/m.py": src}, {"function": "a+"})
     assert findings[0].verdict == "UNKNOWN"
-    with pytest.raises(ValueError):
-        _run(tmp_path, make_rule, write_files, {}, {"function": "a" * 257})
+
+
+def test_timeout_is_reported_alongside_violations(
+    tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
+) -> None:
+    src = f"def BadName(): ...\ndef {'a' * 40}_(): ...\n"
+    params = {"function": "(a|aa)+$"}
+    findings = _run(tmp_path, make_rule, write_files, {"src/m.py": src}, params)
+    assert findings[0].verdict == "VIOLATED"
+    assert "判定不能" in (findings[0].actual or "")

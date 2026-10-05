@@ -13,13 +13,26 @@ from speclino.verifiers.base import Snapshot
 
 
 def parse_params[P: IRModel](model: type[P], rule: PolicyRule) -> P:
-    """`rule.verifier.params` をモデルで検証する。不正なら `ValueError`。"""
-    try:
-        return model.model_validate(rule.verifier_ref.params)
-    except ValueError as e:  # pydantic.ValidationError は ValueError の派生
-        raise ValueError(
-            f"{rule.id}: 検証器 {rule.verifier_ref.id} のパラメーターが不正です: {e}"
-        ) from e
+    """`rule.verifier.params` をモデルで検証する。不正なら `ValueError`。
+
+    呼び出し側は `ValueError` を `invalid_params_finding` で UNKNOWN の Finding にし、run 全体を
+    落とさない（未定義キーを持つ既存の改訂があっても、他の規約の検査は続く）。
+    """
+    return model.model_validate(rule.verifier_ref.params)
+
+
+def invalid_params_finding(rule: PolicyRule, error: ValueError) -> Finding:
+    return Finding(
+        id=f"policy:{rule.id}:invalid_params",
+        requirement_id=rule.id,
+        behavior_id=f"policy:{rule.verifier_ref.id}",
+        verdict="UNKNOWN",
+        category="unsupported_analysis",
+        severity=severity_of(rule),
+        message=f"{rule.id}: 規約のパラメーターが不正なため検査できません",
+        actual=str(error),
+        claim_scope="persisted_state",
+    )
 
 
 def severity_of(rule: PolicyRule) -> Severity:
@@ -65,3 +78,24 @@ def unknown_finding(
     return make_finding(
         rule, snapshot, path, "UNKNOWN", "unsupported_analysis", message, actual=actual
     )
+
+
+def missing_input_finding(
+    rule: PolicyRule, snapshot: Snapshot, path: str, what: str
+) -> Finding | None:
+    """検査対象（ファイル）が無いときの Finding。`rule.on_missing_input` に従う。"""
+    if rule.on_missing_input == "skipped":
+        return None
+    message = f"{path}: {what}が無いため確認できません"
+    if rule.on_missing_input == "violation":
+        return make_finding(
+            rule,
+            snapshot,
+            path,
+            "VIOLATED",
+            "missing_effect",
+            message,
+            expected=f"{what}が存在すること",
+            actual="対象なし",
+        )
+    return unknown_finding(rule, snapshot, path, message, "対象なし")

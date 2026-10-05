@@ -290,10 +290,19 @@ def test_envelope_ignored_without_param_and_204_exempt(
     assert findings[0].verdict == "VERIFIED_IN_SCOPE"
 
 
-def test_unknown_param_is_rejected(
+def test_unknown_param_is_unknown_finding_not_raised(
     tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
 ) -> None:
-    import pytest
+    findings = _run(tmp_path, make_rule, write_files, {}, VALID_OPENAPI, {**PARAMS, "typo": 1})
+    assert len(findings) == 1
+    assert findings[0].verdict == "UNKNOWN"
+    assert findings[0].requirement_id == "API-ERR-001"
+    assert "パラメーターが不正" in findings[0].message
 
-    with pytest.raises(ValueError):
-        _run(tmp_path, make_rule, write_files, {}, VALID_OPENAPI, {**PARAMS, "typo": 1})
+
+def test_openapi_without_paths_is_unknown(
+    tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
+) -> None:
+    findings = _run(tmp_path, make_rule, write_files, {}, {"openapi": "3.1.0"})
+    assert findings[0].verdict == "UNKNOWN"
+    assert findings[0].category == "unsupported_analysis"
