@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from speclino.domain.common import IRModel
 
@@ -37,6 +37,12 @@ class ApiConventionsParams(IRModel):
     version_prefix: str | None = None
     allowed_methods: list[str] | None = None
     require_response_model: bool = False
+
+    @model_validator(mode="after")
+    def _needs_an_input(self) -> ApiConventionsParams:
+        if self.openapi_path is None and self.api_glob is None:
+            raise ValueError("openapi_path と api_glob の少なくとも一方が必要です")
+        return self
 
 
 class NamingIdentifiersParams(IRModel):
