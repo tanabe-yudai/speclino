@@ -52,6 +52,7 @@ DUPLICATE_REASON = "同名の定義が複数あり一意に決まらない"
 CONDITIONAL_REASON = "条件つきの定義（if / try などの中）で一意に決まらない"
 NESTED_REASON = "関数の中の定義で一意に決まらない"
 OTHER_LANGUAGE_REASON = "対象外の言語（LLM 支援の単位は Python だけ）"
+TOO_DEEP_REASON = "入れ子が深すぎて正規形を作れない"
 
 
 @dataclass
@@ -91,8 +92,16 @@ def extract_units(
         except (SyntaxError, UnicodeDecodeError, ValueError):
             out.problems.append((rel, "ファイルを読めない（構文エラーなど）"))
             continue
+        except (RecursionError, MemoryError):
+            out.problems.append((rel, TOO_DEEP_REASON))
+            continue
         collector = _Collector(rel, source, params)
-        collector.visit(tree)
+        try:
+            collector.visit(tree)
+        except (RecursionError, MemoryError):
+            # 入れ子が深すぎて辿れない（run を落とさず、このファイルを UNKNOWN にする）
+            out.problems.append((rel, TOO_DEEP_REASON))
+            continue
         dup = {q for q, n in Counter(collector.defs).items() if n > 1}
         for cand in collector.candidates:
             if cand.symbol in seen:
@@ -122,9 +131,13 @@ class _Candidate:
     raw: str
     # 囲む定義（自身を含む）の (修飾名, 一意に決まらない理由)
     chain: list[tuple[str, str | None]]
+    # 単位そのものの問題（正規形を作れないなど）
+    problem: str | None = None
 
 
 def _unit_problem(cand: _Candidate, duplicated: set[str]) -> str | None:
+    if cand.problem is not None:
+        return cand.problem
     for _, reason in cand.chain:
         if reason is not None:
             return reason
@@ -208,13 +221,19 @@ class _Collector(ast.NodeVisitor):
     def _add_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef, qual: str) -> None:
         start = min([d.lineno for d in node.decorator_list] + [node.lineno])
         raw = "\n".join(self.source.splitlines()[start - 1 : node.end_lineno])
+        try:
+            normalized, problem = ast.unparse(node), None
+        except (RecursionError, MemoryError):
+            # 正規形を作れない単位は送らず UNKNOWN（run は落とさない）
+            normalized, problem = "", TOO_DEEP_REASON
         self.candidates.append(
             _Candidate(
                 symbol=f"{self.rel}::{qual}",
                 kind="endpoint" if self.params.unit_kind == "endpoint" else "function",
-                normalized=ast.unparse(node),
+                normalized=normalized,
                 raw=raw,
                 chain=list(self.chain),
+                problem=problem,
             )
         )
 
@@ -257,6 +276,7 @@ __all__ = [
     "MAX_UNIT_TEXT",
     "NESTED_REASON",
     "OTHER_LANGUAGE_REASON",
+    "TOO_DEEP_REASON",
     "ExtractedUnits",
     "extract_units",
     "normalized_hash",

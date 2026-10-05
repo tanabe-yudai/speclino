@@ -196,7 +196,8 @@ class CheckResult:
     # 仕様側に上書きされる・免除が消えるといったずれが起きる。codex レビュー指摘）。
     gate_levels: dict[str, RuleLevel] = field(default_factory=dict)
     waived_finding_ids: frozenset[str] = field(default_factory=frozenset)
-    # 阻止しない REVIEW（S70: LLM 支援の指摘なし・attested の確定）。再ゲートでも同じものを使う
+    # 阻止しない REVIEW（attested の確定が効いたもの。#114 以降、LLM の指摘なしは含めない）。
+    # 再ゲートでも同じものを使う
     cleared_finding_ids: frozenset[str] = field(default_factory=frozenset)
     # 免除の中身（どの例外で・いつまで・どう直すか）。gate.json に残す
     waivers: list[Waiver] = field(default_factory=list)

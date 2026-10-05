@@ -374,3 +374,13 @@ async def test_ordinary_function_is_sent() -> None:
         policy_revision=1,
     )
     assert llm.calls == 3 and findings[0].verdict == "REVIEW"
+
+
+async def test_unanalyzable_format_is_unknown_and_not_sent() -> None:
+    llm = FakeLlm([_answer(True)])
+    unit = _function_unit('def f():\n    return "%99999999s" % ("a",)')
+    findings, _ = await assess(
+        _rule(), [unit], llm=llm, store=InMemoryAssessmentStore(), policy_revision=1
+    )
+    (f,) = findings
+    assert llm.calls == 0 and f.verdict == "UNKNOWN" and "解析できない書式" in f.message

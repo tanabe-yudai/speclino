@@ -57,7 +57,6 @@ _PATTERNS: tuple[tuple[str, regex.Pattern[str]], ...] = tuple(
 
 # 例示用に予約されたドメイン（RFC 2606・6761）。個人情報ではないので検出しない
 _EXAMPLE_DOMAINS = ("example.com", "example.org", "example.net")
-_EXAMPLE_TLDS = (".example", ".invalid", ".test", ".localhost")
 # Base64・16 進・URL セーフの文字（秘密らしい値の候補の連なり）
 _TOKEN_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=_-")
 
@@ -106,10 +105,20 @@ def sensitive_name(name: str) -> bool:
     return any(part in folded for part in SENSITIVE_NAME_PARTS)
 
 
+_EXAMPLE_HOST = regex.compile(r"[a-z0-9\-]{1,63}\.(?:example|invalid|test|localhost)")
+_EXAMPLE_LOCAL = regex.compile(r"[a-z][a-z0-9.\-]{0,30}")
+
+
 def _example_email(text: str) -> bool:
-    domain = text.rsplit("@", 1)[-1].lower()
-    return domain.endswith(_EXAMPLE_TLDS) or any(
-        domain == d or domain.endswith("." + d) for d in _EXAMPLE_DOMAINS
+    """例示用のアドレスに完全一致するか。ドメインは `example.com` などそのものか `<1 語>.test`、
+    ローカル部は短い小文字の語だけ（秘密をローカル部に埋めた形は除外しない。#114 fix round 2）。"""
+    local, _, domain = text.rpartition("@")
+    domain = domain.lower()
+    example_domain = domain in _EXAMPLE_DOMAINS or _EXAMPLE_HOST.fullmatch(domain) is not None
+    return (
+        example_domain
+        and _EXAMPLE_LOCAL.fullmatch(local) is not None
+        and not secret_like_value(local)
     )
 
 
@@ -151,26 +160,31 @@ def _entropy(token: str) -> float:
     return -sum(c / n * math.log2(c / n) for c in counts.values())
 
 
-def _wordish(token: str) -> bool:
-    """`_` で区切った語の並び（`retry_policy_v2`・`UTF8_INPUT_LIMIT`）。識別子や定数名。
+_WORD = regex.compile(r"[a-z]{1,30}[0-9]{0,2}|[0-9]{1,4}")
 
-    各区切りが英字だけ・数字だけ・英字の後に数字（`v2`・`utf8`）のどれかで、区切りが 2 つ以上。
+
+def _wordish(token: str) -> bool:
+    """Python の識別子の形（`retry_policy_v2`・`UTF8_INPUT_LIMIT`）に完全一致するか。
+
+    小文字だけ・大文字だけのどちらかで、`_` で区切った 2〜16 語。各語は英字（末尾に数字 2 桁まで）か
+    4 桁までの数字で、半分以上の語が 3 文字以上の英字。大文字小文字の混じり・短い語ばかりの並びは
+    識別子とみなさない（#114 fix round 2: 秘密を識別子の形に似せて除外をすり抜けさせない）。
+    本文の中の識別子にだけ使い、文字列リテラルの値には使わない。
     """
-    parts = token.split("_")
-    if len(parts) < 2 or any(not p for p in parts):
+    lowered = token.lower()
+    if token not in (lowered, token.upper()):
         return False
-    for p in parts:
-        letters = p.rstrip("0123456789")
-        if letters and not letters.isalpha():
-            return False
-    return True
+    words = lowered.split("_")
+    if not 2 <= len(words) <= 16 or any(_WORD.fullmatch(w) is None for w in words):
+        return False
+    long_words = sum(1 for w in words if len(w.rstrip("0123456789")) >= 3)
+    return long_words * 2 >= len(words)
 
 
 def secret_like_value(token: str) -> bool:
     """値による検出の条件（空白を含まない 1 つの連なりについて）。"""
     return (
-        not _wordish(token)
-        and len(token) >= VALUE_MIN_LENGTH
+        len(token) >= VALUE_MIN_LENGTH
         and all(c in _TOKEN_CHARS for c in token)
         and any(c.isdigit() for c in token)
         and any(c.isalpha() for c in token)
@@ -178,7 +192,7 @@ def secret_like_value(token: str) -> bool:
     )
 
 
-def _value_runs(text: str, offset: int = 0) -> list[SecretHit]:
+def _value_runs(text: str, offset: int = 0, *, allow_identifiers: bool = True) -> list[SecretHit]:
     """Base64・16 進・URL セーフの文字の連なりのうち、秘密らしい値の条件に合うもの。1 回の走査。"""
     hits: list[SecretHit] = []
     start: int | None = None
@@ -188,7 +202,8 @@ def _value_runs(text: str, offset: int = 0) -> list[SecretHit]:
                 start = i
             continue
         if start is not None:
-            if secret_like_value(text[start:i]):
+            token = text[start:i]
+            if secret_like_value(token) and not (allow_identifiers and _wordish(token)):
                 hits.append(SecretHit(VALUE_KIND, offset + start, offset + i))
             start = None
     return hits
@@ -211,16 +226,29 @@ def _env_key_ids(tree: ast.AST) -> set[int]:
     ids: set[int] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Subscript) and _is_environ(node.value):
-            ids.add(id(node.slice))
+            if _env_name(node.slice):
+                ids.add(id(node.slice))
         elif isinstance(node, ast.Call) and node.args:
             f = node.func
             getenv = (isinstance(f, ast.Attribute) and f.attr == "getenv") or (
                 isinstance(f, ast.Name) and f.id == "getenv"
             )
             environ_get = isinstance(f, ast.Attribute) and f.attr == "get" and _is_environ(f.value)
-            if getenv or environ_get:
+            if (getenv or environ_get) and _env_name(node.args[0]):
                 ids.add(id(node.args[0]))
     return ids
+
+
+_ENV_NAME = regex.compile(r"[A-Z_][A-Z0-9_]{0,127}")
+
+
+def _env_name(n: ast.AST) -> bool:
+    """環境変数の名前の形（大文字・数字・`_`）に完全一致する定数だけを除外する。"""
+    return (
+        isinstance(n, ast.Constant)
+        and isinstance(n.value, str)
+        and _ENV_NAME.fullmatch(n.value) is not None
+    )
 
 
 def _constant_text(n: ast.AST) -> str | None:
@@ -232,47 +260,168 @@ def _constant_text(n: ast.AST) -> str | None:
     return None
 
 
-_MAX_FORMATTED = 10_000
+# 組み立ての上限（#114 fix round 2）。組み立てる「前に」出力の大きさを見積もり、超えるなら
+# 組み立てずにその単位を UNKNOWN にする（`%99999999s`・`"ab" * 10**9` で資源を使い切らせない）
+MAX_ASSEMBLED = 64 * 1024
+MAX_FORMAT_WIDTH = 1024
+UNANALYZABLE_KIND = "解析できない書式"
+_PERCENT_SPEC = regex.compile(
+    r"%(?:\([^)]{0,64}\))?[#0\- +]{0,8}(\*|\d{1,32})?(?:\.(\*|\d{1,32}))?[hlL]?(.)",
+    flags=regex.DOTALL,
+)
+_SPEC_NUMBER = regex.compile(r"\d{1,32}")
+_COMPOSITES = (ast.BinOp, ast.JoinedStr, ast.Call)
 
 
-def _constant_args(nodes: list[ast.expr]) -> list[str] | None:
-    texts = [_constant_text(a) for a in nodes]
-    return None if any(t is None for t in texts) else [t for t in texts if t is not None]
+class _Unanalyzable(Exception):
+    """組み立てると上限を超える・書式が解析できない。その単位は送らない。"""
 
 
-def _formatted(n: ast.AST) -> str | None:
-    """定数どうしの `%` と `.format` を組み立てた値（`"%s-%s" % ("sk", "abc")`）。
+class _Assembler:
+    """定数の式を組み立てる。出力の合計を `MAX_ASSEMBLED` で抑え、超える前に `_Unanalyzable`。"""
 
-    書式も引数も定数のときだけ。`.format` は位置の欄（`{}`・`{0}`）だけを埋める（属性・添字の参照は
-    評価しない）。大きくなりすぎるものは組み立てない。
-    """
-    if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Mod):
-        fmt = _constant_text(n.left)
+    def __init__(self) -> None:
+        self.budget = MAX_ASSEMBLED
+
+    def _charge(self, size: int) -> None:
+        if size > self.budget:
+            raise _Unanalyzable(f"組み立てると {size} 文字を超える")
+        self.budget -= size
+
+    def assemble(self, n: ast.AST) -> str | None:
+        """定数だけでできた式なら組み立てた値、そうでなければ None。"""
+        text = _constant_text(n)
+        if text is not None:
+            return text
+        if isinstance(n, ast.JoinedStr):
+            return self._fstring(n)
+        if isinstance(n, ast.BinOp):
+            if isinstance(n.op, ast.Add):
+                return self._concat(n)
+            if isinstance(n.op, ast.Mult):
+                return self._repeat(n)
+            if isinstance(n.op, ast.Mod):
+                return self._percent(n)
+            return None
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and not n.keywords:
+            if n.func.attr == "format":
+                return self._format(n)
+            if n.func.attr == "join":
+                return self._join(n)
+        return None
+
+    def _all(self, nodes: list[ast.AST]) -> list[str] | None:
+        """すべてを組み立てる（1 つが定数でなくても残りの上限の検査は続ける）。"""
+        texts = [self.assemble(x) for x in nodes]
+        if any(t is None for t in texts):
+            return None
+        return [t for t in texts if t is not None]
+
+    def _fstring(self, n: ast.JoinedStr) -> str:
+        parts: list[str] = []
+        for v in n.values:
+            text = _constant_text(v)
+            if text is not None:
+                parts.append(text)
+            elif isinstance(v, ast.FormattedValue) and isinstance(v.format_spec, ast.JoinedStr):
+                spec_parts = [_constant_text(x) for x in v.format_spec.values]
+                if any(t is None for t in spec_parts):
+                    raise _Unanalyzable("入れ子の書式指定")
+                _check_spec("".join(t for t in spec_parts if t is not None))
+        out = "".join(parts)
+        self._charge(len(out))
+        return out
+
+    def _concat(self, n: ast.BinOp) -> str | None:
+        # `+` の連なりは明示のスタックで平らにする（深い連結で再帰しない）
+        operands: list[ast.AST] = []
+        stack: list[ast.AST] = [n]
+        while stack:
+            cur = stack.pop()
+            if isinstance(cur, ast.BinOp) and isinstance(cur.op, ast.Add):
+                stack += [cur.right, cur.left]
+            else:
+                operands.append(cur)
+        texts = self._all(operands)
+        if texts is None:
+            return None
+        self._charge(sum(map(len, texts)))
+        return "".join(texts)
+
+    def _repeat(self, n: ast.BinOp) -> str | None:
+        for text_node, count_node in ((n.left, n.right), (n.right, n.left)):
+            if (
+                isinstance(count_node, ast.Constant)
+                and isinstance(count_node.value, int)
+                and not isinstance(count_node.value, bool)
+            ):
+                text = self.assemble(text_node)
+                if text is None:
+                    continue
+                count = max(count_node.value, 0)
+                self._charge(len(text) * count)  # 掛ける前に見積もる
+                return text * count
+        for text_node, count_node in ((n.left, n.right), (n.right, n.left)):
+            if _constant_int_expr(count_node) and self.assemble(text_node) is not None:
+                # `"ab" * 10**9` の回数は計算しない（計算すると見積もりの前に大きくなる）
+                raise _Unanalyzable("反復の回数を定数の式から決められない")
+        return None
+
+    def _percent(self, n: ast.BinOp) -> str | None:
+        fmt = self.assemble(n.left)
+        if fmt is None:
+            return None
         right = n.right.elts if isinstance(n.right, ast.Tuple) else [n.right]
-        args = _constant_args(list(right))
-        if fmt is None or args is None or len(fmt) + sum(map(len, args)) > _MAX_FORMATTED:
+        # 書式の幅・精度は引数より先に見る（引数が定数でなくても、大きすぎる書式は解析しない）
+        _check_percent(fmt)
+        args = self._all(list(right))
+        if args is None:
+            return None
+        out: list[str] = []
+        pos = 0
+        consumed = 0
+        try:
+            for m in _PERCENT_SPEC.finditer(fmt, timeout=TIMEOUT_SECONDS):
+                out.append(fmt[pos : m.start()])
+                pos = m.end()
+                width, precision, conv = m.group(1), m.group(2), m.group(3)
+                for number in (width, precision):
+                    if number == "*" or (number is not None and int(number) > MAX_FORMAT_WIDTH):
+                        raise _Unanalyzable("書式の幅・精度が大きすぎる")
+                if conv == "%":
+                    out.append("%")
+                    continue
+                if consumed < len(args):
+                    out.append(args[consumed])  # 幅は詰め物なので値だけをつなぐ（安全側）
+                    consumed += 1
+        except TimeoutError as e:
+            raise _Unanalyzable("書式の照合の時間切れ") from e
+        out.append(fmt[pos:])
+        self._charge(sum(map(len, out)))
+        return "".join(out)
+
+    def _format(self, n: ast.Call) -> str | None:
+        assert isinstance(n.func, ast.Attribute)
+        fmt = self.assemble(n.func.value)
+        if fmt is None:
             return None
         try:
-            return fmt % tuple(args)
-        except (TypeError, ValueError):
-            return None
-    if (
-        isinstance(n, ast.Call)
-        and isinstance(n.func, ast.Attribute)
-        and n.func.attr == "format"
-        and not n.keywords
-    ):
-        fmt = _constant_text(n.func.value)
-        args = _constant_args(list(n.args))
-        if fmt is None or args is None or len(fmt) + sum(map(len, args)) > _MAX_FORMATTED:
+            for _literal, field, spec, _conv in string.Formatter().parse(fmt):
+                if field is not None:
+                    _check_spec(spec or "")
+        except ValueError as e:
+            raise _Unanalyzable("書式を解析できない") from e
+        args = self._all(list(n.args))
+        if args is None:
             return None
         out: list[str] = []
         auto = 0
         try:
-            for literal, field, _spec, _conv in string.Formatter().parse(fmt):
+            for literal, field, spec, _conv in string.Formatter().parse(fmt):
                 out.append(literal)
                 if field is None:
                     continue
+                _check_spec(spec or "")
                 if field == "":
                     index, auto = auto, auto + 1
                 elif field.isdigit():
@@ -281,39 +430,91 @@ def _formatted(n: ast.AST) -> str | None:
                     continue
                 if index < len(args):
                     out.append(args[index])
-        except ValueError:
-            return None
+        except ValueError as e:
+            raise _Unanalyzable("書式を解析できない") from e
+        self._charge(sum(map(len, out)))
         return "".join(out)
-    return None
+
+    def _join(self, n: ast.Call) -> str | None:
+        assert isinstance(n.func, ast.Attribute)
+        sep = self.assemble(n.func.value)
+        if sep is None or len(n.args) != 1 or not isinstance(n.args[0], (ast.List, ast.Tuple)):
+            return None
+        items = self._all(list(n.args[0].elts))
+        if items is None:
+            return None
+        self._charge(sum(map(len, items)) + len(sep) * max(len(items) - 1, 0))
+        return sep.join(items)
 
 
-def _joined(n: ast.AST) -> str | None:
-    """f-string の定数部分と、`+` で連結した定数を結合した値（`"sk-" + "abc"`、`f"sk-{x}abc"`）。"""
-    formatted = _formatted(n)
-    if formatted is not None:
-        return formatted
+def _check_percent(fmt: str) -> None:
+    try:
+        for m in _PERCENT_SPEC.finditer(fmt, timeout=TIMEOUT_SECONDS):
+            for number in (m.group(1), m.group(2)):
+                if number == "*" or (number is not None and int(number) > MAX_FORMAT_WIDTH):
+                    raise _Unanalyzable("書式の幅・精度が大きすぎる")
+    except TimeoutError as e:
+        raise _Unanalyzable("書式の照合の時間切れ") from e
+
+
+def _constant_int_expr(n: ast.AST) -> bool:
+    """整数の定数だけでできた式（`10**9`・`1 << 30`・`-5`）。"""
+    stack = [n]
+    while stack:
+        cur = stack.pop()
+        if isinstance(cur, ast.Constant):
+            if not isinstance(cur.value, int) or isinstance(cur.value, bool):
+                return False
+        elif isinstance(cur, ast.BinOp):
+            stack += [cur.left, cur.right]
+        elif isinstance(cur, ast.UnaryOp):
+            stack.append(cur.operand)
+        else:
+            return False
+    return True
+
+
+def _assembling(n: ast.AST) -> bool:
+    """組み立ての中で子を読む式（子は一番外側の式の組み立ての中で扱う）。"""
+    if isinstance(n, ast.BinOp):
+        return isinstance(n.op, (ast.Add, ast.Mult, ast.Mod))
     if isinstance(n, ast.JoinedStr):
-        return "".join(t for v in n.values if (t := _constant_text(v)) is not None)
-    if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Add):
-        left = _joined(n.left) if not isinstance(n.left, ast.Constant) else _constant_text(n.left)
-        right = (
-            _joined(n.right) if not isinstance(n.right, ast.Constant) else _constant_text(n.right)
-        )
-        if left is not None and right is not None:
-            return left + right
-    return None
+        return True
+    return (
+        isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Attribute)
+        and n.func.attr in ("format", "join")
+    )
+
+
+def _check_spec(spec: str) -> None:
+    """書式指定（`>99999999`・入れ子の `{}`）が大きすぎる・解析できないなら `_Unanalyzable`。"""
+    if "{" in spec or "}" in spec:
+        raise _Unanalyzable("入れ子の書式指定")
+    for m in _SPEC_NUMBER.finditer(spec):
+        if int(m.group(0)) > MAX_FORMAT_WIDTH:
+            raise _Unanalyzable("書式の幅・精度が大きすぎる")
 
 
 def _literals(node: ast.AST, exempt: set[int]) -> list[str]:
     """部分木のすべての文字列・bytes の定数の値（エスケープを解いた後。暗黙の連結はパーサが結合
-    済み）と、f-string・`+` の連結の定数部分を結合した値。空のものは除く。"""
+    済み）と、定数の式（f-string・`+`・`*`・`%`・`.format`・`.join`）を組み立てた値。空は除く。
+
+    組み立ては一番外側の式でだけ行う（各ノードを高々定数回しか見ないので線形）。組み立てが上限を
+    超える・書式が解析できないときは `_Unanalyzable`。
+    """
+    inner: set[int] = set()
+    for n in ast.walk(node):
+        if _assembling(n):
+            inner.update(id(c) for c in ast.iter_child_nodes(n))
+    assembler = _Assembler()
     out: list[str] = []
     for n in ast.walk(node):
         if id(n) in exempt:
             continue
         text = _constant_text(n)
-        if text is None:
-            text = _joined(n)
+        if text is None and isinstance(n, _COMPOSITES) and id(n) not in inner:
+            text = assembler.assemble(n)
         if text:
             out.append(text)
     return out
@@ -361,6 +562,15 @@ def _named_values(tree: ast.AST) -> list[tuple[str, ast.AST]]:
                 for arg, d in zip(a.kwonlyargs, a.kw_defaults, strict=True)
                 if d is not None
             ]
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "setattr"
+            and len(node.args) >= 3
+            and isinstance(node.args[1], ast.Constant)
+            and isinstance(node.args[1].value, str)
+        ):
+            pairs.append((node.args[1].value, node.args[2]))
         elif isinstance(node, ast.Compare):
             names = _target_names(node.left)
             pairs += [(n, c) for n in names for c in node.comparators]
@@ -368,16 +578,26 @@ def _named_values(tree: ast.AST) -> list[tuple[str, ast.AST]]:
 
 
 def _python_hits(tree: ast.AST) -> list[SecretHit]:
-    exempt = _env_key_ids(tree)
-    hits: list[SecretHit] = []
-    for name, value in _named_values(tree):
-        if sensitive_name(name) and _literals(value, exempt):
-            hits.append(SecretHit(NAME_KIND, 0, 0))
-    for literal in _literals(tree, exempt):
-        # 値そのものに、形・名前（"password=..." のような文字列）・値の検出をすべてかける
-        found = _pattern_hits(literal) + _named_value_hits(literal) + _value_runs(literal)
-        hits += [SecretHit(h.kind, 0, 0) for h in found]
-    return hits
+    try:
+        exempt = _env_key_ids(tree)
+        hits: list[SecretHit] = []
+        for name, value in _named_values(tree):
+            # 名前による検出は形の除外（識別子など）に関係なく効く。環境変数の名前（完全一致の形）
+            # だけは読む値の名前なので外す
+            if sensitive_name(name) and _literals(value, exempt):
+                hits.append(SecretHit(NAME_KIND, 0, 0))
+        for literal in _literals(tree, exempt):
+            # 値そのものに、形・名前（"password=..." のような文字列）・値の検出をすべてかける。
+            # 識別子の除外はしない（文字列の値は識別子ではない）
+            found = (
+                _pattern_hits(literal)
+                + _named_value_hits(literal)
+                + _value_runs(literal, allow_identifiers=False)
+            )
+            hits += [SecretHit(h.kind, 0, 0) for h in found]
+        return hits
+    except (_Unanalyzable, RecursionError, MemoryError, OverflowError):
+        return [SecretHit(UNANALYZABLE_KIND, 0, 0)]
 
 
 def find_secrets(text: str, *, python: bool = False) -> list[SecretHit]:
@@ -387,14 +607,17 @@ def find_secrets(text: str, *, python: bool = False) -> list[SecretHit]:
     値による検出（文字列リテラルの中の秘密らしい連なり）を行う（位置は返さない）。読めなければ、また
     `python=False` なら、文字の上で同じ検出を行う（位置つき。引用の伏せ字に使う）。
     """
-    # 送る本文そのもの（正規形）に対して検出する。Python ならさらに AST の定数の値にもかける
-    hits = _pattern_hits(text) + _value_runs(text)
+    # 送る本文そのもの（正規形）に対して検出する。Python ならさらに AST の定数の値にもかける。
+    # Python の本文では識別子（`retry_policy_v2`）を値の検出から外す。文字列の値は外さない
+    hits = _pattern_hits(text) + _value_runs(text, allow_identifiers=python)
     tree: ast.AST | None = None
     if python:
         try:
             tree = ast.parse(text)
         except (SyntaxError, ValueError):
             tree = None
+        except (RecursionError, MemoryError):
+            return [*hits, SecretHit(UNANALYZABLE_KIND, 0, len(text))]
     if tree is not None:
         return hits + _python_hits(tree)
     return hits + _named_value_hits(text)
@@ -411,7 +634,7 @@ def prompt_secret_kinds(prompt: str) -> list[str]:
     形と値の検出に加え、秘密らしい名前に引用符つきの値が結びつくもの（`password = "..."`）を見る。
     引用符の無い `token = make_token()` は値ではないので見ない。
     """
-    hits = _pattern_hits(prompt) + _value_runs(prompt)
+    hits = _pattern_hits(prompt) + _value_runs(prompt, allow_identifiers=True)
     try:
         for m in _QUOTED_NAMED_VALUE.finditer(prompt, timeout=TIMEOUT_SECONDS):
             if sensitive_name(m.group(1)):
@@ -445,6 +668,7 @@ def mask_secrets(text: str) -> str:
 
 __all__ = [
     "NAME_KIND",
+    "UNANALYZABLE_KIND",
     "SENSITIVE_NAME_PARTS",
     "VALUE_KIND",
     "MASK",

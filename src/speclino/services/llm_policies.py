@@ -49,6 +49,7 @@ from speclino.ports.text_llm import TextLlm
 from speclino.services.cost_guard import CostGuard
 from speclino.services.secret_scan import (
     SECRET_REASON,
+    UNANALYZABLE_KIND,
     mask_secrets,
     prompt_secret_kinds,
     secret_kinds,
@@ -447,9 +448,12 @@ async def assess(
             }
         )
         if kinds:
-            findings.append(
-                _unit_unknown(rule, unit, f"{SECRET_REASON}（{'・'.join(kinds)}）", "secret")
+            reason = (
+                f"{UNANALYZABLE_KIND}（組み立てると大きすぎる・深すぎる）のため LLM に送らない"
+                if UNANALYZABLE_KIND in kinds
+                else f"{SECRET_REASON}（{'・'.join(kinds)}）"
             )
+            findings.append(_unit_unknown(rule, unit, reason, "secret"))
             continue
         if model_name is None:
             findings.append(_unit_unknown(rule, unit, "モデルが分からない"))

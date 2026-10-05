@@ -178,3 +178,39 @@ def test_non_python_files_are_problems(tmp_path: Path) -> None:
     (tmp_path / "app" / "x.ts").write_text("export const a = 1\n", encoding="utf-8")
     got = extract_units(tmp_path, _params("function"), ["app/*"])
     assert got.problems == [("app/x.ts", OTHER_LANGUAGE_REASON)]
+
+
+def test_too_deep_function_is_unknown_and_does_not_crash(tmp_path: Path) -> None:
+    """#114 fix round 2: 正規形（ast.unparse）や走査が深すぎて失敗しても run を落とさない。"""
+    from speclino.services.llm_units import TOO_DEEP_REASON
+
+    deep = "def deep():\n    return " + "+".join(["1"] * 3000) + "\n\n\ndef ok():\n    pass\n"
+    root = _write(tmp_path, deep)
+    got = extract_units(root, _params("function"), ["app/*.py"])
+    assert got.units == []
+    assert [reason for _, reason in got.problems] == [TOO_DEEP_REASON]
+
+
+def test_unparse_recursion_marks_only_that_unit(tmp_path: Path, monkeypatch: object) -> None:
+    import ast
+
+    import pytest
+
+    from speclino.services import llm_units
+    from speclino.services.llm_units import TOO_DEEP_REASON
+
+    real = ast.unparse
+
+    def flaky(node: ast.AST) -> str:
+        if isinstance(node, ast.FunctionDef) and node.name == "cancel":
+            raise RecursionError
+        return real(node)
+
+    mp = pytest.MonkeyPatch()
+    mp.setattr(llm_units.ast, "unparse", flaky)
+    try:
+        got = extract_units(_write(tmp_path), _params("function"), ["app/*.py"])
+    finally:
+        mp.undo()
+    assert ("app/api.py::Orders.cancel", TOO_DEEP_REASON) in got.problems
+    assert {u.symbol for u in got.units} == {"app/api.py::create_order", "app/api.py::helper"}

@@ -213,3 +213,125 @@ def test_prompt_gate_catches_secrets_outside_the_unit_body() -> None:
     assert prompt_secret_kinds('```\npassword = "hunter2"\n```')
     ordinary = "規約: エラーは次の行動を示す\n```\ndef f(order_id):\n    token = make_token()\n```"
     assert prompt_secret_kinds(ordinary) == []
+
+
+# ---------------------------------------------------------------------------
+# fix round 2: 組み立ての上限（資源の使い切り）と、除外のすり抜け
+# ---------------------------------------------------------------------------
+
+UNANALYZABLE_PROBES = [
+    'x = "%99999999s" % ("a",)',
+    'x = "%2000000000s" % ("a",)',
+    'x = "%.99999999s" % ("a",)',
+    'x = "%*s" % (99999999, "a")',
+    'x = "{0:>99999999}".format("a")',
+    'x = "{0:{1}}".format("a", "99999999")',
+    'x = f"{y:>99999999}"',
+    'x = "ab" * 10**9',
+    'x = 10**9 * "ab"',
+    'x = "ab" * 1000000',
+    'x = ("ab" * 40000) + ("cd" * 40000)',
+    'x = "-".join(["' + "a" * 1000 + '"] * 1)' + " + " + '"x" * 70000',
+]
+
+
+@pytest.mark.parametrize("source", UNANALYZABLE_PROBES)
+def test_oversized_assembly_is_unanalyzable_quickly(source: str) -> None:
+    import tracemalloc
+
+    from speclino.services.secret_scan import UNANALYZABLE_KIND
+
+    tracemalloc.start()
+    started = time.perf_counter()
+    kinds = secret_kinds(source, python=True)
+    elapsed = time.perf_counter() - started
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    assert UNANALYZABLE_KIND in kinds, source
+    assert elapsed < 1.0 and peak < 8 * 1024 * 1024, (elapsed, peak)
+
+
+def test_deeply_nested_source_is_unanalyzable() -> None:
+    """パーサが深さで失敗する本文（RecursionError / MemoryError）は送らない。"""
+    from speclino.services.secret_scan import UNANALYZABLE_KIND
+
+    for deep in ("x = " + "a." * 100000 + "b", "x = " + "-" * 100000 + "1"):
+        assert UNANALYZABLE_KIND in secret_kinds(deep, python=True)
+
+
+def test_deep_concatenation_is_scanned_without_recursion() -> None:
+    chain = f'x = "sk-" + "{TAIL}" + ' + "+".join(['" "'] * 3000)
+    assert secret_kinds(chain, python=True)
+
+
+def test_long_concatenation_chain_is_linear() -> None:
+    chain = "x = " + " + ".join(['"ab"'] * 900)
+    started = time.perf_counter()
+    secret_kinds(chain, python=True)
+    assert time.perf_counter() - started < 1.0
+
+
+def test_small_formats_are_still_assembled() -> None:
+    assert VALUE_KIND in secret_kinds(f'x = "%5s%s" % ("sk-", "{TAIL}1")', python=True)
+    assert secret_kinds(f'x = "-".join(["sk", "{TAIL}"])', python=True)
+    assert secret_kinds('x = "%-10s|" % ("注文",)', python=True) == []
+
+
+SECRET = "q8Zr2LmX9vB4nT7kP1sD"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        f"/tmp/{SECRET}",
+        f"https://x/{SECRET}",
+        f"https://api.example.com/v1/{SECRET}",
+        "q8Zr2LmX-9vB4-nT7k-P1sD-6fH3jW5yC0aE",  # UUID の形に埋め込む
+        f"sha256:{SECRET}",
+        f"{SECRET}@example.com",  # 例示用ドメインのローカル部に埋め込む
+        "aB3_xY7_pQ9_zZ1_kK2_mN4",  # 識別子の形に似せる
+        "ab3_cd7_ef9_gh1_ij2_kl4",
+    ],
+)
+def test_lookalikes_of_allowed_forms_are_not_sent(value: str) -> None:
+    assert secret_kinds(f'x = "{value}"', python=True), value
+    assert secret_kinds(value), value
+
+
+def test_identifier_exclusion_applies_only_to_code_identifiers() -> None:
+    assert (
+        secret_kinds(
+            "def handle_order_cancellation_request_with_retry_policy_v2(): pass", python=True
+        )
+        == []
+    )
+    # 同じ形でも文字列の値は除外しない
+    assert secret_kinds('x = "handle_order_v2_cancel_retry_v3"', python=True)
+
+
+def test_name_detection_wins_over_allowed_forms() -> None:
+    for value in ("550e8400-e29b-41d4-a716-446655440000", "noreply@example.com", "/tmp/x"):
+        assert NAME_KIND in secret_kinds(f'password = "{value}"', python=True), value
+    # 環境変数の名前は完全一致の形のときだけ除外する
+    assert NAME_KIND in secret_kinds('token = os.environ["sk-not-an-env-name"]', python=True)
+    assert secret_kinds('token = os.environ["API_TOKEN"]', python=True) == []
+
+
+def test_example_email_exclusion_is_exact() -> None:
+    assert secret_kinds('x = "noreply@example.com"', python=True) == []
+    assert secret_kinds('x = "user@service.test"', python=True) == []
+    assert "メールアドレス" in secret_kinds('x = "taro@mail.example.com.evil.jp"')
+    assert "メールアドレス" in secret_kinds('x = "Taro.Yamada@corp.example.co.jp"')
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'setattr(obj, "password", "hunter2")',
+        'setattr(cfg, "api_key", "abc")',
+        f'x = "".join(["sk-", "{TAIL}"])',
+        f'x = "".join(("sk", "-", "{TAIL}"))',
+    ],
+)
+def test_setattr_and_join_are_detected(source: str) -> None:
+    assert secret_kinds(source, python=True), source
