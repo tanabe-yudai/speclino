@@ -24,6 +24,7 @@ from speclino.services.llm_policies import (
     parse_key,
 )
 from speclino.services.llm_units import normalized_hash
+from tests.unit.services.test_secret_scan import EVASIONS, TAIL
 
 
 def _rule(level: str = "mandatory", items: list[str] | None = None) -> PolicyRule:
@@ -322,3 +323,54 @@ async def test_quote_from_model_is_masked_before_storing_and_display() -> None:
     assert f.actual is not None and email not in f.actual and "伏せた" in f.actual
     record = await store.get(parse_key(keys[0]))
     assert record is not None and all(email not in (i.quote or "") for i in record.items)
+
+
+def _function_unit(source: str, symbol: str = "app/api.py::f") -> AssessmentUnit:
+    """抽出器と同じく、本文は ast.unparse の正規形（LLM に送るそのもの）。"""
+    import ast
+
+    text = ast.unparse(ast.parse(source))
+    return AssessmentUnit(
+        symbol=symbol, kind="function", text=text, unit_hash=normalized_hash(text)
+    )
+
+
+@pytest.mark.parametrize("source", EVASIONS)
+async def test_evasions_are_never_sent(source: str) -> None:
+    llm = FakeLlm([_answer(True)])
+    findings, _ = await assess(
+        _rule(),
+        [_function_unit(source)],
+        llm=llm,
+        store=InMemoryAssessmentStore(),
+        policy_revision=1,
+    )
+    assert llm.calls == 0
+    assert all(f.verdict == "UNKNOWN" and "LLM に送らない" in f.message for f in findings)
+
+
+async def test_prompt_gate_blocks_secret_in_symbol() -> None:
+    llm = FakeLlm([_answer(True)])
+    unit = _function_unit("def f():\n    pass", symbol=f"app/sk-{TAIL}.py::f")
+    findings, _ = await assess(
+        _rule(), [unit], llm=llm, store=InMemoryAssessmentStore(), policy_revision=1
+    )
+    assert llm.calls == 0 and findings[0].verdict == "UNKNOWN"
+
+
+async def test_ordinary_function_is_sent() -> None:
+    source = (
+        "def cancel_order(order_id: str, retry_policy_v2: int = 3) -> None:\n"
+        "    session = make_session(engine)\n"
+        "    token = os.environ['API_TOKEN']\n"
+        "    raise OrderError(f'注文 {order_id} が無い。番号を確かめてください。')\n"
+    )
+    llm = FakeLlm([_answer(False, "")])
+    findings, _ = await assess(
+        _rule(),
+        [_function_unit(source)],
+        llm=llm,
+        store=InMemoryAssessmentStore(),
+        policy_revision=1,
+    )
+    assert llm.calls == 3 and findings[0].verdict == "REVIEW"

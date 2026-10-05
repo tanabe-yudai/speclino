@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import ast
 import math
+import string
 from collections import Counter
 from dataclasses import dataclass
 
@@ -150,10 +151,26 @@ def _entropy(token: str) -> float:
     return -sum(c / n * math.log2(c / n) for c in counts.values())
 
 
+def _wordish(token: str) -> bool:
+    """`_` で区切った語の並び（`retry_policy_v2`・`UTF8_INPUT_LIMIT`）。識別子や定数名。
+
+    各区切りが英字だけ・数字だけ・英字の後に数字（`v2`・`utf8`）のどれかで、区切りが 2 つ以上。
+    """
+    parts = token.split("_")
+    if len(parts) < 2 or any(not p for p in parts):
+        return False
+    for p in parts:
+        letters = p.rstrip("0123456789")
+        if letters and not letters.isalpha():
+            return False
+    return True
+
+
 def secret_like_value(token: str) -> bool:
     """値による検出の条件（空白を含まない 1 つの連なりについて）。"""
     return (
-        len(token) >= VALUE_MIN_LENGTH
+        not _wordish(token)
+        and len(token) >= VALUE_MIN_LENGTH
         and all(c in _TOKEN_CHARS for c in token)
         and any(c.isdigit() for c in token)
         and any(c.isalpha() for c in token)
@@ -206,14 +223,99 @@ def _env_key_ids(tree: ast.AST) -> set[int]:
     return ids
 
 
+def _constant_text(n: ast.AST) -> str | None:
+    if isinstance(n, ast.Constant):
+        if isinstance(n.value, str):
+            return n.value
+        if isinstance(n.value, bytes):
+            return n.value.decode("latin-1")  # bytes は latin-1 で文字列にして検査する
+    return None
+
+
+_MAX_FORMATTED = 10_000
+
+
+def _constant_args(nodes: list[ast.expr]) -> list[str] | None:
+    texts = [_constant_text(a) for a in nodes]
+    return None if any(t is None for t in texts) else [t for t in texts if t is not None]
+
+
+def _formatted(n: ast.AST) -> str | None:
+    """定数どうしの `%` と `.format` を組み立てた値（`"%s-%s" % ("sk", "abc")`）。
+
+    書式も引数も定数のときだけ。`.format` は位置の欄（`{}`・`{0}`）だけを埋める（属性・添字の参照は
+    評価しない）。大きくなりすぎるものは組み立てない。
+    """
+    if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Mod):
+        fmt = _constant_text(n.left)
+        right = n.right.elts if isinstance(n.right, ast.Tuple) else [n.right]
+        args = _constant_args(list(right))
+        if fmt is None or args is None or len(fmt) + sum(map(len, args)) > _MAX_FORMATTED:
+            return None
+        try:
+            return fmt % tuple(args)
+        except (TypeError, ValueError):
+            return None
+    if (
+        isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Attribute)
+        and n.func.attr == "format"
+        and not n.keywords
+    ):
+        fmt = _constant_text(n.func.value)
+        args = _constant_args(list(n.args))
+        if fmt is None or args is None or len(fmt) + sum(map(len, args)) > _MAX_FORMATTED:
+            return None
+        out: list[str] = []
+        auto = 0
+        try:
+            for literal, field, _spec, _conv in string.Formatter().parse(fmt):
+                out.append(literal)
+                if field is None:
+                    continue
+                if field == "":
+                    index, auto = auto, auto + 1
+                elif field.isdigit():
+                    index = int(field)
+                else:
+                    continue
+                if index < len(args):
+                    out.append(args[index])
+        except ValueError:
+            return None
+        return "".join(out)
+    return None
+
+
+def _joined(n: ast.AST) -> str | None:
+    """f-string の定数部分と、`+` で連結した定数を結合した値（`"sk-" + "abc"`、`f"sk-{x}abc"`）。"""
+    formatted = _formatted(n)
+    if formatted is not None:
+        return formatted
+    if isinstance(n, ast.JoinedStr):
+        return "".join(t for v in n.values if (t := _constant_text(v)) is not None)
+    if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Add):
+        left = _joined(n.left) if not isinstance(n.left, ast.Constant) else _constant_text(n.left)
+        right = (
+            _joined(n.right) if not isinstance(n.right, ast.Constant) else _constant_text(n.right)
+        )
+        if left is not None and right is not None:
+            return left + right
+    return None
+
+
 def _literals(node: ast.AST, exempt: set[int]) -> list[str]:
+    """部分木のすべての文字列・bytes の定数の値（エスケープを解いた後。暗黙の連結はパーサが結合
+    済み）と、f-string・`+` の連結の定数部分を結合した値。空のものは除く。"""
     out: list[str] = []
     for n in ast.walk(node):
-        if isinstance(n, ast.Constant) and id(n) not in exempt:
-            if isinstance(n.value, str) and n.value:
-                out.append(n.value)
-            elif isinstance(n.value, bytes) and n.value:
-                out.append(n.value.decode("latin-1"))
+        if id(n) in exempt:
+            continue
+        text = _constant_text(n)
+        if text is None:
+            text = _joined(n)
+        if text:
+            out.append(text)
     return out
 
 
@@ -272,7 +374,9 @@ def _python_hits(tree: ast.AST) -> list[SecretHit]:
         if sensitive_name(name) and _literals(value, exempt):
             hits.append(SecretHit(NAME_KIND, 0, 0))
     for literal in _literals(tree, exempt):
-        hits += [SecretHit(h.kind, 0, 0) for h in _value_runs(literal)]
+        # 値そのものに、形・名前（"password=..." のような文字列）・値の検出をすべてかける
+        found = _pattern_hits(literal) + _named_value_hits(literal) + _value_runs(literal)
+        hits += [SecretHit(h.kind, 0, 0) for h in found]
     return hits
 
 
@@ -283,7 +387,8 @@ def find_secrets(text: str, *, python: bool = False) -> list[SecretHit]:
     値による検出（文字列リテラルの中の秘密らしい連なり）を行う（位置は返さない）。読めなければ、また
     `python=False` なら、文字の上で同じ検出を行う（位置つき。引用の伏せ字に使う）。
     """
-    hits = _pattern_hits(text)
+    # 送る本文そのもの（正規形）に対して検出する。Python ならさらに AST の定数の値にもかける
+    hits = _pattern_hits(text) + _value_runs(text)
     tree: ast.AST | None = None
     if python:
         try:
@@ -292,7 +397,28 @@ def find_secrets(text: str, *, python: bool = False) -> list[SecretHit]:
             tree = None
     if tree is not None:
         return hits + _python_hits(tree)
-    return hits + _named_value_hits(text) + _value_runs(text)
+    return hits + _named_value_hits(text)
+
+
+_QUOTED_NAMED_VALUE = regex.compile(
+    r"([A-Za-z_][A-Za-z0-9_\-]{0,63})[\"']?\s{0,3}[:=]\s{0,3}[rbuRBU]{0,2}([\"'])([^\"'\n]{1,256})\2"
+)
+
+
+def prompt_secret_kinds(prompt: str) -> list[str]:
+    """LLM に送る直前のプロンプト全体（規約・チェック項目・symbol・本文）の検出（二重の門）。
+
+    形と値の検出に加え、秘密らしい名前に引用符つきの値が結びつくもの（`password = "..."`）を見る。
+    引用符の無い `token = make_token()` は値ではないので見ない。
+    """
+    hits = _pattern_hits(prompt) + _value_runs(prompt)
+    try:
+        for m in _QUOTED_NAMED_VALUE.finditer(prompt, timeout=TIMEOUT_SECONDS):
+            if sensitive_name(m.group(1)):
+                hits.append(SecretHit(NAME_KIND, m.start(3), m.end(3)))
+    except TimeoutError:
+        hits += _timed_out(prompt)
+    return sorted({h.kind for h in hits})
 
 
 def secret_kinds(text: str, *, python: bool = False) -> list[str]:
@@ -326,6 +452,7 @@ __all__ = [
     "SecretHit",
     "find_secrets",
     "mask_secrets",
+    "prompt_secret_kinds",
     "secret_kinds",
     "secret_like_value",
     "sensitive_name",

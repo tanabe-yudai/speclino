@@ -47,7 +47,12 @@ from speclino.domain.policy import PolicyRule
 from speclino.domain.policy_params import LlmChecklistItem, LlmChecklistParams
 from speclino.ports.text_llm import TextLlm
 from speclino.services.cost_guard import CostGuard
-from speclino.services.secret_scan import SECRET_REASON, mask_secrets, secret_kinds
+from speclino.services.secret_scan import (
+    SECRET_REASON,
+    mask_secrets,
+    prompt_secret_kinds,
+    secret_kinds,
+)
 
 PROMPT_VERSION = "llm-checklist-v1"
 TRIALS = 3
@@ -249,8 +254,9 @@ async def _evaluate(
     budget: _Budget,
     timeout_s: float,
     now: datetime,
+    prompt: str,
 ) -> AssessmentRecord:
-    prompt = build_prompt(rule, params, unit)
+    """`prompt` は `assess` が検出をかけたそのもの（送る文字列と検出した文字列を一致させる）。"""
     trials: list[dict[str, tuple[bool, str]]] = []
     for _ in range(TRIALS):
         if budget.exhausted is not None:
@@ -431,7 +437,15 @@ async def assess(
         )
     by_id = {i.id: i for i in params.items}
     for unit in ordered:
-        kinds = secret_kinds(unit.text, python=unit.kind != "string_literal")
+        # 二重の門（#114）: 送る本文（正規形）と、その AST の定数の値に検出をかけ、さらに組み立てた
+        # プロンプト全体にもかける。どちらかに当たれば送らない（記録の有無にかかわらず同じ扱い）
+        prompt = build_prompt(rule, params, unit)
+        kinds = sorted(
+            {
+                *secret_kinds(unit.text, python=unit.kind != "string_literal"),
+                *prompt_secret_kinds(prompt),
+            }
+        )
         if kinds:
             findings.append(
                 _unit_unknown(rule, unit, f"{SECRET_REASON}（{'・'.join(kinds)}）", "secret")
@@ -462,7 +476,15 @@ async def assess(
                 continue
             try:
                 record = await _evaluate(
-                    rule, params, unit, key, llm=llm, budget=budget, timeout_s=timeout_s, now=now
+                    rule,
+                    params,
+                    unit,
+                    key,
+                    llm=llm,
+                    budget=budget,
+                    timeout_s=timeout_s,
+                    now=now,
+                    prompt=prompt,
                 )
             except (AssessmentFailed, ValidationError) as e:
                 findings.append(_unit_unknown(rule, unit, str(e)))

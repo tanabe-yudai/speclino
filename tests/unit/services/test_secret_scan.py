@@ -172,3 +172,44 @@ def test_scanning_is_fast_on_adversarial_input(adversarial: str) -> None:
     find_secrets(adversarial)
     mask_secrets(adversarial)
     assert time.perf_counter() - started < 2.0
+
+
+# ---------------------------------------------------------------------------
+# 検出の対象と送る文字列のずれ（#114 detector differential）
+# ---------------------------------------------------------------------------
+
+# sk- の後ろ。数字を含まないので、それだけでは値による検出に当たらない（組み立ての検出を確かめる）
+TAIL = "AbCdEfGhIjKlMnOpQrStUvWx"
+
+EVASIONS = [
+    f'KEY = "sk-" "{TAIL}"',  # 暗黙の連結
+    'KEY = "\\x73\\x6b-' + TAIL + '"',  # エスケープ
+    f'KEY = f"sk-{{prefix}}{TAIL}"',  # f-string の定数部分
+    f'KEY = b"sk-{TAIL}"',  # bytes
+    f'KEY = "sk-" + "{TAIL}"',  # + の連結
+    f'msg = "%s-%s" % ("sk", "{TAIL}")',  # %-format の定数
+    f'msg = "{{}}-{{}}".format("sk", "{TAIL}")',  # .format の定数
+    'cfg = {"db": {"settings": {"password": "x"}}}',  # ネストした dict のキーの名前
+]
+
+
+@pytest.mark.parametrize("source", EVASIONS)
+def test_evasions_are_detected_on_the_normalized_text(source: str) -> None:
+    """単位の本文は ast.unparse の正規形（LLM に送るそのもの）。それと AST の定数の値で検出する。"""
+    import ast
+
+    normalized = ast.unparse(ast.parse(source))
+    assert secret_kinds(normalized, python=True), normalized
+
+
+def test_tail_alone_is_not_detected() -> None:
+    assert secret_kinds(f'X = "{TAIL}"', python=True) == []
+
+
+def test_prompt_gate_catches_secrets_outside_the_unit_body() -> None:
+    from speclino.services.secret_scan import prompt_secret_kinds
+
+    assert prompt_secret_kinds(f"評価の単位（function）: app.py::sk-{TAIL}\n```\npass\n```")
+    assert prompt_secret_kinds('```\npassword = "hunter2"\n```')
+    ordinary = "規約: エラーは次の行動を示す\n```\ndef f(order_id):\n    token = make_token()\n```"
+    assert prompt_secret_kinds(ordinary) == []
