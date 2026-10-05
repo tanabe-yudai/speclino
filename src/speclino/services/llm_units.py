@@ -148,11 +148,12 @@ def _call_name(func: ast.expr) -> str | None:
 
 
 def _is_endpoint(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
-    for deco in node.decorator_list:
-        if isinstance(deco, ast.Call) and isinstance(deco.func, ast.Attribute):
-            if deco.func.attr in _ENDPOINT_METHODS:
-                return True
-    return False
+    return any(
+        isinstance(deco, ast.Call)
+        and isinstance(deco.func, ast.Attribute)
+        and deco.func.attr in _ENDPOINT_METHODS
+        for deco in node.decorator_list
+    )
 
 
 __all__ = ["MAX_UNIT_TEXT", "ExtractedUnits", "extract_units", "normalized_hash"]
