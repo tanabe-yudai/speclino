@@ -41,10 +41,27 @@ export function recordedAttestation(
   )
 }
 
-/** 確定の表示の文言。自己確定（PR の作成者による確定）は必ず明示する。 */
+/** 自己確定の区分の文言。照合できないときは黙って「作成者以外」にしない。 */
+export function selfAttestLabel(selfAttested: boolean | null | undefined): string {
+  if (selfAttested === true) return '自己確定'
+  if (selfAttested === false) return '作成者以外の確定'
+  return '作成者との照合不可'
+}
+
+/** 確定の表示の文言。自己確定・照合不可は必ず明示する。 */
 export function describeAttestation(a: Pick<Attestation, 'disposition' | 'self_attested'>): string {
   const base = a.disposition === 'attested' ? '問題なしとして確定済み' : '問題として記録済み（阻止したまま）'
-  return a.self_attested ? `${base}・自己確定` : base
+  return `${base}・${selfAttestLabel(a.self_attested)}`
+}
+
+/**
+ * 対応・契約・免除・規約の変更（KNOWLEDGE-BINDINGS-001）を、作成者自身か照合できない人が確定した
+ * ときの警告（拒否はしない）。それ以外は null。
+ */
+export function configChangeWarning(a: Pick<Attestation, 'fingerprint' | 'self_attested'>): string | null {
+  if (!a.fingerprint.startsWith(`${CONFIG_CHANGE_REQUIREMENT_ID}:`) || a.self_attested === false) return null
+  const who = a.self_attested === true ? 'PR の作成者自身' : 'PR の作成者と照合できない人'
+  return `${who}が判定の前提（対応・契約・免除・規約）の変更を確定しています。別の人によるレビューを推奨します`
 }
 
 export function canAttest(role: WorkspaceRole | null | undefined): boolean {

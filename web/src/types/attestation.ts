@@ -9,8 +9,11 @@ export interface Attestation {
   actor: string
   workspace: string
   created_at: string
-  /** PR の作成者が自分で確定した（拒否はせず印を残す） */
-  self_attested?: boolean
+  /**
+   * PR の作成者が自分で確定したか（GitHub のユーザー ID で照合。拒否はせず印を残す）。
+   * null は作成者との照合不可（確定者が GitHub 未連携、または PR の作成者の ID が無い run）
+   */
+  self_attested?: boolean | null
 }
 
 /** Finding から取り出した確定の対象（指紋と内容の hash）。 */

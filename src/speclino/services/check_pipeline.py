@@ -421,7 +421,8 @@ def _run_check(req: CheckRequest, *, is_base: bool) -> CheckResult:
         aggregate_gate(
             combined, levels, GatePolicy(fail_on=fail_on, mode=req.mode), waived, cleared
         ),
-        self_attested_ids=self_attested_ids(combined, attestations),
+        self_attested_ids=self_attested_ids(combined, attestations, True),
+        self_attest_unverified_ids=self_attested_ids(combined, attestations, None),
     )
 
     compiled_versions = sorted(

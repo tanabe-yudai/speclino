@@ -116,7 +116,7 @@ class AttestationRepository:
         content_hash: str,
         disposition: Disposition,
         actor: str,
-        self_attested: bool = False,
+        self_attested: bool | None = None,
         now: datetime | None = None,
     ) -> Attestation:
         created_at = now or datetime.now(UTC)

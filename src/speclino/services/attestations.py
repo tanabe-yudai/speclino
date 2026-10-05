@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -99,13 +100,15 @@ async def attest(
     actor: str,
     workspace: str,
     via: str = "api",
-    self_attested: bool = False,
+    self_attested: bool | None = None,
     now: datetime | None = None,
 ) -> Attestation:
     """確定を記録し（同じ指紋・hash は最新の処置で上書き）、監査に残す。
 
-    `self_attested`: PR の作成者が自分で確定した。1 人での運用（仕様の自己承認と同じ）のため拒否は
-    しないが、監査・gate.json・manifest に印を残す。
+    `self_attested`: PR の作成者が自分で確定したか（GitHub のユーザー ID で照合）。1 人での運用
+    （仕様の自己承認と同じ）のため拒否はしないが、監査・gate.json・manifest に印を残す。None は
+    「作成者との照合不可」で、false と区別して残す。対応・規約の変更（KNOWLEDGE-BINDINGS-001）の
+    確定で true / None のときは監査に警告を足す（裁定 34: 拒否はしない）。
     """
     # 入力の形を先に確かめる（hash の形式違反を DB に入れない）
     Attestation(
@@ -125,14 +128,47 @@ async def attest(
         self_attested=self_attested,
         now=now,
     )
+    detail: dict[str, object] = {
+        "content_hash": content_hash,
+        "via": via,
+        "self_attested": self_attested,
+        "self_attested_label": self_attest_label(self_attested),
+    }
+    warning = config_change_warning(fingerprint, self_attested)
+    if warning is not None:
+        detail["warning"] = warning
     await AuditRepository(session).record(
-        actor,
-        "attestation.record",
-        f"{workspace}:{fingerprint}",
-        disposition,
-        {"content_hash": content_hash, "via": via, "self_attested": self_attested},
+        actor, "attestation.record", f"{workspace}:{fingerprint}", disposition, detail
     )
     return saved
+
+
+def same_github_user(actor_id: int | None, author_id: int | None) -> bool | None:
+    """確定者と PR の作成者が同じ GitHub ユーザーか。どちらかの ID が無ければ None（照合不可）。"""
+    if actor_id is None or author_id is None:
+        return None
+    return actor_id == author_id
+
+
+def self_attest_label(self_attested: bool | None) -> str:
+    if self_attested is None:
+        return "作成者との照合不可"
+    return "自己確定" if self_attested else "作成者以外の確定"
+
+
+def config_change_warning(fingerprint: str, self_attested: bool | None) -> str | None:
+    """対応・契約・免除・規約の変更の確定を、作成者自身か照合不可の人が行ったときの警告。"""
+    if not fingerprint.startswith(f"{CONFIG_CHANGE_REQUIREMENT_ID}:") or self_attested is False:
+        return None
+    who = "PR の作成者自身" if self_attested else "PR の作成者と照合できない人"
+    return (
+        f"{who}が対応・契約・免除・規約の変更を確定した。判定の前提を変える変更なので、"
+        "別の人によるレビューを推奨する"
+    )
+
+
+# SpecLino の uid → 連携済みの GitHub ユーザー ID（未連携なら None）
+GithubIdOf = Callable[[str], Awaitable[int | None]]
 
 
 async def attest_as_member(
@@ -145,11 +181,14 @@ async def attest_as_member(
     disposition: Disposition,
     audit_factory: async_sessionmaker[AsyncSession] | None = None,
     run_id: uuid.UUID | None = None,
+    github_id_of: GithubIdOf | None = None,
 ) -> tuple[Attestation, tuple[Project, ReviewRun] | None]:
     """画面（REST）からの確定。owner / approver だけ。戻り値は (確定, 再検査する (project, run))。
 
-    `run_id`（確定した画面の run）があれば、その PR の最新の run を再検査の対象にし、PR の作成者
-    と確定者が同じなら `self_attested`。run が無い確定は作成者を確かめられないので印を付けない。
+    `run_id`（確定した画面の run）があれば、その PR の最新の run を再検査の対象にする。
+    自己確定は GitHub のユーザー ID で照合する: 確定者の uid → 連携済みの GitHub ID
+    （`github_id_of`）と、run の PR の作成者の ID（`pr_author_id`）。どちらかが無い（未連携・
+    run 無し・作成者の ID の無い run）なら None（照合不可）。
 
     メンバーでなければ（別のワークスペースも）`WorkspaceNotFound`（404、存在を漏らさない）、
     member なら `PermissionError`（403）。拒否は `audit_factory` の別トランザクションで監査に残す
@@ -182,29 +221,30 @@ async def attest_as_member(
         actor=uid,
         workspace=workspace,
         via="api",
-        self_attested=target is not None and authored_by(uid, target[1]),
+        self_attested=await _self_attested(uid, target, github_id_of),
     )
     return saved, target
 
 
-def authored_by(uid: str, run: ReviewRun) -> bool:
-    """uid が run の PR の作成者か（PR の作成者の GitHub ログイン、または手動 run の開始者）。
+async def _self_attested(
+    uid: str, target: tuple[Project, ReviewRun] | None, github_id_of: GithubIdOf | None
+) -> bool | None:
+    if target is None or github_id_of is None:
+        return None
+    return same_github_user(await github_id_of(uid), target[1].pr_author_id)
 
-    SpecLino の uid と GitHub のアカウントの対応はまだ持っていない（S61b の照合を取り込むまで）。
-    それまでは uid がログイン名と一致するときと、画面から手動で始めた run の開始者だけを作成者と
-    みなす。
+
+def self_attested_ids(
+    findings: Findings, attestations: list[Attestation], mark: bool | None
+) -> list[str]:
+    """attested の確定で阻止から外れた Finding のうち、自己確定の印が `mark` のものの ID。
+
+    mark=True は自己確定、None は作成者との照合不可。どちらも gate.json に残す。
     """
-    if run.pr_author and uid in (run.pr_author, f"github:{run.pr_author}"):
-        return True
-    return run.trigger == f"manual:{uid}"
-
-
-def self_attested_ids(findings: Findings, attestations: list[Attestation]) -> list[str]:
-    """自己確定（PR の作成者による attested）で阻止から外れた Finding の ID。gate.json に残す。"""
     return sorted(
         f.id
         for f in findings.findings
-        if (a := _matching(f, attestations)) is not None and a.self_attested
+        if (a := _matching(f, attestations)) is not None and a.self_attested is mark
     )
 
 
@@ -239,7 +279,10 @@ __all__ = [
     "attestation_target",
     "informational_ids",
     "list_attestations",
-    "authored_by",
+    "GithubIdOf",
+    "config_change_warning",
+    "same_github_user",
+    "self_attest_label",
     "recheck_target",
     "self_attested_ids",
 ]

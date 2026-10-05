@@ -38,6 +38,8 @@ class GateResult:
     cleared: list[Finding] = field(default_factory=list)
     # cleared のうち PR の作成者が自分で確定したもの（S70。拒否はせず印を残す）
     self_attested_ids: list[str] = field(default_factory=list)
+    # cleared のうち作成者との照合ができなかった確定によるもの（黙って「自己確定でない」にしない）
+    self_attest_unverified_ids: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

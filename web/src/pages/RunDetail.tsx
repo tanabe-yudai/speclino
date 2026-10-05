@@ -12,7 +12,13 @@ import { RerunButton } from '../components/RerunButton'
 import { ScopeBlock } from '../components/ScopeBlock'
 import { SupplementList } from '../components/SupplementList'
 import { Timeline } from '../components/Timeline'
-import { attestationTarget, canAttest, describeAttestation, recordedAttestation } from '../services/attestation'
+import {
+  attestationTarget,
+  canAttest,
+  configChangeWarning,
+  describeAttestation,
+  recordedAttestation,
+} from '../services/attestation'
 import { describeGateReason } from '../services/gate'
 import { useMe } from '../hooks/useMe'
 import { formatDateTime, shortSha } from '../services/format'
@@ -270,6 +276,11 @@ function FindingAttest({ slug, run, finding, mayAttest }: FindingAttestProps) {
       {recorded && (
         <p className="text-sm text-ink-2">
           {describeAttestation(recorded)}（{recorded.actor}）
+        </p>
+      )}
+      {recorded && configChangeWarning(recorded) && (
+        <p role="alert" className="text-sm font-semibold text-bad">
+          {configChangeWarning(recorded)}
         </p>
       )}
       {mayAttest && slug && (

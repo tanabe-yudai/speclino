@@ -39,7 +39,7 @@ from speclino.db.repositories import (
     WebhookDeliveryRepository,
 )
 from speclino.services.approvals import attest_disposition, authorize_command, parse_commands
-from speclino.services.attestations import attest
+from speclino.services.attestations import attest, same_github_user
 from speclino.services.workspaces import resolve_github_project
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
@@ -89,7 +89,7 @@ async def _dispatch(
             base_sha=pr.base_sha,
             pr_number=pr.pr_number,
             trigger=f"pull_request.{event.action}",
-            pr_author=pr.author_login or None,
+            pr_author_id=pr.author_id,
         )
         return {"status": "queued", "run_id": str(run_id), "fork": pr.is_fork}, [run_id]
 
@@ -206,8 +206,8 @@ async def _record_attestation(
         actor=f"github:{cm.author_login}",
         workspace=project.team,
         via=f"pr_comment:{cm.comment_url}",
-        # PR の作成者が自分で確定した（拒否はせず印を残す）
-        self_attested=bool(cm.issue_author_login) and cm.issue_author_login == cm.author_login,
+        # PR の作成者が自分で確定した（GitHub の ID で照合。拒否はせず印を残す。照合不可は None）
+        self_attested=same_github_user(cm.author_id, cm.issue_author_id),
     )
     return {
         "accepted": True,

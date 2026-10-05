@@ -65,7 +65,6 @@ async def create_attestation(
                     base_sha=latest.base_sha,
                     pr_number=latest.pr_number,
                     trigger="attestation",
-                    pr_author=latest.pr_author,
                 )
     except WorkspaceNotFound as e:
         raise api_error(404, "workspace_not_found", "ワークスペースが無い") from e

@@ -128,8 +128,9 @@ class ReviewRun(Base):
         UUID(as_uuid=True), ForeignKey("review_runs.id"), nullable=True
     )
     check_run_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    # PR の作成者の GitHub ログイン（S70: 自己確定の印）。PR 以外・記録前の run は NULL
-    pr_author: Mapped[str | None] = mapped_column(String, nullable=True)
+    # PR の作成者の GitHub ユーザー ID（S70: 自己確定の照合。ログイン名は改名後に他人が取れるので
+    # ID で持つ）。PR 以外・記録前の run は NULL（照合できない）
+    pr_author_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     artifacts_uri: Mapped[str | None] = mapped_column(String, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -716,10 +717,8 @@ class AttestationRecord(Base):
     content_hash: Mapped[str] = mapped_column(String, nullable=False)
     disposition: Mapped[str] = mapped_column(String, nullable=False)
     actor: Mapped[str] = mapped_column(String, nullable=False)
-    # PR の作成者が自分で確定した（拒否はしないが印を残す）
-    self_attested: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default=text("false")
-    )
+    # PR の作成者が自分で確定したか（GitHub の ID で照合、拒否はしない）。NULL は照合できない
+    self_attested: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

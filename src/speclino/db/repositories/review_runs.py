@@ -35,10 +35,10 @@ class ReviewRunRepository:
         trigger: str,
         budget: dict[str, Any] | None = None,
         parent_run_id: uuid.UUID | None = None,
-        pr_author: str | None = None,
+        pr_author_id: int | None = None,
     ) -> ReviewRun:
         run = ReviewRun(
-            pr_author=pr_author,
+            pr_author_id=pr_author_id,
             project_id=project_id,
             pr_number=pr_number,
             head_sha=head_sha,

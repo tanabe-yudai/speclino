@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { attestationTarget, canAttest, describeAttestation, recordedAttestation } from './attestation'
+import {
+  attestationTarget,
+  canAttest,
+  configChangeWarning,
+  describeAttestation,
+  recordedAttestation,
+} from './attestation'
 import type { Finding } from '@/types/finding'
 
 const HASH = 'sha256:' + 'a'.repeat(64)
@@ -61,9 +67,17 @@ describe('recordedAttestation / describeAttestation', () => {
     expect(recordedAttestation({ fingerprint: 'R:i:abc', contentHash: HASH }, [att])).toBe(att)
     expect(recordedAttestation({ fingerprint: 'R:i:abc', contentHash: 'x' }, [att])).toBeNull()
   })
-  it('自己確定を明示する', () => {
+  it('自己確定・作成者以外・照合不可を区別して明示する', () => {
     expect(describeAttestation(att)).toContain('自己確定')
-    expect(describeAttestation({ ...att, self_attested: false })).not.toContain('自己確定')
+    expect(describeAttestation({ ...att, self_attested: false })).toContain('作成者以外の確定')
+    expect(describeAttestation({ ...att, self_attested: null })).toContain('作成者との照合不可')
+  })
+  it('KNOWLEDGE-BINDINGS-001 の自己確定・照合不可は警告する', () => {
+    const cfg = { ...att, fingerprint: `KNOWLEDGE-BINDINGS-001:${HASH}` }
+    expect(configChangeWarning(cfg)).toContain('PR の作成者自身')
+    expect(configChangeWarning({ ...cfg, self_attested: null })).toContain('照合できない')
+    expect(configChangeWarning({ ...cfg, self_attested: false })).toBeNull()
+    expect(configChangeWarning(att)).toBeNull()
   })
 })
 

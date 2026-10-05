@@ -53,6 +53,9 @@ def _gate_dict(gate: GateResult, waivers: list[Waiver] | None = None) -> dict[st
         out["cleared_ids"] = sorted(f.id for f in gate.cleared)
     if gate.self_attested_ids:
         out["self_attested_ids"] = sorted(gate.self_attested_ids)
+    if gate.self_attest_unverified_ids:
+        # 確定者と PR の作成者を照合できなかった（作成者との照合不可）
+        out["self_attest_unverified_ids"] = sorted(gate.self_attest_unverified_ids)
     return out
 
 

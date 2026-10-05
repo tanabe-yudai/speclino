@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button'
 import { createAttestation } from '../api/attestations'
 import { ApiError } from '../api/errors'
 import type { AttestButtonProps } from '../types/components'
-import { describeAttestation } from '../services/attestation'
+import { configChangeWarning, describeAttestation } from '../services/attestation'
 import type { Attestation, Disposition } from '../types/attestation'
 
 /**
@@ -38,6 +38,11 @@ export function AttestButton({ slug, runId, target, onDone }: AttestButtonProps)
     return (
       <p className="text-sm text-ink-2">
         {describeAttestation(done)}（再検査で反映されます）
+        {configChangeWarning(done) && (
+          <span role="alert" className="block font-semibold text-bad">
+            {configChangeWarning(done)}
+          </span>
+        )}
       </p>
     )
   }

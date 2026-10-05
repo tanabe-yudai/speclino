@@ -293,5 +293,34 @@ async def test_self_attestation_is_marked_in_gate_and_manifest(tmp_path: Path) -
     write_result(res, out)
     gate = json.loads((out / "gate.json").read_text())
     assert gate["self_attested_ids"] == [target.id]
-    other = run_check(request(root, k, llm_findings=llm, attestations=(_attest(target),)))
-    assert other.gate.self_attested_ids == []
+    other = run_check(
+        request(root, k, llm_findings=llm, attestations=(_attest(target, self_attested=False),))
+    )
+    assert other.gate.self_attested_ids == [] and other.gate.self_attest_unverified_ids == []
+    # 照合できない確定は「作成者との照合不可」として別に残す（黙って自己確定でない扱いにしない）
+    unknown = run_check(
+        request(root, k, llm_findings=llm, attestations=(_attest(target, self_attested=None),))
+    )
+    assert unknown.gate.self_attest_unverified_ids == [target.id]
+    assert [a.self_attested for a in unknown.manifest.attestations] == [None]
+    write_result(unknown, tmp_path / "out2")
+    gate2 = json.loads((tmp_path / "out2" / "gate.json").read_text())
+    assert gate2["self_attest_unverified_ids"] == [target.id]
+    assert "self_attested_ids" not in gate2
+
+
+def test_self_attest_helpers() -> None:
+    from speclino.services.attestations import (
+        config_change_warning,
+        same_github_user,
+        self_attest_label,
+    )
+
+    assert same_github_user(1, 1) is True
+    assert same_github_user(1, 2) is False
+    assert same_github_user(None, 1) is None and same_github_user(1, None) is None
+    assert self_attest_label(None) == "作成者との照合不可"
+    cfg = "KNOWLEDGE-BINDINGS-001:sha256:" + "a" * 64
+    assert config_change_warning(cfg, True) and config_change_warning(cfg, None)
+    assert config_change_warning(cfg, False) is None
+    assert config_change_warning("R:i:1", True) is None

@@ -208,12 +208,12 @@ class ReviewRunService:
         pr_number: int | None,
         trigger: str,
         parent_run_id: UUID | None = None,
-        pr_author: str | None = None,
+        pr_author_id: int | None = None,
     ) -> UUID:
         """呼び出し側のトランザクションの中で run を queued で作る。enqueue はしない。
 
-        `pr_author`（PR の作成者の GitHub ログイン。S70 の自己確定の印）が無ければ、同じ PR の
-        前の run から引き継ぐ（コメント・再実行・確定の後の再検査）。
+        `pr_author_id`（PR の作成者の GitHub ユーザー ID。S70 の自己確定の照合）が無ければ、
+        同じ PR の前の run から引き継ぐ（コメント・再実行・確定の後の再検査）。
 
         呼び出し側は commit のあとで `queue.enqueue(run_id)` する（webhook は重複排除の記録と
         run の作成を 1 つのトランザクションにするため、これを直接使う。S53）。
@@ -228,9 +228,9 @@ class ReviewRunService:
                 raise ValueError(
                     f"親 run {parent_run_id} は {project.repo_full_name} の run ではない"
                 )
-        if pr_author is None and pr_number is not None:
+        if pr_author_id is None and pr_number is not None:
             previous = await runs.latest_run_for_pr(project.id, pr_number)
-            pr_author = previous.pr_author if previous is not None else None
+            pr_author_id = previous.pr_author_id if previous is not None else None
         run = await runs.create(
             project_id=project.id,
             pr_number=pr_number,
@@ -238,7 +238,7 @@ class ReviewRunService:
             base_sha=base_sha,
             trigger=trigger,
             parent_run_id=parent_run_id,
-            pr_author=pr_author,
+            pr_author_id=pr_author_id,
         )
         superseded = await runs.supersede_open_runs(project.id, pr_number, run.id)
         await RunEventRepository(session).append(
@@ -900,7 +900,11 @@ def _regate(findings: Findings, result: CheckResult, fail_on: tuple[str, ...]) -
         result.waived_finding_ids,
         result.cleared_finding_ids,
     )
-    return replace(gate, self_attested_ids=result.gate.self_attested_ids)
+    return replace(
+        gate,
+        self_attested_ids=result.gate.self_attested_ids,
+        self_attest_unverified_ids=result.gate.self_attest_unverified_ids,
+    )
 
 
 def _model_name(model: str | BaseLlm) -> str:

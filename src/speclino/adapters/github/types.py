@@ -33,6 +33,8 @@ class PullRequestRef(_GitHubModel):
     is_fork: bool
     author_login: str
     html_url: str
+    # PR の作成者の GitHub ユーザー ID（S70: 自己確定の照合）。無ければ None
+    author_id: int | None = None
 
 
 class IssueCommentRef(_GitHubModel):
@@ -46,8 +48,10 @@ class IssueCommentRef(_GitHubModel):
     author_login: str
     comment_url: str
     is_pull_request: bool
-    # issue（PR）の作成者のログイン（S70: 自己確定の印）。ペイロードに無ければ空
-    issue_author_login: str = ""
+    # コメントの作成者と issue（PR）の作成者の GitHub ユーザー ID（S70: 自己確定の照合）。
+    # ペイロードに無ければ None（照合できない）
+    author_id: int | None = None
+    issue_author_id: int | None = None
 
 
 class RerunRef(_GitHubModel):

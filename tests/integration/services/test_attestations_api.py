@@ -18,7 +18,7 @@ from speclino.adapters.queue.inprocess import InProcessQueue
 from speclino.adapters.storage.fs import FileSystemBlobStore
 from speclino.api.app import create_app
 from speclino.api.deps import AppState
-from speclino.services.attestations import list_attestations
+from speclino.services.attestations import attest_as_member, list_attestations
 from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
 from speclino.settings import Settings
 from tests.integration.services.conftest import register_repo, repo_id_of, set_project_approvers
@@ -186,7 +186,7 @@ async def test_pr_comment_attest_is_recorded_for_approvers(ctx: Ctx, engine: Asy
     assert res["commands"][0]["accepted"] is False
 
 
-async def _audit_detail(engine: AsyncEngine, slug: str) -> list[tuple[str, bool]]:
+async def _audit_detail(engine: AsyncEngine, slug: str) -> list[tuple[str, object, object]]:
     async with engine.connect() as conn:
         rows = await conn.execute(
             sql_text(
@@ -195,37 +195,94 @@ async def _audit_detail(engine: AsyncEngine, slug: str) -> list[tuple[str, bool]
             ),
             {"t": f"{slug}:%"},
         )
-        return [(r[0], bool(r[1].get("self_attested"))) for r in rows]
+        return [(r[0], r[1].get("self_attested"), r[1].get("warning")) for r in rows]
 
 
-async def test_rest_self_attestation_is_allowed_but_marked(ctx: Ctx, engine: AsyncEngine) -> None:
-    """PR の作成者（pr_payload の user は dev）が自分で確定しても拒否せず、印を残す。"""
-    run_id = await _pr_run(ctx, ctx.repo)
+DEV_ID, OTHER_ID = 1001, 2002
+
+
+async def _pr_run_by(ctx: Ctx, author_id: int | None) -> str:
+    payload = pr_payload(ctx.repo, ctx.head, ctx.base, 1)
+    if author_id is not None:
+        payload["pull_request"]["user"]["id"] = author_id
+    raw, headers = signed(payload, "pull_request")
+    res = await ctx.c.post("/webhooks/github", content=raw, headers=headers)
+    return str(res.json()["run_id"])
+
+
+async def _attest_via_service(
+    engine: AsyncEngine, ctx: Ctx, run_id: str, uid: str, fp: str, linked: dict[str, int]
+) -> object:
+    async def github_id_of(u: str) -> int | None:
+        return linked.get(u)
+
+    async with async_sessionmaker(engine, expire_on_commit=False)() as s, s.begin():
+        saved, _ = await attest_as_member(
+            s,
+            workspace=ctx.slug,
+            uid=uid,
+            fingerprint=fp,
+            content_hash=HASH,
+            disposition="attested",
+            run_id=uuid.UUID(run_id),
+            github_id_of=github_id_of,
+        )
+    return saved.self_attested
+
+
+async def test_self_attestation_is_matched_by_github_id(ctx: Ctx, engine: AsyncEngine) -> None:
+    """確定者の連携済み GitHub ID と PR の作成者の ID で照合する（ログイン名・uid は使わない）。"""
+    run_id = await _pr_run_by(ctx, DEV_ID)
+    linked = {"approver1": DEV_ID, "owner1": OTHER_ID}
+    assert await _attest_via_service(engine, ctx, run_id, "approver1", "R:i:1", linked) is True
+    assert await _attest_via_service(engine, ctx, run_id, "owner1", "R:i:2", linked) is False
+    # 未連携は照合不可（null）。黙って false にしない
+    assert await _attest_via_service(engine, ctx, run_id, "dev", "R:i:3", linked) is None
+    cfg = f"KNOWLEDGE-BINDINGS-001:{HASH}"
+    assert await _attest_via_service(engine, ctx, run_id, "approver1", cfg, linked) is True
+    audit = await _audit_detail(engine, ctx.slug)
+    assert [(a, m) for a, m, _ in audit] == [
+        ("approver1", True),
+        ("owner1", False),
+        ("dev", None),
+        ("approver1", True),
+    ]
+    # 対応・規約の変更の自己確定は監査に警告（拒否はしない）
+    assert [w is not None for _, _, w in audit] == [False, False, False, True]
+
+
+async def test_self_attestation_is_null_without_author_id(ctx: Ctx, engine: AsyncEngine) -> None:
+    run_id = await _pr_run_by(ctx, None)
+    linked = {"approver1": DEV_ID}
+    assert await _attest_via_service(engine, ctx, run_id, "approver1", "R:i:4", linked) is None
+    # REST（連携の無い現状）は照合不可で記録する
     url = f"/api/workspaces/{ctx.slug}/attestations"
-    own = {
-        "fingerprint": "R:i:7",
+    body = {
+        "fingerprint": "R:i:5",
         "content_hash": HASH,
         "disposition": "attested",
         "run_id": run_id,
     }
-    res = await ctx.c.post(url, json=own, headers={"X-Dev-User": "dev"})
-    assert res.status_code == 200, res.text
-    assert res.json()["attestation"]["self_attested"] is True
-    other = {**own, "fingerprint": "R:i:8"}
-    res = await ctx.c.post(url, json=other, headers=APPROVER)
-    assert res.json()["attestation"]["self_attested"] is False
-    assert await _audit_detail(engine, ctx.slug) == [("dev", True), ("approver1", False)]
+    res = await ctx.c.post(url, json=body, headers=APPROVER)
+    assert res.status_code == 200 and res.json()["attestation"]["self_attested"] is None
 
 
-async def test_pr_comment_self_attestation_is_marked(ctx: Ctx, engine: AsyncEngine) -> None:
-    await _pr_run(ctx, ctx.repo)
+async def test_pr_comment_self_attestation_is_matched_by_id(ctx: Ctx, engine: AsyncEngine) -> None:
+    await _pr_run_by(ctx, DEV_ID)
     await set_project_approvers(engine, ctx.repo, ["dev", "gh-approver"])
-    for login, fp in (("dev", "R:i:5"), ("gh-approver", "R:i:6")):
+    cases = (("dev", DEV_ID, "R:i:6", True), ("gh-approver", OTHER_ID, "R:i:7", False))
+    for login, user_id, fp, expected in cases:
         payload = comment_payload(ctx.repo, 1, f"/speclino attest {fp} {HASH}", login)
-        payload["issue"]["user"] = {"login": "dev"}  # PR の作成者
+        payload["comment"]["user"]["id"] = user_id
+        payload["issue"]["user"] = {"login": "dev", "id": DEV_ID}  # PR の作成者
         raw, headers = signed(payload, "issue_comment")
         res = (await ctx.c.post("/webhooks/github", content=raw, headers=headers)).json()
-        assert res["commands"][0]["self_attested"] is (login == "dev"), res
+        assert res["commands"][0]["self_attested"] is expected, res
+    # ID の無いペイロードは照合不可
+    payload = comment_payload(ctx.repo, 1, f"/speclino attest R:i:8 {HASH}", "dev")
+    raw, headers = signed(payload, "issue_comment")
+    res = (await ctx.c.post("/webhooks/github", content=raw, headers=headers)).json()
+    assert res["commands"][0]["self_attested"] is None
     async with async_sessionmaker(engine)() as s:
         marks = {a.fingerprint: a.self_attested for a in await list_attestations(s, ctx.slug)}
-    assert marks == {"R:i:5": True, "R:i:6": False}
+    assert marks == {"R:i:6": True, "R:i:7": False, "R:i:8": None}
