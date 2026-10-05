@@ -15,4 +15,11 @@ describe('paths', () => {
   it('ワークスペースのホーム', () => {
     expect(paths.workspace('acme team')).toBe('/w/acme%20team')
   })
+  it('知識は種類ごとのパスにする', () => {
+    expect(paths.knowledge('ws')).toBe('/w/ws/knowledge/specs')
+    expect(paths.knowledge('ws', 'skill')).toBe('/w/ws/knowledge/skills')
+    expect(paths.knowledgeNew('ws', 'instructions')).toBe('/w/ws/knowledge/instructions/new')
+    expect(paths.knowledgeItem('ws', 'spec', 'a/b')).toBe('/w/ws/knowledge/specs/a%2Fb')
+    expect(paths.knowledgeRevisions('ws', 'spec', 'id1')).toBe('/w/ws/knowledge/specs/id1/revisions')
+  })
 })
