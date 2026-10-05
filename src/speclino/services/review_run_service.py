@@ -542,6 +542,8 @@ class ReviewRunService:
                         "blocking_ids": [f.id for f in gate.blocking],
                         "advisory_ids": [f.id for f in gate.advisory],
                         "waived_ids": [f.id for f in gate.waived],
+                        # 阻止しない REVIEW（LLM 支援の指摘なし・人の確定）。画面の件数と理由の正本
+                        "cleared_ids": sorted(f.id for f in gate.cleared),
                     }
                     if gate
                     else None

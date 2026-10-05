@@ -21,6 +21,9 @@ export const VERDICT_LABELS: Record<Verdict, string> = {
   REVIEW: '要確認',
 }
 
+/** ゲートを止めない REVIEW（LLM 支援の指摘なし・人が確定した指摘）の区分。verdict は REVIEW のまま */
+export const CLEARED_LABEL = '確定済み・情報'
+
 /** VIOLATED → REVIEW → UNKNOWN → VERIFIED_IN_SCOPE の表示順。 */
 export const VERDICT_ORDER: Record<Verdict, number> = {
   VIOLATED: 0,

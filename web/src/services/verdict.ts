@@ -48,3 +48,15 @@ export function collectUnresolvedItems(findings: Finding[]): string[] {
     .filter((f) => f.verdict === 'UNKNOWN' || f.verdict === 'REVIEW')
     .map((f) => `${f.requirement_id}: ${f.message}`)
 }
+
+/**
+ * ゲートの cleared（阻止しない REVIEW）とそれ以外に分ける。判定ごとの件数・失敗の理由・一覧は
+ * すべてこの分け方から作る（バックエンドの gate が決めた集合だけを使い、画面で推測しない）。
+ */
+export function splitCleared(findings: Finding[], clearedIds: readonly string[] | undefined): { active: Finding[]; cleared: Finding[] } {
+  const ids = new Set(clearedIds ?? [])
+  const active: Finding[] = []
+  const cleared: Finding[] = []
+  for (const f of findings) (ids.has(f.id) && f.verdict === 'REVIEW' ? cleared : active).push(f)
+  return { active, cleared }
+}

@@ -25,14 +25,22 @@ import { describeGateReason } from '../services/gate'
 import { useMe } from '../hooks/useMe'
 import { formatDateTime, shortSha } from '../services/format'
 import { githubChecksUrl, githubPrUrl } from '../services/github'
-import { EXEC_STATE_LABELS, VERDICT_LABELS } from '../services/labels'
+import { CLEARED_LABEL, EXEC_STATE_LABELS, VERDICT_LABELS } from '../services/labels'
 import { GateBadge } from '@/components/app/GateBadge'
 import { Panel } from '@/components/app/Panel'
+import { ToneBadge } from '@/components/app/ToneBadge'
 import { VerdictBadge } from '@/components/app/VerdictBadge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { paths } from '@/services/paths'
 import { describeLimits, describeSemanticDiff, describeTeamPolicy } from '../services/manifest'
-import { collectScopeAndAssumptions, collectUnresolvedItems, countByVerdict, groupFindingsByVerdict } from '../services/verdict'
+import {
+  collectScopeAndAssumptions,
+  collectUnresolvedItems,
+  countByVerdict,
+  groupFindingsByVerdict,
+  sortFindingsForDisplay,
+  splitCleared,
+} from '../services/verdict'
 import type { RunEvent } from '../types/events'
 import type { FindingAttestProps } from '../types/components'
 import type { RerunResponse, ReviewRunDetail } from '../types/run'
@@ -174,12 +182,14 @@ function RunSummary({ run }: { run: ReviewRunDetail }) {
   const navigate = useNavigate()
   // 再実行ボタンから遷移してきたときは、回数・費用枠の情報を router state で受け取る
   const rerun = (useLocation().state as { rerun?: RerunResponse } | null)?.rerun
-  const counts = countByVerdict(run.findings)
+  // 件数・失敗の理由・未確認範囲は、ゲートの cleared を除いた同じ集合から作る
+  const { active, cleared } = splitCleared(run.findings, run.cleared_ids)
+  const counts = countByVerdict(active)
   const { assumptions } = collectScopeAndAssumptions(run.findings)
-  const unresolvedItems = collectUnresolvedItems(run.findings)
+  const unresolvedItems = collectUnresolvedItems(active)
   const scopeItems = run.manifest ? [describeLimits(run.manifest), describeTeamPolicy(run.manifest)] : []
   const semanticDiff = run.manifest ? describeSemanticDiff(run.manifest) : null
-  const gateReason = describeGateReason(run.gate_status, run.manifest, run.findings)
+  const gateReason = describeGateReason(run.gate_status, run.manifest, active)
   const canLinkGithub = Boolean(run.repo_full_name && run.pr_number != null)
 
   return (
@@ -213,11 +223,15 @@ function RunSummary({ run }: { run: ReviewRunDetail }) {
         <p className="text-sm text-ink-2">{gateReason}</p>
         {semanticDiff && <p className="text-xs text-ink-3">{semanticDiff}</p>}
 
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
           <CountTile verdict="VIOLATED" count={counts.VIOLATED} />
           <CountTile verdict="REVIEW" count={counts.REVIEW} />
           <CountTile verdict="UNKNOWN" count={counts.UNKNOWN} />
           <CountTile verdict="VERIFIED_IN_SCOPE" count={counts.VERIFIED_IN_SCOPE} />
+          <div className="row flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5">
+            <span className="text-2xl font-bold tabular-nums">{cleared.length}</span>
+            <ToneBadge tone="exempt">{CLEARED_LABEL}</ToneBadge>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
@@ -315,7 +329,8 @@ function FindingsByVerdict({ run, supplements }: { run: ReviewRunDetail; supplem
   if (run.findings.length === 0) {
     return <p className="text-sm text-ink-3">この検査にはまだ所見がありません（実行中、または未完了の可能性があります）。</p>
   }
-  const grouped = groupFindingsByVerdict(run.findings)
+  const { active, cleared } = splitCleared(run.findings, run.cleared_ids)
+  const grouped = groupFindingsByVerdict(active)
   return (
     <div className="space-y-6">
       {DETAIL_VERDICTS.map((verdict) => {
@@ -339,6 +354,22 @@ function FindingsByVerdict({ run, supplements }: { run: ReviewRunDetail; supplem
           </div>
         )
       })}
+
+      {cleared.length > 0 && (
+        <div className="space-y-3">
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-ink-2">
+            <ToneBadge tone="exempt">{CLEARED_LABEL}</ToneBadge>
+            {cleared.length} 件
+          </h3>
+          <p className="text-xs text-ink-3">判定は要確認（REVIEW）のまま。LLM 支援の「指摘なし」と人が問題なしと確定した指摘で、ゲートを止めません。</p>
+          {sortFindingsForDisplay(cleared).map((finding) => (
+            <div key={finding.id} className="space-y-2">
+              <FindingCard finding={finding} repoFullName={run.repo_full_name} headSha={run.head_sha} />
+              <FindingAttest slug={slug} run={run} finding={finding} mayAttest={false} />
+            </div>
+          ))}
+        </div>
+      )}
 
       {grouped.VERIFIED_IN_SCOPE.length > 0 && (
         <details className="space-y-3">

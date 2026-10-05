@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { describeGateReason } from './gate'
+import { countByVerdict, splitCleared } from './verdict'
 import type { Finding } from '@/types/finding'
-import type { RunManifest } from '@/types/run'
 
 const HASH = 'sha256:' + 'a'.repeat(64)
 
@@ -31,30 +31,31 @@ function finding(over: Partial<Finding>): Finding {
   }
 }
 
-describe('describeGateReason', () => {
-  it('LLM 支援の「指摘なし」は失敗の理由の件数に数えない', () => {
-    const findings = [
-      finding({ id: 'v', verdict: 'VIOLATED', assessment_outcome: null }),
-      finding({ id: 'n1', assessment_outcome: 'no_issue' }),
-      finding({ id: 'n2', assessment_outcome: 'no_issue' }),
-    ]
-    expect(describeGateReason('fail', null, findings)).toBe('違反 1件 が残っているため失敗しました')
+describe('件数と失敗の理由は cleared を除いた同じ集合から作る', () => {
+  const findings = [
+    finding({ id: 'v', verdict: 'VIOLATED', assessment_outcome: null }),
+    finding({ id: 'issue' }),
+    finding({ id: 'n1', assessment_outcome: 'no_issue' }),
+    finding({ id: 'n2', assessment_outcome: 'no_issue' }),
+    finding({ id: 'u', verdict: 'UNKNOWN', assessment_outcome: null }),
+  ]
+
+  it('バックエンドの cleared_ids だけを除く（画面で推測しない）', () => {
+    const { active, cleared } = splitCleared(findings, ['n1', 'n2'])
+    expect(cleared.map((f) => f.id)).toEqual(['n1', 'n2'])
+    expect(countByVerdict(active)).toEqual({ VIOLATED: 1, REVIEW: 1, UNKNOWN: 1, VERIFIED_IN_SCOPE: 0 })
+    expect(describeGateReason('fail', null, active)).toBe('違反 1件 / 未検証 1件 / 要確認 1件 が残っているため失敗しました')
   })
 
-  it('この run で問題なしと確定した指摘は数えず、阻止したままの記録は数える', () => {
-    const attestation = {
-      fingerprint: 'R:i:abc',
-      content_hash: HASH,
-      disposition: 'attested' as const,
-      actor: 'judge',
-      workspace: 'w',
-      created_at: '2026-10-05T00:00:00Z',
-      self_attested: false,
-    }
-    const manifest = { attestations: [attestation] } as unknown as RunManifest
-    const findings = [finding({}), finding({ id: 'u', verdict: 'UNKNOWN', assessment_outcome: null })]
-    expect(describeGateReason('fail', manifest, findings)).toBe('未検証 1件 が残っているため失敗しました')
-    const kept = { attestations: [{ ...attestation, disposition: 'acknowledged_violation' }] } as unknown as RunManifest
-    expect(describeGateReason('fail', kept, findings)).toBe('未検証 1件 / 要確認 1件 が残っているため失敗しました')
+  it('確定が効いた指摘も cleared に入っていれば数えない', () => {
+    const { active } = splitCleared(findings, ['issue', 'n1', 'n2'])
+    expect(describeGateReason('fail', null, active)).toBe('違反 1件 / 未検証 1件 が残っているため失敗しました')
+  })
+
+  it('cleared_ids の無い古い run は全部を数える。REVIEW 以外の ID は cleared にしない', () => {
+    expect(splitCleared(findings, undefined).cleared).toEqual([])
+    const { active, cleared } = splitCleared(findings, ['v', 'u'])
+    expect(cleared).toEqual([])
+    expect(active).toHaveLength(5)
   })
 })

@@ -85,3 +85,48 @@ async def test_seeded_runs_have_the_intended_verdicts(engine: AsyncEngine, tmp_p
         else:
             assert set(outcomes) == {"no_issue"}, (mutation, outcomes)
             assert gate == ("pass" if not expected else "fail"), mutation
+
+
+async def test_run_api_returns_the_cleared_ids(engine: AsyncEngine, tmp_path: Path) -> None:
+    """run の API はゲートを止めない REVIEW の ID（gate の cleared）を返す。画面はこの集合で数える。"""
+    import httpx
+
+    from speclino.adapters.localgit.local_code_host import LocalCodeHost
+    from speclino.adapters.queue.inprocess import InProcessQueue
+    from speclino.adapters.storage.fs import FileSystemBlobStore
+    from speclino.api.app import create_app
+    from speclino.api.deps import AppState
+    from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
+    from speclino.settings import Settings
+
+    slug = f"e2e-shopapi-{uuid.uuid4().hex[:8]}"
+    names = Names(
+        workspace=slug,
+        repo=f"e2e/{slug}",
+        github_repo_id=zlib.crc32(slug.encode()),
+        llm_model=f"fake-{slug}",
+    )
+    f = async_sessionmaker(engine, expire_on_commit=False)
+    result = await seed(f, repo_dir=tmp_path / "repo", artifact_dir=tmp_path / "blobs", names=names)
+    host = LocalCodeHost(repos={names.repo: tmp_path / "repo"})
+    queue = InProcessQueue(lambda _rid: None, immediate=False)  # type: ignore[arg-type, return-value]
+    blobs = FileSystemBlobStore(tmp_path / "blobs")
+    service = ReviewRunService(f, host, queue, blobs, ReviewRunConfig(agent_enabled=False))
+    settings = Settings(env="local", role="all")
+    app = create_app(settings, AppState(settings, engine, f, host, queue, blobs, service))
+    judge = {"X-Dev-User": "judge"}
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c,
+    ):
+        for branch, expected in (
+            ("main", 4),
+            ("pr/07-terse-error", 3),
+            ("pr/01-missing-charge", 4),
+        ):
+            body = (await c.get(f"/api/review-runs/{result.runs[branch]}", headers=judge)).json()
+            by_id = {x["id"]: x for x in body["findings"]}
+            cleared = body["cleared_ids"]
+            assert len(cleared) == expected, branch
+            assert all(by_id[i]["assessment_outcome"] == "no_issue" for i in cleared), branch
+            assert body["manifest"]["gate"]["cleared_ids"] == cleared
