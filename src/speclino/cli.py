@@ -614,7 +614,7 @@ def cutover_status(
         mark = "ready" if r.ready else "TODO "
         specs = ",".join(r.approved_specs) or ("-" if r.bundle_problem is None else "!")
         typer.echo(
-            f"{mark} {r.workspace} {r.repo_full_name} "
+            f"{mark} {r.workspace} {r.repo_full_name} project={r.project_id} "
             f"bundle={r.bundle_generation or '-'} specs={specs} "
             f"sync_tokens={r.active_sync_tokens} lock={r.lock_verdict or '-'}"
             + (f" problem={r.bundle_problem}" if r.bundle_problem else "")

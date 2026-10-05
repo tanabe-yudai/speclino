@@ -90,3 +90,23 @@ async def test_cutover_status_per_project(engine: AsyncEngine) -> None:
     assert ng.lock_verdict == "REVIEW"
     # ワークスペースを省略すると全部（このワークスペースの分も入る）
     assert {done_repo, todo_repo} <= {r.repo_full_name for r in everything}
+
+
+async def test_cli_prints_project_id(engine: AsyncEngine) -> None:
+    """手順書は cutover-status の `project=<ID>` で import-specs の project ID を確かめる。"""
+    import asyncio
+
+    from typer.testing import CliRunner
+
+    from speclino.cli import app
+
+    slug = f"e2e-cutcli-{uuid.uuid4().hex[:8]}"
+    repo = f"e2e/{slug}"
+    await register_repo(engine, repo, {"owner1": "owner"}, team=slug)
+    pid = await project_id_of(engine, repo)
+    # CLI は自分で asyncio.run するので別のスレッドで動かす
+    result = await asyncio.to_thread(
+        CliRunner().invoke, app, ["cutover-status", "--workspace", slug]
+    )
+    assert result.exit_code == 0, result.output
+    assert f"project={pid}" in result.output

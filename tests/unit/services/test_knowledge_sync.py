@@ -845,3 +845,22 @@ def test_lock_with_unknown_key_id_is_unknown(tmp_path: Path) -> None:
     data["key_id"] = "f" * 16  # 鍵束に無い ID（書き換えれば署名の対象も変わる）
     f = _check(tmp_path, json.dumps(data), current=bundle)
     assert f.verdict == "UNKNOWN" and "署名" in f.message
+
+
+@pytest.mark.usefixtures("_restore_key")
+def test_lock_after_rebundle_with_same_members_stays_verified_until_old_key_removed(
+    tmp_path: Path,
+) -> None:
+    """鍵の更新（手順書 9 章）: rebundle で世代だけ進んでも、前の鍵が鍵束にある間は VERIFIED。"""
+    from speclino.settings import Settings
+
+    bundle_signing.configure(Settings(bundle_signing_key="old"))
+    lock_json, _ = _synced(tmp_path)
+    old_kid = bundle_signing.key_id_of(b"old")
+    bundle_signing.configure(
+        Settings(bundle_signing_key="new", bundle_signing_keys_old=f"{old_kid}:old")
+    )
+    rebundled = _bundle(BASE, generation=2)  # 同じメンバー・新しい鍵・次の世代
+    assert _check(tmp_path, lock_json, current=rebundled).verdict == "VERIFIED_IN_SCOPE"
+    bundle_signing.configure(Settings(bundle_signing_key="new"))
+    assert _check(tmp_path, lock_json, current=rebundled).verdict == "UNKNOWN"

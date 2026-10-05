@@ -14,21 +14,28 @@
 
 ## 0. 前提
 
-- 統合ブランチが main にマージ済みで、CI（lint / typecheck / test / self-check / web）が緑
+- **統合ブランチ（`s72-integration`）はまだ main にマージしない**。main へのマージで
+  `.github/workflows/deploy.yml` が自動でマイグレーションとデプロイを行い、新しいコードは env=prod で
+  署名鍵が無いと起動しない。署名鍵の secret の作成・値の投入・注入（手順 1〜3）は、マージより前に
+  統合ブランチの `.tf` で行う
+- 統合ブランチの CI（lint / typecheck / test / self-check / web）が緑
 - `speclino-migrate` と `speclino-admin` の Cloud Run Job がある（`infra/envs/prod/run.tf`）
-- 手元に `gcloud` と `terraform`（`infra/envs/prod` で `terraform init` 済み）
+- 手元に `gcloud` と `terraform`。統合ブランチを checkout し、`infra/envs/prod` で `terraform init` 済み
 
-## 1. 署名鍵の secret を作る（terraform apply 1 回目、ユーザー）
+## 1. 署名鍵の secret を作る（統合ブランチの .tf で apply 1 回目、ユーザー、マージ前）
 
 ```sh
+git switch s72-integration
 cd infra/envs/prod
-terraform plan -out=tfplan   # bundle-signing-key / bundle-signing-keys-old の secret と IAM が増えるだけ
+terraform plan -out=tfplan   # 増えるのは bundle-signing-key / bundle-signing-keys-old の secret と IAM、
+                             # admin Job の SPECLINO_ENV=prod。それ以外の差分が出たら止めて確かめる
 terraform apply tfplan
 ```
 
-この時点では `mount_bundle_signing_key = false`（既定）なので、サービスには何も注入されない。
+この時点では `mount_bundle_signing_key = false`（既定）なので、サービスには何も注入されない。admin Job の
+`SPECLINO_ENV=prod` は、今の（main の）コードでも動作を変えない。
 
-## 2. 鍵の値を入れる（ユーザー）
+## 2. 鍵の値を入れる（ユーザー、マージ前）
 
 ```sh
 openssl rand -hex 32 | tr -d '\n' | \
@@ -37,21 +44,24 @@ openssl rand -hex 32 | tr -d '\n' | \
 
 値は手元に残さない（シェルの履歴にも出ない形で入れる）。
 
-## 3. 鍵を注入する（terraform apply 2 回目、ユーザー）
+## 3. 鍵を注入する（統合ブランチの .tf で apply 2 回目、ユーザー、マージ前）
 
 ```sh
 echo 'mount_bundle_signing_key = true' >> terraform.tfvars
-terraform plan -out=tfplan   # web / worker の env と admin Job（SPECLINO_ENV=prod も）が変わる
+terraform plan -out=tfplan   # web / worker / admin Job の env に SPECLINO_BUNDLE_SIGNING_KEY が増える
 terraform apply tfplan
 ```
 
-旧コードは `SPECLINO_BUNDLE_SIGNING_KEY` を読まないので、この apply で動作は変わらない。新しいコードは
-env=prod で鍵が無いと起動しないので、**必ずデプロイより先に行う**。
+今の（main の）コードは `SPECLINO_BUNDLE_SIGNING_KEY` を読まないので、この apply で動作は変わらない。
+確かめる: `gcloud run services describe speclino-web --project=$P --region=$REGION
+--format='yaml(spec.template.spec.containers[0].env)'` に `SPECLINO_BUNDLE_SIGNING_KEY` が secret 参照で
+出ていること。
 
-## 4. マイグレーション 0010 / 0011（migrate Job）
+## 4. main にマージする（マイグレーション 0010 / 0011 とデプロイ）
 
-main へのマージで `.github/workflows/deploy.yml` が、サービスを更新する前に `speclino-migrate` を
-流す。手で流す場合（デプロイを止めているときなど）:
+手順 1〜3 が済んでから統合ブランチを main にマージする。deploy.yml が次を順に行う:
+migrate Job（0010 / 0011）→ admin Job の `backfill-repo-ids` → web / worker の更新。
+デプロイを止めていて手で流す場合:
 
 ```sh
 IMAGE=$REGION-docker.pkg.dev/$P/speclino/speclino:<新しいイメージのタグ>
@@ -60,13 +70,11 @@ gcloud run jobs execute speclino-migrate --project=$P --region=$REGION --wait
 gcloud run jobs executions list --job=speclino-migrate --project=$P --region=$REGION --limit=1
 ```
 
-0010 / 0011 は**追加だけ**（新しい表と NULL 可の列 `review_runs.pr_author_id`・`bundles.key_id`）なので、
-旧コードのサービスがこのスキーマで動き続けても問題ない。
+続けて web / worker の更新は `guides/deploy-runbook.md` の 5 章。0010 / 0011 は**追加だけ**（新しい表と
+NULL 可の列 `review_runs.pr_author_id`・`bundles.key_id`）なので、サービスの更新より先にスキーマが進んでも
+旧コードは動き続ける。
 
-## 5. デプロイ
-
-deploy.yml がそのまま続けて行う（migrate → `backfill-repo-ids` → web / worker の更新）。手で行うなら
-`guides/deploy-runbook.md` の 5 章。確かめる:
+## 5. デプロイを確かめる
 
 ```sh
 gcloud run services describe speclino-web --project=$P --region=$REGION \
@@ -77,7 +85,8 @@ gcloud run jobs logs read speclino-admin --project=$P --region=$REGION --limit=5
 ```
 
 `signing-key-id` が 16 桁の 16 進を出せば鍵が届いている。`cutover-status` はこの時点で全プロジェクトが
-`TODO`（仕様・トークン・lock がまだ無い）。
+`TODO`（仕様・トークン・lock がまだ無い）。新しいリビジョンが起動しない（鍵が無い）ときは手順 3 を
+確かめる。旧リビジョンへの戻し方は 8 章。
 
 ## 6. プロジェクトごとの切り替え（登録済みの全プロジェクト）
 
@@ -94,7 +103,7 @@ gcloud run jobs logs read speclino-admin --project=$P --region=$REGION --limit=5
        --author <自分の uid> --repo <checkout のパス>
    ```
 
-   project ID は `cutover-status` の出力（または `speclino workspace list`）で確かめる。仕様の無い
+   project ID は `cutover-status` の各行の `project=<ID>` で確かめる。仕様の無い
    リポジトリは飛ばしてよい（規約・スキル・指示だけで使う）。
 2. **画面で確かめて承認する**: 「知識」→「仕様」→ 取り込んだ仕様。診断が 0 件であること、図・正規形・
    要求の表を見てから「承認して有効にする」。承認のたびに新しい bundle（署名つき）ができる。
@@ -161,9 +170,13 @@ bundle と lock は署名した鍵の ID（`key_id`）を持つ。サーバは�
    ```
 
    kid と鍵が合わないとサービスは起動しない（取り違えを起動時に止める）。
-3. 新しい鍵を入れる: `openssl rand -hex 32 | tr -d '\n' | gcloud secrets versions add bundle-signing-key ...`
-4. `mount_bundle_signing_keys_old = true` を tfvars に書いて `terraform apply`（ユーザー）。新しい
-   リビジョンが新しい鍵（`latest`）と前の鍵を読む
+3. **3 と 4 は間を空けずに続けて行う。** 新しい鍵の値を入れる:
+   `openssl rand -hex 32 | tr -d '\n' | gcloud secrets versions add bundle-signing-key --data-file=- --project=$P`。
+   secret は `latest` で参照しているので、この後に起動したインスタンスは新しい鍵を読む。手順 4 が終わる
+   までは、前の鍵を鍵束に持たないインスタンスが混ざり、前の鍵の bundle を使う検査が失敗しうる
+4. 続けて `mount_bundle_signing_keys_old = true` を tfvars に書いて `terraform apply`（ユーザー）。新しい
+   リビジョンが新しい鍵（`latest`）と前の鍵の両方を読む。古いリビジョンへのトラフィックが無くなった
+   ことを確かめる（`gcloud run services describe ... --format='value(status.traffic)'`）
 5. 全ワークスペースの bundle を新しい鍵で作り直す:
 
    ```sh
@@ -171,11 +184,13 @@ bundle と lock は署名した鍵の ID（`key_id`）を持つ。サーバは�
    ```
 
    既に新しい鍵で署名済みのワークスペースは飛ばす。競合などで作れなかったワークスペースは `failed` と
-   理由が出て、終了コードが 1 になる（他のワークスペースの作り直しは残る）。世代が進むので、各リポジトリの
-   lock は古い扱い（REVIEW）になる。各リポジトリで `speclino sync` をやり直してコミットする
-6. lock の期限（30 日）が過ぎたら、`mount_bundle_signing_keys_old = false` にして apply し、
-   `bundle-signing-keys-old` の値を無効化する（`gcloud secrets versions disable`）。前の鍵の lock は
-   その時点で UNKNOWN になる
+   理由が出て、終了コードが 1 になる（他のワークスペースの作り直しは残る）。作り直しで世代は進むが、
+   メンバーと規約は同じなので、各リポジトリの前の鍵の lock は**前の鍵が鍵束にある間は VERIFIED のまま**
+   （lock の鮮度はメンバーと規約で比べ、世代の差だけでは古い扱いにしない）。手順 6 で前の鍵を外すと
+   UNKNOWN になるので、それまでに各リポジトリで `speclino sync` をやり直してコミットする
+6. 全リポジトリの lock を新しい鍵で取り直した（または lock の期限の 30 日が過ぎた）ら、
+   `mount_bundle_signing_keys_old = false` にして apply し、`bundle-signing-keys-old` の値を無効化する
+   （`gcloud secrets versions disable`）。前の鍵の lock と bundle はその時点で検証できなくなる
 
 鍵が漏れた疑いのときは、手順 2 と 6 を飛ばして（前の鍵を残さず）すぐに 3〜5 を行う。前の鍵で
 署名された bundle と lock は直ちに検証できなくなり、検査は sync をやり直すまで失敗する（安全側）。
