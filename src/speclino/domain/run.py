@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, StringConstraints
 
+from speclino.domain.assessment import Attestation
 from speclino.domain.code_ir import AnalysisLimits, ReachabilityDigest
 from speclino.domain.common import SCHEMA_VERSION, IRModel
 
@@ -90,6 +91,12 @@ class RunManifest(IRModel):
         default_factory=list, description="出るべき要求 ID（欠けたら UNKNOWN）"
     )
     llm_assessment_keys: list[str] = Field(default_factory=list)
+    attestations: list[Attestation] = Field(
+        default_factory=list,
+        description=(
+            "このゲートで効いた人の確定（S70）。verdict は書き換えず、ゲートの処置として残す"
+        ),
+    )
     trusted_commit: str | None = Field(
         default=None,
         description=(

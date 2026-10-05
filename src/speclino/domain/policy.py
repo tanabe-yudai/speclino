@@ -14,6 +14,10 @@ from speclino.domain.common import SCHEMA_VERSION, IRModel
 
 PolicyLevel = Literal["mandatory", "advisory"]
 OnMissingInput = Literal["violation", "unknown", "skipped"]
+# 規約の検査の段（S70、設計 6.2）。llm_assisted は検査器 `llm.checklist` で LLM が評価し、
+# verdict は常に REVIEW（確定は人）。既定は決定的な検査器
+PolicyTier = Literal["deterministic", "llm_assisted"]
+LLM_CHECKLIST_VERIFIER_ID = "llm.checklist"
 
 
 class PolicyApplicability(IRModel):
@@ -65,6 +69,10 @@ class PolicyRule(IRModel):
         description="applies_to が対象を1つも見つけられないときの扱い"
     )
     exceptions_allowed: bool = True
+    tier: PolicyTier = Field(
+        default="deterministic",
+        description="llm_assisted は検査器 llm.checklist（LLM は REVIEW しか出さず、確定は人）",
+    )
 
     @property
     def verifier_ref(self) -> PolicyVerifierRef:
@@ -87,6 +95,20 @@ class PolicyRule(IRModel):
         if self.level == "mandatory" and self.verifier is None:
             raise ValueError(
                 f"{self.id}: mandatory なルールには verifier が必要（助言なら advisory に）"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _tier_matches_verifier(self) -> PolicyRule:
+        """llm_assisted ⇔ 検査器 llm.checklist（決定的な段に LLM の検査器を紛れ込ませない）。"""
+        uses_llm = self.verifier is not None and self.verifier.id == LLM_CHECKLIST_VERIFIER_ID
+        if self.tier == "llm_assisted" and not uses_llm:
+            raise ValueError(
+                f"{self.id}: tier=llm_assisted のルールの検査器は {LLM_CHECKLIST_VERIFIER_ID}"
+            )
+        if self.tier == "deterministic" and uses_llm:
+            raise ValueError(
+                f"{self.id}: 検査器 {LLM_CHECKLIST_VERIFIER_ID} は tier=llm_assisted のルールだけ"
             )
         return self
 
@@ -147,6 +169,7 @@ class PolicyRevision(IRModel):
 
 
 __all__ = [
+    "LLM_CHECKLIST_VERIFIER_ID",
     "OnMissingInput",
     "PolicyApplicability",
     "PolicyException",
@@ -158,5 +181,6 @@ __all__ = [
     "PolicyRevisionStatus",
     "PolicyRule",
     "PolicySource",
+    "PolicyTier",
     "PolicyVerifierRef",
 ]

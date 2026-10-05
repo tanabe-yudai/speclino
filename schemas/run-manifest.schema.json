@@ -30,6 +30,54 @@
       "title": "AnalysisLimits",
       "type": "object"
     },
+    "Attestation": {
+      "additionalProperties": false,
+      "properties": {
+        "fingerprint": {
+          "minLength": 1,
+          "title": "Fingerprint",
+          "type": "string"
+        },
+        "content_hash": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Content Hash",
+          "type": "string"
+        },
+        "disposition": {
+          "enum": [
+            "attested",
+            "acknowledged_violation"
+          ],
+          "title": "Disposition",
+          "type": "string"
+        },
+        "actor": {
+          "minLength": 1,
+          "title": "Actor",
+          "type": "string"
+        },
+        "workspace": {
+          "minLength": 1,
+          "title": "Workspace",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "fingerprint",
+        "content_hash",
+        "disposition",
+        "actor",
+        "workspace",
+        "created_at"
+      ],
+      "title": "Attestation",
+      "type": "object"
+    },
     "BehaviorAnalysis": {
       "additionalProperties": false,
       "description": "増分解析（S41c）の記録。再利用は「解析していない」ことなので必ず記録して隠さない。",
@@ -419,6 +467,14 @@
         "type": "string"
       },
       "title": "Llm Assessment Keys",
+      "type": "array"
+    },
+    "attestations": {
+      "description": "このゲートで効いた人の確定（S70）。verdict は書き換えず、ゲートの処置として残す",
+      "items": {
+        "$ref": "#/$defs/Attestation"
+      },
+      "title": "Attestations",
       "type": "array"
     },
     "trusted_commit": {
