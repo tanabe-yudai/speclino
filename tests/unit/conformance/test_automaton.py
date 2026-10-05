@@ -6,6 +6,7 @@ from speclino.conformance.automaton import (
     GuardOracle,
     accepting_guard_sets,
     explain_subsequence,
+    initial_configs,
     normalize,
     run_word,
 )
@@ -99,3 +100,40 @@ def test_explain_reports_last_match_and_expected_call() -> None:
     last, expected = explain_subsequence(["Inv.reserve"], a, {"g2"})
     assert last == "Inv.reserve"
     assert expected == ["Ship.normal"]
+
+
+# S63 の parser は中身が opt だけの loop から ε だけで一周する閉路を作る（o1.skip → l1.back）。
+# head -[o1.enter, express] ε-> body -Ship.fast-> join ; head -[o1.skip] ε-> join ;
+# join -[l1.back] ε-> head ; join -[l1.again, express] ε-> head ; head -[l1.exit] ε-> done
+EPS_LOOP = Automaton(
+    states=["head", "body", "join", "done"],
+    initial="head",
+    accepting=["done"],
+    transitions=[
+        _t("o1.enter", "head", "body", guard=EXPRESS),
+        _t("m1", "body", "join", "Ship.fast"),
+        _t("o1.skip", "head", "join"),
+        _t("l1.back", "join", "head"),
+        _t("l1.again", "join", "head", guard=EXPRESS),
+        _t("l1.exit", "head", "done"),
+    ],
+)
+
+
+def test_epsilon_cycle_closure_terminates_with_bounded_guards() -> None:
+    a, _ = normalize(EPS_LOOP, lambda op: op, "Svc.entry")
+    ctx = Z3Context(TypeEnv(DOMAIN))
+    oracle = GuardOracle(ctx, [], a.guards, 500)
+    configs = initial_configs(a, oracle)
+    # ガードつき ε の閉路を何周しても条件集合は増え続けない（同じ状態・同じ集合で打ち切る）
+    assert {c.guards for c in configs} <= {
+        frozenset(),
+        frozenset({"o1.enter"}),
+        frozenset({"l1.again"}),
+        frozenset({"o1.enter", "l1.again"}),
+    }
+    assert len(configs) <= 4 * 4
+    ok, dead = run_word(["Ship.fast"] * 4, a, oracle, skip=False)
+    assert dead is None and ok
+    assert all("o1.enter" in g for g in ok)
+    assert accepting_guard_sets(a, oracle)  # ε だけで受理に達する（0 回）

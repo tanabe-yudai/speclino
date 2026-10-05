@@ -351,3 +351,25 @@ def test_activity_may_call_is_unknown() -> None:
         may=frozenset({"Audit.log"}),
     )
     assert _one(_activity(True), _code(maybe, ACT_OK[1])).verdict == "UNKNOWN"
+
+
+def test_epsilon_only_cycle_from_opt_in_loop() -> None:
+    # loop { opt [express] Shipping.express } ; Mailer.notify（S63 が作る ε だけの閉路を含む）
+    ob = _seq(
+        [
+            _t("m0", "s0", "head", "Inventory.reserve"),
+            _t("o1.enter", "head", "body", guard=EXPRESS),
+            _t("m1", "body", "join", "Shipping.express"),
+            _t("o1.skip", "head", "join"),
+            _t("l1.back", "join", "head"),
+            _t("l1.exit", "head", "tail"),
+            _t("m3", "tail", "s9", "Mailer.notify"),
+        ],
+        ["s9"],
+    )
+    ok = _path("p1", TRUE, ["Inventory.reserve", "Shipping.express", "Mailer.notify"])
+    assert _one(ob, _code(ok)).verdict == "VERIFIED_IN_SCOPE"
+    missing = _path("p1", TRUE, ["Inventory.reserve"])
+    f = _one(ob, _code(missing))
+    assert f.verdict == "VIOLATED"
+    assert "Mailer.notify" in f.message
