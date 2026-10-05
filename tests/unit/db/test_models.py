@@ -44,6 +44,8 @@ EXPECTED_TABLES = {
     "bundles",
     "sync_tokens",
     "knowledge_fetches",
+    "llm_assessments",
+    "attestations",
 }
 
 

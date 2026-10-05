@@ -73,3 +73,8 @@ def test_checklist_params() -> None:
         LlmChecklistParams.model_validate(
             {"items": [{"id": "a", "question": "q"}], "unit_kind": "function", "extra": 1}
         )
+
+
+def test_llm_assisted_never_violates_on_missing_input() -> None:
+    with pytest.raises(ValidationError, match="on_missing_input"):
+        PolicyRule.model_validate(_rule(tier="llm_assisted", on_missing_input="violation"))

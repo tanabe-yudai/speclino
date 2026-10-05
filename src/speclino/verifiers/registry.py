@@ -2,6 +2,10 @@
 
 例外（PolicyException）の適用はまだ行わない（S30 で実装）。`exceptions` はシグネチャに
 残すが、ここでは参照しない。
+
+LLM 支援の規約（検査器 ID `llm.checklist`、S70）も同じ登録の仕組みを通すが、検査器
+（`verifiers/llm_checklist.py`）は LLM を呼ばない。Finding を作るのは `services/llm_policies.py`
+で、worker が run の前に評価した結果を検査器に渡す（判定の層は LLM に依存しない）。
 """
 
 from __future__ import annotations

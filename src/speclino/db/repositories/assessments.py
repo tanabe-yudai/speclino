@@ -60,7 +60,7 @@ def _attestation(row: AttestationRecord) -> Attestation:
     return Attestation(
         fingerprint=row.fingerprint,
         content_hash=row.content_hash,
-        disposition=row.disposition,  # type: ignore[arg-type]
+        disposition=row.disposition,
         actor=row.actor,
         workspace=row.workspace,
         created_at=row.created_at,

@@ -106,6 +106,11 @@ class PolicyRule(IRModel):
             raise ValueError(
                 f"{self.id}: tier=llm_assisted のルールの検査器は {LLM_CHECKLIST_VERIFIER_ID}"
             )
+        if self.tier == "llm_assisted" and self.on_missing_input == "violation":
+            # LLM 支援の規約は VIOLATED を出さない（対象が無いときも UNKNOWN か skipped）
+            raise ValueError(
+                f"{self.id}: tier=llm_assisted の on_missing_input は unknown か skipped"
+            )
         if self.tier == "deterministic" and uses_llm:
             raise ValueError(
                 f"{self.id}: 検査器 {LLM_CHECKLIST_VERIFIER_ID} は tier=llm_assisted のルールだけ"

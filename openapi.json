@@ -1327,6 +1327,16 @@
             "title": "Text",
             "type": "string"
           },
+          "tier": {
+            "default": "deterministic",
+            "description": "llm_assisted は検査器 llm.checklist（LLM は REVIEW しか出さず、確定は人）",
+            "enum": [
+              "deterministic",
+              "llm_assisted"
+            ],
+            "title": "Tier",
+            "type": "string"
+          },
           "title": {
             "minLength": 1,
             "title": "Title",
