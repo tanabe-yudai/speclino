@@ -384,6 +384,10 @@ def replay(
     base: Annotated[
         Path | None, typer.Option("--base", help="bundle の PR の run: base のスナップショット")
     ] = None,
+    trusted: Annotated[
+        Path | None,
+        typer.Option("--trusted", help="bundle の run: 信頼側（trusted_commit）のスナップショット"),
+    ] = None,
 ) -> None:
     """凍結した IR から判定を再評価し、保存された結果と一致するか確認する（AC-013）。
 
@@ -408,7 +412,12 @@ def replay(
 
         async def work(s: AsyncSession) -> BundleReplayResult:
             return await replay_bundle(
-                s, run_dir, project_id=project_id, repo_root=head_root, base_root=base
+                s,
+                run_dir,
+                project_id=project_id,
+                repo_root=head_root,
+                base_root=base,
+                trusted_root=trusted,
             )
 
         try:

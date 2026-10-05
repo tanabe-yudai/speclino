@@ -75,6 +75,9 @@ async def _record(engine: AsyncEngine, tmp_path: Path) -> Recorded:
             knowledge=knowledge,
             github_repo_id=repo_id_of(repo),
             now=NOW,
+            today=NOW.date(),
+            trusted_root=head,
+            trusted_sha="default-tip",
         )
     )
     assert any(x.requirement_id.startswith("MAKE-001") for x in result.findings.findings)
@@ -86,7 +89,7 @@ async def _record(engine: AsyncEngine, tmp_path: Path) -> Recorded:
 async def _replay(r: Recorded, pid: str | None = None) -> replay_service.BundleReplayResult:
     async with r.f() as s:
         return await replay_service.replay_bundle(
-            s, r.out, project_id=pid or r.pid, repo_root=r.head
+            s, r.out, project_id=pid or r.pid, repo_root=r.head, trusted_root=r.head
         )
 
 
@@ -143,6 +146,27 @@ async def test_replay_only_resolves_the_projects_workspace(
 async def test_cli_replay_bundle(engine: AsyncEngine, tmp_path: Path) -> None:
     r = await _record(engine, tmp_path)
     args = ["replay", str(r.out), "--project-id", r.pid, "--repo", str(r.head)]
+    missing = await asyncio.to_thread(CliRunner().invoke, cli_app, args)
+    assert missing.exit_code == 2 and "信頼側" in missing.output
+    args += ["--trusted", str(r.head)]
     result = await asyncio.to_thread(CliRunner().invoke, cli_app, args)
     assert result.exit_code == 0, result.output
     assert "一致" in result.output and "bundle:" in result.output
+
+
+async def test_replay_prefers_deterministic_findings(engine: AsyncEngine, tmp_path: Path) -> None:
+    """エージェントの調査後の findings.json ではなく、調査前の決定的な Findings と比べる。"""
+    r = await _record(engine, tmp_path)
+    (r.out / replay_service.DETERMINISTIC_FINDINGS).write_text(
+        (r.out / "findings.json").read_text()
+    )
+    data = json.loads((r.out / "findings.json").read_text())
+    for x in data["findings"]:
+        if x["requirement_id"] == "R-CANCEL-04":
+            x["verdict"], x["category"] = "UNKNOWN", "unsupported_analysis"  # 調査で変わった値
+    (r.out / "findings.json").write_text(json.dumps(data, ensure_ascii=False))
+    assert (await _replay(r)).identical
+    manifest = json.loads((r.out / "run-manifest.json").read_text())
+    assert (
+        manifest["trusted_commit"] == "default-tip" and manifest["today"] == NOW.date().isoformat()
+    )

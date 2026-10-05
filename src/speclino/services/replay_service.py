@@ -179,6 +179,10 @@ def _check_policy_findings_against(revision: PolicyRevision, saved: Findings) ->
         )
 
 
+# worker が書く、エージェントの調査前の決定的な Findings（review_run_service と同じ名前）
+DETERMINISTIC_FINDINGS = "findings.deterministic.json"
+
+
 def _load_manifest(run_dir: Path) -> RunManifest:
     return RunManifest.model_validate(json.loads((run_dir / "run-manifest.json").read_text()))
 
@@ -206,14 +210,17 @@ async def replay_bundle(
     project_id: str,
     repo_root: Path,
     base_root: Path | None = None,
-    source_roots: tuple[str, ...] = (".", "src"),
+    trusted_root: Path | None = None,
 ) -> BundleReplayResult:
     """bundle を固定した run を、記録の bundle で再実行して保存結果と比べる。
 
     bundle は run のプロジェクトの（今の）ワークスペースからだけ引く。リクエストや manifest の
     ワークスペース名は使わない。プロジェクトが別のワークスペースへ移った・bundle が書き換えられた
     場合は `bundle_hash` か署名が合わず ValueError。`repo_root` は run の head のスナップショット、
-    PR の run（base あり）は `base_root` も要る（対応・契約・免除・規約を base から読むため）。
+    PR の run（base あり）は `base_root`（意味差分）、信頼側を記録した run は `trusted_root`
+    （manifest の `trusted_commit` のスナップショット。対応・契約・免除・規約を読む）も要る。
+    source_roots・today・bindings_patch は manifest の記録を使う（記録の無い古い run は既定値）。
+    比較の相手は、記録があればエージェントの調査前の決定的な Findings（DETERMINISTIC_FINDINGS）。
     """
     from speclino.db.models import Project
     from speclino.services import knowledge_registry as kr
@@ -224,6 +231,8 @@ async def replay_bundle(
         raise ValueError("この run は bundle を固定していない（replay を使う）")
     if manifest.inputs.base_commit is not None and base_root is None:
         raise ValueError("PR の run の再現には base のスナップショット（base_root）が要る")
+    if manifest.trusted_commit is not None and trusted_root is None:
+        raise ValueError(f"この run の信頼側（{manifest.trusted_commit}）のスナップショットが要る")
     try:
         project = await session.get(Project, UUID(project_id))
     except ValueError:
@@ -249,13 +258,20 @@ async def replay_bundle(
             fail_on=tuple(manifest.fail_on),  # type: ignore[arg-type]
             mode=manifest.mode,
             run_id=manifest.run_id,
-            source_roots=source_roots,
+            source_roots=tuple(manifest.source_roots) or (".", "src"),
+            today=manifest.today,
+            bindings_patch=manifest.bindings_patch or None,
             knowledge=knowledge,
             github_repo_id=project.github_repo_id,
             now=manifest.created_at,
+            trusted_root=trusted_root if manifest.trusted_commit is not None else None,
+            trusted_sha=manifest.trusted_commit,
         )
     )
-    saved = Findings.model_validate(json.loads((run_dir / "findings.json").read_text()))
+    saved_path = run_dir / DETERMINISTIC_FINDINGS
+    if not saved_path.is_file():
+        saved_path = run_dir / "findings.json"
+    saved = Findings.model_validate(json.loads(saved_path.read_text()))
     diffs, compared, llm = compare_findings(saved, fresh.findings)
     return BundleReplayResult(
         manifest.run_id, bundle.generation, not diffs, compared, diffs, llm, fresh.findings
