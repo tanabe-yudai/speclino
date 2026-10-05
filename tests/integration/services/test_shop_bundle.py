@@ -88,7 +88,11 @@ async def test_seeded_runs_have_the_intended_verdicts(engine: AsyncEngine, tmp_p
 
 
 async def test_run_api_returns_the_cleared_ids(engine: AsyncEngine, tmp_path: Path) -> None:
-    """run の API はゲートを止めない REVIEW の ID（gate の cleared）を返す。画面はこの集合で数える。"""
+    """run の API はゲートを止めない REVIEW の ID（gate の cleared）を返す。
+
+    画面は判定ごとの件数と失敗の理由をこの集合で数える。
+    """
+
     import httpx
 
     from speclino.adapters.localgit.local_code_host import LocalCodeHost
