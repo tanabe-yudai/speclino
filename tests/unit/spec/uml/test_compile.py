@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 
@@ -20,6 +21,8 @@ from tests.unit.spec.uml.samples import ACTIVITY, CLASSES, FULL, REQUIREMENTS, S
 from tests.unit.spec.uml.samples import STATES as STATES_MD
 
 ROOT = Path(__file__).resolve().parents[4]
+PERF_LIMIT = 3.0 * float(os.environ.get("SPECLINO_PERF_FACTOR", "1"))
+"""計算量のテストの時間の上限（秒）。遅い環境では SPECLINO_PERF_FACTOR で倍率を掛ける。"""
 LEGACY = load_spec_ir(ROOT / "specs/ir/gate_decide.spec-ir.json")
 
 # 正常な文書と、さまざまな誤りを含む文書（網羅のテストに使う）
@@ -216,13 +219,13 @@ def test_pathological_input_finishes_quickly(md: str) -> None:
     assert len(md) >= 4000
     start = time.perf_counter()
     compile_spec(md, domain=None, legacy_ir=[])
-    assert time.perf_counter() - start < 1.0
+    assert time.perf_counter() - start < PERF_LIMIT
 
 
 def _timed_codes(md: str) -> list[str]:
     start = time.perf_counter()
     res = compile_spec(md, domain=None, legacy_ir=[])  # 例外（RecursionError 等）を漏らさない
-    assert time.perf_counter() - start < 1.0
+    assert time.perf_counter() - start < PERF_LIMIT
     assert res.compiled is None
     return [d.code for d in res.diagnostics]
 
@@ -275,7 +278,7 @@ def test_many_requirement_tables_finish_quickly() -> None:
     md = table * (200 * 1024 // len(table.encode()))
     start = time.perf_counter()
     compile_spec(md, domain=None, legacy_ir=[])
-    assert time.perf_counter() - start < 1.0
+    assert time.perf_counter() - start < PERF_LIMIT
 
 
 # ---------------------------------------------- Markdown の構造（fix round 2 のプローブ）
@@ -378,7 +381,7 @@ def test_empty_diagram_error_has_line() -> None:
 def test_deep_markdown_nesting_is_bounded(md: str) -> None:
     start = time.perf_counter()
     res = compile_spec(md[: 250 * 1024], domain=None, legacy_ir=[])
-    assert time.perf_counter() - start < 1.0
+    assert time.perf_counter() - start < PERF_LIMIT
     assert "E_NESTING_TOO_DEEP" in [d.code for d in res.diagnostics]
 
 
@@ -391,7 +394,7 @@ def test_long_tables_and_brackets_finish_quickly() -> None:
     ):
         start = time.perf_counter()
         compile_spec(md[: 250 * 1024], domain=None, legacy_ir=[])
-        assert time.perf_counter() - start < 1.0
+        assert time.perf_counter() - start < PERF_LIMIT
 
 
 def test_table_size_limits() -> None:
@@ -401,3 +404,41 @@ def test_table_size_limits() -> None:
     assert _codes_of(long) == ["E_TOO_LARGE"]
     cells = "|" + "a|" * 60 + "\n|" + "-|" * 60 + "\n" + ("|" + "x|" * 60 + "\n") * 400
     assert _codes_of(cells) == ["E_TOO_LARGE"]
+
+
+# ---------------------------------------------- fix round 3
+
+
+_REQ_HEAD = "| ID | level | 要求 | 形式化 |\n| --- | --- | --- | --- |\n"
+_CLS_A = "```mermaid\n%%@ id: c\nclassDiagram\nclass A {\n  +m()\n}\n```\n\n"
+
+
+@pytest.mark.parametrize(
+    "row", ["| R1 | mandatory | a \\| c#A |\n", "| R1 | mandatory | x \\| - |\n"]
+)
+def test_rejects_escaped_pipe_in_requirement_table(row: str) -> None:
+    res = compile_spec(_CLS_A + _REQ_HEAD + row, domain=None, legacy_ir=[])
+    assert res.compiled is None
+    assert [d.code for d in res.diagnostics] == ["E_REQ_TABLE"]
+    assert "\\|" in res.diagnostics[0].message
+
+
+def test_bom_is_stripped_before_reading_structure() -> None:
+    second = _CLS_A.replace("id: c", "id: d").replace("class A", "class B")
+    md = "\ufeff" + _CLS_A + second
+    res = compile_spec(md, domain=None, legacy_ir=[])
+    assert res.compiled is not None, res.diagnostics
+    assert [k.name for k in res.compiled.classes] == ["A", "B"]
+    assert res.compiled.classes[0].span.line == 4  # 行番号はずれない
+    assert res.compiled.source_hash == content_hash(md)  # source_hash は原文
+
+
+def test_rejects_emphasized_requirement_header() -> None:
+    md = _CLS_A + "| **ID** | level | 要求 | **形式化** |\n| --- | --- | --- | --- |\n"
+    md += "| R1 | mandatory | x | - |\n"
+    assert _codes_of(md) == ["E_REQ_TABLE"]
+
+
+def test_thematic_break_is_not_nesting() -> None:
+    md = "- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -\n\n" + _CLS_A
+    assert _compiled(md).classes

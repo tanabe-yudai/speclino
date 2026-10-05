@@ -536,6 +536,8 @@ def compile_with_coverage(
         return ParseResult(compiled=None, diagnostics=[_doc_error("E_TOO_LARGE", msg)]), coverage
     # 改行を CommonMark と同じく \n にそろえる（行番号を markdown-it と合わせる）
     text = markdown.replace("\r\n", "\n").replace("\r", "\n")
+    if text.startswith("\ufeff"):
+        text = text[1:]  # 先頭の BOM を 1 つ除く（行番号は変わらない）
     long_lines = [i + 1 for i, line in enumerate(text.split("\n")) if len(line) > MAX_LINE_CHARS]
     if long_lines:
         too_long = [

@@ -110,9 +110,18 @@ def _loose_cells(line: str) -> list[str]:
     return [c.strip() for c in s.split("|")]
 
 
+def _plain(cell: str) -> str:
+    """見出しのセルから強調記号（`*` `_` `` ` ``）と前後の空白を除く（候補の判定だけに使う）。"""
+    return cell.strip().strip("*_`").strip()
+
+
 def _is_req_header(cells: list[str]) -> bool:
-    """要求の表の候補: 見出しに `形式化` があるか、最初の列が（大文字小文字を無視して）`ID`。"""
-    return bool(cells) and ("形式化" in cells or cells[0].lower() == "id")
+    """要求の表の候補: 見出しに `形式化` があるか、最初の列が（大文字小文字を無視して）`ID`。
+
+    強調された見出し（`**ID**`）も候補にする。受け付けるかどうかは見出しの完全一致で決める。
+    """
+    plain = [_plain(c) for c in cells]
+    return bool(plain) and ("形式化" in plain or plain[0].lower() == "id")
 
 
 def _is_req_candidate(line: str) -> bool:
@@ -121,6 +130,8 @@ def _is_req_candidate(line: str) -> bool:
 
 def _container_depth(line: str) -> int:
     """行頭のコンテナ（引用 `>`・リストの記号・字下げ）の深さの見積り（多めに数える）。"""
+    if all(c in "-*_ \t" for c in line) and line.strip():
+        return 0  # 水平線（`- - - -`）はリストではない
     depth = 0
     indent = 0
     i = 0
@@ -316,6 +327,9 @@ class _Scanner:
             reason = "要求の表は行頭の `|` から書く（字下げ・先頭の `|` の省略は不可）"
         elif tuple(header) != REQ_HEADER:
             reason = f"要求の表の見出しは | {' | '.join(REQ_HEADER)} | でなければならない"
+        elif any("\\|" in self.lines[k] for k in [start, *rows]):
+            # GFM は \| を列の区切りにしないが、列の数え方が読み手とずれるので拒否する
+            reason = "要求の表のセルに \\| は使えない"
         if reason is not None:
             self.error("E_REQ_TABLE", reason, start)
             return j + 1
