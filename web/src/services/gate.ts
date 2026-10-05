@@ -9,10 +9,23 @@
 
 import type { Finding, Verdict } from '../types/finding'
 import type { GateStatus, RunManifest } from '../types/run'
+import { attestationTarget, recordedAttestation } from './attestation'
 import { VERDICT_LABELS } from './labels'
 import { countByVerdict } from './verdict'
 
 const DEFAULT_FAIL_ON: Verdict[] = ['VIOLATED', 'UNKNOWN', 'REVIEW']
+
+/**
+ * ゲートを止めない REVIEW（バックエンドの gate の cleared と同じ規則）: LLM 支援の「指摘なし」と、
+ * この run で `attested` の確定が効いた指摘。失敗の理由の件数に数えない。
+ */
+function clearedReview(finding: Finding, manifest: RunManifest | null): boolean {
+  if (finding.verdict !== 'REVIEW') return false
+  if (finding.assessment_outcome === 'no_issue') return true
+  const target = attestationTarget(finding)
+  const recorded = target ? recordedAttestation(target, manifest?.attestations) : null
+  return recorded?.disposition === 'attested'
+}
 
 export function describeGateReason(
   gateStatus: GateStatus | null,
@@ -29,7 +42,7 @@ export function describeGateReason(
     return '登録済みの例外により通過しています（一部は要確認のまま残っています）'
   }
 
-  const counts = countByVerdict(findings)
+  const counts = countByVerdict(findings.filter((f) => !clearedReview(f, manifest)))
   const failOn = new Set<string>(manifest?.fail_on ?? DEFAULT_FAIL_ON)
   const blocking = DEFAULT_FAIL_ON.filter((verdict) => failOn.has(verdict) && counts[verdict] > 0)
   if (blocking.length === 0) {
