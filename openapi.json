@@ -1,25 +1,86 @@
 {
   "components": {
     "schemas": {
-      "ApproveRequest": {
+      "ApprovalRecord": {
+        "additionalProperties": false,
+        "description": "仕様解釈の承認記録。LLM が生成してはならない。",
         "properties": {
-          "expected_hash": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Expected Hash",
+          "approved_at": {
+            "format": "date-time",
+            "title": "Approved At",
             "type": "string"
           },
-          "expected_revision": {
-            "minimum": 1.0,
-            "title": "Expected Revision",
-            "type": "integer"
+          "approver": {
+            "description": "承認者の識別子（GitHub ログイン等）",
+            "minLength": 1,
+            "title": "Approver",
+            "type": "string"
+          },
+          "evidence_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Url"
+          },
+          "id": {
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "ir_content_hash": {
+            "description": "承認時の Spec IR ハッシュ（sha256:...）",
+            "title": "Ir Content Hash",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "merged_default_branch",
+              "pr_comment",
+              "manual"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "spec_content_hash": {
+            "description": "承認時の仕様本文ハッシュ（sha256:...）",
+            "title": "Spec Content Hash",
+            "type": "string"
           }
         },
         "required": [
-          "expected_revision",
-          "expected_hash"
+          "id",
+          "approver",
+          "approved_at",
+          "source",
+          "spec_content_hash",
+          "ir_content_hash"
         ],
-        "title": "ApproveRequest",
+        "title": "ApprovalRecord",
+        "type": "object"
+      },
+      "ArtifactScope": {
+        "additionalProperties": false,
+        "description": "どのリポジトリに当たるか。`workspace=True` か `projects`（project ID）のどちらか一方。",
+        "properties": {
+          "projects": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Projects",
+            "type": "array"
+          },
+          "workspace": {
+            "default": false,
+            "title": "Workspace",
+            "type": "boolean"
+          }
+        },
+        "title": "ArtifactScope",
         "type": "object"
       },
       "AuthorizeRequest": {
@@ -35,6 +96,269 @@
           "repo_full_name"
         ],
         "title": "AuthorizeRequest",
+        "type": "object"
+      },
+      "Automaton": {
+        "additionalProperties": false,
+        "properties": {
+          "accepting": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Accepting",
+            "type": "array"
+          },
+          "initial": {
+            "title": "Initial",
+            "type": "string"
+          },
+          "states": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "States",
+            "type": "array"
+          },
+          "transitions": {
+            "items": {
+              "$ref": "#/components/schemas/AutomatonTransition"
+            },
+            "title": "Transitions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "states",
+          "initial",
+          "accepting",
+          "transitions"
+        ],
+        "title": "Automaton",
+        "type": "object"
+      },
+      "AutomatonTransition": {
+        "additionalProperties": false,
+        "properties": {
+          "guard": {
+            "anyOf": [
+              {
+                "discriminator": {
+                  "mapping": {
+                    "add": "#/components/schemas/Binary",
+                    "and": "#/components/schemas/Nary",
+                    "const": "#/components/schemas/Const",
+                    "eq": "#/components/schemas/Binary",
+                    "ge": "#/components/schemas/Binary",
+                    "gt": "#/components/schemas/Binary",
+                    "le": "#/components/schemas/Binary",
+                    "lt": "#/components/schemas/Binary",
+                    "ne": "#/components/schemas/Binary",
+                    "not": "#/components/schemas/Not",
+                    "or": "#/components/schemas/Nary",
+                    "ref": "#/components/schemas/Ref",
+                    "sub": "#/components/schemas/Binary"
+                  },
+                  "propertyName": "op"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/Ref"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Const"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Not"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Binary"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Nary"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guard"
+          },
+          "id": {
+            "description": "図の要素 ID（メッセージ・辺）",
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "discriminator": {
+              "mapping": {
+                "call": "#/components/schemas/CallLabel",
+                "epsilon": "#/components/schemas/EpsilonLabel"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CallLabel"
+              },
+              {
+                "$ref": "#/components/schemas/EpsilonLabel"
+              }
+            ],
+            "title": "Label"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "span": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceSpan"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "target",
+          "label"
+        ],
+        "title": "AutomatonTransition",
+        "type": "object"
+      },
+      "Binary": {
+        "additionalProperties": false,
+        "properties": {
+          "left": {
+            "discriminator": {
+              "mapping": {
+                "add": "#/components/schemas/Binary",
+                "and": "#/components/schemas/Nary",
+                "const": "#/components/schemas/Const",
+                "eq": "#/components/schemas/Binary",
+                "ge": "#/components/schemas/Binary",
+                "gt": "#/components/schemas/Binary",
+                "le": "#/components/schemas/Binary",
+                "lt": "#/components/schemas/Binary",
+                "ne": "#/components/schemas/Binary",
+                "not": "#/components/schemas/Not",
+                "or": "#/components/schemas/Nary",
+                "ref": "#/components/schemas/Ref",
+                "sub": "#/components/schemas/Binary"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Ref"
+              },
+              {
+                "$ref": "#/components/schemas/Const"
+              },
+              {
+                "$ref": "#/components/schemas/Not"
+              },
+              {
+                "$ref": "#/components/schemas/Binary"
+              },
+              {
+                "$ref": "#/components/schemas/Nary"
+              }
+            ],
+            "title": "Left"
+          },
+          "op": {
+            "enum": [
+              "eq",
+              "ne",
+              "lt",
+              "le",
+              "gt",
+              "ge",
+              "add",
+              "sub"
+            ],
+            "title": "Op",
+            "type": "string"
+          },
+          "right": {
+            "discriminator": {
+              "mapping": {
+                "add": "#/components/schemas/Binary",
+                "and": "#/components/schemas/Nary",
+                "const": "#/components/schemas/Const",
+                "eq": "#/components/schemas/Binary",
+                "ge": "#/components/schemas/Binary",
+                "gt": "#/components/schemas/Binary",
+                "le": "#/components/schemas/Binary",
+                "lt": "#/components/schemas/Binary",
+                "ne": "#/components/schemas/Binary",
+                "not": "#/components/schemas/Not",
+                "or": "#/components/schemas/Nary",
+                "ref": "#/components/schemas/Ref",
+                "sub": "#/components/schemas/Binary"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Ref"
+              },
+              {
+                "$ref": "#/components/schemas/Const"
+              },
+              {
+                "$ref": "#/components/schemas/Not"
+              },
+              {
+                "$ref": "#/components/schemas/Binary"
+              },
+              {
+                "$ref": "#/components/schemas/Nary"
+              }
+            ],
+            "title": "Right"
+          }
+        },
+        "required": [
+          "op",
+          "left",
+          "right"
+        ],
+        "title": "Binary",
+        "type": "object"
+      },
+      "CallLabel": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "call",
+            "default": "call",
+            "title": "Kind",
+            "type": "string"
+          },
+          "operation": {
+            "description": "<参加者のクラス名>.<メソッド名>",
+            "minLength": 1,
+            "title": "Operation",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "title": "CallLabel",
         "type": "object"
       },
       "CallbackRequest": {
@@ -57,6 +381,227 @@
           "state"
         ],
         "title": "CallbackRequest",
+        "type": "object"
+      },
+      "ClassAttribute": {
+        "additionalProperties": false,
+        "properties": {
+          "enum": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "type=enum のときの列挙クラス名",
+            "title": "Enum"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "int",
+              "bool",
+              "str",
+              "enum",
+              "opaque_id"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "type"
+        ],
+        "title": "ClassAttribute",
+        "type": "object"
+      },
+      "ClassDef": {
+        "additionalProperties": false,
+        "properties": {
+          "attributes": {
+            "items": {
+              "$ref": "#/components/schemas/ClassAttribute"
+            },
+            "title": "Attributes",
+            "type": "array"
+          },
+          "enum_values": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Enum Values",
+            "type": "array"
+          },
+          "id": {
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "operations": {
+            "items": {
+              "$ref": "#/components/schemas/ClassOperation"
+            },
+            "title": "Operations",
+            "type": "array"
+          },
+          "span": {
+            "$ref": "#/components/schemas/SourceSpan"
+          },
+          "stereotype": {
+            "default": "class",
+            "enum": [
+              "class",
+              "enumeration"
+            ],
+            "title": "Stereotype",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "span"
+        ],
+        "title": "ClassDef",
+        "type": "object"
+      },
+      "ClassOperation": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "params": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Params",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ClassOperation",
+        "type": "object"
+      },
+      "CompiledSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "classes": {
+            "items": {
+              "$ref": "#/components/schemas/ClassDef"
+            },
+            "title": "Classes",
+            "type": "array"
+          },
+          "ir_hash": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Ir Hash",
+            "type": "string"
+          },
+          "legacy": {
+            "items": {
+              "$ref": "#/components/schemas/SpecIR"
+            },
+            "title": "Legacy",
+            "type": "array"
+          },
+          "parser_version": {
+            "minLength": 1,
+            "title": "Parser Version",
+            "type": "string"
+          },
+          "requirements": {
+            "items": {
+              "$ref": "#/components/schemas/RequirementRow"
+            },
+            "title": "Requirements",
+            "type": "array"
+          },
+          "source_hash": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Source Hash",
+            "type": "string"
+          },
+          "state_machines": {
+            "items": {
+              "$ref": "#/components/schemas/StateMachine"
+            },
+            "title": "State Machines",
+            "type": "array"
+          },
+          "structure": {
+            "items": {
+              "$ref": "#/components/schemas/StructureObligation"
+            },
+            "title": "Structure",
+            "type": "array"
+          },
+          "traces": {
+            "items": {
+              "$ref": "#/components/schemas/TraceObligation"
+            },
+            "title": "Traces",
+            "type": "array"
+          }
+        },
+        "required": [
+          "parser_version",
+          "source_hash",
+          "ir_hash"
+        ],
+        "title": "CompiledSpec",
+        "type": "object"
+      },
+      "Const": {
+        "additionalProperties": false,
+        "properties": {
+          "op": {
+            "const": "const",
+            "title": "Op",
+            "type": "string"
+          },
+          "type": {
+            "description": "boolean / integer / 列挙型名 / opaque 型名",
+            "title": "Type",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "op",
+          "type",
+          "value"
+        ],
+        "title": "Const",
         "type": "object"
       },
       "ContextRequest": {
@@ -86,46 +631,190 @@
         "title": "ContextRequest",
         "type": "object"
       },
-      "DraftRequest": {
+      "CountConstraint": {
+        "additionalProperties": false,
         "properties": {
-          "expected_hash": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+          "operator": {
+            "enum": [
+              "eq",
+              "ge",
+              "le"
             ],
-            "title": "Expected Hash"
-          },
-          "expected_revision": {
-            "anyOf": [
-              {
-                "minimum": 1.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expected Revision"
-          },
-          "note": {
-            "default": "",
-            "maxLength": 500,
-            "title": "Note",
+            "title": "Operator",
             "type": "string"
           },
-          "package": {
-            "$ref": "#/components/schemas/PolicyPackage"
+          "value": {
+            "minimum": 0.0,
+            "title": "Value",
+            "type": "integer"
           }
         },
         "required": [
-          "package"
+          "operator",
+          "value"
         ],
-        "title": "DraftRequest",
+        "title": "CountConstraint",
+        "type": "object"
+      },
+      "CreateArtifactRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "discriminator": {
+              "mapping": {
+                "instructions": "#/components/schemas/InstructionsContent",
+                "skill": "#/components/schemas/SkillContent",
+                "spec": "#/components/schemas/SpecContent"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SkillContent"
+              },
+              {
+                "$ref": "#/components/schemas/InstructionsContent"
+              },
+              {
+                "$ref": "#/components/schemas/SpecContent"
+              }
+            ],
+            "title": "Content"
+          },
+          "kind": {
+            "enum": [
+              "skill",
+              "instructions",
+              "spec"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "content"
+        ],
+        "title": "CreateArtifactRequest",
+        "type": "object"
+      },
+      "DomainSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "assumptions": {
+            "description": "入口で成立すると仮定する条件（before 名前空間）",
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "add": "#/components/schemas/Binary",
+                  "and": "#/components/schemas/Nary",
+                  "const": "#/components/schemas/Const",
+                  "eq": "#/components/schemas/Binary",
+                  "ge": "#/components/schemas/Binary",
+                  "gt": "#/components/schemas/Binary",
+                  "le": "#/components/schemas/Binary",
+                  "lt": "#/components/schemas/Binary",
+                  "ne": "#/components/schemas/Binary",
+                  "not": "#/components/schemas/Not",
+                  "or": "#/components/schemas/Nary",
+                  "ref": "#/components/schemas/Ref",
+                  "sub": "#/components/schemas/Binary"
+                },
+                "propertyName": "op"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/Ref"
+                },
+                {
+                  "$ref": "#/components/schemas/Const"
+                },
+                {
+                  "$ref": "#/components/schemas/Not"
+                },
+                {
+                  "$ref": "#/components/schemas/Binary"
+                },
+                {
+                  "$ref": "#/components/schemas/Nary"
+                }
+              ]
+            },
+            "title": "Assumptions",
+            "type": "array"
+          },
+          "enums": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "description": "列挙型名 → 値の一覧",
+            "title": "Enums",
+            "type": "object"
+          },
+          "observation_scope": {
+            "description": "この解析が判定できる観測境界の説明",
+            "items": {
+              "type": "string"
+            },
+            "title": "Observation Scope",
+            "type": "array"
+          },
+          "opaque_types": {
+            "description": "同一性だけ比較する ID 型",
+            "items": {
+              "type": "string"
+            },
+            "title": "Opaque Types",
+            "type": "array"
+          },
+          "out_of_scope": {
+            "description": "対象外の説明",
+            "items": {
+              "type": "string"
+            },
+            "title": "Out Of Scope",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "0.1",
+            "default": "0.1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "variables": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "変数名（名前空間なし。例 order.status）→ 型名",
+            "title": "Variables",
+            "type": "object"
+          }
+        },
+        "title": "DomainSpec",
+        "type": "object"
+      },
+      "EpsilonLabel": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "epsilon",
+            "default": "epsilon",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "title": "EpsilonLabel",
         "type": "object"
       },
       "ErrorBody": {
@@ -156,6 +845,185 @@
           "error"
         ],
         "title": "ErrorResponse",
+        "type": "object"
+      },
+      "EventRequirement": {
+        "additionalProperties": false,
+        "description": "種別・操作・phase で選んだイベントの総数と、各イベントの引数を検査する。\n\nイベント総数は引数による絞り込みの前に数える。arguments_equal に指定した項目は、\n選択された全イベントで一致することを要求する。",
+        "properties": {
+          "arguments_equal": {
+            "additionalProperties": {
+              "discriminator": {
+                "mapping": {
+                  "add": "#/components/schemas/Binary",
+                  "and": "#/components/schemas/Nary",
+                  "const": "#/components/schemas/Const",
+                  "eq": "#/components/schemas/Binary",
+                  "ge": "#/components/schemas/Binary",
+                  "gt": "#/components/schemas/Binary",
+                  "le": "#/components/schemas/Binary",
+                  "lt": "#/components/schemas/Binary",
+                  "ne": "#/components/schemas/Binary",
+                  "not": "#/components/schemas/Not",
+                  "or": "#/components/schemas/Nary",
+                  "ref": "#/components/schemas/Ref",
+                  "sub": "#/components/schemas/Binary"
+                },
+                "propertyName": "op"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/Ref"
+                },
+                {
+                  "$ref": "#/components/schemas/Const"
+                },
+                {
+                  "$ref": "#/components/schemas/Not"
+                },
+                {
+                  "$ref": "#/components/schemas/Binary"
+                },
+                {
+                  "$ref": "#/components/schemas/Nary"
+                }
+              ]
+            },
+            "title": "Arguments Equal",
+            "type": "object"
+          },
+          "count": {
+            "$ref": "#/components/schemas/CountConstraint"
+          },
+          "event_kind": {
+            "enum": [
+              "call",
+              "write",
+              "return",
+              "raise"
+            ],
+            "title": "Event Kind",
+            "type": "string"
+          },
+          "kind": {
+            "const": "event_requirement",
+            "title": "Kind",
+            "type": "string"
+          },
+          "operation_or_target": {
+            "description": "業務操作 ID または書込み対象",
+            "minLength": 1,
+            "title": "Operation Or Target",
+            "type": "string"
+          },
+          "phase": {
+            "enum": [
+              "invoked",
+              "applied",
+              "returned",
+              "raised"
+            ],
+            "title": "Phase",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "event_kind",
+          "operation_or_target",
+          "phase",
+          "count"
+        ],
+        "title": "EventRequirement",
+        "type": "object"
+      },
+      "ExpressionAssertion": {
+        "additionalProperties": false,
+        "description": "boolean Expr の真偽を検査する。終了状態や応答の比較に用いる。",
+        "properties": {
+          "expr": {
+            "discriminator": {
+              "mapping": {
+                "add": "#/components/schemas/Binary",
+                "and": "#/components/schemas/Nary",
+                "const": "#/components/schemas/Const",
+                "eq": "#/components/schemas/Binary",
+                "ge": "#/components/schemas/Binary",
+                "gt": "#/components/schemas/Binary",
+                "le": "#/components/schemas/Binary",
+                "lt": "#/components/schemas/Binary",
+                "ne": "#/components/schemas/Binary",
+                "not": "#/components/schemas/Not",
+                "or": "#/components/schemas/Nary",
+                "ref": "#/components/schemas/Ref",
+                "sub": "#/components/schemas/Binary"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Ref"
+              },
+              {
+                "$ref": "#/components/schemas/Const"
+              },
+              {
+                "$ref": "#/components/schemas/Not"
+              },
+              {
+                "$ref": "#/components/schemas/Binary"
+              },
+              {
+                "$ref": "#/components/schemas/Nary"
+              }
+            ],
+            "title": "Expr"
+          },
+          "kind": {
+            "const": "expression",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "expr"
+        ],
+        "title": "ExpressionAssertion",
+        "type": "object"
+      },
+      "InstructionsContent": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "minLength": 1,
+            "title": "Body",
+            "type": "string"
+          },
+          "kind": {
+            "const": "instructions",
+            "title": "Kind",
+            "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ArtifactScope"
+          },
+          "target": {
+            "enum": [
+              "agents_md",
+              "claude_md"
+            ],
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "target",
+          "body",
+          "scope"
+        ],
+        "title": "InstructionsContent",
         "type": "object"
       },
       "InviteRequest": {
@@ -197,6 +1065,122 @@
           "name"
         ],
         "title": "IssueTokenRequest",
+        "type": "object"
+      },
+      "Nary": {
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "description": "空配列は拒否する",
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "add": "#/components/schemas/Binary",
+                  "and": "#/components/schemas/Nary",
+                  "const": "#/components/schemas/Const",
+                  "eq": "#/components/schemas/Binary",
+                  "ge": "#/components/schemas/Binary",
+                  "gt": "#/components/schemas/Binary",
+                  "le": "#/components/schemas/Binary",
+                  "lt": "#/components/schemas/Binary",
+                  "ne": "#/components/schemas/Binary",
+                  "not": "#/components/schemas/Not",
+                  "or": "#/components/schemas/Nary",
+                  "ref": "#/components/schemas/Ref",
+                  "sub": "#/components/schemas/Binary"
+                },
+                "propertyName": "op"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/Ref"
+                },
+                {
+                  "$ref": "#/components/schemas/Const"
+                },
+                {
+                  "$ref": "#/components/schemas/Not"
+                },
+                {
+                  "$ref": "#/components/schemas/Binary"
+                },
+                {
+                  "$ref": "#/components/schemas/Nary"
+                }
+              ]
+            },
+            "minItems": 1,
+            "title": "Args",
+            "type": "array"
+          },
+          "op": {
+            "enum": [
+              "and",
+              "or"
+            ],
+            "title": "Op",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op",
+          "args"
+        ],
+        "title": "Nary",
+        "type": "object"
+      },
+      "Not": {
+        "additionalProperties": false,
+        "properties": {
+          "arg": {
+            "discriminator": {
+              "mapping": {
+                "add": "#/components/schemas/Binary",
+                "and": "#/components/schemas/Nary",
+                "const": "#/components/schemas/Const",
+                "eq": "#/components/schemas/Binary",
+                "ge": "#/components/schemas/Binary",
+                "gt": "#/components/schemas/Binary",
+                "le": "#/components/schemas/Binary",
+                "lt": "#/components/schemas/Binary",
+                "ne": "#/components/schemas/Binary",
+                "not": "#/components/schemas/Not",
+                "or": "#/components/schemas/Nary",
+                "ref": "#/components/schemas/Ref",
+                "sub": "#/components/schemas/Binary"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Ref"
+              },
+              {
+                "$ref": "#/components/schemas/Const"
+              },
+              {
+                "$ref": "#/components/schemas/Not"
+              },
+              {
+                "$ref": "#/components/schemas/Binary"
+              },
+              {
+                "$ref": "#/components/schemas/Nary"
+              }
+            ],
+            "title": "Arg"
+          },
+          "op": {
+            "const": "not",
+            "title": "Op",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op",
+          "arg"
+        ],
+        "title": "Not",
         "type": "object"
       },
       "PolicyApplicability": {
@@ -451,6 +1435,65 @@
         "title": "ProjectSettings",
         "type": "object"
       },
+      "Ref": {
+        "additionalProperties": false,
+        "properties": {
+          "op": {
+            "const": "ref",
+            "title": "Op",
+            "type": "string"
+          },
+          "path": {
+            "description": "例: before.order.status",
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op",
+          "path"
+        ],
+        "title": "Ref",
+        "type": "object"
+      },
+      "RequirementRow": {
+        "additionalProperties": false,
+        "properties": {
+          "formalized_by": {
+            "description": "`図ID#要素ID` か `ir:要求ID`",
+            "items": {
+              "type": "string"
+            },
+            "title": "Formalized By",
+            "type": "array"
+          },
+          "id": {
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "level": {
+            "enum": [
+              "mandatory",
+              "advisory"
+            ],
+            "title": "Level",
+            "type": "string"
+          },
+          "text": {
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "level",
+          "text"
+        ],
+        "title": "RequirementRow",
+        "type": "object"
+      },
       "RoleRequest": {
         "properties": {
           "role": {
@@ -469,6 +1512,157 @@
         "title": "RoleRequest",
         "type": "object"
       },
+      "Rule": {
+        "additionalProperties": false,
+        "properties": {
+          "applicability": {
+            "description": "この要求が適用される入口条件",
+            "discriminator": {
+              "mapping": {
+                "add": "#/components/schemas/Binary",
+                "and": "#/components/schemas/Nary",
+                "const": "#/components/schemas/Const",
+                "eq": "#/components/schemas/Binary",
+                "ge": "#/components/schemas/Binary",
+                "gt": "#/components/schemas/Binary",
+                "le": "#/components/schemas/Binary",
+                "lt": "#/components/schemas/Binary",
+                "ne": "#/components/schemas/Binary",
+                "not": "#/components/schemas/Not",
+                "or": "#/components/schemas/Nary",
+                "ref": "#/components/schemas/Ref",
+                "sub": "#/components/schemas/Binary"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Ref"
+              },
+              {
+                "$ref": "#/components/schemas/Const"
+              },
+              {
+                "$ref": "#/components/schemas/Not"
+              },
+              {
+                "$ref": "#/components/schemas/Binary"
+              },
+              {
+                "$ref": "#/components/schemas/Nary"
+              }
+            ],
+            "title": "Applicability"
+          },
+          "approval_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "この仕様解釈を承認した記録の ID。None は未承認",
+            "title": "Approval Ref"
+          },
+          "assertion": {
+            "discriminator": {
+              "mapping": {
+                "event_requirement": "#/components/schemas/EventRequirement",
+                "expression": "#/components/schemas/ExpressionAssertion"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ExpressionAssertion"
+              },
+              {
+                "$ref": "#/components/schemas/EventRequirement"
+              }
+            ],
+            "title": "Assertion"
+          },
+          "behavior_id": {
+            "minLength": 1,
+            "title": "Behavior Id",
+            "type": "string"
+          },
+          "claim_scope": {
+            "enum": [
+              "memory_state",
+              "command_invocation",
+              "service_outcome",
+              "http_response",
+              "persisted_state"
+            ],
+            "title": "Claim Scope",
+            "type": "string"
+          },
+          "id": {
+            "description": "安定した要求／判定単位 ID（例 R-CANCEL-04）",
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "level": {
+            "default": "mandatory",
+            "enum": [
+              "mandatory",
+              "advisory"
+            ],
+            "title": "Level",
+            "type": "string"
+          },
+          "modality": {
+            "enum": [
+              "must",
+              "must_not"
+            ],
+            "title": "Modality",
+            "type": "string"
+          },
+          "source_refs": {
+            "items": {
+              "$ref": "#/components/schemas/SourceRef"
+            },
+            "minItems": 1,
+            "title": "Source Refs",
+            "type": "array"
+          },
+          "tests": {
+            "description": "動的に確認する宣言済みテスト ID（path::name）。test_run の許可リスト",
+            "items": {
+              "type": "string"
+            },
+            "title": "Tests",
+            "type": "array"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "id",
+          "behavior_id",
+          "source_refs",
+          "modality",
+          "claim_scope",
+          "applicability",
+          "assertion"
+        ],
+        "title": "Rule",
+        "type": "object"
+      },
       "RunTask": {
         "properties": {
           "run_id": {
@@ -481,6 +1675,263 @@
           "run_id"
         ],
         "title": "RunTask",
+        "type": "object"
+      },
+      "SkillContent": {
+        "additionalProperties": false,
+        "properties": {
+          "files": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "相対パス → 本文（テキストのみ）",
+            "title": "Files",
+            "type": "object"
+          },
+          "kind": {
+            "const": "skill",
+            "title": "Kind",
+            "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ArtifactScope"
+          },
+          "skill_md": {
+            "minLength": 1,
+            "title": "Skill Md",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "skill_md",
+          "scope"
+        ],
+        "title": "SkillContent",
+        "type": "object"
+      },
+      "SourceRef": {
+        "additionalProperties": false,
+        "description": "仕様またはコード上の位置。requirement_id か symbol のどちらかを持つ。",
+        "properties": {
+          "line_end": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line End"
+          },
+          "line_start": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line Start"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          },
+          "requirement_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requirement Id"
+          },
+          "snapshot_id": {
+            "minLength": 1,
+            "title": "Snapshot Id",
+            "type": "string"
+          },
+          "symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "完全修飾シンボル",
+            "title": "Symbol"
+          }
+        },
+        "required": [
+          "snapshot_id"
+        ],
+        "title": "SourceRef",
+        "type": "object"
+      },
+      "SourceSpan": {
+        "additionalProperties": false,
+        "properties": {
+          "column": {
+            "minimum": 1.0,
+            "title": "Column",
+            "type": "integer"
+          },
+          "diagram_id": {
+            "minLength": 1,
+            "title": "Diagram Id",
+            "type": "string"
+          },
+          "line": {
+            "description": "Markdown 全体での行",
+            "minimum": 1.0,
+            "title": "Line",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "diagram_id",
+          "line",
+          "column"
+        ],
+        "title": "SourceSpan",
+        "type": "object"
+      },
+      "SpecContent": {
+        "additionalProperties": false,
+        "properties": {
+          "compiled": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompiledSpec"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "承認時に固定した変換結果"
+          },
+          "domain": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DomainSpec"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "入口の仮定・不透明 ID・観測の境界など（旧 domain.yaml）"
+          },
+          "kind": {
+            "const": "spec",
+            "title": "Kind",
+            "type": "string"
+          },
+          "legacy_ir": {
+            "description": "旧形式の入口（承認済み JSON をそのまま）",
+            "items": {
+              "$ref": "#/components/schemas/SpecIR"
+            },
+            "title": "Legacy Ir",
+            "type": "array"
+          },
+          "markdown": {
+            "minLength": 1,
+            "title": "Markdown",
+            "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ArtifactScope"
+          }
+        },
+        "required": [
+          "kind",
+          "markdown",
+          "scope"
+        ],
+        "title": "SpecContent",
+        "type": "object"
+      },
+      "SpecIR": {
+        "additionalProperties": false,
+        "properties": {
+          "approvals": {
+            "items": {
+              "$ref": "#/components/schemas/ApprovalRecord"
+            },
+            "title": "Approvals",
+            "type": "array"
+          },
+          "behavior_id": {
+            "minLength": 1,
+            "title": "Behavior Id",
+            "type": "string"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/Rule"
+            },
+            "title": "Rules",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "0.1",
+            "default": "0.1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "spec_content_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "仕様本文のハッシュ",
+            "title": "Spec Content Hash"
+          },
+          "spec_snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "仕様スナップショットの ID",
+            "title": "Spec Snapshot Id"
+          },
+          "unextracted": {
+            "description": "抽出しきれなかった要求 ID。対応できる要求だけを分母にしないために残す",
+            "items": {
+              "type": "string"
+            },
+            "title": "Unextracted",
+            "type": "array"
+          }
+        },
+        "required": [
+          "behavior_id"
+        ],
+        "title": "SpecIR",
         "type": "object"
       },
       "StartRunRequest": {
@@ -529,6 +1980,188 @@
         "title": "StartRunRequest",
         "type": "object"
       },
+      "StateMachine": {
+        "additionalProperties": false,
+        "properties": {
+          "attribute": {
+            "description": "状態を持つ属性（例 order.status）",
+            "minLength": 1,
+            "title": "Attribute",
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "initial": {
+            "title": "Initial",
+            "type": "string"
+          },
+          "level": {
+            "enum": [
+              "mandatory",
+              "advisory"
+            ],
+            "title": "Level",
+            "type": "string"
+          },
+          "states": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "States",
+            "type": "array"
+          },
+          "transitions": {
+            "items": {
+              "$ref": "#/components/schemas/StateTransition"
+            },
+            "title": "Transitions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "attribute",
+          "states",
+          "initial",
+          "transitions",
+          "level"
+        ],
+        "title": "StateMachine",
+        "type": "object"
+      },
+      "StateTransition": {
+        "additionalProperties": false,
+        "properties": {
+          "event": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event"
+          },
+          "guard": {
+            "anyOf": [
+              {
+                "discriminator": {
+                  "mapping": {
+                    "add": "#/components/schemas/Binary",
+                    "and": "#/components/schemas/Nary",
+                    "const": "#/components/schemas/Const",
+                    "eq": "#/components/schemas/Binary",
+                    "ge": "#/components/schemas/Binary",
+                    "gt": "#/components/schemas/Binary",
+                    "le": "#/components/schemas/Binary",
+                    "lt": "#/components/schemas/Binary",
+                    "ne": "#/components/schemas/Binary",
+                    "not": "#/components/schemas/Not",
+                    "or": "#/components/schemas/Nary",
+                    "ref": "#/components/schemas/Ref",
+                    "sub": "#/components/schemas/Binary"
+                  },
+                  "propertyName": "op"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/Ref"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Const"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Not"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Binary"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Nary"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guard"
+          },
+          "id": {
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "span": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceSpan"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "target"
+        ],
+        "title": "StateTransition",
+        "type": "object"
+      },
+      "StructureObligation": {
+        "additionalProperties": false,
+        "properties": {
+          "class_name": {
+            "minLength": 1,
+            "title": "Class Name",
+            "type": "string"
+          },
+          "id": {
+            "description": "<図 ID>#<クラス ID>",
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "level": {
+            "enum": [
+              "mandatory",
+              "advisory"
+            ],
+            "title": "Level",
+            "type": "string"
+          },
+          "operations": {
+            "items": {
+              "$ref": "#/components/schemas/ClassOperation"
+            },
+            "title": "Operations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "class_name",
+          "level"
+        ],
+        "title": "StructureObligation",
+        "type": "object"
+      },
       "TokenRequest": {
         "properties": {
           "token": {
@@ -542,6 +2175,194 @@
           "token"
         ],
         "title": "TokenRequest",
+        "type": "object"
+      },
+      "TraceObligation": {
+        "additionalProperties": false,
+        "properties": {
+          "automaton": {
+            "$ref": "#/components/schemas/Automaton"
+          },
+          "closed": {
+            "default": false,
+            "title": "Closed",
+            "type": "boolean"
+          },
+          "diagram_kind": {
+            "enum": [
+              "sequence",
+              "activity"
+            ],
+            "title": "Diagram Kind",
+            "type": "string"
+          },
+          "entry_operation": {
+            "minLength": 1,
+            "title": "Entry Operation",
+            "type": "string"
+          },
+          "id": {
+            "description": "<図 ID>#<入口の操作>",
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "level": {
+            "enum": [
+              "mandatory",
+              "advisory"
+            ],
+            "title": "Level",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "contains_subsequence",
+              "included_in"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "spans": {
+            "items": {
+              "$ref": "#/components/schemas/SourceSpan"
+            },
+            "title": "Spans",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "diagram_kind",
+          "entry_operation",
+          "mode",
+          "automaton",
+          "level"
+        ],
+        "title": "TraceObligation",
+        "type": "object"
+      },
+      "speclino__api__routes__knowledge__ApproveRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_hash": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Expected Hash",
+            "type": "string"
+          },
+          "expected_revision": {
+            "minimum": 1.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_revision",
+          "expected_hash"
+        ],
+        "title": "ApproveRequest",
+        "type": "object"
+      },
+      "speclino__api__routes__knowledge__DraftRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "discriminator": {
+              "mapping": {
+                "instructions": "#/components/schemas/InstructionsContent",
+                "skill": "#/components/schemas/SkillContent",
+                "spec": "#/components/schemas/SpecContent"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SkillContent"
+              },
+              {
+                "$ref": "#/components/schemas/InstructionsContent"
+              },
+              {
+                "$ref": "#/components/schemas/SpecContent"
+              }
+            ],
+            "title": "Content"
+          },
+          "expected_revision": {
+            "minimum": 1.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_revision",
+          "content"
+        ],
+        "title": "DraftRequest",
+        "type": "object"
+      },
+      "speclino__api__routes__policies__ApproveRequest": {
+        "properties": {
+          "expected_hash": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Expected Hash",
+            "type": "string"
+          },
+          "expected_revision": {
+            "minimum": 1.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_revision",
+          "expected_hash"
+        ],
+        "title": "ApproveRequest",
+        "type": "object"
+      },
+      "speclino__api__routes__policies__DraftRequest": {
+        "properties": {
+          "expected_hash": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Hash"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Revision"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Note",
+            "type": "string"
+          },
+          "package": {
+            "$ref": "#/components/schemas/PolicyPackage"
+          }
+        },
+        "required": [
+          "package"
+        ],
+        "title": "DraftRequest",
         "type": "object"
       }
     }
@@ -1318,6 +3139,562 @@
         "summary": "Get Supplements",
         "tags": [
           "review-runs"
+        ]
+      }
+    },
+    "/api/w/{slug}/artifacts": {
+      "get": {
+        "operationId": "list_artifacts_api_w__slug__artifacts_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Artifacts Api W  Slug  Artifacts Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "List Artifacts",
+        "tags": [
+          "knowledge"
+        ]
+      },
+      "post": {
+        "operationId": "create_artifact_api_w__slug__artifacts_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateArtifactRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Artifact Api W  Slug  Artifacts Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Create Artifact",
+        "tags": [
+          "knowledge"
+        ]
+      }
+    },
+    "/api/w/{slug}/artifacts/{artifact_id}/approve": {
+      "post": {
+        "operationId": "approve_api_w__slug__artifacts__artifact_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "title": "Artifact Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/speclino__api__routes__knowledge__ApproveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Approve Api W  Slug  Artifacts  Artifact Id  Approve Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Approve",
+        "tags": [
+          "knowledge"
+        ]
+      }
+    },
+    "/api/w/{slug}/artifacts/{artifact_id}/draft": {
+      "get": {
+        "operationId": "get_draft_api_w__slug__artifacts__artifact_id__draft_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "title": "Artifact Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Draft Api W  Slug  Artifacts  Artifact Id  Draft Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Get Draft",
+        "tags": [
+          "knowledge"
+        ]
+      },
+      "put": {
+        "operationId": "put_draft_api_w__slug__artifacts__artifact_id__draft_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "title": "Artifact Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/speclino__api__routes__knowledge__DraftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Put Draft Api W  Slug  Artifacts  Artifact Id  Draft Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Put Draft",
+        "tags": [
+          "knowledge"
+        ]
+      }
+    },
+    "/api/w/{slug}/artifacts/{artifact_id}/revisions": {
+      "get": {
+        "operationId": "list_revisions_api_w__slug__artifacts__artifact_id__revisions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "title": "Artifact Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Revisions Api W  Slug  Artifacts  Artifact Id  Revisions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "List Revisions",
+        "tags": [
+          "knowledge"
+        ]
+      }
+    },
+    "/api/w/{slug}/bundles/current": {
+      "get": {
+        "operationId": "current_bundle_api_w__slug__bundles_current_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Current Bundle Api W  Slug  Bundles Current Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Current Bundle",
+        "tags": [
+          "knowledge"
         ]
       }
     },
@@ -2224,7 +4601,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/DraftRequest"
+                "$ref": "#/components/schemas/speclino__api__routes__policies__DraftRequest"
               }
             }
           },
@@ -2308,7 +4685,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ApproveRequest"
+                "$ref": "#/components/schemas/speclino__api__routes__policies__ApproveRequest"
               }
             }
           },
