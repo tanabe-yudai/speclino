@@ -17,6 +17,7 @@ from speclino.spec.uml.compile import (
     ir_hash_of,
 )
 from tests.unit.spec.uml.samples import ACTIVITY, CLASSES, FULL, REQUIREMENTS, SEQUENCE, block
+from tests.unit.spec.uml.samples import STATES as STATES_MD
 
 ROOT = Path(__file__).resolve().parents[4]
 LEGACY = load_spec_ir(ROOT / "specs/ir/gate_decide.spec-ir.json")
@@ -275,3 +276,128 @@ def test_many_requirement_tables_finish_quickly() -> None:
     start = time.perf_counter()
     compile_spec(md, domain=None, legacy_ir=[])
     assert time.perf_counter() - start < 1.0
+
+
+# ---------------------------------------------- Markdown の構造（fix round 2 のプローブ）
+
+
+def _compiled(md: str):  # type: ignore[no-untyped-def]
+    res = compile_spec(md, domain=None, legacy_ir=[])
+    assert res.compiled is not None, [(d.code, d.message) for d in res.diagnostics]
+    return res.compiled
+
+
+def _codes_of(md: str) -> list[str]:
+    return [d.code for d in compile_spec(md, domain=None, legacy_ir=[]).diagnostics]
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    ["- - ```mermaid\n", "1. - ```mermaid\n", "* 1. ```mermaid\n", "> - ```mermaid\n"],
+)
+def test_rejects_mermaid_fence_in_nested_containers(prefix: str) -> None:
+    md = prefix + "  classDiagram\n  ```\n\n" + CLASSES
+    assert "E_UNSUPPORTED_SYNTAX" in _codes_of(md)
+
+
+def test_table_row_without_leading_pipe_is_read_as_row() -> None:
+    md = REQUIREMENTS + "R4 | mandatory | 追加の要求 | -\n\n" + CLASSES + SEQUENCE + ACTIVITY
+    c = _compiled(md)
+    assert [r.id for r in c.requirements][-1] == "R4"
+
+
+def test_table_row_with_wrong_cell_count_is_error() -> None:
+    md = REQUIREMENTS + "R4 | mandatory\n\n" + CLASSES + SEQUENCE + ACTIVITY
+    assert "E_REQ_TABLE" in _codes_of(md)
+
+
+@pytest.mark.parametrize(
+    "before",
+    [
+        "    ```\n    code\n\n",  # 字下げのコードブロック（フェンスではない）
+        "> ```\n> code\n\n",  # 引用の中の閉じていないフェンスは引用の終わりで閉じる
+        "- ```\n  code\n\n段落\n\n",  # リストの中の閉じていないフェンス＋段落
+    ],
+)
+def test_container_fence_does_not_swallow_following_diagram(before: str) -> None:
+    c = _compiled(before + CLASSES)
+    assert [k.name for k in c.classes][0] == "OrderService"
+
+
+def test_quoted_unclosed_fence_then_table_and_diagram() -> None:
+    md = "> ```\n> x\n\n" + REQUIREMENTS + "\n" + CLASSES + SEQUENCE + ACTIVITY + STATES_MD
+    c = _compiled(md)
+    assert [r.id for r in c.requirements] == ["R1", "R2", "R3"]
+    assert len(c.traces) == 2
+
+
+def test_indented_close_inside_mermaid_block_then_swallowed_diagram() -> None:
+    # 字下げ 2 の ``` は CommonMark では mermaid ブロックを閉じる。最後の ``` がフェンスを開き、
+    # 後ろの図を飲み込む → 読み手の見え方どおりに扱い、飲み込みを知らせる
+    md = "```mermaid\n%%@ id: v\nclassDiagram\n    class A\n  ```\n    class B\n```\n\n"
+    # 後ろの図の閉じで閉じる場合（図はコードとして見える）→ 警告
+    res = compile_spec(md + CLASSES, domain=None, legacy_ir=[])
+    assert res.compiled is not None
+    assert [k.name for k in res.compiled.classes] == ["A"]
+    assert "W_MERMAID_IN_CODE" in [d.code for d in res.diagnostics]
+    # 閉じないまま文書の終わりまで伸びる場合 → エラー
+    assert "E_UNCLOSED_BLOCK" in _codes_of(md + "```mermaid\n%%@ id: w\nclassDiagram\n")
+
+
+def test_unclosed_mermaid_fence_is_error() -> None:
+    assert _codes_of("```mermaid\n%%@ id: v\nclassDiagram\n    class A\n") == ["E_UNCLOSED_BLOCK"]
+
+
+def test_two_html_comments_on_one_line() -> None:
+    closed = "<!-- a --> <!-- b -->\n\n" + CLASSES
+    assert _compiled(closed).classes
+    hidden = "<!-- a --> <!--\n" + CLASSES + "-->\n"
+    assert "E_UNSUPPORTED_SYNTAX" in _codes_of(hidden)
+
+
+def test_inline_html_comment_with_mermaid() -> None:
+    md = "本文 <!-- ```mermaid --> 続き\n\n" + CLASSES
+    assert "E_UNSUPPORTED_SYNTAX" in _codes_of(md)
+
+
+def test_empty_diagram_error_has_line() -> None:
+    res = compile_spec(block("%%@ id: e", "classDiagram"), domain=None, legacy_ir=[])
+    (d,) = res.diagnostics
+    assert d.code == "E_EMPTY_DIAGRAM" and d.span is not None and d.span.line == 3
+
+
+@pytest.mark.parametrize(
+    "md",
+    [
+        "> " * 1000 + "```mermaid\nclassDiagram\n```\n",
+        "".join("  " * i + "- a\n" for i in range(1000)),
+        "".join("> " * i + "x\n" for i in range(1, 1000)),
+        "- " * 1000 + "x\n",
+    ],
+)
+def test_deep_markdown_nesting_is_bounded(md: str) -> None:
+    start = time.perf_counter()
+    res = compile_spec(md[: 250 * 1024], domain=None, legacy_ir=[])
+    assert time.perf_counter() - start < 1.0
+    assert "E_NESTING_TOO_DEEP" in [d.code for d in res.diagnostics]
+
+
+def test_long_tables_and_brackets_finish_quickly() -> None:
+    for md in (
+        "| a | b |\n|---|---|\n" + "| x | y |\n" * 25000,
+        ("[" * 4000 + "\n") * 60,
+        ("[a](" * 1000 + "\n") * 60,
+        "|" + "a|" * 60 + "\n|" + "-|" * 60 + "\n" + ("|" + "x|" * 60 + "\n") * 1600,
+    ):
+        start = time.perf_counter()
+        compile_spec(md[: 250 * 1024], domain=None, legacy_ir=[])
+        assert time.perf_counter() - start < 1.0
+
+
+def test_table_size_limits() -> None:
+    wide = "|" + "a|" * 70 + "\n|" + "-|" * 70 + "\n"
+    assert set(_codes_of(wide)) == {"E_TOO_LARGE"}
+    long = "| a | b |\n|---|---|\n" + "| x | y |\n" * 5100
+    assert _codes_of(long) == ["E_TOO_LARGE"]
+    cells = "|" + "a|" * 60 + "\n|" + "-|" * 60 + "\n" + ("|" + "x|" * 60 + "\n") * 400
+    assert _codes_of(cells) == ["E_TOO_LARGE"]

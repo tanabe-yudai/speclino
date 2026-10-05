@@ -86,6 +86,7 @@ class MarkdownParts:
     tables: list[RequirementTable]
     errors: list[MarkdownError]
     table_tokens: list[Token]
+    warnings: list[MarkdownError] = field(default_factory=list)
 
 
 @dataclass

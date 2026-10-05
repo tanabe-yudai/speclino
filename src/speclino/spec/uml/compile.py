@@ -534,9 +534,9 @@ def compile_with_coverage(
     if len(markdown.encode("utf-8")) > MAX_BODY_BYTES:
         msg = f"仕様の本文が上限 {MAX_BODY_BYTES} バイトを超える"
         return ParseResult(compiled=None, diagnostics=[_doc_error("E_TOO_LARGE", msg)]), coverage
-    long_lines = [
-        i + 1 for i, line in enumerate(markdown.split("\n")) if len(line) > MAX_LINE_CHARS
-    ]
+    # 改行を CommonMark と同じく \n にそろえる（行番号を markdown-it と合わせる）
+    text = markdown.replace("\r\n", "\n").replace("\r", "\n")
+    long_lines = [i + 1 for i, line in enumerate(text.split("\n")) if len(line) > MAX_LINE_CHARS]
     if long_lines:
         too_long = [
             _doc_error("E_LINE_TOO_LONG", f"1 行は {MAX_LINE_CHARS} 文字まで", n)
@@ -545,8 +545,17 @@ def compile_with_coverage(
         return ParseResult(compiled=None, diagnostics=too_long), coverage
 
     diags: list[SpecDiagnostic] = []
-    parts = split_markdown(markdown)
+    parts = split_markdown(text)
     diags.extend(_doc_error(e.code, e.message, e.line, e.column) for e in parts.errors)
+    diags.extend(
+        SpecDiagnostic(
+            code=w.code,
+            severity="warning",
+            message=w.message,
+            span=SourceSpan(diagram_id=DOC_ID, line=w.line, column=w.column),
+        )
+        for w in parts.warnings
+    )
     coverage.add(parts.table_tokens)
 
     if len(parts.blocks) > MAX_DIAGRAMS:
