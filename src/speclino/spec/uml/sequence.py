@@ -96,7 +96,7 @@ def parse_sequence(ctx: Ctx, lines: list[list[Token]], result: DiagramResult) ->
     if ctx.has_errors():
         return
     if not result.operations:
-        ctx.error("E_EMPTY_DIAGRAM", "シーケンス図に呼出し（->>）が無い", None)
+        ctx.error("E_EMPTY_DIAGRAM", "シーケンス図に呼出し（->>）が無い", result.span)
         return
     result.automaton = _build(st.root)
 

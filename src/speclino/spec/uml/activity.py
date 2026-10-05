@@ -72,9 +72,9 @@ def parse_activity(ctx: Ctx, lines: list[list[Token]], result: DiagramResult) ->
     starts = [n for n, v in st.nodes.items() if v.kind == "start"]
     ends = [n for n, v in st.nodes.items() if v.kind == "end"]
     if len(starts) != 1:
-        ctx.error("E_ACTIVITY_START", f"開始ノードはちょうど 1 つ（{len(starts)} 個）", None)
+        ctx.error("E_ACTIVITY_START", f"開始ノードはちょうど 1 つ（{len(starts)} 個）", result.span)
     if not ends:
-        ctx.error("E_ACTIVITY_END", "終了ノードが無い", None)
+        ctx.error("E_ACTIVITY_END", "終了ノードが無い", result.span)
     incoming = {e.target for e in st.edges}
     outgoing = {e.source for e in st.edges}
     for name in st.order:
@@ -88,7 +88,7 @@ def parse_activity(ctx: Ctx, lines: list[list[Token]], result: DiagramResult) ->
         if node.kind != "end" and name not in outgoing:
             ctx.error("E_DEAD_END", f"ノード {name} から出る辺が無い", node.tok)
     if not any(n.kind == "process" for n in st.nodes.values()):
-        ctx.error("E_EMPTY_DIAGRAM", "アクティビティ図に処理ノードが無い", None)
+        ctx.error("E_EMPTY_DIAGRAM", "アクティビティ図に処理ノードが無い", result.span)
     if ctx.has_errors():
         return
     for n in st.nodes.values():

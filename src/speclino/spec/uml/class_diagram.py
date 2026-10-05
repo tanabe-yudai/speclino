@@ -24,7 +24,7 @@ def parse_class_diagram(ctx: Ctx, lines: list[list[Token]], result: DiagramResul
     if st.current is not None:
         ctx.error("E_UNCLOSED_BLOCK", f"class {st.current.name} の `}}` が無い", st.current_tok)
     if not result.classes and not ctx.has_errors():
-        ctx.error("E_EMPTY_DIAGRAM", "クラス図にクラスが無い", None)
+        ctx.error("E_EMPTY_DIAGRAM", "クラス図にクラスが無い", result.span)
     for cls in result.classes:
         _check_class(ctx, cls, st.class_ids[cls.name])
 

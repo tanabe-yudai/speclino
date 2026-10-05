@@ -32,7 +32,7 @@ def parse_state(ctx: Ctx, lines: list[list[Token]], result: DiagramResult) -> No
     for toks in lines:
         ctx.run(toks, lambda cur: _line(ctx, cur, st, result))
     if st.initial is None:
-        ctx.error("E_STATE_INITIAL", "初期状態（`[*] --> X`）が無い", None)
+        ctx.error("E_STATE_INITIAL", "初期状態（`[*] --> X`）が無い", result.span)
         return
     for f in st.finals:
         if f.text not in st.order and f.text != st.initial.text:

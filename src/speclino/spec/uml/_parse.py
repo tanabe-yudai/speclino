@@ -93,15 +93,17 @@ class Ctx:
     def at(self, tok: Token) -> SourceSpan:
         return SourceSpan(diagram_id=self.diagram_id, line=tok.line, column=tok.column)
 
-    def span(self, tok: Token | None) -> SourceSpan | None:
-        return None if tok is None else self.at(tok)
+    def span(self, tok: Token | SourceSpan | None) -> SourceSpan | None:
+        if tok is None or isinstance(tok, SourceSpan):
+            return tok
+        return self.at(tok)
 
-    def error(self, code: str, message: str, tok: Token | None) -> None:
+    def error(self, code: str, message: str, tok: Token | SourceSpan | None) -> None:
         self.diagnostics.append(
             SpecDiagnostic(code=code, severity="error", message=message, span=self.span(tok))
         )
 
-    def warn(self, code: str, message: str, tok: Token | None) -> None:
+    def warn(self, code: str, message: str, tok: Token | SourceSpan | None) -> None:
         self.diagnostics.append(
             SpecDiagnostic(code=code, severity="warning", message=message, span=self.span(tok))
         )
