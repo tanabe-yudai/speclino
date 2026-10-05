@@ -25,7 +25,7 @@ def test_secret_container_and_accessors_for_web_and_worker() -> None:
 def test_env_injected_into_web_and_worker_behind_flag() -> None:
     secrets = _read("secrets.tf")
     assert re.search(
-        r"bundle_signing_env\s*=\s*var\.mount_bundle_signing_key\s*\?\s*\{\s*"
+        r"var\.mount_bundle_signing_key\s*\?\s*\{\s*"
         r'SPECLINO_BUNDLE_SIGNING_KEY\s*=\s*"bundle-signing-key"',
         secrets,
     )
@@ -45,4 +45,17 @@ def test_admin_job_runs_as_prod_with_signing_key() -> None:
 def test_flag_is_declared_and_defaults_off() -> None:
     variables = _read("variables.tf")
     block = variables.split('variable "mount_bundle_signing_key"', 1)[1]
+    assert re.search(r"default\s*=\s*false", block)
+
+
+def test_old_keys_secret_is_optional_and_off_by_default() -> None:
+    """#114: 鍵の更新の間だけ前の鍵を渡す。既定では注入しない。"""
+    secrets = _read("secrets.tf")
+    assert re.search(r'"bundle-signing-keys-old"\s*=\s*\["web",\s*"worker"\]', secrets)
+    assert re.search(
+        r"var\.mount_bundle_signing_keys_old\s*\?\s*\{\s*"
+        r'SPECLINO_BUNDLE_SIGNING_KEYS_OLD\s*=\s*"bundle-signing-keys-old"',
+        secrets,
+    )
+    block = _read("variables.tf").split('variable "mount_bundle_signing_keys_old"', 1)[1]
     assert re.search(r"default\s*=\s*false", block)

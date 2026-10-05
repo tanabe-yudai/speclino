@@ -77,6 +77,9 @@ class Settings(BaseSettings):
     # 知識の bundle の署名鍵（S62、HMAC-SHA256）。本番は Secret Manager から環境変数へ。
     # 未設定なら env=local は固定の開発鍵、env=prod は起動時にエラー（services/bundle_signing.py）
     bundle_signing_key: str | None = None
+    # 鍵の更新の間だけ、前の鍵を検証に使う（#114）。`kid:secret` をカンマ区切り。kid は
+    # `speclino signing-key-id` で確かめる。lock の期限（30 日）が過ぎたら外してよい
+    bundle_signing_keys_old: str | None = None
 
     @model_validator(mode="after")
     def _no_local_code_host_in_prod(self) -> Settings:

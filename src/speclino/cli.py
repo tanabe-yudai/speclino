@@ -593,6 +593,46 @@ def import_specs(
         typer.echo(f"{rev.name}: 下書き {rev.revision} を作成した（{rev.content_hash}）")
 
 
+@app.command("signing-key-id")
+def signing_key_id() -> None:
+    """今の bundle の署名鍵（`SPECLINO_BUNDLE_SIGNING_KEY`）の ID を出す（鍵そのものは出さない）。
+
+    鍵の更新で前の鍵を `SPECLINO_BUNDLE_SIGNING_KEYS_OLD`（`kid:secret`）に残すときの kid。
+    """
+    from speclino.services import bundle_signing
+
+    typer.echo(bundle_signing.current_key_id())
+
+
+@app.command("rebundle-all")
+def rebundle_all(
+    force: Annotated[
+        bool, typer.Option("--force", help="今の鍵で署名済みのワークスペースも作り直す")
+    ] = False,
+    workspace: Annotated[
+        list[str] | None,
+        typer.Option("--workspace", help="対象のワークスペース（複数可。省略で全部）"),
+    ] = None,
+) -> None:
+    """鍵の更新の後、全ワークスペースの bundle を今の鍵で作り直す（新しい世代、#114）。
+
+    1 つでも失敗すれば終了コード 1（他のワークスペースの作り直しは残る）。
+    """
+    from speclino.services import bundle_signing
+    from speclino.services.signing_rotation import rebundle_all as _rebundle
+
+    outcomes = _in_transaction(lambda s: _rebundle(s, force=force, only=workspace))
+    typer.echo(f"今の鍵の ID: {bundle_signing.current_key_id()}")
+    for o in outcomes:
+        before = f"世代 {o.previous_generation}（鍵 {o.previous_key_id or '-'}）"
+        if o.status == "rebundled":
+            typer.echo(f"{o.workspace}: {before} → 世代 {o.generation}")
+        else:
+            typer.echo(f"{o.workspace}: {before} {o.status}: {o.detail}")
+    if any(o.status == "failed" for o in outcomes):
+        raise typer.Exit(code=1)
+
+
 @workspace_app.command("create")
 def workspace_create(
     slug: Annotated[

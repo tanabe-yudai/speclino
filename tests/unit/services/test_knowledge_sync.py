@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
@@ -805,3 +806,42 @@ def test_old_lock_without_policy_fields_still_verifies_and_parses(tmp_path: Path
     assert _check(tmp_path, old_json, current=newer).verdict == "REVIEW"
     same = _with_policy(_bundle(BASE, generation=1), 1, POLICY_A)
     assert _check(tmp_path, old_json, current=same).verdict == "UNKNOWN"
+
+
+# ---------------------------------------------------------------------------
+# 署名鍵の更新（#114）: lock の鍵の ID
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def _restore_key() -> Iterator[None]:
+    yield
+    bundle_signing.configure(None)
+
+
+@pytest.mark.usefixtures("_restore_key")
+def test_lock_signed_with_old_key_verifies_while_in_keyring(tmp_path: Path) -> None:
+    from speclino.settings import Settings
+
+    bundle_signing.configure(Settings(bundle_signing_key="old"))
+    lock_json, bundle = _synced(tmp_path)
+    lock = KnowledgeLock.model_validate_json(lock_json)
+    old_kid = bundle_signing.key_id_of(b"old")
+    assert lock.key_id == old_kid and bundle.key_id is None  # テストの bundle は鍵の ID なし
+    bundle_signing.configure(
+        Settings(bundle_signing_key="new", bundle_signing_keys_old=f"{old_kid}:old")
+    )
+    assert _check(tmp_path, lock_json, current=bundle).verdict == "VERIFIED_IN_SCOPE"
+    # 前の鍵を外すと UNKNOWN（署名が合わない）
+    bundle_signing.configure(Settings(bundle_signing_key="new"))
+    f = _check(tmp_path, lock_json, current=bundle)
+    assert f.verdict == "UNKNOWN" and "署名" in f.message
+
+
+@pytest.mark.usefixtures("_restore_key")
+def test_lock_with_unknown_key_id_is_unknown(tmp_path: Path) -> None:
+    lock_json, bundle = _synced(tmp_path)
+    data = json.loads(lock_json)
+    data["key_id"] = "f" * 16  # 鍵束に無い ID（書き換えれば署名の対象も変わる）
+    f = _check(tmp_path, json.dumps(data), current=bundle)
+    assert f.verdict == "UNKNOWN" and "署名" in f.message

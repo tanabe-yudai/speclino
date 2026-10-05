@@ -164,3 +164,13 @@ variable "mount_bundle_signing_key" {
   type        = bool
   default     = false
 }
+
+variable "mount_bundle_signing_keys_old" {
+  description = <<-EOT
+    署名鍵の更新の間だけ true にし、前の鍵（Secret Manager の bundle-signing-keys-old、
+    `kid:secret` のカンマ区切り）を SPECLINO_BUNDLE_SIGNING_KEYS_OLD として注入する。値を投入してから
+    true にする。lock の期限（30 日）が過ぎたら false に戻してよい（docs/runbooks/knowledge-registry-cutover.md）。
+  EOT
+  type        = bool
+  default     = false
+}

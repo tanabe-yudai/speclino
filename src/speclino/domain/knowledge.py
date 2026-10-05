@@ -192,6 +192,8 @@ class Bundle(IRModel):
     policy_hash: str | None = None
     members: list[BundleMember] = Field(default_factory=list)
     scope_hash: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    # 署名した鍵の ID（#114、鍵の更新）。欄の無い古い bundle も読めるよう既定は None
+    key_id: str | None = None
     signature: str = Field(
         min_length=1, description="サーバ鍵による HMAC。対象は signature 以外の正規 JSON"
     )
@@ -213,6 +215,8 @@ class KnowledgeLock(IRModel):
     files: dict[str, str] = Field(description="書き出したファイルの相対パス → sha256")
     issued_at: datetime
     expires_at: datetime
+    # 署名した鍵の ID（#114、鍵の更新）。欄の無い古い lock も読めるよう既定は None
+    key_id: str | None = None
     signature: str = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -220,6 +224,19 @@ class KnowledgeLock(IRModel):
         if self.expires_at <= self.issued_at:
             raise ValueError("expires_at は issued_at より後")
         return self
+
+
+class RebundleOutcome(IRModel):
+    """鍵の更新の後の bundle の作り直し（`speclino rebundle-all`、#114）の 1 ワークスペース分。"""
+
+    workspace: str
+    previous_generation: int | None = None
+    previous_key_id: str | None = None
+    generation: int | None = Field(
+        default=None, description="作った bundle の世代（作らなければ None）"
+    )
+    status: Literal["rebundled", "skipped", "failed"]
+    detail: str = ""
 
 
 class ResolvedKnowledge(IRModel):
@@ -284,6 +301,7 @@ __all__ = [
     "InstructionsContent",
     "InstructionsTarget",
     "KnowledgeLock",
+    "RebundleOutcome",
     "SkillContent",
     "SpecContent",
     "SpecSuggestions",

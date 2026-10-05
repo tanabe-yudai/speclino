@@ -104,7 +104,7 @@ def file_hash(text: str) -> str:
 
 
 # 後から足した欄。None のときは署名の対象に含めない（欄の無い古い lock の署名を保つ）
-_OPTIONAL_LOCK_FIELDS = ("policy_revision", "policy_hash")
+_OPTIONAL_LOCK_FIELDS = ("policy_revision", "policy_hash", "key_id")
 
 
 def lock_payload(lock: KnowledgeLock) -> bytes:
@@ -117,7 +117,7 @@ def lock_payload(lock: KnowledgeLock) -> bytes:
 
 
 def verify_lock(lock: KnowledgeLock) -> bool:
-    return bundle_signing.verify(lock_payload(lock), lock.signature)
+    return bundle_signing.verify(lock_payload(lock), lock.signature, lock.key_id)
 
 
 class ManagedBlock(NamedTuple):
@@ -254,6 +254,7 @@ def issue_lock(
         files={p: file_hash(body) for p, body in sorted(files.items())},
         issued_at=issued,
         expires_at=issued + LOCK_TTL,
+        key_id=bundle_signing.current_key_id(),
         signature="unsigned",
     )
     return unsigned.model_copy(update={"signature": bundle_signing.sign(lock_payload(unsigned))})
@@ -693,7 +694,7 @@ def assess_lock(
     current: Bundle,
     current_members: list[BundleMember],
     github_repo_id: int,
-    verify: Callable[[bytes, str], bool] = bundle_signing.verify,
+    verify: Callable[[bytes, str, str | None], bool] = bundle_signing.verify,
     now: datetime | None = None,
     snapshot: Snapshot | None = None,
 ) -> LockAssessment:
@@ -718,7 +719,7 @@ def assess_lock(
         lock = KnowledgeLock.model_validate_json(lock_json)
     except (ValidationError, ValueError) as e:
         return LockAssessment("UNKNOWN", f"{LOCK_PATH} を読めません", actual=str(e)[:500])
-    if not verify(lock_payload(lock), lock.signature):
+    if not verify(lock_payload(lock), lock.signature, lock.key_id):
         return LockAssessment("UNKNOWN", f"{LOCK_PATH} の署名が合いません", lock=lock)
     if lock.workspace != current.workspace or lock.github_repo_id != github_repo_id:
         return LockAssessment(
@@ -799,7 +800,7 @@ def check_lock_snapshot(
     current: Bundle,
     current_members: list[BundleMember],
     github_repo_id: int,
-    verify: Callable[[bytes, str], bool] = bundle_signing.verify,
+    verify: Callable[[bytes, str, str | None], bool] = bundle_signing.verify,
     now: datetime | None = None,
 ) -> Finding:
     """snapshot（PR の head など）の `.speclino/lock.json` の鮮度。`KNOWLEDGE-LOCK-001`（必須）。
@@ -831,7 +832,7 @@ def check_lock(
     current: Bundle,
     current_members: list[BundleMember],
     github_repo_id: int,
-    verify: Callable[[bytes, str], bool] = bundle_signing.verify,
+    verify: Callable[[bytes, str, str | None], bool] = bundle_signing.verify,
     now: datetime | None = None,
 ) -> Finding:
     """手元のディレクトリ版。lock の本文は呼び出し側が渡す（無ければ None）。"""

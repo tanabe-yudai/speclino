@@ -87,6 +87,8 @@ export interface Bundle {
   policy_hash: string | null
   members: BundleMember[]
   scope_hash: string
+  /** 署名した鍵の ID（#114、鍵の更新）。古い bundle には無い */
+  key_id?: string | null
   signature: string
   created_at: string
 }

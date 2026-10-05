@@ -9,7 +9,8 @@ Create Date: 2026-10-05 18:00:00.000000
 `attestations` は人の確定（ゲートの処置。verdict は書き換えない）。確定はプロジェクトに属する
 （#114: 同じ指紋でも別のプロジェクトの run には効かせない）。評価の記録はワークスペース
 ごとに区切る。`review_runs.pr_author_id`（PR の作成者の GitHub ユーザー ID。自己確定の照合）は
-NULL 可の列の追加だけ。
+NULL 可の列の追加だけ。`bundles.key_id`（署名した鍵の ID。#114 の鍵の更新）も NULL 可の列の
+追加だけ。
 """
 
 from collections.abc import Sequence
@@ -71,10 +72,12 @@ def upgrade() -> None:
     op.create_index("ix_attestations_workspace", "attestations", ["workspace"])
     op.create_index("ix_attestations_project_id", "attestations", ["project_id"])
     op.add_column("review_runs", sa.Column("pr_author_id", sa.BigInteger(), nullable=True))
+    op.add_column("bundles", sa.Column("key_id", sa.String(), nullable=True))
 
 
 def downgrade() -> None:
     """Downgrade schema."""
+    op.drop_column("bundles", "key_id")
     op.drop_column("review_runs", "pr_author_id")
     op.drop_index("ix_attestations_project_id", table_name="attestations")
     op.drop_index("ix_attestations_workspace", table_name="attestations")

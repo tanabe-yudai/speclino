@@ -36,12 +36,19 @@ locals {
     # 知識の bundle・lock の署名鍵（S62・S68）。web は承認で bundle を作って署名し、
     # worker は run で bundle と PR の lock.json の署名を検証する
     "bundle-signing-key" = ["web", "worker"]
+    # 鍵の更新の間だけ、前の鍵（`kid:secret` のカンマ区切り）を検証に使う（#114）
+    "bundle-signing-keys-old" = ["web", "worker"]
   }
 
   # 署名鍵は値の投入を待ってから注入する（github-app-client-secret と同じ理由）
-  bundle_signing_env = var.mount_bundle_signing_key ? {
-    SPECLINO_BUNDLE_SIGNING_KEY = "bundle-signing-key"
-  } : {}
+  bundle_signing_env = merge(
+    var.mount_bundle_signing_key ? {
+      SPECLINO_BUNDLE_SIGNING_KEY = "bundle-signing-key"
+    } : {},
+    var.mount_bundle_signing_keys_old ? {
+      SPECLINO_BUNDLE_SIGNING_KEYS_OLD = "bundle-signing-keys-old"
+    } : {},
+  )
 
   # Cloud Run の環境変数として参照する秘密（役割 → 環境変数名 → secret_id）。
   # 値は state に入らない（参照だけを宣言する）。mount_secrets = false のあいだは

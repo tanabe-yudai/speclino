@@ -17,6 +17,7 @@ def _to_domain(row: BundleRecord) -> Bundle:
         policy_hash=row.policy_hash,
         members=[BundleMember.model_validate(m) for m in row.members],
         scope_hash=row.scope_hash,
+        key_id=row.key_id,
         signature=row.signature,
         created_at=row.created_at,
     )
@@ -43,11 +44,17 @@ class BundleRepository:
                 policy_hash=bundle.policy_hash,
                 members=[m.model_dump(mode="json") for m in bundle.members],
                 scope_hash=bundle.scope_hash,
+                key_id=bundle.key_id,
                 signature=bundle.signature,
                 created_at=bundle.created_at,
             )
         )
         await self._session.flush()
+
+    async def workspaces(self) -> list[str]:
+        """bundle を持つワークスペース（名前順）。"""
+        stmt = select(BundleRecord.workspace).distinct().order_by(BundleRecord.workspace)
+        return list((await self._session.execute(stmt)).scalars())
 
     async def latest(self, workspace: str) -> Bundle | None:
         stmt = (

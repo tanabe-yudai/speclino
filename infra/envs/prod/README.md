@@ -52,7 +52,8 @@ openssl rand -hex 32 | tr -d '\n' | gcloud secrets versions add bundle-signing-k
 
 `bundle-signing-key`（知識の bundle・lock の署名鍵）は、値を投入してから tfvars に
 `mount_bundle_signing_key = true` を書いて apply する。web・worker・admin Job に
-`SPECLINO_BUNDLE_SIGNING_KEY` として注入される。順序と鍵の更新は
+`SPECLINO_BUNDLE_SIGNING_KEY` として注入される。鍵の更新の間だけ、前の鍵を `bundle-signing-keys-old`
+（`kid:secret`）に入れて `mount_bundle_signing_keys_old = true` にする。順序と鍵の更新は
 `docs/runbooks/knowledge-registry-cutover.md`。
 
 `mcp-token` には値を投入しない。S54 以降、MCP の認証はワークスペース単位のトークン（DB の

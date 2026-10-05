@@ -616,6 +616,8 @@ class BundleRecord(Base):
     policy_hash: Mapped[str | None] = mapped_column(String, nullable=True)
     members: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
     scope_hash: Mapped[str] = mapped_column(String, nullable=False)
+    # 署名した鍵の ID（#114、鍵の更新。0011 で追加。NULL は鍵の ID を持たない古い署名）
+    key_id: Mapped[str | None] = mapped_column(String, nullable=True)
     signature: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

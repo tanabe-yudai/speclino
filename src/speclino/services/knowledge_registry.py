@@ -114,12 +114,18 @@ def content_hash(content: ArtifactContent) -> str:
 
 
 def bundle_payload(bundle: Bundle) -> bytes:
-    """bundle の署名の対象（`signature` 以外のすべて。`created_at` も含む）。"""
-    return canonical_json(bundle.model_dump(mode="json", exclude={"signature"}))
+    """bundle の署名の対象（`signature` 以外のすべて。`created_at` も含む）。
+
+    後から足した `key_id` は値があるときだけ含める（欄の無い古い bundle の署名を保つ）。
+    """
+    data = bundle.model_dump(mode="json", exclude={"signature"})
+    if data.get("key_id") is None:
+        data.pop("key_id", None)
+    return canonical_json(data)
 
 
 def verify_bundle(bundle: Bundle) -> bool:
-    return bundle_signing.verify(bundle_payload(bundle), bundle.signature)
+    return bundle_signing.verify(bundle_payload(bundle), bundle.signature, bundle.key_id)
 
 
 def _reject_client_derived(content: ArtifactContent) -> None:
@@ -464,6 +470,7 @@ async def build_bundle(session: AsyncSession, workspace: str) -> Bundle:
                 {r.artifact_id: r.content.scope.model_dump(mode="json") for r in actives}
             )
         ),
+        key_id=bundle_signing.current_key_id(),
         signature="unsigned",
         created_at=datetime.now(UTC),
     )

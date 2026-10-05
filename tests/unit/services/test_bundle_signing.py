@@ -77,3 +77,65 @@ def test_build_state_injects_the_key() -> None:
     assert bundle_signing.verify(b"x", sig)
     bundle_signing.configure(Settings(bundle_signing_key="other"))
     assert not bundle_signing.verify(b"x", sig)
+
+
+# ---------------------------------------------------------------------------
+# 鍵の更新（#114）
+# ---------------------------------------------------------------------------
+
+
+def _kid(secret: str) -> str:
+    return bundle_signing.key_id_of(secret.encode())
+
+
+def test_key_id_is_derived_from_the_key_and_does_not_contain_it() -> None:
+    assert _kid("k1") == _kid("k1") != _kid("k2")
+    assert len(_kid("k1")) == 16 and "k1" not in _kid("k1")
+    bundle_signing.configure(Settings(bundle_signing_key="k1"))
+    assert bundle_signing.current_key_id() == _kid("k1")
+
+
+def test_old_key_verifies_with_its_kid_only_while_in_the_keyring() -> None:
+    bundle_signing.configure(Settings(bundle_signing_key="k1"))
+    sig = bundle_signing.sign(b"x")
+    bundle_signing.configure(
+        Settings(bundle_signing_key="k2", bundle_signing_keys_old=f"{_kid('k1')}:k1")
+    )
+    assert bundle_signing.verify(b"x", sig, _kid("k1"))
+    # 違う kid では検証しない（鍵の取り違えを通さない）
+    assert not bundle_signing.verify(b"x", sig, _kid("k2"))
+    # 新しい署名は今の鍵
+    assert bundle_signing.verify(b"x", bundle_signing.sign(b"x"), _kid("k2"))
+    # 前の鍵を外すと検証できない
+    bundle_signing.configure(Settings(bundle_signing_key="k2"))
+    assert not bundle_signing.verify(b"x", sig, _kid("k1"))
+
+
+def test_unknown_kid_fails_closed() -> None:
+    bundle_signing.configure(Settings(bundle_signing_key="k1"))
+    sig = bundle_signing.sign(b"x")
+    assert not bundle_signing.verify(b"x", sig, "0" * 16)
+
+
+def test_signature_without_kid_is_checked_against_the_keyring() -> None:
+    """鍵の ID を持たない古い署名は、鍵束のどれかで合えば通す（どれも信頼する鍵）。"""
+    bundle_signing.configure(Settings(bundle_signing_key="k1"))
+    sig = bundle_signing.sign(b"x")
+    bundle_signing.configure(
+        Settings(bundle_signing_key="k2", bundle_signing_keys_old=f"{_kid('k1')}:k1")
+    )
+    assert bundle_signing.verify(b"x", sig)
+    bundle_signing.configure(Settings(bundle_signing_key="k3"))
+    assert not bundle_signing.verify(b"x", sig)
+
+
+@pytest.mark.parametrize("value", ["k1", ":k1", "abc:", "0000000000000000:k1"])
+def test_malformed_or_mismatched_old_keys_are_rejected(value: str) -> None:
+    with pytest.raises(ValueError, match="SPECLINO_BUNDLE_SIGNING_KEYS_OLD"):
+        bundle_signing.configure(Settings(bundle_signing_key="k2", bundle_signing_keys_old=value))
+
+
+def test_old_keys_accept_several_entries_and_ignore_blanks() -> None:
+    value = f" {_kid('a')}:a , ,{_kid('b')}:b"
+    ring = bundle_signing.keyring(Settings(bundle_signing_key="c", bundle_signing_keys_old=value))
+    assert set(ring.old) == {_kid("a"), _kid("b")}
