@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
+from speclino.domain.uml import SourceSpan, SpecDiagnostic
 from speclino.spec.uml.types import Classification, Coverage, Token, TokenKind
 
 
@@ -79,4 +82,51 @@ def take_bracket_id(cur: Cursor) -> Token:
     return t
 
 
-__all__ = ["Cursor", "LineError", "take_bracket_id"]
+class Ctx:
+    """図 1 つを解析する間の文脈（図 ID・網羅・診断）。"""
+
+    def __init__(self, diagram_id: str, coverage: Coverage) -> None:
+        self.diagram_id = diagram_id
+        self.coverage = coverage
+        self.diagnostics: list[SpecDiagnostic] = []
+
+    def at(self, tok: Token) -> SourceSpan:
+        return SourceSpan(diagram_id=self.diagram_id, line=tok.line, column=tok.column)
+
+    def span(self, tok: Token | None) -> SourceSpan | None:
+        return None if tok is None else self.at(tok)
+
+    def error(self, code: str, message: str, tok: Token | None) -> None:
+        self.diagnostics.append(
+            SpecDiagnostic(code=code, severity="error", message=message, span=self.span(tok))
+        )
+
+    def run(self, tokens: list[Token], fn: Callable[[Cursor], None]) -> bool:
+        """1 行を解析する。失敗したらその行のトークンをすべて error に分類して診断を残す。"""
+        cur = Cursor(tokens, self.coverage)
+        try:
+            fn(cur)
+            cur.expect_end()
+        except LineError as e:
+            self.coverage.mark(tokens, "error")
+            self.error(e.code, e.message, e.token)
+            return False
+        return True
+
+
+def register_id(ids: dict[str, Token], tok: Token) -> None:
+    """図の中の要素 ID を登録する。重複（ラベルだけ違う同じ ID を含む）はエラー。"""
+    if tok.text in ids:
+        first = ids[tok.text]
+        raise LineError(
+            "E_DUPLICATE_ID",
+            f"ID {tok.text} が重複している（最初は {first.line} 行目）",
+            tok,
+        )
+    ids[tok.text] = tok
+
+
+DIRECTIONS = frozenset({"TB", "TD", "BT", "LR", "RL"})
+
+
+__all__ = ["DIRECTIONS", "Ctx", "Cursor", "LineError", "register_id", "take_bracket_id"]
