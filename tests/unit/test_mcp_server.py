@@ -78,6 +78,7 @@ async def test_tools_are_exposed_in_process() -> None:
         "sync_status",
         "spec_get",
         "skill_get",
+        "spec_suggest",
     }
 
 
