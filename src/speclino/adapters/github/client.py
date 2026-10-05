@@ -174,6 +174,21 @@ class GitHubClient:
             raise
         return int(response.json()["id"])
 
+    async def branch_head(self, repo: str, branch: str) -> str | None:
+        """`GET /repos/{owner}/{repo}/branches/{branch}` の `commit.sha`。無ければ None。"""
+        if not re.fullmatch(GIT_REF_PATTERN, branch):
+            return None
+        try:
+            response = await self._request(
+                "GET", f"{self.base_url}/repos/{repo}/branches/{branch}", repo=repo
+            )
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return None
+            raise
+        sha = response.json().get("commit", {}).get("sha")
+        return sha if isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha) else None
+
     async def fetch_snapshot(self, repo: str, sha: str, dest_dir: Path) -> Path:
         # ref は URL のパスに埋め込む。`..` 等で別リポジトリのパスに移れないよう、形を限る（S54）
         if not re.fullmatch(GIT_REF_PATTERN, sha):

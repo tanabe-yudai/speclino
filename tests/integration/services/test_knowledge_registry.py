@@ -374,7 +374,7 @@ async def test_spec_with_errors_cannot_be_approved(ws: Ws) -> None:
     aid = await _create(ws, "spec", "orders", _spec(_projects(ws.p1), markdown="# ERROR\n"))
     with pytest.raises(kr.SpecNotCompilable, match="E_STUB"):
         await _approve(ws, aid)
-    # 既定の compiler（S63 の parser が入るまで）は常に拒否する
+    # parser の無い compiler（unavailable_compiler）は常に拒否する
     async with ws.f() as s:
         draft = await kr.current_draft(s, aid)
     assert draft is not None
@@ -398,8 +398,43 @@ async def test_spec_with_errors_cannot_be_approved(ws: Ws) -> None:
                 expected_revision=1,
                 expected_hash=draft.content_hash,
                 approver="owner1",
+                compiler=kr.unavailable_compiler,
             )
     assert (await _approve(ws, aid)).generation == 1
+
+
+async def test_default_compiler_is_the_uml_parser(ws: Ws) -> None:
+    """S65: 既定の compiler は S63 の compile_spec。誤りのある図は承認できない。"""
+    bad = "# 仕様\n\n```mermaid\n%%@ id: s\nsequenceDiagram\n    par\n```\n"
+    aid = await _create(ws, "spec", "uml", _spec(_projects(ws.p1), markdown=bad))
+    async with ws.f() as s:
+        draft = await kr.current_draft(s, aid)
+    assert draft is not None
+    with pytest.raises(kr.SpecNotCompilable):
+        async with ws.f() as s, s.begin():
+            await kr.approve(
+                s,
+                artifact_id=aid,
+                expected_revision=1,
+                expected_hash=draft.content_hash,
+                approver="owner1",
+            )
+    aid2 = await _create(ws, "spec", "plain", _spec(_projects(ws.p1), markdown="# 仕様\n"))
+    async with ws.f() as s:
+        draft2 = await kr.current_draft(s, aid2)
+    assert draft2 is not None
+    async with ws.f() as s, s.begin():
+        await kr.approve(
+            s,
+            artifact_id=aid2,
+            expected_revision=1,
+            expected_hash=draft2.content_hash,
+            approver="owner1",
+        )
+    async with ws.f() as s:
+        active = await kr.revision_at(s, aid2, 1)
+    assert isinstance(active.content, SpecContent) and active.content.compiled is not None
+    assert active.content.compiled.parser_version.startswith("uml-")
 
 
 async def test_client_compiled_is_rejected(ws: Ws) -> None:

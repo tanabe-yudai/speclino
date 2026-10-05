@@ -53,7 +53,7 @@ def _gate_dict(gate: GateResult, waivers: list[Waiver] | None = None) -> dict[st
 def write_artifacts(
     out_dir: Path,
     manifest: RunManifest,
-    spec: SpecIR,
+    spec: SpecIR | None,
     code: CodeIR | None,
     findings: Findings,
     gate: GateResult | None,
@@ -76,7 +76,9 @@ def write_artifacts(
         written[name] = path
 
     emit("run-manifest.json", manifest.model_dump(mode="json"))
-    emit("spec-ir.json", spec.model_dump(mode="json"))
+    # bundle の run（S65）で旧形式の仕様が無いときは spec-ir.json を書かない
+    if spec is not None:
+        emit("spec-ir.json", spec.model_dump(mode="json"))
     if code is not None:
         emit("code-ir.json", code.model_dump(mode="json"))
     emit("findings.json", findings.model_dump(mode="json"))
@@ -87,7 +89,14 @@ def write_artifacts(
 
     review_path = out_dir / "review.md"
     review_path.write_text(
-        render_review(manifest, findings, gate, spec.behavior_id, semantic_diff), encoding="utf-8"
+        render_review(
+            manifest,
+            findings,
+            gate,
+            spec.behavior_id if spec is not None else "(bundle)",
+            semantic_diff,
+        ),
+        encoding="utf-8",
     )
     written["review.md"] = review_path
     return written

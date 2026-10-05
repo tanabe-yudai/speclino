@@ -52,6 +52,7 @@ from speclino.services.check_pipeline import policy_package_hash
 from speclino.services.policy_governance import DraftConflict
 from speclino.services.workspaces import WorkspaceNotFound, record_denial
 from speclino.spec.loader import content_hash as _sha256
+from speclino.spec.uml import compile_spec
 
 _DRAFT = "knowledge.draft"
 _APPROVE = "knowledge.approve"
@@ -66,11 +67,16 @@ SpecCompiler = Callable[[str, DomainSpec | None, list[SpecIR]], ParseResult]
 def unavailable_compiler(
     markdown: str, domain: DomainSpec | None, legacy: list[SpecIR]
 ) -> ParseResult:
-    """parser が入るまでの既定。常にエラーにして spec の承認を拒否する（偽の承認を作らない）。"""
+    """parser の無い compiler。常にエラーにして spec の承認を拒否する（S65 より前の既定）。"""
     diag = SpecDiagnostic(
         code="E_PARSER_UNAVAILABLE", severity="error", message="仕様の変換器がまだ無い"
     )
     return ParseResult(compiled=None, diagnostics=[diag])
+
+
+def uml_compiler(markdown: str, domain: DomainSpec | None, legacy: list[SpecIR]) -> ParseResult:
+    """S63 の決定的な parser（`compile_spec`）を `SpecCompiler` の形にしたもの（承認の既定）。"""
+    return compile_spec(markdown, domain=domain, legacy_ir=legacy)
 
 
 class ArtifactNotFound(LookupError):
@@ -297,7 +303,7 @@ async def approve(
     expected_hash: str,
     approver: str,
     audit_factory: async_sessionmaker[AsyncSession] | None = None,
-    compiler: SpecCompiler = unavailable_compiler,
+    compiler: SpecCompiler = uml_compiler,
 ) -> Bundle:
     """承認者が見た下書き（番号と content_hash）を承認し、新しい bundle を返す。
 
@@ -305,7 +311,8 @@ async def approve(
     （競合の検査）→ 監査を、呼び出し側の 1 トランザクションで行う。例外のときは呼び出し側が
     rollback する（拒否の監査は `audit_factory` で別に確定させる）。
 
-    spec は保存済みの本文から `compiler` で IR を作り、それを入れた内容で active にする。
+    spec は保存済みの本文から `compiler`（既定は S63 の parser）で IR を作り、それを入れた内容で
+    active にする。
     承認者が照合する `expected_hash` は下書き（IR なし）の hash で、active 行の hash は IR 込みで
     計算し直す（監査に両方残す）。変換にエラーがあれば `SpecNotCompilable`。
     """
@@ -580,6 +587,7 @@ __all__ = [
     "InvalidArtifact",
     "SpecCompiler",
     "SpecNotCompilable",
+    "uml_compiler",
     "unavailable_compiler",
     "approve",
     "build_bundle",

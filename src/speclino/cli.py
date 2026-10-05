@@ -374,8 +374,26 @@ def replay(
             ),
         ),
     ] = False,
+    project_id: Annotated[
+        str | None,
+        typer.Option("--project-id", help="bundle を固定した run のプロジェクト ID（DB を使う）"),
+    ] = None,
+    repo: Annotated[
+        Path | None, typer.Option("--repo", help="bundle の run: head のスナップショット")
+    ] = None,
+    base: Annotated[
+        Path | None, typer.Option("--base", help="bundle の PR の run: base のスナップショット")
+    ] = None,
+    trusted: Annotated[
+        Path | None,
+        typer.Option("--trusted", help="bundle の run: 信頼側（trusted_commit）のスナップショット"),
+    ] = None,
 ) -> None:
     """凍結した IR から判定を再評価し、保存された結果と一致するか確認する（AC-013）。
+
+    bundle を固定した run（S65）は `--project-id` と `--repo`（PR なら `--base` も）を渡すと、
+    `SPECLINO_DATABASE_URL` の DB から記録の bundle を解決し、規約・lock を含む決定的な検査を
+    再実行して比べる。
 
     run-manifest がチーム規約の改訂（`policy_revision`）を記録している run は、CLI 単体では
     DB に接続できず改訂を解決できないため既定で失敗する（規約が変わっても過去の判定が
@@ -383,6 +401,39 @@ def replay(
     付けるとその検査だけを明示的に飛ばして再評価する。
     """
     from speclino.services.replay_service import replay as _replay
+
+    if project_id is not None:
+        from speclino.services.replay_service import BundleReplayResult, replay_bundle
+
+        if repo is None:
+            typer.echo("入力不正: bundle の run の replay には --repo が要る", err=True)
+            raise typer.Exit(code=2)
+        head_root = repo
+
+        async def work(s: AsyncSession) -> BundleReplayResult:
+            return await replay_bundle(
+                s,
+                run_dir,
+                project_id=project_id,
+                repo_root=head_root,
+                base_root=base,
+                trusted_root=trusted,
+            )
+
+        try:
+            bres = _in_transaction(work)
+        except (OSError, LookupError) as e:
+            typer.echo(f"入力不正: {e}", err=True)
+            raise typer.Exit(code=2) from e
+        typer.echo(
+            f"run_id: {bres.run_id}  bundle: {bres.bundle_generation}  compared: {bres.compared}"
+        )
+        for d in bres.differences:
+            typer.echo(f"  差異: {d}")
+        if bres.llm_findings:
+            typer.echo(f"  LLM 支援（記録で再評価、比較対象外）: {len(bres.llm_findings)} 件")
+        typer.echo("一致" if bres.identical else "不一致")
+        raise typer.Exit(code=0 if bres.identical else 1)
 
     try:
         res = _replay(run_dir, require_policy_check=not no_policy_check)
@@ -499,6 +550,39 @@ def policy_seed(
         f"{team}@{revision.revision} を {revision.status} として取り込んだ"
         f"（rules={len(revision.package.rules)}）"
     )
+
+
+@app.command("import-specs")
+def import_specs(
+    workspace: Annotated[str, typer.Option("--workspace", help="取り込み先のワークスペース")],
+    project_id: Annotated[
+        str, typer.Option("--project-id", help="仕様を当てるプロジェクトの ID（scope）")
+    ],
+    author: Annotated[str, typer.Option("--author", help="下書きの作者として記録する uid")],
+    repo: Annotated[
+        Path, typer.Option("--repo", help="specs/ と .speclino/ のあるディレクトリ")
+    ] = Path("."),
+) -> None:
+    """リポジトリの旧形式の仕様（specs/*.md・specs/ir・domain.yaml）を spec の下書きにする。
+
+    承認は画面か API で行う（承認時にサーバが IR を固定する）。図への書き換えは行わない。
+    DB 接続は `SPECLINO_DATABASE_URL`。同じ名前の仕様が既にあれば拒否する（終了コード 2）。
+    """
+    from speclino.domain.knowledge import ArtifactRevision
+    from speclino.services.spec_import import import_specs as _import
+
+    async def work(s: AsyncSession) -> list[ArtifactRevision]:
+        return await _import(
+            s, workspace=workspace, project_id=project_id, repo_root=repo, author=author
+        )
+
+    try:
+        created = _in_transaction(work)
+    except (OSError, LookupError) as e:
+        typer.echo(f"入力不正: {e}", err=True)
+        raise typer.Exit(code=2) from e
+    for rev in created:
+        typer.echo(f"{rev.name}: 下書き {rev.revision} を作成した（{rev.content_hash}）")
 
 
 @workspace_app.command("create")

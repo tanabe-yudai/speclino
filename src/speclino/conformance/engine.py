@@ -448,7 +448,10 @@ class ConformanceEngine:
         channel = _channel_of(req)
         op, required = req.count.operator, req.count.value
         expected = f"{req.operation_or_target} を {req.count.operator} {required} 回" + (
-            f"（引数 {', '.join(req.arguments_equal)} が一致）" if req.arguments_equal else ""
+            # 引数名は名前順（JSONB に保存した IR はキーの順を保たないため。文言を順序に依らせない）
+            f"（引数 {', '.join(sorted(req.arguments_equal))} が一致）"
+            if req.arguments_equal
+            else ""
         )
         counts_ok = [_count_ok(op, required, n) for n in range(sel.min_count, sel.max_count + 1)]
         count_holds = all(counts_ok)
@@ -496,8 +499,10 @@ class ConformanceEngine:
             )
         # 回数は成立。引数の一致を Z3 で検査
         conj: list[Any] = []
+        # 引数は名前順（IR の dict のキー順に判定・文言・反例を依らせない。JSONB は順を保たない）
+        args_equal = sorted(req.arguments_equal.items())
         for e in sel.must + sel.may:
-            for name, req_expr in req.arguments_equal.items():
+            for name, req_expr in args_equal:
                 if name not in e.arguments:
                     return _PathResult(
                         "UNKNOWN",
@@ -521,7 +526,7 @@ class ConformanceEngine:
         arg_actual = "; ".join(
             f"{name} = {self._describe_expr(e.arguments[name])}"
             for e in sel.must + sel.may
-            for name in req.arguments_equal
+            for name, _ in args_equal
         )
         return self._violation(
             rule, path, "argument_mismatch", expected, arg_actual, model, channel=channel

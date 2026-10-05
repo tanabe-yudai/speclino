@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Literal
 
 from pydantic import Field, StringConstraints
@@ -90,3 +90,17 @@ class RunManifest(IRModel):
         default_factory=list, description="出るべき要求 ID（欠けたら UNKNOWN）"
     )
     llm_assessment_keys: list[str] = Field(default_factory=list)
+    trusted_commit: str | None = Field(
+        default=None,
+        description=(
+            "bundle の run（S65）で対応・契約・免除・規約を読んだ信頼側のコミット（worker が取った"
+            "デフォルトブランチの先端）。None は信頼側を確かめられなかった run"
+        ),
+    )
+    source_roots: list[str] = Field(
+        default_factory=list, description="解析した source_roots（空は既定。replay で使う）"
+    )
+    today: date | None = Field(default=None, description="例外の期限判定に使った日付")
+    bindings_patch: dict[str, str] = Field(
+        default_factory=dict, description="人の回答による run 限定の操作束縛（S32）"
+    )
