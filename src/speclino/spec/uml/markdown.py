@@ -11,6 +11,7 @@ from __future__ import annotations
 import unicodedata
 
 from markdown_it import MarkdownIt
+from markdown_it.common.utils import unescapeAll
 from markdown_it.token import Token as MdToken
 
 from speclino.spec.uml.limits import (
@@ -28,6 +29,8 @@ from speclino.spec.uml.types import (
 )
 
 REQ_HEADER = ("ID", "level", "要求", "形式化")
+MAX_REPORTED = 20
+"""行ごとの診断を報告する上限。超えた分は最後の診断に「ほか N 件」と書く。"""
 _CANONICAL_FENCE = "```mermaid"
 _LEAF_BLOCKS = frozenset(
     {"fence", "code_block", "html_block", "table_open", "paragraph_open", "heading_open"}
@@ -132,7 +135,11 @@ def _fence_open(line: str) -> tuple[str, int, str] | None:
 
 
 def _is_mermaid(info: str) -> bool:
-    words = info.split()
+    """info の最初の語が（大文字小文字を無視して）mermaid か。
+
+    読み手は info の文字参照・エスケープを解いてから言語名を読むので、解いて比べる。
+    """
+    words = unescapeAll(info).split()
     return bool(words) and words[0].lower() == "mermaid"
 
 
@@ -160,7 +167,7 @@ def _is_req_header(cells: list[str]) -> bool:
 
     強調された見出し（`**ID**`）も候補にする。受け付けるかどうかは見出しの完全一致で決める。
     """
-    plain = [_plain(c) for c in cells]
+    plain = [unescapeAll(_plain(c)) for c in cells]
     return bool(plain) and ("形式化" in plain or plain[0].lower() == "id")
 
 
@@ -208,15 +215,23 @@ def _container_depth(line: str) -> int:
 
 def _precheck(lines: list[str]) -> list[MarkdownError]:
     errors: list[MarkdownError] = []
+    dropped = 0
     for k, line in enumerate(lines):
         if _container_depth(line) > MAX_CONTAINER_DEPTH:
             msg = f"引用・リストの入れ子は {MAX_CONTAINER_DEPTH} 段まで"
-            errors.append(MarkdownError("E_NESTING_TOO_DEEP", msg, k + 1))
+            err = MarkdownError("E_NESTING_TOO_DEEP", msg, k + 1)
         elif line.count("|") > MAX_PIPES_PER_LINE:
             msg = f"1 行の `|` は {MAX_PIPES_PER_LINE} 個まで"
-            errors.append(MarkdownError("E_TOO_LARGE", msg, k + 1))
-        if len(errors) >= 20:
-            break
+            err = MarkdownError("E_TOO_LARGE", msg, k + 1)
+        else:
+            continue
+        if len(errors) < MAX_REPORTED:
+            errors.append(err)
+        else:
+            dropped += 1
+    if dropped:
+        last = errors[-1]
+        errors[-1] = MarkdownError(last.code, f"{last.message}（ほか {dropped} 件）", last.line)
     pipe_lines = sum(1 for line in lines if "|" in line)
     if not errors and pipe_lines > MAX_PIPE_LINES:
         msg = f"`|` を含む行は {MAX_PIPE_LINES} 行まで（{pipe_lines} 行ある）"
@@ -248,7 +263,10 @@ def _is_mermaid_like(line: str) -> bool:
         return False
     while j < n and line[j] in " \t":
         j += 1
-    return line[j : j + 7].lower() == "mermaid"
+    if line[j : j + 7].lower() == "mermaid":
+        return True
+    # 文字参照・エスケープで書いた info（```mer&#109;aid）も読み手には図に見える
+    return unescapeAll(line[j:]).lstrip()[:7].lower() == "mermaid"
 
 
 def _is_header_like(line: str) -> bool:
@@ -300,9 +318,20 @@ class _Scanner:
         self.errors: list[MarkdownError] = []
         self.warnings: list[MarkdownError] = []
         self.table_tokens: list[Token] = []
+        self.dropped = 0
 
     def error(self, code: str, message: str, line_index: int) -> None:
+        # 行ごとに出る診断（段落の中の HTML コメントなど）が際限なく増えないよう上限で切る
+        if len(self.errors) >= MAX_REPORTED:
+            self.dropped += 1
+            return
         self.errors.append(MarkdownError(code, message, line_index + 1))
+
+    def finish_errors(self) -> None:
+        if self.dropped:
+            last = self.errors[-1]
+            msg = f"{last.message}（ほか {self.dropped} 件）"
+            self.errors[-1] = MarkdownError(last.code, msg, last.line, last.column)
 
     # -------------------------------------------------------------- フェンス
 
@@ -429,11 +458,14 @@ class _Scanner:
             reason = "要求の表は引用・リストの外に書く"
         elif not self.lines[start].startswith("|"):
             reason = "要求の表は行頭の `|` から書く（字下げ・先頭の `|` の省略は不可）"
-        elif tuple(header) != REQ_HEADER:
-            reason = f"要求の表の見出しは | {' | '.join(REQ_HEADER)} | でなければならない"
         elif any("\\|" in self.lines[k] for k in [start, *rows]):
             # GFM は \| を列の区切りにしないが、列の数え方が読み手とずれるので拒否する
             reason = "要求の表のセルに \\| は使えない"
+        elif any(unescapeAll(self.lines[k]) != self.lines[k] for k in [start, *rows]):
+            # 読み手は文字参照・エスケープを解いて表示する。見た目と原文の文字列がずれるので拒否する
+            reason = "要求の表に文字参照・エスケープは使えない"
+        elif tuple(header) != REQ_HEADER:
+            reason = f"要求の表の見出しは | {' | '.join(REQ_HEADER)} | でなければならない"
         if reason is not None:
             self.error("E_REQ_TABLE", reason, start)
             return j + 1
@@ -467,8 +499,9 @@ def split_markdown(text: str) -> MarkdownParts:
         elif t.type == "inline" and i > 0 and toks[i - 1].type == "paragraph_open":
             sc.paragraph(t)
         i += 1
+    sc.finish_errors()
     unexplained = _unexplained_lines(lines, toks)
-    shown = unexplained[:20]
+    shown = unexplained[:MAX_REPORTED]
     for idx, k in enumerate(shown):
         msg = "Markdown の構造を解釈できない（入れ子が深すぎる等）。図・要求の表として読めない"
         if idx == len(shown) - 1 and len(unexplained) > len(shown):

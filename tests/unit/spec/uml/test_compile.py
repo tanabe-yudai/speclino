@@ -584,3 +584,65 @@ def _timed(md: str) -> None:
 )
 def test_markdown_processing_is_linear(md: str) -> None:
     _timed(md if len(md.encode()) > 256 * 1024 and md.startswith("&") else md[: 250 * 1024])
+
+
+# ---------------------------------------------- Ruling 27: 文字参照とエスケープ
+
+
+@pytest.mark.parametrize("opener", ["```mer&#109;aid", "```&#77;ermaid", "```&#x6d;ermaid"])
+def test_char_ref_in_mermaid_fence_info_is_error(opener: str) -> None:
+    """読み手は info の文字参照を解いて mermaid の図として描く → 正規形でない開きのエラー。"""
+    md = _CLS_A + "\n".join([opener, *_FENCE[1:]]).replace("id: c", "id: d") + "\n"
+    res = compile_spec(md, domain=None, legacy_ir=[])
+    assert res.compiled is None
+    line = _CLS_A.count("\n") + 1
+    assert ("E_UNSUPPORTED_SYNTAX", line) in [
+        (d.code, d.span.line if d.span else None) for d in res.diagnostics
+    ]
+
+
+def test_backslash_before_letter_is_not_an_escape() -> None:
+    """`\\m` は CommonMark のエスケープではない（info は `\\mermaid` のまま）ので図にならない。"""
+    md = _CLS_A + "```\\mermaid\nclassDiagram\n```\n"
+    res = compile_spec(md, domain=None, legacy_ir=[])
+    assert res.compiled is not None, res.diagnostics
+
+
+@pytest.mark.parametrize("opener", ["```mer&#109;aid", "~~~&#77;ermaid"])
+def test_char_ref_fence_in_deep_nesting_is_error(opener: str) -> None:
+    md = _nested_ol(11, [opener, "classDiagram", "class A", opener[:3]])
+    res = compile_spec(md, domain=None, legacy_ir=[])
+    msgs = [d.message for d in res.diagnostics if d.code == "E_UNSUPPORTED_SYNTAX"]
+    assert any("解釈できない" in m for m in msgs), res.diagnostics
+
+
+@pytest.mark.parametrize(
+    "table",
+    [
+        "| &#73;D | level | 要求 | &#24418;式化 |\n| --- | --- | --- | --- |\n"
+        "| R1 | mandatory | x | - |\n",
+        "| &#73;D | level | 要求 | 式 |\n| --- | --- | --- | --- |\n| R1 | mandatory | x | - |\n",
+        _REQ_HEAD + "| R1 | mandatory | a &amp; b | - |\n",
+        _REQ_HEAD + "| R1 | mandatory | a \\* b | - |\n",
+    ],
+    ids=["header-refs", "header-one-ref", "body-amp", "body-backslash"],
+)
+def test_char_ref_or_escape_in_requirement_table_is_error(table: str) -> None:
+    res = compile_spec(_CLS_A + table, domain=None, legacy_ir=[])
+    assert res.compiled is None
+    assert [d.code for d in res.diagnostics] == ["E_REQ_TABLE"], res.diagnostics
+    assert "文字参照" in res.diagnostics[0].message
+
+
+def test_ampersand_without_entity_in_requirement_table_is_ok() -> None:
+    md = _CLS_A + _REQ_HEAD + "| R1 | mandatory | a && b | - |\n"
+    res = compile_spec(md, domain=None, legacy_ir=[])
+    assert not [d for d in res.diagnostics if d.code == "E_REQ_TABLE"], res.diagnostics
+
+
+def test_per_line_markdown_diagnostics_are_capped() -> None:
+    md = "a <!-- b\n" * 200
+    res = compile_spec(md, domain=None, legacy_ir=[])
+    assert res.compiled is None
+    assert len(res.diagnostics) <= 21
+    assert "ほか" in res.diagnostics[19].message
