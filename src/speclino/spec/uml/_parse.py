@@ -101,6 +101,14 @@ class Ctx:
             SpecDiagnostic(code=code, severity="error", message=message, span=self.span(tok))
         )
 
+    def warn(self, code: str, message: str, tok: Token | None) -> None:
+        self.diagnostics.append(
+            SpecDiagnostic(code=code, severity="warning", message=message, span=self.span(tok))
+        )
+
+    def has_errors(self) -> bool:
+        return any(d.severity == "error" for d in self.diagnostics)
+
     def run(self, tokens: list[Token], fn: Callable[[Cursor], None]) -> bool:
         """1 行を解析する。失敗したらその行のトークンをすべて error に分類して診断を残す。"""
         cur = Cursor(tokens, self.coverage)
@@ -128,5 +136,63 @@ def register_id(ids: dict[str, Token], tok: Token) -> None:
 
 DIRECTIONS = frozenset({"TB", "TD", "BT", "LR", "RL"})
 
+RESERVED_SEQUENCE = frozenset(
+    {
+        "end",
+        "alt",
+        "else",
+        "opt",
+        "loop",
+        "par",
+        "and",
+        "rect",
+        "critical",
+        "break",
+        "option",
+        "note",
+        "Note",
+        "participant",
+        "actor",
+        "activate",
+        "deactivate",
+        "autonumber",
+        "box",
+        "create",
+        "destroy",
+        "title",
+        "as",
+        "over",
+        "left",
+        "right",
+        "of",
+    }
+)
+"""シーケンス図の名前に使うと Mermaid の描画が崩れる語（W_RESERVED_WORD）。"""
+RESERVED_FLOWCHART = frozenset(
+    {
+        "end",
+        "graph",
+        "flowchart",
+        "subgraph",
+        "style",
+        "classDef",
+        "class",
+        "click",
+        "linkStyle",
+        "direction",
+        "default",
+    }
+)
+"""flowchart のノード ID に使うと Mermaid の描画が崩れる語（W_RESERVED_WORD）。"""
 
-__all__ = ["DIRECTIONS", "Ctx", "Cursor", "LineError", "register_id", "take_bracket_id"]
+
+__all__ = [
+    "DIRECTIONS",
+    "RESERVED_FLOWCHART",
+    "RESERVED_SEQUENCE",
+    "Ctx",
+    "Cursor",
+    "LineError",
+    "register_id",
+    "take_bracket_id",
+]

@@ -119,6 +119,12 @@ class DiagramResult:
     guards: list[tuple[Expr, SourceSpan]] = field(default_factory=list)
     classes: list[RawClass] = field(default_factory=list)
     entry: str | None = None
+    entry_span: SourceSpan | None = None
+    attribute_span: SourceSpan | None = None
+    operations: list[tuple[str, SourceSpan]] = field(default_factory=list)
+    """図が使う操作（`<クラス>.<メソッド>`）。クラス図との突き合わせに使う。"""
+    class_refs: list[tuple[str, SourceSpan]] = field(default_factory=list)
+    """図が使うクラス名（シーケンス図の参加者）。"""
     closed: bool = False
     automaton: Automaton | None = None
     attribute: str | None = None

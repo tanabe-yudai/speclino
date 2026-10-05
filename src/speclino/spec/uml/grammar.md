@@ -74,16 +74,16 @@ arith    = atom { ( "+" | "-" ) atom } ;
 atom     = ref | int | "true" | "false" | enum_lit | "(" or_expr ")" ;
 ref      = ( "before" | "after" | "outcome" ) "." NAME ;   (* 1 つの NAME トークン *)
 int      = [ "-" ] INT ;
-enum_lit = EnumType "." VALUE ;                             (* 1 つの NAME トークン、ドットは 1 つ *)
+enum_lit = EnumType "." VALUE ;                             (* 1 つの NAME トークン、ドットは 1 つ、EnumType は大文字で始まる *)
 ```
 
 - 参照は `before.` / `after.` / `outcome.` の名前空間が必須（入口の引数は `before.`）。名前空間の無い名前・日本語・
-  文字列はエラー（`E_GUARD_SYNTAX`）。自然言語のガードはここで落ちる
+  文字列はエラー（`E_GUARD_SYNTAX`）。自然言語のガードはここで落ちる。小文字で始まるドット付きの名前（`order.qty`）は
+  名前空間の付け忘れとして「before./after./outcome. で始める」と案内する
 - 列挙値は `型名.値`（例 `OrderStatus.PENDING` → `Const(type="OrderStatus", value="PENDING")`）。型はクラス図の
   `<<enumeration>>` か `domain.enums` に宣言されていて、値はその列挙の要素でなければならない（`E_UNKNOWN_ENUM`）
 - 比較の連鎖（`a < b < c`）はエラー。`and` / `or` の連続は 1 つの `Nary` に平らにする。括弧はノードを作らない
-- 最上位が算術式・整数・列挙値のガードはエラー（`E_GUARD_TYPE`）。`domain` が渡されたときは
-  `conformance.typing.require_boolean` で型検査する（参照は `domain.variables` に必要）
+- 最上位が算術式・整数・列挙値のガードはエラー（`E_GUARD_TYPE`）。参照の解決と型検査は 13 章
 - 正規形の表記（`render`）: 2 項演算の左右と `Nary` の要素は、参照・定数以外を括弧で囲む。`not` は `not (x)`
 
 ## 4. クラス図
@@ -244,3 +244,23 @@ ref        = diagram_id "#" ID | "ir:" RULE_ID ;
 | オートマトンの状態数・遷移数 | それぞれ 10,000（構成は Thompson 型で要素数に線形。分岐の直積展開はしない） | `E_TOO_LARGE` |
 | `alt` / `opt` / `loop` の入れ子 | 32 | `E_NESTING_TOO_DEEP` |
 | ガードの式の深さ（括弧・`not`・比較・加減の連なり） | 64 | `E_NESTING_TOO_DEEP` |
+
+## 13. クラス図の語彙との突き合わせ
+
+振る舞いの図（シーケンス・状態遷移・アクティビティ）は、同じ仕様のクラス図を語彙とする。旧形式の IR だけの仕様は対象外。
+
+- 振る舞いの図があるのにクラス図が 1 つも無ければ `E_NO_CLASS_DIAGRAM`
+- シーケンス図の参加者のクラスはクラス図に必要（`E_UNKNOWN_CLASS`）。呼出しの `<受け手のクラス>.<メソッド>`、`%%@ entry`、
+  アクティビティ図の処理ノードの操作は、そのクラスの操作として宣言されていなければならない（`E_UNKNOWN_CLASS` / `E_UNKNOWN_OPERATION`）
+- **変数名の規則**: クラス `C` の属性 `a` は変数 `c.a` で参照する。`c` はクラス名の**先頭の 1 文字だけを小文字にしたもの**
+  （`Order` → `order`、`InventoryService` → `inventoryService`、先頭が小文字のクラス名はそのまま）。`domain` が渡されたら
+  `domain.variables` の変数でも補う（クラス図が優先）
+- 状態遷移図の `%%@ attribute` はこの規則で属性に解決できなければ `E_UNKNOWN_REFERENCE`。型が列挙でなければ
+  `E_STATE_ATTRIBUTE_TYPE`、状態の集合が列挙値の部分集合でなければ `E_UNKNOWN_STATE`
+- ガードの参照は `before.` / `after.` の後をこの規則で、`outcome.` の後を組込み変数（`status`、`kind`）で解決する。
+  できなければ `E_UNKNOWN_REFERENCE`。`参照 ==/!= 列挙値` は、列挙値がその属性の列挙に属さなければ `E_UNKNOWN_ENUM`。
+  そのうえで `conformance.typing.require_boolean` で型検査する（`E_GUARD_TYPE`）
+- 中身の無い図はエラー（`E_EMPTY_DIAGRAM`）: クラスの無いクラス図、呼出し（`->>`）の無いシーケンス図、遷移の無い状態遷移図、
+  処理ノードの無いアクティビティ図
+- Mermaid の予約語（`end` など。`_parse.RESERVED_SEQUENCE` / `RESERVED_FLOWCHART`）を参加者・ノード ID に使うと
+  警告 `W_RESERVED_WORD`（IR には影響しない。描画できるかの判断はエディタ側）

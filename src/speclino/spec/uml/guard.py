@@ -128,13 +128,20 @@ def _atom(cur: Cursor, depth: int) -> Expr:
         if t.text.startswith(_NAMESPACES):
             cur.take("ir")
             return Ref(op="ref", path=t.text)
-        if t.text not in _KEYWORDS and t.text.count(".") == 1:
+        if t.text.count(".") == 1 and t.text[0].isupper():
             cur.take("ir")
             type_name, value = t.text.split(".")
             return Const(op="const", type=type_name, value=value)
+        if "." in t.text and t.text.split(".", 1)[0] not in _KEYWORDS:
+            raise LineError(
+                "E_GUARD_SYNTAX",
+                f"{t.text!r}: 参照は before./after./outcome. で始める（例 before.{t.text}）。"
+                "列挙値なら 型名.値 で型名を大文字で始める",
+                t,
+            )
         raise LineError(
             "E_GUARD_SYNTAX",
-            f"{t.text!r} は読めない（参照は before./after./outcome. が必須、列挙値は 型名.値）",
+            f"{t.text!r} は読めない（参照は before./after./outcome. で始める、列挙値は 型名.値）",
             t,
         )
     if t.kind == "TEXT":

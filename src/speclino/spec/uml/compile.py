@@ -9,9 +9,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from speclino.conformance.typing import IRTypeError, TypeEnv, require_boolean
+from speclino.conformance.typing import OUTCOME_VARIABLES, IRTypeError, TypeEnv, require_boolean
 from speclino.domain.domain_spec import DomainSpec
-from speclino.domain.expr import BOOL_TYPE, INT_TYPE, Binary, Const, Expr, Nary, Not
+from speclino.domain.expr import BOOL_TYPE, INT_TYPE, Binary, Const, Expr, Nary, Not, Ref, refs_in
 from speclino.domain.spec_ir import RuleLevel, SpecIR
 from speclino.domain.uml import (
     ClassAttribute,
@@ -243,6 +243,7 @@ def _compile_block(
             )
         else:
             result.entry = name
+            result.entry_span = SourceSpan(diagram_id=diagram_id, line=tok.line, column=tok.column)
     if "closed" in headers:
         value, tok = headers["closed"]
         if value not in ("true", "false"):
@@ -263,6 +264,9 @@ def _compile_block(
             )
         else:
             result.attribute = name
+            result.attribute_span = SourceSpan(
+                diagram_id=diagram_id, line=tok.line, column=tok.column
+            )
     parser = {
         "class": parse_class_diagram,
         "sequence": parse_sequence,
@@ -387,6 +391,142 @@ def _level(element_ids: set[str], diagram_id: str, index: dict[str, set[RuleLeve
     return "advisory"
 
 
+_ATTR_EXPR_TYPES = {"int": INT_TYPE, "bool": BOOL_TYPE, "str": "str", "opaque_id": "opaque_id"}
+
+
+def class_variable(class_name: str) -> str:
+    """クラス図の属性を参照するときの変数名の頭（クラス名の先頭の 1 文字を小文字にしたもの）。"""
+    return class_name[:1].lower() + class_name[1:]
+
+
+def _variables(classes: list[ClassDef], domain: DomainSpec | None) -> dict[str, str]:
+    """参照できる変数（名前空間なし）→ 型名。クラス図の属性を先に、domain の変数で補う。"""
+    out: dict[str, str] = {}
+    for c in classes:
+        if c.stereotype == "enumeration":
+            continue
+        head = class_variable(c.name)
+        for a in c.attributes:
+            ty = a.enum if a.type == "enum" and a.enum else _ATTR_EXPR_TYPES[a.type]
+            out.setdefault(f"{head}.{a.name}", ty)
+    if domain is not None:
+        for var, ty in domain.variables.items():
+            out.setdefault(var, ty)
+    return out
+
+
+def _enum_pairs(e: Expr) -> list[tuple[Ref, Const]]:
+    """`参照 ==/!= 列挙値` の組（列挙値がその属性の列挙に属するかを確かめる）。"""
+    if isinstance(e, Not):
+        return _enum_pairs(e.arg)
+    if isinstance(e, Nary):
+        return [p for a in e.args for p in _enum_pairs(a)]
+    if isinstance(e, Binary):
+        pairs = _enum_pairs(e.left) + _enum_pairs(e.right)
+        for x, y in ((e.left, e.right), (e.right, e.left)):
+            if isinstance(x, Ref) and isinstance(y, Const) and y.type not in (BOOL_TYPE, INT_TYPE):
+                pairs.append((x, y))
+        return pairs
+    return []
+
+
+def _check_vocabulary(
+    results: list[DiagramResult],
+    classes: list[ClassDef],
+    enums: dict[str, list[str]],
+    domain: DomainSpec | None,
+) -> list[SpecDiagnostic]:
+    """振る舞いの図をクラス図の語彙と突き合わせる（grammar.md 13 章）。"""
+    diags: list[SpecDiagnostic] = []
+    behavior = [r for r in results if r.kind != "class"]
+    if not behavior:
+        return diags
+    if not any(r.kind == "class" for r in results):
+        return [
+            _err(
+                "E_NO_CLASS_DIAGRAM",
+                "シーケンス図・状態遷移図・アクティビティ図を書くときは、語彙のクラス図が必要",
+                behavior[0].span,
+            )
+        ]
+    by_name = {c.name: c for c in classes}
+    variables = _variables(classes, domain)
+
+    def check_operation(op: str, span: SourceSpan | None) -> None:
+        cls, method = op.split(".", 1)
+        target = by_name.get(cls)
+        if target is None or target.stereotype == "enumeration":
+            diags.append(_err("E_UNKNOWN_CLASS", f"クラス {cls} がクラス図に無い", span))
+        elif method not in {o.name for o in target.operations}:
+            diags.append(_err("E_UNKNOWN_OPERATION", f"操作 {op} がクラス図に無い", span))
+
+    for r in behavior:
+        for cls, span in r.class_refs:
+            if cls not in by_name or by_name[cls].stereotype == "enumeration":
+                diags.append(_err("E_UNKNOWN_CLASS", f"クラス {cls} がクラス図に無い", span))
+        if r.entry is not None:
+            check_operation(r.entry, r.entry_span)
+        for op, span in r.operations:
+            check_operation(op, span)
+        if r.kind == "state" and r.attribute is not None:
+            ty = variables.get(r.attribute)
+            if ty is None:
+                msg = f"状態の属性 {r.attribute} をクラス図の属性に解決できない"
+                diags.append(_err("E_UNKNOWN_REFERENCE", msg, r.attribute_span))
+            elif ty not in enums:
+                msg = f"状態の属性 {r.attribute} の型 {ty} は列挙でない"
+                diags.append(_err("E_STATE_ATTRIBUTE_TYPE", msg, r.attribute_span))
+            else:
+                extra = [st for st in r.states if st not in enums[ty]]
+                if extra:
+                    msg = f"状態 {extra} は {r.attribute} の列挙 {ty} の値に無い"
+                    diags.append(_err("E_UNKNOWN_STATE", msg, r.attribute_span))
+
+    try:
+        env = TypeEnv(
+            DomainSpec(
+                enums=enums,
+                opaque_types=sorted({*(domain.opaque_types if domain else []), "opaque_id"}),
+            ),
+            extra_variables=variables,
+        )
+    except ValueError:
+        return diags  # 列挙の定義の誤りは別の診断で報告済み
+    for r in behavior:
+        for guard, span in r.guards:
+            bad = False
+            for rf in refs_in(guard):
+                known = (
+                    rf.variable in OUTCOME_VARIABLES
+                    if rf.namespace == "outcome"
+                    else rf.variable in variables
+                )
+                if not known:
+                    msg = f"ガードの参照 {rf.path} を属性・domain の変数に解決できない"
+                    diags.append(_err("E_UNKNOWN_REFERENCE", msg, span))
+                    bad = True
+            for lit in _enum_consts(guard):
+                if lit.type not in enums or lit.value not in enums[lit.type]:
+                    msg = f"列挙値 {lit.type}.{lit.value} が未定義"
+                    diags.append(_err("E_UNKNOWN_ENUM", msg, span))
+                    bad = True
+            if bad:
+                continue
+            for rf, lit in _enum_pairs(guard):
+                ty = env.type_of_ref(rf)
+                if ty != lit.type:
+                    msg = f"列挙値 {lit.type}.{lit.value} は {rf.path}（型 {ty}）の列挙に無い"
+                    diags.append(_err("E_UNKNOWN_ENUM", msg, span))
+                    bad = True
+            if bad:
+                continue
+            try:
+                require_boolean(env, guard, "guard")
+            except IRTypeError as e:
+                diags.append(_err("E_GUARD_TYPE", str(e), span))
+    return diags
+
+
 def compile_with_coverage(
     markdown: str, *, domain: DomainSpec | None, legacy_ir: list[SpecIR]
 ) -> tuple[ParseResult, Coverage]:
@@ -500,24 +640,7 @@ def compile_with_coverage(
                 )
             )
 
-    # ガード: 列挙値と（domain があれば）型
-    env = None
-    if domain is not None:
-        env = TypeEnv(domain.model_copy(update={"enums": {**enums, **domain.enums}}))
-    for r in results:
-        for guard, span in r.guards:
-            bad_enum = False
-            for lit in _enum_consts(guard):
-                if lit.type not in enums or lit.value not in enums[lit.type]:
-                    diags.append(
-                        _err("E_UNKNOWN_ENUM", f"列挙値 {lit.type}.{lit.value} が未定義", span)
-                    )
-                    bad_enum = True
-            if env is not None and not bad_enum:
-                try:
-                    require_boolean(env, guard, "guard")
-                except IRTypeError as e:
-                    diags.append(_err("E_GUARD_TYPE", str(e), span))
+    diags.extend(_check_vocabulary(results, classes, enums, domain))
 
     # 旧形式
     if domain is not None:

@@ -40,7 +40,9 @@ def parse_state(ctx: Ctx, lines: list[list[Token]], result: DiagramResult) -> No
     for name in [st.initial.text, *st.order]:
         if name in st.ids:
             ctx.error("E_DUPLICATE_ID", f"状態名 {name} が遷移 ID と重複", st.ids[name])
-    if ctx.diagnostics:
+    if not ctx.has_errors() and not result.state_transitions:
+        ctx.error("E_EMPTY_DIAGRAM", "状態遷移図に遷移が無い", st.initial)
+    if ctx.has_errors():
         return
     initial = st.initial.text
     result.initial = initial

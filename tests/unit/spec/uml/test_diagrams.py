@@ -274,3 +274,108 @@ def test_full_document() -> None:
     res: ParseResult = compile_spec(FULL, domain=None, legacy_ir=[])
     assert res.compiled is not None, res.diagnostics
     assert len(res.compiled.traces) == 2 and len(res.compiled.state_machines) == 1
+
+
+# ---------------------------------------------------------------- クラス図の語彙との突き合わせ
+
+
+def test_rejects_behavior_diagram_without_class_diagram() -> None:
+    for md in (SEQUENCE, STATES, ACTIVITY):
+        assert _codes(md) == ["E_NO_CLASS_DIAGRAM"]
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "code"),
+    [
+        ("[m2] charge(order)", "[m2] capture(order)", "E_UNKNOWN_OPERATION"),
+        ("participant P as PaymentGateway", "participant P as Stripe", "E_UNKNOWN_CLASS"),
+        ("%%@ entry: OrderService.checkout", "%%@ entry: OrderService.pay", "E_UNKNOWN_OPERATION"),
+        ("%%@ entry: OrderService.checkout", "%%@ entry: Checkout.run", "E_UNKNOWN_CLASS"),
+        ("before.order.qty > 0", "before.order.amount > 0", "E_UNKNOWN_REFERENCE"),
+        ("before.order.qty > 0", "before.cart.qty > 0", "E_UNKNOWN_REFERENCE"),
+        ("before.order.qty > 0", "outcome.body > 0", "E_UNKNOWN_REFERENCE"),
+    ],
+)
+def test_rejects_sequence_vocabulary_mismatch(old: str, new: str, code: str) -> None:
+    assert code in _codes(CLASSES + SEQUENCE.replace(old, new))
+
+
+def test_rejects_activity_operation_not_in_class_diagram() -> None:
+    md = ACTIVITY.replace("r[PaymentGateway.refund]", "r[PaymentGateway.void]")
+    assert "E_UNKNOWN_OPERATION" in _codes(CLASSES + md)
+    md = ACTIVITY.replace("%%@ entry: OrderService.cancel", "%%@ entry: OrderService.abort")
+    assert "E_UNKNOWN_OPERATION" in _codes(CLASSES + md)
+
+
+def test_rejects_state_attribute_mismatch() -> None:
+    assert "E_UNKNOWN_REFERENCE" in _codes(
+        CLASSES + STATES.replace("attribute: order.status", "attribute: order.phase")
+    )
+    assert "E_STATE_ATTRIBUTE_TYPE" in _codes(
+        CLASSES + STATES.replace("attribute: order.status", "attribute: order.qty")
+    )
+    assert "E_UNKNOWN_STATE" in _codes(CLASSES + STATES.replace("CANCELLED", "SHIPPED"))
+
+
+def test_rejects_enum_value_of_other_enum() -> None:
+    classes = CLASSES.replace(
+        "    class OrderStatus {",
+        "    class Color {\n        <<enumeration>>\n        RED\n    }\n    class OrderStatus {",
+    )
+    md = STATES.replace("OrderStatus.PENDING", "Color.RED")
+    assert "E_UNKNOWN_ENUM" in _codes(classes + md)
+
+
+def test_state_attribute_resolves_by_lowercased_class_name() -> None:
+    c = _ok(CLASSES + STATES)
+    assert c.state_machines[0].attribute == "order.status"
+
+
+# ---------------------------------------------------------------- 中身の無い図・付け忘れ・予約語
+
+
+@pytest.mark.parametrize(
+    "md",
+    [
+        block("%%@ id: e", "classDiagram"),
+        block(
+            "%%@ id: e",
+            "%%@ entry: OrderService.checkout",
+            "sequenceDiagram",
+            "    participant S as OrderService",
+        ),
+        block("%%@ id: e", "%%@ attribute: order.status", "stateDiagram-v2", "    [*] --> PENDING"),
+        block(
+            "%%@ id: e",
+            "%%@ entry: OrderService.cancel",
+            "flowchart TD",
+            "    a((start))",
+            "    z((end))",
+            "    a -->|[e1]| z",
+        ),
+    ],
+)
+def test_rejects_empty_diagram(md: str) -> None:
+    assert "E_EMPTY_DIAGRAM" in _codes(CLASSES + md)
+
+
+def test_missing_namespace_message() -> None:
+    res = compile_spec(
+        CLASSES + SEQUENCE.replace("before.order.qty", "order.qty"), domain=None, legacy_ir=[]
+    )
+    (d,) = [d for d in res.diagnostics if d.code == "E_GUARD_SYNTAX"]
+    assert "before./after./outcome. で始める" in d.message and "before.order.qty" in d.message
+
+
+def test_reserved_word_is_warning() -> None:
+    md = SEQUENCE.replace(
+        "participant I as InventoryService", "participant end as InventoryService"
+    )
+    md = md.replace("S->>I", "S->>end").replace("I-->>S", "end-->>S")
+    res = compile_spec(CLASSES + md, domain=None, legacy_ir=[])
+    assert res.compiled is not None
+    assert [d.code for d in res.diagnostics] == ["W_RESERVED_WORD"]
+    act = ACTIVITY.replace("z((end))", "end((end))").replace("| z", "| end")
+    res = compile_spec(CLASSES + act, domain=None, legacy_ir=[])
+    assert res.compiled is not None
+    assert {d.code for d in res.diagnostics} == {"W_RESERVED_WORD"}

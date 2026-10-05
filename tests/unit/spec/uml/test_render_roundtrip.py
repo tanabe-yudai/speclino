@@ -26,23 +26,25 @@ METHODS = ["m0", "m1", "m2"]
 
 
 def _atoms() -> st.SearchStrategy[Expr]:
-    refs = st.sampled_from(["before.v", "after.v", "outcome.status", "before.order.qty"]).map(
-        lambda p: Ref(op="ref", path=p)
-    )
+    refs = st.sampled_from(
+        ["before.order.v", "after.order.v", "outcome.status", "before.order.qty"]
+    ).map(lambda p: Ref(op="ref", path=p))
     ints = st.integers(-50, 50).map(lambda v: Const(op="const", type=INT_TYPE, value=v))
     return st.one_of(refs, ints)
 
 
 def _bool_atoms() -> st.SearchStrategy[Expr]:
-    flags = st.sampled_from(["before.flag", "after.ok"]).map(lambda p: Ref(op="ref", path=p))
+    flags = st.sampled_from(["before.order.flag", "after.order.ok"]).map(
+        lambda p: Ref(op="ref", path=p)
+    )
     bools = st.booleans().map(lambda v: Const(op="const", type=BOOL_TYPE, value=v))
     enum_cmp = st.builds(
         lambda t, i, op: Binary(
             op=op,
-            left=Ref(op="ref", path="before.status"),
+            left=Ref(op="ref", path="before.order.status"),
             right=Const(op="const", type=t, value=ENUMS[t][i % len(ENUMS[t])]),
         ),
-        st.sampled_from(sorted(ENUMS)),
+        st.just("E0"),  # before.order.status の列挙
         st.integers(0, 5),
         st.sampled_from(["eq", "ne"]),
     )
@@ -125,6 +127,8 @@ def class_block(draw: st.DrawFn) -> tuple[str, list[str]]:
             lines.append(f"        {t} f{i}")
         lines += _noise(draw)
         lines.append("    }")
+    lines += ["    class Order {", "        int qty", "        int v", "        bool flag"]
+    lines += ["        bool ok", "        E0 status", "    }"]
     lines.append("    class Empty")
     return "```mermaid\n" + "\n".join(lines) + "\n```\n", [
         "vocab#" + c for c in [*CLASSES, "Empty"]
@@ -191,17 +195,18 @@ def sequence_block(draw: st.DrawFn, ids: Ids, diagram_id: str) -> tuple[str, lis
         return out
 
     lines += items(0, 1)
+    lines.append(f"    {aliases['C0']}->>{aliases['C1']}: [{ids('m')}] m2")  # 呼出しを 1 つは持つ
     return "```mermaid\n" + "\n".join(lines) + "\n```\n", refs
 
 
 @st.composite
 def state_block(draw: st.DrawFn, ids: Ids, diagram_id: str) -> tuple[str, list[str]]:
-    states = [f"S{i}" for i in range(draw(st.integers(1, 4)))]
+    states = ENUMS["E0"][: draw(st.integers(1, 3))]  # 状態は order.status の列挙値
     lines = [f"%%@ id: {diagram_id}", "%%@ attribute: order.status", "stateDiagram-v2"]
     initial = draw(st.sampled_from(states))
     body = [f"    [*] --> {initial}"]
     refs = [f"{diagram_id}#{initial}"]
-    for _ in range(draw(st.integers(0, 5))):
+    for _ in range(draw(st.integers(1, 5))):
         tid = ids("t")
         label = f"[{tid}]"
         if draw(st.booleans()):
@@ -225,6 +230,7 @@ def activity_block(draw: st.DrawFn, ids: Ids, diagram_id: str) -> tuple[str, lis
     n = draw(st.integers(1, 4))
     middle = [f"n{i}" for i in range(n)]
     kinds = {m: draw(st.sampled_from(["process", "decision"])) for m in middle}
+    kinds["n0"] = "process"  # 処理ノードを 1 つは持つ
     nodes = ["s0", *middle, "z0"]
     decls = ["    s0((start))"]
     for m in middle:

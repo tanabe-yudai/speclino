@@ -12,7 +12,14 @@ from speclino.domain.uml import (
     EpsilonLabel,
     SourceSpan,
 )
-from speclino.spec.uml._parse import Ctx, Cursor, LineError, register_id, take_bracket_id
+from speclino.spec.uml._parse import (
+    RESERVED_SEQUENCE,
+    Ctx,
+    Cursor,
+    LineError,
+    register_id,
+    take_bracket_id,
+)
 from speclino.spec.uml.guard import parse_guard
 from speclino.spec.uml.limits import MAX_NESTING
 from speclino.spec.uml.types import DiagramResult, Token
@@ -86,7 +93,10 @@ def parse_sequence(ctx: Ctx, lines: list[list[Token]], result: DiagramResult) ->
     for block in st.stack:
         ctx.error("E_UNCLOSED_BLOCK", f"{block.kind} の end が無い", block.open_tok)
     result.element_ids.update(st.ids)
-    if ctx.diagnostics:
+    if ctx.has_errors():
+        return
+    if not result.operations:
+        ctx.error("E_EMPTY_DIAGRAM", "シーケンス図に呼出し（->>）が無い", None)
         return
     result.automaton = _build(st.root)
 
@@ -113,6 +123,10 @@ def _line(ctx: Ctx, cur: Cursor, st: _State, result: DiagramResult) -> None:
         if alias.text in st.participants:
             raise LineError("E_DUPLICATE_ID", f"参加者 {alias.text} が重複", alias)
         st.participants[alias.text] = cls.text
+        result.class_refs.append((cls.text, ctx.at(cls)))
+        for name in {alias.text, cls.text}:
+            if name in RESERVED_SEQUENCE:
+                ctx.warn("W_RESERVED_WORD", f"{name} は Mermaid の予約語で描画が崩れる", alias)
         return
     if word in ("alt", "opt", "loop") and not is_message:
         cur.take("ir")
@@ -187,7 +201,9 @@ def _line(ctx: Ctx, cur: Cursor, st: _State, result: DiagramResult) -> None:
                 cur.take("ignored")
                 cur.take_name("ignored", "引数名")
         cur.take("ignored", text=")", what="`)`")
-    st.body().append(Msg(id_tok.text, f"{receiver_class}.{method.text}", ctx.at(id_tok)))
+    operation = f"{receiver_class}.{method.text}"
+    st.body().append(Msg(id_tok.text, operation, ctx.at(id_tok)))
+    result.operations.append((operation, ctx.at(method)))
     result.referenceable.add(id_tok.text)
 
 

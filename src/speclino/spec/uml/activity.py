@@ -13,12 +13,19 @@ from speclino.domain.uml import (
     SourceSpan,
     TransitionLabel,
 )
-from speclino.spec.uml._parse import Ctx, Cursor, LineError, register_id, take_bracket_id
+from speclino.spec.uml._parse import (
+    RESERVED_FLOWCHART,
+    Ctx,
+    Cursor,
+    LineError,
+    register_id,
+    take_bracket_id,
+)
 from speclino.spec.uml.guard import parse_guard
 from speclino.spec.uml.types import DiagramResult, Token
 
 _UNSUPPORTED = frozenset(
-    {"subgraph", "end", "click", "style", "classDef", "class", "linkStyle", "graph", "direction"}
+    {"subgraph", "click", "style", "classDef", "class", "linkStyle", "graph", "direction"}
 )
 
 
@@ -56,7 +63,7 @@ def parse_activity(ctx: Ctx, lines: list[list[Token]], result: DiagramResult) ->
     st = _State()
     for toks in lines:
         ctx.run(toks, lambda cur: _line(ctx, cur, st, result))
-    if ctx.diagnostics:
+    if ctx.has_errors():
         return
     for ref in st.refs:
         if ref.text not in st.nodes:
@@ -80,8 +87,13 @@ def parse_activity(ctx: Ctx, lines: list[list[Token]], result: DiagramResult) ->
             ctx.error("E_UNREACHABLE", f"ノード {name} に入る辺が無い", node.tok)
         if node.kind != "end" and name not in outgoing:
             ctx.error("E_DEAD_END", f"ノード {name} から出る辺が無い", node.tok)
-    if ctx.diagnostics:
+    if not any(n.kind == "process" for n in st.nodes.values()):
+        ctx.error("E_EMPTY_DIAGRAM", "アクティビティ図に処理ノードが無い", None)
+    if ctx.has_errors():
         return
+    for n in st.nodes.values():
+        if n.operation is not None:
+            result.operations.append((n.operation, ctx.at(n.tok)))
     transitions: list[AutomatonTransition] = []
     for e in st.edges:
         target = st.nodes[e.target]
@@ -114,7 +126,7 @@ def _operation(cur: Cursor) -> str:
     return t.text
 
 
-def _node(cur: Cursor, st: _State) -> Token:
+def _node(ctx: Ctx, cur: Cursor, st: _State) -> Token:
     tok = cur.take_name("ir", "ノード ID")
     if tok.text in _UNSUPPORTED:
         raise LineError(
@@ -154,6 +166,8 @@ def _node(cur: Cursor, st: _State) -> Token:
         cur.take("ir")
         node = _Node("decision", None, tok)
     if node is not None:
+        if tok.text in RESERVED_FLOWCHART:
+            ctx.warn("W_RESERVED_WORD", f"{tok.text} は Mermaid の予約語で描画が崩れる", tok)
         register_id(st.ids, tok)
         st.nodes[tok.text] = node
     return tok
@@ -167,7 +181,7 @@ def _line(ctx: Ctx, cur: Cursor, st: _State, result: DiagramResult) -> None:
             "E_UNSUPPORTED_SYNTAX", f"アクティビティ図で対応しない構文: {head.text!r}", head
         )
     before = len(st.nodes)
-    source = _node(cur, st)
+    source = _node(ctx, cur, st)
     if cur.at_end():
         if len(st.nodes) == before:
             raise LineError("E_UNEXPECTED_TOKEN", f"ノード {source.text} の形が無い行", source)
@@ -183,7 +197,7 @@ def _line(ctx: Ctx, cur: Cursor, st: _State, result: DiagramResult) -> None:
         guard = parse_guard(cur)
         result.guards.append((guard, ctx.at(id_tok)))
     cur.take("ir", text="|", what="辺のラベルの `|`")
-    target = _node(cur, st)
+    target = _node(ctx, cur, st)
     nxt = cur.peek()
     if nxt is not None and nxt.kind == "ARROW":
         raise LineError("E_UNEXPECTED_TOKEN", "1 行に辺は 1 本（それぞれに ID が要る）", nxt)

@@ -18,9 +18,11 @@ CLASSES = block(
     "    }",
     "    class InventoryService {",
     "        +reserve(order)",
+    "        +release(order)",
     "    }",
     "    class PaymentGateway {",
     "        +charge(order)",
+    "        +refund(order)",
     "    }",
     "    class Order {",
     "        int qty",
@@ -48,7 +50,7 @@ SEQUENCE = block(
     "    alt [g1] before.order.qty > 0",
     "        S->>P: [m2] charge(order)",
     "    else [g2]",
-    "        S->>I: [m3] release",
+    "        S->>I: [m3] release(order)",
     "    end",
 )
 
