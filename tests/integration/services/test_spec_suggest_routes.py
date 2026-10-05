@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import uuid
 from collections.abc import AsyncIterator
@@ -31,7 +30,7 @@ from speclino.services.cost_guard import CostGuard, InMemoryLedger
 from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
 from speclino.settings import Settings
 from tests.integration.services.conftest import register_repo
-from tests.unit.spec.uml.samples import FULL
+from tests.unit.services.suggest_samples import BAD, FULL, RESPONSE
 
 pytestmark = [
     pytest.mark.integration,
@@ -40,23 +39,6 @@ pytestmark = [
 
 MEMBER = {"X-Dev-User": "member1"}
 STRANGER = {"X-Dev-User": "owner9"}
-GOOD_GUARD = "[before.order.status == OrderStatus.PENDING]"
-BAD = FULL.replace(GOOD_GUARD, "[注文が未払いのとき]")
-BAD_LINE_NO = next(i for i, ln in enumerate(BAD.split("\n"), 1) if "注文が未払いのとき" in ln)
-FIXED_LINE = BAD.split("\n")[BAD_LINE_NO - 1].replace("[注文が未払いのとき]", GOOD_GUARD)
-RESPONSE = json.dumps(
-    {
-        "suggestions": [
-            {
-                "start_line": BAD_LINE_NO,
-                "end_line": BAD_LINE_NO,
-                "replacement": FIXED_LINE,
-                "reason": "自然言語のガードを式にする",
-            }
-        ]
-    },
-    ensure_ascii=False,
-)
 
 
 @dataclass

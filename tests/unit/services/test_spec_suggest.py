@@ -24,15 +24,9 @@ from speclino.services.spec_suggest import (
     suggest,
 )
 from speclino.spec.uml import compile_spec
-from tests.unit.spec.uml.samples import FULL
+from tests.unit.services.suggest_samples import BAD, BAD_LINE, BAD_LINE_NO, FIXED_LINE, FULL
 
 TODAY = date(2026, 10, 5)
-GOOD_GUARD = "[before.order.status == OrderStatus.PENDING]"
-BAD = FULL.replace(GOOD_GUARD, "[注文が未払いのとき]")
-assert BAD != FULL
-BAD_LINE_NO = next(i for i, ln in enumerate(BAD.split("\n"), 1) if "注文が未払いのとき" in ln)
-BAD_LINE = BAD.split("\n")[BAD_LINE_NO - 1]
-FIXED_LINE = BAD_LINE.replace("[注文が未払いのとき]", GOOD_GUARD)
 
 
 class Budget:

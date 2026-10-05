@@ -32,7 +32,7 @@ from speclino.services.review_run_service import ReviewRunConfig, ReviewRunServi
 from speclino.settings import Settings
 from tests.integration.services.conftest import project_id_of, register_repo
 from tests.integration.services.test_mcp_flow import _issue as issue_mcp_token
-from tests.integration.services.test_spec_suggest_routes import BAD, FULL, RESPONSE
+from tests.unit.services.suggest_samples import BAD, FULL, RESPONSE
 
 pytestmark = [
     pytest.mark.integration,

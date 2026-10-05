@@ -1,4 +1,4 @@
-"""A2A の 3 スキルを app の state から組み立てる（S59）。
+"""A2A のスキル（S59 の 3 つと S67 の spec_suggest）を app の state から組み立てる（S59）。
 
 費用ガードが無い構成では組み立てない（フェイルクローズ）。計量なしで Gemini を呼ばせない。
 """
@@ -16,6 +16,7 @@ from speclino.adapters.llm.gemini_json import GeminiJsonLlm
 from speclino.agent.consultant.requirement_consult import run_requirement_consult
 from speclino.agent.consultant.run_clarification import run_run_clarification
 from speclino.agent.consultant.spec_review import run_spec_review
+from speclino.agent.consultant.spec_suggest import run_spec_suggest
 from speclino.agent.consultant.tools import ConsultBudget, ConsultDeps
 from speclino.api.deps import AppState
 from speclino.domain.a2a import SkillId, TokenIdentity
@@ -90,10 +91,14 @@ def handlers_for(deps: ConsultDeps) -> dict[SkillId, SkillHandler]:
     async def run_clarification(call: SkillCall) -> None:
         await run_run_clarification(call, deps)
 
+    async def spec_suggest(call: SkillCall) -> None:
+        await run_spec_suggest(call, deps)
+
     return {
         "spec_review": spec_review,
         "requirement_consult": requirement_consult,
         "run_clarification": run_clarification,
+        "spec_suggest": spec_suggest,
     }
 
 
@@ -103,5 +108,5 @@ def build_handlers(
     spec_llm: TextLlm | None = None,
     agent_model: str | BaseLlm | None = None,
 ) -> dict[SkillId, SkillHandler]:
-    """本物の 3 スキル。テストは spec_llm / agent_model に台本の LLM を渡す。"""
+    """本物のスキル。テストは spec_llm / agent_model に台本の LLM を渡す。"""
     return handlers_for(build_deps(state, spec_llm=spec_llm, agent_model=agent_model))

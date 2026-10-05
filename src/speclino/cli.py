@@ -292,7 +292,7 @@ def a2a_send(
     url: Annotated[str, typer.Option("--url", help="SpecLino のベース URL")] = "",
     skill: Annotated[
         str | None,
-        typer.Option(help="spec_review / requirement_consult / run_clarification"),
+        typer.Option(help="spec_review / requirement_consult / run_clarification / spec_suggest"),
     ] = None,
     repo: Annotated[str | None, typer.Option(help="owner/name")] = None,
     behavior: Annotated[str | None, typer.Option(help="spec_review の対象の振る舞い")] = None,

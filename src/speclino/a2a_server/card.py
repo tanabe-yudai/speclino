@@ -76,6 +76,21 @@ def _skills() -> list[AgentSkill]:
                 "要確認の点を聞かせて",
             ),
         ),
+        AgentSkill(
+            id="spec_suggest",
+            name="仕様の下書きの相談",
+            description=(
+                "仕様の Markdown と Mermaid の図の下書きに、書き換えの提案"
+                "（本文の位置と置換・理由）を返す。提案ごとに SpecLino の決定的な parser で"
+                "検証し直した結果（前後のエラー数）を添える。IR は返さず、本文から IR を作るのは"
+                "parser だけ。採否・保存は人が行う。" + _BOUNDARY
+            ),
+            tags=["spec", "suggest"],
+            examples=_examples(
+                {"skill": "spec_suggest"},
+                "```mermaid\n%%@ id: order-status\n...\n```",
+            ),
+        ),
     ]
 
 
@@ -84,7 +99,7 @@ def build_agent_card(public_url: str) -> AgentCard:
         name="SpecLino",
         description=(
             "仕様とコードの適合を検査する SpecLino の議論役。仕様のレビュー・要求の相談・"
-            "検査の後の聞き取りを行う。" + _BOUNDARY
+            "検査の後の聞き取り・仕様の下書きの相談を行う。" + _BOUNDARY
         ),
         version=speclino.__version__,
         supported_interfaces=[
