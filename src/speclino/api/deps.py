@@ -34,6 +34,7 @@ from speclino.ports.code_host import CodeHost
 from speclino.ports.mcp_context import McpContextSource
 from speclino.ports.sandbox import Sandbox
 from speclino.ports.task_queue import TaskQueue
+from speclino.services.bundle_signing import signing_key
 from speclino.services.cost_guard import CostGuard, CostLedger
 from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
 from speclino.settings import Settings
@@ -180,6 +181,10 @@ class LazyCodeHost:
 
 
 def build_state(settings: Settings) -> AppState:
+    if settings.role in ("web", "worker", "all"):
+        # bundle を作る（web の承認）・確かめる（worker の run）役割は署名鍵が要る。本番で
+        # 未設定なら最初の承認で落ちる前に、起動で落とす
+        signing_key(settings)
     engine = make_engine(settings)
     factory = make_session_factory(engine)
     if settings.blob_kind == "fs":
