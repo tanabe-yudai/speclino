@@ -42,13 +42,13 @@ class _State:
     def __init__(self) -> None:
         self.nodes: dict[str, _Node] = {}
         self.ids: dict[str, Token] = {}
-        self.order: list[str] = []
+        self.order: dict[str, None] = {}  # 最初に現れた順（dict は挿入順）
         self.refs: list[Token] = []
         self.edges: list[_Edge] = []
 
     def see(self, tok: Token) -> None:
         if tok.text not in self.order:
-            self.order.append(tok.text)
+            self.order[tok.text] = None
         self.refs.append(tok)
 
 

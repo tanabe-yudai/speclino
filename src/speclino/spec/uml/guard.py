@@ -15,6 +15,8 @@ from speclino.domain.expr import (
     Ref,
 )
 from speclino.spec.uml._parse import Cursor, LineError
+from speclino.spec.uml.limits import MAX_EXPR_DEPTH
+from speclino.spec.uml.types import Token
 
 _CMP = {"==": "eq", "!=": "ne", "<": "lt", "<=": "le", ">": "gt", ">=": "ge"}
 _ARITH = {"+": "add", "-": "sub"}
@@ -31,25 +33,25 @@ def parse_guard(cur: Cursor) -> Expr:
     start = cur.peek()
     if start is None or start.text in ("]", "|"):
         raise LineError("E_GUARD_SYNTAX", "ガードが空", start or cur.last())
-    e = _or(cur)
+    e = _or(cur, 0)
     if not _bool_shaped(e):
         raise LineError("E_GUARD_TYPE", "ガードは真偽値の式でなければならない", start)
     return e
 
 
-def _or(cur: Cursor) -> Expr:
-    args = [_and(cur)]
+def _or(cur: Cursor, depth: int) -> Expr:
+    args = [_and(cur, depth)]
     while cur.at("or"):
         cur.take("ir")
-        args.append(_and(cur))
+        args.append(_and(cur, depth))
     return _nary("or", args, cur)
 
 
-def _and(cur: Cursor) -> Expr:
-    args = [_not(cur)]
+def _and(cur: Cursor, depth: int) -> Expr:
+    args = [_not(cur, depth)]
     while cur.at("and"):
         cur.take("ir")
-        args.append(_not(cur))
+        args.append(_not(cur, depth))
     return _nary("and", args, cur)
 
 
@@ -62,22 +64,24 @@ def _nary(op: str, args: list[Expr], cur: Cursor) -> Expr:
     return Nary(op=op, args=args)
 
 
-def _not(cur: Cursor) -> Expr:
+def _not(cur: Cursor, depth: int) -> Expr:
     if cur.at("not"):
         tok = cur.take("ir")
-        arg = _not(cur)
+        _check_depth(depth + 1, tok)
+        arg = _not(cur, depth + 1)
         if not _bool_shaped(arg):
             raise LineError("E_GUARD_TYPE", "not の項は真偽値の式でなければならない", tok)
         return Not(op="not", arg=arg)
-    return _cmp(cur)
+    return _cmp(cur, depth)
 
 
-def _cmp(cur: Cursor) -> Expr:
-    left = _arith(cur)
+def _cmp(cur: Cursor, depth: int) -> Expr:
+    left = _arith(cur, depth)
     t = cur.peek()
     if t is not None and t.kind == "PUNCT" and t.text in _CMP:
+        _check_depth(depth + 1, t)
         cur.take("ir")
-        right = _arith(cur)
+        right = _arith(cur, depth + 1)
         nxt = cur.peek()
         if nxt is not None and nxt.kind == "PUNCT" and nxt.text in _CMP:
             raise LineError("E_GUARD_SYNTAX", "比較は連鎖できない（and で分ける）", nxt)
@@ -85,24 +89,27 @@ def _cmp(cur: Cursor) -> Expr:
     return left
 
 
-def _arith(cur: Cursor) -> Expr:
-    left = _atom(cur)
+def _arith(cur: Cursor, depth: int) -> Expr:
+    left = _atom(cur, depth)
     while True:
         t = cur.peek()
         if t is None or t.kind != "PUNCT" or t.text not in _ARITH:
             return left
+        depth += 1
+        _check_depth(depth, t)
         cur.take("ir")
-        right = _atom(cur)
+        right = _atom(cur, depth)
         left = Binary(op=_ARITH[t.text], left=left, right=right)
 
 
-def _atom(cur: Cursor) -> Expr:
+def _atom(cur: Cursor, depth: int) -> Expr:
     t = cur.peek()
     if t is None:
         raise LineError("E_GUARD_SYNTAX", "ガードの式が途中で終わった", cur.last())
     if t.text == "(" and t.kind == "PUNCT":
         cur.take("ir")
-        inner = _or(cur)
+        _check_depth(depth + 1, t)
+        inner = _or(cur, depth + 1)
         cur.take("ir", text=")", what="`)`", code="E_GUARD_SYNTAX")
         return inner
     if t.text == "-" and t.kind == "PUNCT":
@@ -133,6 +140,11 @@ def _atom(cur: Cursor) -> Expr:
     if t.kind == "TEXT":
         raise LineError("E_GUARD_SYNTAX", f"自然言語のガードは書けない: {t.text!r}", t)
     raise LineError("E_GUARD_SYNTAX", f"ガードに {t.text!r} は書けない", t)
+
+
+def _check_depth(depth: int, tok: Token) -> None:
+    if depth > MAX_EXPR_DEPTH:
+        raise LineError("E_NESTING_TOO_DEEP", f"ガードの式の深さは {MAX_EXPR_DEPTH} まで", tok)
 
 
 def _bool_shaped(e: Expr) -> bool:

@@ -18,13 +18,13 @@ from speclino.spec.uml.types import Classification, DiagramResult, Token
 class _State:
     def __init__(self) -> None:
         self.initial: Token | None = None
-        self.order: list[str] = []
+        self.order: dict[str, None] = {}  # 最初に現れた順（dict は挿入順）
         self.ids: dict[str, Token] = {}
         self.finals: list[Token] = []
 
     def see(self, name: str) -> None:
         if name not in self.order:
-            self.order.append(name)
+            self.order[name] = None
 
 
 def parse_state(ctx: Ctx, lines: list[list[Token]], result: DiagramResult) -> None:

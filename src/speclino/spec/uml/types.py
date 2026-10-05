@@ -76,7 +76,7 @@ class MarkdownError:
 
 @dataclass(frozen=True)
 class RequirementTable:
-    header_line: int
+    header: list[Token]
     rows: list[list[Token]]
 
 

@@ -14,6 +14,7 @@ from speclino.domain.uml import (
 )
 from speclino.spec.uml._parse import Ctx, Cursor, LineError, register_id, take_bracket_id
 from speclino.spec.uml.guard import parse_guard
+from speclino.spec.uml.limits import MAX_NESTING
 from speclino.spec.uml.types import DiagramResult, Token
 
 _UNSUPPORTED = frozenset(
@@ -126,6 +127,10 @@ def _line(ctx: Ctx, cur: Cursor, st: _State, result: DiagramResult) -> None:
         elif not cur.at_end() or word == "alt":
             guard = parse_guard(cur)
             result.guards.append((guard, ctx.at(id_tok)))
+        if len(st.stack) >= MAX_NESTING:
+            raise LineError(
+                "E_NESTING_TOO_DEEP", f"alt/opt/loop の入れ子は {MAX_NESTING} 段まで", head
+            )
         st.stack.append(Block(word, [Branch(id_tok.text, guard, ctx.at(id_tok))], head))
         result.referenceable.add(id_tok.text)
         return

@@ -93,7 +93,7 @@ def split_markdown(text: str) -> MarkdownParts:
                     rows.append(_cells(lines[j], j + 1))
                     j += 1
                 if names == REQ_HEADER:
-                    tables.append(RequirementTable(header_line=line_no, rows=rows))
+                    tables.append(RequirementTable(header=header, rows=rows))
                     table_tokens.extend(header)
                     table_tokens.extend(t for r in rows for t in r)
                 i = j

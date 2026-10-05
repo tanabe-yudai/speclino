@@ -12,7 +12,6 @@ from typing import Any
 from speclino.conformance.typing import IRTypeError, TypeEnv, require_boolean
 from speclino.domain.domain_spec import DomainSpec
 from speclino.domain.expr import BOOL_TYPE, INT_TYPE, Binary, Const, Expr, Nary, Not
-from speclino.domain.knowledge import BODY_MAX_BYTES
 from speclino.domain.spec_ir import RuleLevel, SpecIR
 from speclino.domain.uml import (
     ClassAttribute,
@@ -33,6 +32,14 @@ from speclino.spec.uml._parse import DIRECTIONS, Ctx
 from speclino.spec.uml.activity import parse_activity
 from speclino.spec.uml.class_diagram import parse_class_diagram
 from speclino.spec.uml.lexer import tokenize_block_line, tokenize_line
+from speclino.spec.uml.limits import (
+    MAX_AUTOMATON_SIZE,
+    MAX_BODY_BYTES,
+    MAX_DIAGRAMS,
+    MAX_LINE_CHARS,
+    MAX_STATEMENTS_PER_DIAGRAM,
+    MAX_TOKENS,
+)
 from speclino.spec.uml.markdown import split_markdown
 from speclino.spec.uml.sequence import parse_sequence
 from speclino.spec.uml.state import parse_state
@@ -46,7 +53,6 @@ from speclino.spec.uml.types import (
 )
 
 PARSER_VERSION = "uml-0.1"
-LINE_MAX_CHARS = 4096
 _PLACEHOLDER_HASH = "sha256:" + "0" * 64
 _BUILTIN_ATTR_TYPES = frozenset({"int", "bool", "str", "opaque_id"})
 _ID_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
@@ -263,7 +269,18 @@ def _compile_block(
         "state": parse_state,
         "activity": parse_activity,
     }[kind]
+    if len(body) > MAX_STATEMENTS_PER_DIAGRAM:
+        for toks in body:
+            coverage.mark(toks, "error")
+        msg = f"図の文は {MAX_STATEMENTS_PER_DIAGRAM} 行まで（{len(body)} 行ある）"
+        diags.append(_doc_error("E_TOO_LARGE", msg, body[MAX_STATEMENTS_PER_DIAGRAM][0].line))
+        return result, diags
     parser(ctx, body, result)
+    a = result.automaton
+    if a is not None and max(len(a.states), len(a.transitions)) > MAX_AUTOMATON_SIZE:
+        result.automaton = None
+        msg = f"オートマトンの状態・遷移は {MAX_AUTOMATON_SIZE} まで"
+        ctx.error("E_TOO_LARGE", msg, type_line[0])
     diags.extend(ctx.diagnostics)
     return result, diags
 
@@ -282,8 +299,7 @@ def _parse_requirements(
     diags: list[SpecDiagnostic] = []
     seen: set[str] = set()
     for table in tables:
-        header_cells = [t for t in coverage.tokens if t.line == table.header_line]
-        coverage.mark(header_cells, "ignored")
+        coverage.mark(table.header, "ignored")
         for cells in table.rows:
             row_diags: list[SpecDiagnostic] = []
 
@@ -348,26 +364,36 @@ def _err(code: str, message: str, span: SourceSpan | None) -> SpecDiagnostic:
     return SpecDiagnostic(code=code, severity="error", message=message, span=span)
 
 
-def _level(element_ids: set[str], diagram_id: str, rows: list[RequirementRow]) -> RuleLevel:
+def _level_index(rows: list[RequirementRow]) -> dict[str, set[RuleLevel]]:
+    """参照（`図ID#要素ID`）→ それを参照する行の level の集合。義務ごとの全探索を避ける。"""
+    index: dict[str, set[RuleLevel]] = {}
+    for r in rows:
+        for ref in r.formalized_by:
+            index.setdefault(ref, set()).add(r.level)
+    return index
+
+
+def _level(element_ids: set[str], diagram_id: str, index: dict[str, set[RuleLevel]]) -> RuleLevel:
     """参照する行が 1 つ以上あり、すべて advisory なら advisory（grammar.md 8 章）。"""
-    keys = {f"{diagram_id}#{e}" for e in element_ids}
-    levels = [r.level for r in rows if keys & set(r.formalized_by)]
-    return "advisory" if levels and all(lv == "advisory" for lv in levels) else "mandatory"
+    levels: set[RuleLevel] = set()
+    for e in element_ids:
+        levels |= index.get(f"{diagram_id}#{e}", set())
+    return "advisory" if levels == {"advisory"} else "mandatory"
 
 
 def compile_with_coverage(
     markdown: str, *, domain: DomainSpec | None, legacy_ir: list[SpecIR]
 ) -> tuple[ParseResult, Coverage]:
     coverage = Coverage()
-    if len(markdown.encode("utf-8")) > BODY_MAX_BYTES:
-        msg = f"仕様の本文が上限 {BODY_MAX_BYTES} バイトを超える"
+    if len(markdown.encode("utf-8")) > MAX_BODY_BYTES:
+        msg = f"仕様の本文が上限 {MAX_BODY_BYTES} バイトを超える"
         return ParseResult(compiled=None, diagnostics=[_doc_error("E_TOO_LARGE", msg)]), coverage
     long_lines = [
-        i + 1 for i, line in enumerate(markdown.split("\n")) if len(line) > LINE_MAX_CHARS
+        i + 1 for i, line in enumerate(markdown.split("\n")) if len(line) > MAX_LINE_CHARS
     ]
     if long_lines:
         too_long = [
-            _doc_error("E_LINE_TOO_LONG", f"1 行は {LINE_MAX_CHARS} 文字まで", n)
+            _doc_error("E_LINE_TOO_LONG", f"1 行は {MAX_LINE_CHARS} 文字まで", n)
             for n in long_lines[:20]
         ]
         return ParseResult(compiled=None, diagnostics=too_long), coverage
@@ -377,12 +403,22 @@ def compile_with_coverage(
     diags.extend(_doc_error(e.code, e.message, e.line, e.column) for e in parts.errors)
     coverage.add(parts.table_tokens)
 
+    if len(parts.blocks) > MAX_DIAGRAMS:
+        block = parts.blocks[MAX_DIAGRAMS]
+        msg = f"図は {MAX_DIAGRAMS} 個まで（{len(parts.blocks)} 個ある）"
+        return ParseResult(
+            compiled=None, diagnostics=[_doc_error("E_TOO_LARGE", msg, block.fence_line)]
+        ), coverage
     results: list[DiagramResult] = []
     for block in parts.blocks:
         result, bdiags = _compile_block(block, coverage)
         diags.extend(bdiags)
         if result is not None:
             results.append(result)
+        if len(coverage.tokens) > MAX_TOKENS:
+            msg = f"トークンは {MAX_TOKENS} 個まで"
+            diags.append(_doc_error("E_TOO_LARGE", msg, block.fence_line))
+            return ParseResult(compiled=None, diagnostics=diags), coverage
 
     by_id: dict[str, DiagramResult] = {}
     for r in results:
@@ -394,6 +430,7 @@ def compile_with_coverage(
 
     legacy_rule_ids = {rule.id for ir in legacy_ir for rule in ir.rules}
     rows, pending, rdiags = _parse_requirements(parts.tables, coverage, legacy_rule_ids)
+    level_index = _level_index(rows)
     diags.extend(rdiags)
     for req_id, ref, cell in pending:
         diagram_id, element_id = ref.split("#")
@@ -453,7 +490,7 @@ def compile_with_coverage(
                     id=f"{r.diagram_id}#{c.name}",
                     class_name=c.name,
                     operations=c.operations,
-                    level=_level({c.name}, r.diagram_id, rows),
+                    level=_level({c.name}, r.diagram_id, level_index),
                 )
             )
 
@@ -499,7 +536,7 @@ def compile_with_coverage(
     traces: list[TraceObligation] = []
     machines: list[StateMachine] = []
     for r in results:
-        level = _level(r.referenceable, r.diagram_id, rows)
+        level = _level(r.referenceable, r.diagram_id, level_index)
         if r.kind in ("sequence", "activity"):
             assert r.entry is not None and r.automaton is not None
             traces.append(
@@ -549,7 +586,6 @@ def compile_spec(
 
 
 __all__ = [
-    "LINE_MAX_CHARS",
     "PARSER_VERSION",
     "compile_spec",
     "compile_with_coverage",
