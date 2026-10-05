@@ -220,3 +220,89 @@ def test_repository_self_check(make_rule: MakeRule) -> None:
         "API-ERR-001:src/speclino/api/auth.py",
         "API-ERR-001:src/speclino/api/routes/review_runs.py",
     }
+
+
+ENVELOPE_PARAMS = {**PARAMS, "success_envelope_schema": "Envelope"}
+ENVELOPE_REF = "#/components/schemas/Envelope"
+
+
+def _openapi_with_success(schema: dict[str, Any] | None, status: str = "200") -> dict[str, Any]:
+    spec = json.loads(json.dumps(VALID_OPENAPI))
+    response: dict[str, Any] = {"description": "ok"}
+    if schema is not None:
+        response["content"] = {"application/json": {"schema": schema}}
+    spec["paths"]["/things"]["get"]["responses"][status] = response
+    return spec
+
+
+def test_envelope_ref_is_verified(
+    tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
+) -> None:
+    findings = _run(
+        tmp_path,
+        make_rule,
+        write_files,
+        {},
+        _openapi_with_success({"$ref": ENVELOPE_REF}),
+        ENVELOPE_PARAMS,
+    )
+    assert findings[0].verdict == "VERIFIED_IN_SCOPE"
+
+
+def test_envelope_allof_first_ref_is_verified(
+    tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
+) -> None:
+    schema = {"allOf": [{"$ref": ENVELOPE_REF}, {"properties": {"data": {"type": "object"}}}]}
+    findings = _run(
+        tmp_path, make_rule, write_files, {}, _openapi_with_success(schema), ENVELOPE_PARAMS
+    )
+    assert findings[0].verdict == "VERIFIED_IN_SCOPE"
+
+
+def test_envelope_missing_is_violated(
+    tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
+) -> None:
+    findings = _run(
+        tmp_path,
+        make_rule,
+        write_files,
+        {},
+        _openapi_with_success({"type": "object"}),
+        ENVELOPE_PARAMS,
+    )
+    assert findings[0].verdict == "VIOLATED"
+    assert findings[0].category == "constraint_mismatch"
+    assert "GET /things 200" in (findings[0].actual or "")
+
+
+def test_envelope_ignored_without_param_and_204_exempt(
+    tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
+) -> None:
+    findings = _run(tmp_path, make_rule, write_files, {}, _openapi_with_success({"type": "object"}))
+    assert findings[0].verdict == "VERIFIED_IN_SCOPE"
+    findings = _run(
+        tmp_path, make_rule, write_files, {}, _openapi_with_success(None, "204"), ENVELOPE_PARAMS
+    )
+    assert findings[0].verdict == "VIOLATED"  # 200 の既存応答は包まれていない
+    spec = _openapi_with_success(None, "204")
+    del spec["paths"]["/things"]["get"]["responses"]["200"]
+    findings = _run(tmp_path, make_rule, write_files, {}, spec, ENVELOPE_PARAMS)
+    assert findings[0].verdict == "VERIFIED_IN_SCOPE"
+
+
+def test_unknown_param_is_unknown_finding_not_raised(
+    tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
+) -> None:
+    findings = _run(tmp_path, make_rule, write_files, {}, VALID_OPENAPI, {**PARAMS, "typo": 1})
+    assert len(findings) == 1
+    assert findings[0].verdict == "UNKNOWN"
+    assert findings[0].requirement_id == "API-ERR-001"
+    assert "パラメーターが不正" in findings[0].message
+
+
+def test_openapi_without_paths_is_unknown(
+    tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
+) -> None:
+    findings = _run(tmp_path, make_rule, write_files, {}, {"openapi": "3.1.0"})
+    assert findings[0].verdict == "UNKNOWN"
+    assert findings[0].category == "unsupported_analysis"
