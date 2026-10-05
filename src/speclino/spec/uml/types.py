@@ -41,7 +41,10 @@ class Token:
 
 @dataclass
 class Coverage:
-    """トークンの網羅（grammar.md 4.3「全か無か」）。各トークンを ir / ignored / error に分類する。"""
+    """トークンの網羅（設計 4.3「全か無か」）。
+
+    各トークンを ir / ignored / error に分類する。
+    """
 
     tokens: list[Token] = field(default_factory=list)
     marks: dict[tuple[int, int], Classification] = field(default_factory=dict)

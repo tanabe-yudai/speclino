@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-
 from speclino.spec.uml.types import (
     MarkdownError,
     MarkdownParts,
@@ -13,12 +11,20 @@ from speclino.spec.uml.types import (
 )
 
 REQ_HEADER = ("ID", "level", "要求", "形式化")
-_FENCE_RE = re.compile(r"^```(.*)$")
-_SEP_RE = re.compile(r"^\|[\s\-:|]+\|?\s*$")
+_SEP_CHARS = frozenset("|-: \t")
+
+
+def _is_separator(line: str) -> bool:
+    """`| --- | :-: |` 形式の区切り行か（正規表現を使わない 1 回の走査）。"""
+    s = line.strip()
+    return s.startswith("|") and "-" in s and all(c in _SEP_CHARS for c in s)
 
 
 def _cells(line: str, line_no: int) -> list[Token]:
-    """`| a | b |` を列ごとの CELL トークンにする。column は列の中身の開始位置（空なら `|` の直後）。"""
+    """`| a | b |` を列ごとの CELL トークンにする。
+
+    column は列の中身の開始位置（空なら `|` の直後）。
+    """
     body = line.rstrip()
     start = body.index("|") + 1
     end = len(body) - 1 if body.endswith("|") else len(body)
@@ -47,9 +53,8 @@ def split_markdown(text: str) -> MarkdownParts:
     while i < len(lines):
         line = lines[i]
         line_no = i + 1
-        fence = _FENCE_RE.match(line)
-        if fence:
-            lang = fence.group(1).strip()
+        if line.startswith("```"):
+            lang = line[3:].strip()
             j = i + 1
             while j < len(lines) and not lines[j].startswith("```"):
                 j += 1
@@ -70,10 +75,8 @@ def split_markdown(text: str) -> MarkdownParts:
             names = tuple(c.text for c in header)
             if names[:2] == REQ_HEADER[:2]:
                 j = i + 1
-                if j >= len(lines) or not _SEP_RE.match(lines[j].strip()):
-                    errors.append(
-                        MarkdownError("E_REQ_TABLE", "要求の表に区切り行が無い", line_no)
-                    )
+                if j >= len(lines) or not _is_separator(lines[j]):
+                    errors.append(MarkdownError("E_REQ_TABLE", "要求の表に区切り行が無い", line_no))
                     i = j
                     continue
                 if names != REQ_HEADER:

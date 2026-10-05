@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import re
+from collections.abc import Callable
 
 from speclino.spec.uml.types import Token, TokenKind
 
@@ -54,9 +54,30 @@ _SYMBOLS: tuple[tuple[str, TokenKind], ...] = tuple(
         key=lambda s: -len(s[0]),
     )
 )
-_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*")
-_INT_RE = re.compile(r"[0-9]+")
-_TEXT_RE = re.compile(r"[^\x00-\x7f]+")
+_ALPHA = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_")
+_DIGITS = frozenset("0123456789")
+_WORD = _ALPHA | _DIGITS
+
+
+def _scan_name(text: str, i: int) -> int:
+    """NAME（ドット区切りの識別子）の終わりの位置。正規表現を使わず 1 回の走査で読む。"""
+    n = len(text)
+    j = i + 1
+    while True:
+        while j < n and text[j] in _WORD:
+            j += 1
+        if j + 1 < n and text[j] == "." and text[j + 1] in _ALPHA:
+            j += 2
+            continue
+        return j
+
+
+def _scan_while(text: str, i: int, pred: Callable[[str], bool]) -> int:
+    n = len(text)
+    j = i
+    while j < n and pred(text[j]):
+        j += 1
+    return j
 
 
 def tokenize_line(text: str, line: int) -> list[Token]:
@@ -70,20 +91,20 @@ def tokenize_line(text: str, line: int) -> list[Token]:
             i += 1
             continue
         col = i + 1
-        m = _NAME_RE.match(text, i) or None
-        if m:
-            tokens.append(Token("NAME", m.group(), line, col))
-            i = m.end()
+        if ch in _ALPHA:
+            j = _scan_name(text, i)
+            tokens.append(Token("NAME", text[i:j], line, col))
+            i = j
             continue
-        m = _INT_RE.match(text, i)
-        if m:
-            tokens.append(Token("INT", m.group(), line, col))
-            i = m.end()
+        if ch in _DIGITS:
+            j = _scan_while(text, i, lambda c: c in _DIGITS)
+            tokens.append(Token("INT", text[i:j], line, col))
+            i = j
             continue
-        m = _TEXT_RE.match(text, i)
-        if m:
-            tokens.append(Token("TEXT", m.group(), line, col))
-            i = m.end()
+        if not ch.isascii():
+            j = _scan_while(text, i, lambda c: not c.isascii())
+            tokens.append(Token("TEXT", text[i:j], line, col))
+            i = j
             continue
         for sym, kind in _SYMBOLS:
             if text.startswith(sym, i):
@@ -97,7 +118,10 @@ def tokenize_line(text: str, line: int) -> list[Token]:
 
 
 def tokenize_block_line(text: str, line: int) -> list[Token]:
-    """Mermaid ブロックの 1 行。`%%@` は宣言、`%%{` は directive、ほかの `%%` はコメント（行全体で 1 トークン）。"""
+    """Mermaid ブロックの 1 行。
+
+    `%%@` は宣言、`%%{` は directive、ほかの `%%` はコメント（どれも行全体で 1 トークン）。
+    """
     stripped = text.lstrip()
     col = len(text) - len(stripped) + 1
     if stripped.startswith("%%@"):
