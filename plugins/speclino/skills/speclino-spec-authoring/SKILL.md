@@ -11,7 +11,9 @@ VERIFIED_IN_SCOPE / VIOLATED / UNKNOWN / REVIEW の 4 値を出す。実装の�
 語彙・既存の要求・チーム規約を読み、`verification_start` で検証を開始し、`verification_get` で
 結果を読む。LLM（あなた）は証拠を集め候補を書くだけで、判定も承認もしない。判定はエンジンだけが
 行う（verdict を書き換える手段は無い）。承認は人が PR コメントで行う（`/speclino approve-spec`）。
-承認済みの判定は書き換えない。
+承認済みの判定は書き換えない。チームが承認したスキル・指示書・仕様は `skill_get` / `spec_get`
+で読み、手元の `.speclino/lock.json` が古くないかを `sync_status` で確かめる（古ければ
+`speclino sync` を勧める）。
 <!-- mcp-instructions:end -->
 
 ## SpecLino エージェントに相談する（A2A）
@@ -21,8 +23,9 @@ VERIFIED_IN_SCOPE / VIOLATED / UNKNOWN / REVIEW の 4 値を出す。実装の�
 
 - **A2A（会話）**: 仕様の下書きのレビュー、要求の意味や判定の理由の説明、検査の後の聞き取り。
   あいまいな点は質問が返り（入力待ち）、同じタスクに文章で答えると続きが進む
-- **MCP（関数呼び出し）**: `context_get` / `verification_start` / `verification_get`。
-  語彙の取得と検証の実行・結果の読み取りは、こちらで行う
+- **MCP（関数呼び出し）**: `context_get` / `verification_start` / `verification_get`、
+  チームの知識を読む `sync_status` / `spec_get` / `skill_get`。語彙の取得と検証の実行・結果の
+  読み取りは、こちらで行う
 
 接続先は Agent Card（`https://<your-host>/.well-known/agent-card.json`、認証不要）に書いてある。
 `/a2a` への送信にはワークスペースの MCP トークン（`slmcp_…`）を Bearer で付ける。
@@ -70,6 +73,27 @@ run_id: 00000000-0000-0000-0000-000000000000
 
 **補足は正式な回答ではない。** 聞き取りで記録した補足は判定にもゲートにも効かない。判定は
 検査器だけが行い、承認は人が PR で行う。
+
+## チームの知識を取り込む（`speclino sync`）
+
+チームが SpecLino で承認したスキル・指示書・仕様は、リポジトリごとに配信される。
+
+- **書き出し**: リポジトリのルートで `speclino sync --url https://<your-host> --repo-id <GitHub のリポジトリ ID>`
+  （2 回目からは `--repo-id` を省ける）。トークンは環境変数 `SPECLINO_SYNC_TOKEN` に sync 用の
+  トークン（`slsync_…`。ワークスペースの owner / approver が発行し、1 つのリポジトリに限る）を入れる。
+  引数には書かない
+- **書き出し先**: スキルは `.claude/skills/<name>/` と `.agents/skills/<name>/`、指示書は
+  `AGENTS.md` / `CLAUDE.md` の `<!-- speclino:begin bundle=<n> -->` 〜 `<!-- speclino:end -->` の
+  区画（区画の外は書き換えない）、仕様は `.speclino/specs/<name>.md`（読み取り専用の写し）。
+  最後に `.speclino/lock.json`（どの bundle を宣言しているか、書き出したファイルのハッシュ、署名、
+  30 日の期限）を書く
+- **手で直さない**: 書き出したファイルや区画の中身を直すと、PR のゲートで lock の照合
+  （`KNOWLEDGE-LOCK-001`）が UNKNOWN になる。直したいときは SpecLino で改訂を出して承認を通し、
+  もう一度 sync する。sync は手で変えたファイルを消さずに残し、警告を出す
+- **MCP**: `sync_status(repo_full_name, lock_json)` に lock の本文を渡すと、今の承認済みの知識と
+  比べて `stale`・`verdict`・`changed`（変わった知識）を返す（判定はゲートと同じ）。
+  `spec_get` / `skill_get(repo_full_name, name)` は承認済みの本文を返す。sync 用トークンでも
+  呼べるが、検証の開始（`verification_start`）はできない
 
 ## 0. チーム規約を読む（仕様を書く前にも、実装する前にも）
 

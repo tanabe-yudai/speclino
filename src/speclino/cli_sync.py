@@ -104,13 +104,18 @@ def sync(
         raise typer.Exit(code=2)
     try:
         payload = fetch_payload(base, token, target_id)
-        write_bundle(repo, payload.files, payload.lock)
+        kept = write_bundle(repo, payload.files, payload.lock)
     except (SyncFailed, SyncRejected, OSError) as e:
         typer.echo(
             f"同期できなかった（手元のファイルと lock は前のまま）: {e}".replace(token, "***"),
             err=True,
         )
         raise typer.Exit(code=1) from e
+    for path in kept:
+        typer.echo(
+            f"警告: {path} は手元で変更されているため消さずに残した（不要なら手で消してください）",
+            err=True,
+        )
     typer.echo(
         f"bundle {payload.lock.bundle_generation} を書き出した"
         f"（ファイル {len(payload.files)}、知識 {len(payload.lock.members)}）"

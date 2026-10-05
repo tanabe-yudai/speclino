@@ -11,6 +11,7 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -29,9 +30,9 @@ from speclino.api.app import create_app
 from speclino.api.deps import AppState
 from speclino.domain.knowledge import ArtifactScope, InstructionsContent, SkillContent
 from speclino.domain.knowledge_sync import SyncIdentity
+from speclino.services import bundle_signing, sync_tokens
 from speclino.services import knowledge_registry as kr
 from speclino.services import knowledge_sync as ks
-from speclino.services import sync_tokens
 from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
 from speclino.settings import Settings
 from tests.integration.services.conftest import project_id_of, register_repo, repo_id_of
@@ -264,3 +265,32 @@ async def test_sync_status_reports_stale_lock(world: World) -> None:
         {"name": "review", "kind": "skill", "lock_revision": 1, "current_revision": 2}
     ]
     assert broken["stale"] is True
+    assert stale["verdict"] == "REVIEW" and broken["verdict"] == "UNKNOWN"
+
+
+async def test_sync_status_rejects_expired_or_other_repo_lock(world: World) -> None:
+    w = world
+    await _seed(w)
+    token = await _sync_token(w)
+    async with w.f() as s, s.begin():
+        identity = await sync_tokens.authenticate(s, token)
+        assert isinstance(identity, SyncIdentity)
+        payload = await ks.fetch_for_sync(s, identity, repo_id_of(w.repo))
+    base = payload.lock
+
+    def resign(**update: Any) -> str:
+        lock = base.model_copy(update=update)
+        signed = lock.model_copy(update={"signature": bundle_signing.sign(ks.lock_payload(lock))})
+        return signed.model_dump_json()
+
+    expired = resign(
+        issued_at=base.issued_at - timedelta(days=60),
+        expires_at=base.issued_at - timedelta(days=30),
+    )
+    other_repo = resign(github_repo_id=repo_id_of(w.repo) + 1)
+    async with _client(w, token) as c:
+        for lock_json, word in ((expired, "期限"), (other_repo, "別のワークスペースかリポジトリ")):
+            got = _json(
+                await c.call_tool("sync_status", {"repo_full_name": w.repo, "lock_json": lock_json})
+            )
+            assert got["stale"] is True and got["verdict"] == "UNKNOWN" and word in got["reason"]

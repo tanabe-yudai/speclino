@@ -46,7 +46,6 @@ from speclino.db.repositories.review_runs import ReviewRunRepository
 from speclino.db.repositories.sync_tokens import KnowledgeFetchRepository
 from speclino.domain.knowledge import (
     ArtifactRevision,
-    KnowledgeLock,
     ResolvedKnowledge,
     SkillContent,
     SpecContent,
@@ -182,11 +181,12 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
     async def sync_status(repo_full_name: str, lock_json: str, ctx: Context) -> dict[str, Any]:
         """手元の `.speclino/lock.json`（本文）が今の承認済みの知識と比べて古いか。
 
-        `stale` が true なら `speclino sync` で最新にする。`changed` は世代の間で変わった知識。
+        `stale` が true なら `speclino sync` で最新にする（期限切れ・署名不一致・別のリポジトリの
+        lock も stale）。`changed` は lock と今の間で変わった知識。判定はゲートと同じ。
         """
         principal = _principal(ctx)
-        _, resolved = await _resolve(get_state(), principal, repo_full_name)
-        return _sync_status(resolved, lock_json)
+        project, resolved = await _resolve(get_state(), principal, repo_full_name)
+        return _sync_status(project, resolved, lock_json)
 
     @mcp.tool()
     async def spec_get(repo_full_name: str, name: str, ctx: Context) -> dict[str, Any]:
@@ -272,53 +272,31 @@ async def _record_fetch(
         )
 
 
-def _sync_status(resolved: ResolvedKnowledge, lock_json: str) -> dict[str, Any]:
-    current = {
-        m.artifact_id: m
-        for m in resolved.bundle.members
-        if m.artifact_id
-        in {r.artifact_id for r in (*resolved.skills, *resolved.instructions, *resolved.specs)}
-    }
+def _sync_status(project: Project, resolved: ResolvedKnowledge, lock_json: str) -> dict[str, Any]:
+    """ゲート（`KNOWLEDGE-LOCK-001`）と同じ `assess_lock` で判定する（ファイルの照合は除く）。"""
     generation = resolved.bundle.generation
-    try:
-        lock = KnowledgeLock.model_validate_json(lock_json)
-    except ValueError:
+    if project.github_repo_id is None:
         return {
             "current_generation": generation,
             "lock_generation": None,
             "stale": True,
-            "reason": "lock を読めない",
+            "verdict": "UNKNOWN",
+            "reason": "リポジトリ ID が未登録のため照合できない",
             "changed": [],
         }
-    if not knowledge_sync.verify_lock(lock) or lock.workspace != resolved.bundle.workspace:
-        return {
-            "current_generation": generation,
-            "lock_generation": lock.bundle_generation,
-            "stale": True,
-            "reason": "lock の署名が合わないか別のワークスペースのもの",
-            "changed": [],
-        }
-    before = {m.artifact_id: m for m in lock.members}
-    changed = []
-    for aid in sorted(set(before) | set(current)):
-        old, new = before.get(aid), current.get(aid)
-        if old is not None and new is not None and old.content_hash == new.content_hash:
-            continue
-        ref = new or old
-        assert ref is not None
-        changed.append(
-            {
-                "name": ref.name,
-                "kind": ref.kind,
-                "lock_revision": old.revision if old else None,
-                "current_revision": new.revision if new else None,
-            }
-        )
+    a = knowledge_sync.assess_lock(
+        lock_json,
+        current=resolved.bundle,
+        current_members=knowledge_sync.project_members(resolved),
+        github_repo_id=project.github_repo_id,
+    )
     return {
         "current_generation": generation,
-        "lock_generation": lock.bundle_generation,
-        "stale": bool(changed),
-        "changed": sorted(changed, key=lambda c: (c["kind"], c["name"])),
+        "lock_generation": a.lock.bundle_generation if a.lock is not None else None,
+        "stale": a.verdict != "VERIFIED_IN_SCOPE",
+        "verdict": a.verdict,
+        "reason": a.message,
+        "changed": a.changed,
     }
 
 

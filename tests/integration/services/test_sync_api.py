@@ -201,7 +201,14 @@ async def test_sync_bundle_writes_and_verifies(ctx: Ctx, tmp_path: Path) -> None
     repo.mkdir()
     ks.write_bundle(repo, files, lock)
     lock_json = (repo / ks.LOCK_PATH).read_text()
-    assert ks.check_lock(repo, lock_json, current=bundle).verdict == "VERIFIED_IN_SCOPE"
+    finding = ks.check_lock(
+        repo,
+        lock_json,
+        current=bundle,
+        current_members=lock.members,
+        github_repo_id=repo_id_of(x.repo),
+    )
+    assert finding.verdict == "VERIFIED_IN_SCOPE"
 
     async with x.engine.connect() as conn:
         row = (

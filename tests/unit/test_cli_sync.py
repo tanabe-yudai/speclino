@@ -57,9 +57,15 @@ def test_sync_writes_bundle(
     assert (tmp_path / ".claude/skills/review/SKILL.md").exists()
     lock_json = (tmp_path / ks.LOCK_PATH).read_text()
     _, _, bundle = _payload(BASE)
-    assert ks.check_lock(tmp_path, lock_json, current=bundle, now=NOW).verdict == (
-        "VERIFIED_IN_SCOPE"
+    finding = ks.check_lock(
+        tmp_path,
+        lock_json,
+        current=bundle,
+        current_members=bundle.members,
+        github_repo_id=42,
+        now=NOW,
     )
+    assert finding.verdict == "VERIFIED_IN_SCOPE"
     # 2 回目はリポジトリ ID を lock から読む
     again = runner.invoke(cli.app, ["sync", "--repo", str(tmp_path)])
     assert again.exit_code == 0, again.output
@@ -118,3 +124,20 @@ def test_sync_rejects_lock_for_other_repo(
     result = runner.invoke(cli.app, ["sync", "--repo", str(tmp_path), "--repo-id", "7"])
     assert result.exit_code == 1
     assert not (tmp_path / ks.LOCK_PATH).exists()
+
+
+def test_sync_warns_about_kept_user_files(
+    tmp_path: Path, server: Callable[[int, bytes], list[httpx.Request]]
+) -> None:
+    (tmp_path / ".speclino/specs").mkdir(parents=True)
+    (tmp_path / ".speclino/specs/user.md").write_text("user spec")
+    _, lock, _ = _payload(BASE)
+    forged = lock.model_copy(
+        update={"files": {".speclino/specs/user.md": ks.file_hash("y")}, "signature": "forged"}
+    )
+    (tmp_path / ks.LOCK_PATH).write_text(forged.model_dump_json())
+    server(200, _body())
+    result = runner.invoke(cli.app, ["sync", "--repo", str(tmp_path), "--repo-id", "42"])
+    assert result.exit_code == 0, result.output
+    assert "警告: .speclino/specs/user.md" in result.output
+    assert (tmp_path / ".speclino/specs/user.md").read_text() == "user spec"

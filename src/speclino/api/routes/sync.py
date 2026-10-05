@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any
 
@@ -23,6 +24,7 @@ from speclino.domain.workspace import AuthUser
 from speclino.services import knowledge_sync, sync_tokens
 from speclino.services.workspaces import NotPermitted, WorkspaceNotFound
 
+logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/api/workspaces/{slug}/sync-tokens",
     tags=["sync-tokens"],
@@ -123,7 +125,16 @@ async def get_sync_bundle(
     except LookupError as e:
         raise api_error(404, "repository_not_found", "このトークンのリポジトリではない") from e
     except ValueError as e:
-        raise api_error(409, "bundle_unavailable", f"知識を配信できない: {e}") from e
+        # 内部の理由は応答に出さずログにだけ残す（トークンは含まない。ワークスペースと型だけ）
+        logger.warning(
+            "sync の bundle を配信できない: workspace=%s %s: %s",
+            identity.workspace,
+            type(e).__name__,
+            e,
+        )
+        raise api_error(
+            409, "bundle_unavailable", "知識を配信できない。管理者に連絡してください"
+        ) from e
     return payload.model_dump(mode="json")
 
 
