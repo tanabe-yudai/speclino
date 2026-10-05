@@ -376,3 +376,37 @@ async def test_sync_token_and_fetch_tables(ws: Ws) -> None:
         assert await SyncTokenRepository(s).revoke(token_id=tok.id, team=ws.slug)
     async with ws.f() as s:
         assert await SyncTokenRepository(s).find_active(h) is None
+
+
+async def test_policy_activation_creates_bundle(ws: Ws) -> None:
+    from speclino.domain.policy import PolicyPackage, PolicyRule
+    from speclino.services import policy_governance as gov
+    from speclino.services.check_pipeline import policy_package_hash
+
+    aid = await _create(ws, "instructions", "agents", _instr())
+    await _approve(ws, aid)
+    rule = PolicyRule.model_validate(
+        {
+            "id": "DOC-001",
+            "version": "1.0.0",
+            "level": "advisory",
+            "title": "題",
+            "text": "本文",
+            "applies_to": {"paths": ["docs/**"]},
+            "verifier": None,
+            "on_missing_input": "unknown",
+        }
+    )
+    pkg = PolicyPackage(id="team", version="1", status="active", owner="o", rules=[rule])
+    async with ws.f() as s, s.begin():
+        draft = await gov.create_draft(s, team=ws.slug, package=pkg, author="member1")
+        await gov.approve(s, team=ws.slug, revision=draft.revision, approver="owner1")
+    async with ws.f() as s:
+        bundle = await kr.current_bundle(s, ws.slug)
+    assert bundle is not None and bundle.generation == 2
+    assert bundle.policy_revision == draft.revision
+    assert bundle.policy_hash == policy_package_hash(pkg)
+    assert [m.artifact_id for m in bundle.members] == [aid]  # 承認済みの知識はそのまま残る
+    async with ws.f() as s:
+        resolved = await kr.resolve_for_project(s, bundle, ws.p1)
+    assert resolved.policy is not None and resolved.policy.revision == draft.revision

@@ -18,7 +18,14 @@ import yaml
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from speclino.db.models import AuditEvent, Base, PolicyRevisionRecord, TeamRecord, WorkspaceMember
+from speclino.db.models import (
+    AuditEvent,
+    Base,
+    BundleRecord,
+    PolicyRevisionRecord,
+    TeamRecord,
+    WorkspaceMember,
+)
 from speclino.db.repositories.policy_revisions import PolicyRevisionRepository
 from speclino.db.repositories.teams import TeamRepository
 from speclino.domain.policy import PolicyApplicability, PolicyPackage, PolicyRule
@@ -492,6 +499,10 @@ async def test_seed_fails_when_it_races_with_create_draft_and_approve() -> None:
             await conn.execute(
                 WorkspaceMember.__table__.delete().where(WorkspaceMember.team == team)
             )
+            # 規約の承認で作られた bundle（S62）
+            await conn.execute(
+                BundleRecord.__table__.delete().where(BundleRecord.workspace == team)
+            )
             await conn.execute(TeamRecord.__table__.delete().where(TeamRecord.team == team))
         await engine.dispose()
 
@@ -553,6 +564,7 @@ async def test_denied_audit_survives_the_callers_rollback(_schema_ready: None) -
                 PolicyRevisionRecord.__table__.delete().where(PolicyRevisionRecord.team == team)
             )
             await s.execute(WorkspaceMember.__table__.delete().where(WorkspaceMember.team == team))
+            await s.execute(BundleRecord.__table__.delete().where(BundleRecord.workspace == team))
             await s.execute(TeamRecord.__table__.delete().where(TeamRecord.team == team))
             await s.commit()
         await engine.dispose()
