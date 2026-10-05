@@ -501,6 +501,39 @@ def policy_seed(
     )
 
 
+@app.command("import-specs")
+def import_specs(
+    workspace: Annotated[str, typer.Option("--workspace", help="取り込み先のワークスペース")],
+    project_id: Annotated[
+        str, typer.Option("--project-id", help="仕様を当てるプロジェクトの ID（scope）")
+    ],
+    author: Annotated[str, typer.Option("--author", help="下書きの作者として記録する uid")],
+    repo: Annotated[
+        Path, typer.Option("--repo", help="specs/ と .speclino/ のあるディレクトリ")
+    ] = Path("."),
+) -> None:
+    """リポジトリの旧形式の仕様（specs/*.md・specs/ir・domain.yaml）を spec の下書きにする。
+
+    承認は画面か API で行う（承認時にサーバが IR を固定する）。図への書き換えは行わない。
+    DB 接続は `SPECLINO_DATABASE_URL`。同じ名前の仕様が既にあれば拒否する（終了コード 2）。
+    """
+    from speclino.domain.knowledge import ArtifactRevision
+    from speclino.services.spec_import import import_specs as _import
+
+    async def work(s: AsyncSession) -> list[ArtifactRevision]:
+        return await _import(
+            s, workspace=workspace, project_id=project_id, repo_root=repo, author=author
+        )
+
+    try:
+        created = _in_transaction(work)
+    except (OSError, LookupError) as e:
+        typer.echo(f"入力不正: {e}", err=True)
+        raise typer.Exit(code=2) from e
+    for rev in created:
+        typer.echo(f"{rev.name}: 下書き {rev.revision} を作成した（{rev.content_hash}）")
+
+
 @workspace_app.command("create")
 def workspace_create(
     slug: Annotated[

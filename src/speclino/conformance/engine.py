@@ -448,7 +448,10 @@ class ConformanceEngine:
         channel = _channel_of(req)
         op, required = req.count.operator, req.count.value
         expected = f"{req.operation_or_target} を {req.count.operator} {required} 回" + (
-            f"（引数 {', '.join(req.arguments_equal)} が一致）" if req.arguments_equal else ""
+            # 引数名は名前順（JSONB に保存した IR はキーの順を保たないため。文言を順序に依らせない）
+            f"（引数 {', '.join(sorted(req.arguments_equal))} が一致）"
+            if req.arguments_equal
+            else ""
         )
         counts_ok = [_count_ok(op, required, n) for n in range(sel.min_count, sel.max_count + 1)]
         count_holds = all(counts_ok)
