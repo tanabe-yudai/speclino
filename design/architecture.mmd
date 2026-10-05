@@ -1,11 +1,14 @@
 flowchart TB
-  subgraph USERS["利用者"]
+  subgraph USERS["チーム"]
     direction LR
-    DEV["開発者・審査員<br/>ブラウザ"]
-    ED["エディタのエージェント<br/>（Claude Code 等）"]
+    DEV["開発者・承認者<br/>ブラウザ（知識・規約・可観測性）"]
+    ED["各自のコーディングエージェント<br/>（Claude Code / Codex 等）"]
   end
 
-  subgraph GHAPPSG["GitHub"]
+  subgraph REPO["対象リポジトリ（GitHub）"]
+    direction LR
+    LOCAL["sync の書き出し<br/>.claude/skills ・ .agents/skills<br/>AGENTS.md / CLAUDE.md の管理区画<br/>.speclino/specs ・ lock.json（署名つき）"]
+    TRUSTED["デフォルトブランチ（信頼側）<br/>bindings.yaml ・ contracts/<br/>exceptions.yaml ・ プロジェクト規約"]
     GHAPP["GitHub App<br/>webhook ・ Checks API ・ PR コメント"]
   end
 
@@ -14,34 +17,34 @@ flowchart TB
 
     subgraph GCP_RUN["Cloud Run（同一イメージ、SPECLINO_ROLE で役割切替）"]
       direction LR
-      WEB["<b>speclino-web</b>（公開）<br/>FastAPI: /webhooks/github ・ /api/* ・ /mcp ・ React SPA 配信"]
-      WORKER["<b>speclino-worker</b>（IAM 必須・Cloud Tasks の OIDC からのみ呼出し可）<br/>ReviewRunService：スナップショット→検査（Z3）→未解決ならエージェント→gate→Checks 更新"]
-      SANDBOX["<b>speclino-sandbox</b>（IAM 必須・worker からのみ呼出し可）<br/>権限ゼロ SA・Cloud Run sandboxes（Preview）<br/>Rule.tests の ID だけを隔離実行（test_run）"]
+      WEB["<b>speclino-web</b>（公開）<br/>FastAPI: /api/* ・ /mcp ・ /a2a ・ /api/sync/bundle<br/>/webhooks/github ・ React SPA 配信<br/>知識の改訂・承認 → bundle（署名）"]
+      WORKER["<b>speclino-worker</b>（IAM 必須・Cloud Tasks の OIDC からのみ）<br/>bundle を固定 → 仕様（UML/IR）・規約・lock を検査（Z3）<br/>→ 未解決ならエージェント → gate → Checks 更新"]
+      SANDBOX["<b>speclino-sandbox</b>（IAM 必須・worker からのみ）<br/>権限ゼロ SA・Rule.tests の ID だけを隔離実行"]
     end
 
     TASKS[("Cloud Tasks<br/>speclino-runs キュー")]
 
     subgraph GCP_DATA["データ / 秘密"]
       direction LR
-      SQL[("Cloud SQL（PostgreSQL）<br/>runs / findings / audit<br/>questions / policy_revisions<br/>/cloudsql Unix ソケット接続")]
+      SQL[("Cloud SQL（PostgreSQL）<br/>artifacts / artifact_revisions / bundles<br/>policy_revisions / attestations / llm_assessments<br/>knowledge_fetches / runs / findings / audit")]
       GCS[("GCS<br/>run-manifest / spec-ir / code-ir<br/>findings / review.md")]
-      SECRETS[("Secret Manager<br/>DB接続URL・GitHub App秘密鍵<br/>webhook秘密・MCPトークン")]
+      SECRETS[("Secret Manager<br/>DB 接続・GitHub App 秘密鍵<br/>webhook 秘密・bundle 署名鍵")]
     end
 
     subgraph GCP_AUX["補助サービス"]
       direction LR
       IDP["Identity Platform<br/>メール / パスワード"]
-      VERTEX["Vertex AI（global）<br/>Gemini（ADK エージェント）<br/>証拠収集・確認のみ。判定はしない"]
+      VERTEX["Vertex AI（Gemini）<br/>執筆の提案・LLM 支援の規約（常に REVIEW）<br/>証拠収集・確認。変換と判定はしない"]
       OBS["Cloud Logging / Cloud Trace"]
     end
 
     subgraph GCP_DEPLOY["デプロイ"]
       direction LR
-      AR["Artifact Registry<br/>speclino イメージ"]
-      MIGRATE["Cloud Run Job<br/>speclino-migrate<br/>alembic upgrade head"]
+      AR["Artifact Registry"]
+      MIGRATE["Cloud Run Job<br/>speclino-migrate"]
     end
 
-    NOTE["原則：判定は決定的な検査器（Z3）だけが行う。<br/>エージェントは証拠収集と確認のみ。<br/>ゲートは未検証（UNKNOWN/REVIEW）が残れば失敗（フェイルクローズ）"]
+    NOTE["原則：UML → IR の変換と判定は決定的（parser と Z3）。<br/>AI は提案と証拠収集だけ。<br/>ゲートは必須ルールに UNKNOWN / REVIEW が残れば失敗（フェイルクローズ）"]
   end
 
   subgraph GHACTSG["GitHub Actions（CI/CD）"]
@@ -49,14 +52,17 @@ flowchart TB
   end
 
   DEV -- "ログイン" --> IDP
-  DEV --> WEB
-  ED -- "/mcp（Bearer）<br/>context_get / verification_*" --> WEB
+  DEV -- "改訂・承認・観測" --> WEB
+  ED -- "MCP / A2A<br/>context_get ・ spec_get ・ skill_get<br/>sync_status ・ spec_suggest" --> WEB
+  ED -- "speclino sync<br/>（sync トークン）" --> WEB
+  ED -. "読み込む" .-> LOCAL
   GHAPP -- "webhook（HMAC 検証・重複排除）" --> WEB
   WEB -- "ID トークン検証" --> IDP
   WEB -- enqueue --> TASKS
   TASKS -- OIDC --> WORKER
-  WORKER -- "Checks API ・ PR コメント" --> GHAPP
+  WORKER -- "head と信頼側を取得<br/>Checks API ・ PR コメント" --> GHAPP
   WORKER -- "ツールは ToolGateway 経由・書込みなし" --> VERTEX
+  WEB -- "書き換えの提案のみ" --> VERTEX
   WORKER -- "Rule.tests の ID のみ" --> SANDBOX
   WEB --> SQL
   WORKER --> SQL
