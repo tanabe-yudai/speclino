@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from examples.shop.materialize import DOMAIN, SPEC, apply_mutation, materialize, mutation_names
@@ -55,11 +56,14 @@ from speclino.services import policy_governance as pg
 from speclino.services import workspace_admin as wa
 from speclino.services.knowledge_inputs import make_knowledge_resolver
 from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
+from speclino.settings import Settings
 from speclino.spec import load_domain
 
 WORKSPACE = "shop-team"
 REPO = "example/shop"
-GITHUB_REPO_ID = 7_200_001
+# 実在しえない GitHub のリポジトリ ID（JavaScript の安全な整数の上限から下に数える）。本物の
+# リポジトリと取り違えないため
+GITHUB_REPO_ID = 2**53 - 1
 OWNER = "judge"  # web の開発ログイン（X-Dev-User）の利用者
 AUTHOR = "spec-author"
 SEED_LLM_MODEL = "scripted-checklist"
@@ -151,6 +155,29 @@ class ScriptedChecklistLlm:
             for item in _ITEM.findall(head.partition("チェック項目")[2])
         ]
         return JsonGeneration(json.dumps({"items": items}, ensure_ascii=False), 0, 0)
+
+
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+class UnsafeSeedTarget(RuntimeError):
+    """本番か遠隔の DB に seed しようとした（接続する前に止める）。"""
+
+
+def check_seed_target(settings: Settings, *, allow_remote_db: bool = False) -> None:
+    """seed してよい環境か。env=prod は常に拒否。DB のホストがローカル（localhost・ループバック・
+    unix socket）でなければ、`allow_remote_db` を明示したときだけ通す。"""
+    if settings.env == "prod":
+        raise UnsafeSeedTarget("SPECLINO_ENV=prod には seed しない")
+    url = make_url(settings.database_url)
+    host = url.host or url.query.get("host")
+    if isinstance(host, tuple):
+        host = host[0] if host else None
+    local = host is None or host in _LOCAL_HOSTS or str(host).startswith("/")
+    if not local and not allow_remote_db:
+        raise UnsafeSeedTarget(
+            f"DB のホスト {host} はローカルではない（遠隔の DB に入れるなら --allow-remote-db）"
+        )
 
 
 @dataclass(frozen=True)
@@ -388,5 +415,7 @@ __all__ = [
     "WORKSPACE",
     "ScriptedChecklistLlm",
     "SeedResult",
+    "UnsafeSeedTarget",
+    "check_seed_target",
     "seed",
 ]

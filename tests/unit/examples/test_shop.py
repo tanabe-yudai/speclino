@@ -24,7 +24,7 @@ STATUS_SHIP = ("status", "OrderService.ship_order")
 BINDINGS = ("KNOWLEDGE-BINDINGS-001", "knowledge:config")
 
 # 変異 → main との違い（(要求 ID, 振る舞い) → 判定）。ここに無い Finding は main と同じ判定
-EXPECTED_CHANGES: dict[str, dict[tuple[str, str], str]] = {
+EXPECTED_CHANGES: dict[str, dict[tuple[str, str], str | None]] = {
     "01-missing-charge": {PLACE: "VIOLATED"},
     "02-ship-from-pending": {STATUS_SHIP: "VIOLATED"},
     "03-refund-on-cancel": {CANCEL: "VIOLATED"},
@@ -55,8 +55,11 @@ def verdicts(findings: list[Any]) -> dict[tuple[str, str], str]:
 
 def changes(
     main: dict[tuple[str, str], str], variant: dict[tuple[str, str], str]
-) -> dict[tuple[str, str], str]:
-    return {k: v for k, v in variant.items() if main.get(k) != v}
+) -> dict[tuple[str, str], str | None]:
+    """main と違う Finding（キーの和で比べる。変異で消えた Finding は None）。"""
+    return {
+        k: variant.get(k) for k in main.keys() | variant.keys() if main.get(k) != variant.get(k)
+    }
 
 
 def test_spec_compiles_without_diagnostics() -> None:
@@ -108,3 +111,60 @@ def test_missing_call_has_a_counterexample(shop: tuple[Path, Any], tmp_path: Pat
     (f,) = [x for x in res.findings.findings if x.requirement_id == PLACE[0]]
     assert f.counterexample is not None
     assert "Payment.charge" in f.message
+
+
+# ---------------------------------------------------------------- seed の安全策
+
+
+def test_seed_refuses_prod_and_remote_db_before_connecting(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
+    import seed_demo
+
+    def no_connect(*_a: object, **_k: object) -> None:
+        raise AssertionError("接続してはいけない")
+
+    monkeypatch.setattr(seed_demo, "create_async_engine", no_connect)
+    monkeypatch.setenv("SPECLINO_ENV", "prod")
+    assert seed_demo.run(["--allow-remote-db"]) == 2
+    assert "prod" in capsys.readouterr().err
+
+    monkeypatch.setenv("SPECLINO_ENV", "local")
+    monkeypatch.setenv("SPECLINO_DATABASE_URL", "postgresql+asyncpg://u:p@db.example.com:5432/x")
+    assert seed_demo.run([]) == 2
+    assert "--allow-remote-db" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "postgresql+asyncpg://u:p@localhost:5432/x",
+        "postgresql+asyncpg://u:p@127.0.0.1/x",
+        "postgresql+asyncpg://u:p@[::1]:5432/x",
+        "postgresql+asyncpg://u:p@/x?host=/var/run/postgresql",
+    ],
+)
+def test_seed_accepts_local_db(url: str) -> None:
+    from examples.shop.seed import check_seed_target
+    from speclino.settings import Settings
+
+    check_seed_target(Settings(env="local", database_url=url))
+
+
+def test_seed_remote_db_needs_explicit_flag() -> None:
+    from examples.shop.seed import UnsafeSeedTarget, check_seed_target
+    from speclino.settings import Settings
+
+    remote = Settings(env="local", database_url="postgresql+asyncpg://u:p@10.0.0.5/x")
+    with pytest.raises(UnsafeSeedTarget):
+        check_seed_target(remote)
+    check_seed_target(remote, allow_remote_db=True)
+
+
+def test_seed_repo_id_cannot_be_a_real_repository() -> None:
+    from examples.shop.seed import GITHUB_REPO_ID
+
+    assert GITHUB_REPO_ID == 2**53 - 1

@@ -31,7 +31,7 @@ uv run python scripts/seed_demo.py --repo-dir build/shop-repo
 export SPECLINO_ENV=local SPECLINO_ROLE=all SPECLINO_AUTH_KIND=dev
 export SPECLINO_CODE_HOST_KIND=local
 export SPECLINO_LOCAL_REPOS="{\"example/shop\": \"$PWD/build/shop-repo\"}"
-export SPECLINO_LOCAL_REPO_IDS='{"example/shop": 7200001}'
+export SPECLINO_LOCAL_REPO_IDS='{"example/shop": 9007199254740991}'
 # 記録と同じモデル名にすると、変わっていないコードは記録を使い LLM を呼ばない
 export SPECLINO_LLM_POLICIES_MODEL=scripted-checklist SPECLINO_AGENT_ENABLED=false SPECLINO_SPEC_BOT_ENABLED=false
 uv run uvicorn speclino.api.app:app --port 8080

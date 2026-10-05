@@ -19,12 +19,18 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from examples.shop.seed import SEED_LLM_MODEL, seed  # noqa: E402
+from examples.shop.seed import (  # noqa: E402
+    GITHUB_REPO_ID,
+    SEED_LLM_MODEL,
+    UnsafeSeedTarget,
+    check_seed_target,
+    seed,
+)
 from speclino.settings import Settings  # noqa: E402
 
 
-async def main(repo_dir: Path, artifact_dir: Path) -> None:
-    engine = create_async_engine(Settings().database_url)
+async def main(repo_dir: Path, artifact_dir: Path, settings: Settings) -> None:
+    engine = create_async_engine(settings.database_url)
     try:
         result = await seed(
             async_sessionmaker(engine, expire_on_commit=False),
@@ -40,6 +46,7 @@ async def main(repo_dir: Path, artifact_dir: Path) -> None:
     print(f"リポジトリ: {result.repo_dir}")
     for branch, run_id in result.runs.items():
         print(f"  {branch}: /runs/{run_id}")
+    print(f"リポジトリ ID: {GITHUB_REPO_ID}（SPECLINO_LOCAL_REPO_IDS に使う）")
     print(
         "サーバーは SPECLINO_CODE_HOST_KIND=local、SPECLINO_LOCAL_REPOS / SPECLINO_LOCAL_REPO_IDS、"
         f"SPECLINO_LLM_POLICIES_MODEL={SEED_LLM_MODEL} で起動する"
@@ -47,7 +54,7 @@ async def main(repo_dir: Path, artifact_dir: Path) -> None:
     )
 
 
-if __name__ == "__main__":
+def run(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo-dir", type=Path, default=Path("build/shop-repo"))
     parser.add_argument(
@@ -56,5 +63,21 @@ if __name__ == "__main__":
         default=None,
         help="run の成果物の置き場（既定は SPECLINO_ARTIFACT_DIR。サーバーと同じにする）",
     )
-    args = parser.parse_args()
-    asyncio.run(main(args.repo_dir, args.artifact_dir or Settings().artifact_dir))
+    parser.add_argument(
+        "--allow-remote-db",
+        action="store_true",
+        help="DB のホストがローカルでなくても seed する（本番 env は常に拒否）",
+    )
+    args = parser.parse_args(argv)
+    settings = Settings()
+    try:
+        check_seed_target(settings, allow_remote_db=args.allow_remote_db)
+    except UnsafeSeedTarget as e:
+        print(f"拒否した: {e}", file=sys.stderr)
+        return 2
+    asyncio.run(main(args.repo_dir, args.artifact_dir or settings.artifact_dir, settings))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(run())
