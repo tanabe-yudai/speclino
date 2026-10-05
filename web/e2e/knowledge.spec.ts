@@ -148,7 +148,8 @@ test('仕様の編集・診断・承認、skill、可観測性、検査結果の
     .toBe(0)
   const attested = page.getByText(/問題なしとして確定済み/).first()
   await expect(attested).toBeVisible()
-  // 件数と理由は同じ集合から: 確定した指摘と LLM の「指摘なし」は「確定済み・情報」、残る要確認は lock だけ
+  // 件数と理由は同じ集合から: 確定した指摘と、seed が main で確定した「指摘なし」は「確定済み・情報」、
+  // 残る要確認は lock だけ（必須の規約の「指摘なし」も確定までは要確認。#114）
   await expect(page.getByText('要確認 1件 が残っているため失敗しました')).toBeVisible()
   await expect(page.getByText('確定済み・情報').first()).toBeVisible()
   await shot(page, 'run-recheck')

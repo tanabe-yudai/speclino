@@ -104,7 +104,7 @@ export interface ReviewRunDetail extends ReviewRunSummary {
   findings: Finding[]
   /** run のプロジェクトのワークスペース（S70: 確定の宛先）。未登録なら null */
   workspace?: string | null
-  /** ゲートを止めない REVIEW の ID（gate の cleared: LLM 支援の指摘なし・人の確定）。件数と理由の正本 */
+  /** ゲートを止めない REVIEW の ID（gate の cleared: 人の attested の確定）。件数と理由の正本 */
   cleared_ids?: string[]
 }
 

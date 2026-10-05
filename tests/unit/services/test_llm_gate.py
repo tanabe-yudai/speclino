@@ -24,7 +24,12 @@ from speclino.services.check_pipeline import (
     run_check,
     write_result,
 )
-from speclino.services.llm_policies import InMemoryAssessmentStore, assess, checklist_params
+from speclino.services.llm_policies import (
+    NO_ISSUE_BLOCKING_LABEL,
+    InMemoryAssessmentStore,
+    assess,
+    checklist_params,
+)
 from speclino.services.llm_units import extract_units
 from tests.unit.services.test_check_pipeline_bundle import (
     UML,
@@ -103,23 +108,47 @@ def _attest(f: Finding, disposition: str = "attested", **over: Any) -> Attestati
     return Attestation.model_validate(data)
 
 
-async def test_no_issue_is_informational_and_does_not_block(tmp_path: Path) -> None:
+async def test_no_issue_blocks_mandatory_until_attested(tmp_path: Path) -> None:
+    """#114 のユーザー判断: 必須の LLM 支援の規約は、指摘なしでも人の確定まで止める。"""
     root = make_repo(tmp_path / "r")
     policy = _llm_policy()
+    k = knowledge(spec_revision("u", UML), policy=policy)
     llm, keys = await _llm_findings(root, policy, _answer(False, "", item="intent"))
-    res = run_check(
-        request(
-            root,
-            knowledge(spec_revision("u", UML), policy=policy),
-            llm_findings=llm,
-            llm_assessment_keys=tuple(keys),
-        )
-    )
+    res = run_check(request(root, k, llm_findings=llm, llm_assessment_keys=tuple(keys)))
     found = _llm(res)
     assert found and all((f.verdict, f.assessment_outcome) == ("REVIEW", "no_issue") for f in found)
-    assert _ids(found) <= _ids(res.gate.cleared)
-    assert not _ids(found) & _ids(res.gate.blocking)
+    assert _ids(found) <= _ids(res.gate.blocking)
+    assert not _ids(found) & _ids(res.gate.cleared)
+    assert res.gate.status == "fail"
+    assert all(f.message.endswith(NO_ISSUE_BLOCKING_LABEL) for f in found)
+    assert all(attestation_target(f) is not None for f in found)
     assert res.manifest.llm_assessment_keys == sorted(keys) and keys
+
+    # attested の確定だけが阻止から外す（acknowledged_violation は阻止したまま）
+    oks = tuple(_attest(f) for f in found)
+    attested = run_check(request(root, k, llm_findings=llm, attestations=oks))
+    assert _ids(found) <= _ids(attested.gate.cleared)
+    assert not _ids(found) & _ids(attested.gate.blocking)
+    acks = tuple(_attest(f, "acknowledged_violation") for f in found)
+    acked = run_check(request(root, k, llm_findings=llm, attestations=acks))
+    assert _ids(found) <= _ids(acked.gate.blocking)
+
+    out = tmp_path / "out"
+    write_result(res, out)
+    assert "cleared_ids" not in json.loads((out / "gate.json").read_text())
+
+
+async def test_no_issue_of_advisory_rule_does_not_block(tmp_path: Path) -> None:
+    root = make_repo(tmp_path / "r")
+    policy = _llm_policy("advisory")
+    llm, _ = await _llm_findings(root, policy, _answer(False, "", item="intent"))
+    res = run_check(
+        request(root, knowledge(spec_revision("u", UML), policy=policy), llm_findings=llm)
+    )
+    found = _llm(res)
+    assert found and _ids(found) <= _ids(res.gate.advisory)
+    assert not _ids(found) & _ids(res.gate.blocking)
+    assert all(not f.message.endswith(NO_ISSUE_BLOCKING_LABEL) for f in found)
 
 
 async def test_issue_blocks_when_mandatory_and_is_advisory_otherwise(tmp_path: Path) -> None:

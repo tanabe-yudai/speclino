@@ -20,9 +20,10 @@ function refValue(refs: string[], prefix: string): string | null {
 export function attestationTarget(finding: Finding): AttestationTarget | null {
   if (finding.verdict !== 'REVIEW') return null
   const outcome = finding.assessment_outcome ?? null
-  const llmIssue = outcome === 'issue' || outcome === 'split'
+  // LLM 支援はどの区分も確定できる（指摘なしも機械検証ではないので、必須の規約は人の確定まで止める）
+  const llm = outcome !== null
   const configChange = outcome === null && finding.requirement_id === CONFIG_CHANGE_REQUIREMENT_ID
-  if (!llmIssue && !configChange) return null
+  if (!llm && !configChange) return null
   const fingerprint = refValue(finding.evidence_refs, FINGERPRINT_REF)
   const contentHash = refValue(finding.evidence_refs, CONTENT_HASH_REF)
   if (!fingerprint || !contentHash) return null

@@ -10,7 +10,10 @@
    プロジェクトを作る
 3. 仕様（spec.md）・skill・AGENTS.md の指示を作者が下書きし、owner が承認する（2 人の承認）
 4. LLM 支援の規約（チェックリスト）を owner が下書き・承認する
-5. 承認後の bundle を main に sync し（署名つき lock）、main と各 PR の検査を実行する
+5. 承認後の bundle を main に sync し（署名つき lock）、main を検査する
+6. main の LLM 支援の「指摘なし」を owner が確定し（必須の規約は指摘なしでも人の確定まで
+   ゲートを止める。#114）、main を検査し直してから各 PR を検査する。確定は単位の内容に結びつく
+   ので、PR で変わっていない単位にはそのまま効く
 
 LLM は呼ばない。LLM 支援の規約は `ScriptedChecklistLlm`（コードの文字列だけで答える決定的な
 偽物）で評価し、その記録を DB に残す。サーバーを同じモデル名（`SEED_LLM_MODEL`）で起動すると
@@ -33,7 +36,12 @@ from examples.shop.materialize import DOMAIN, SPEC, apply_mutation, materialize,
 from speclino.adapters.localgit.local_code_host import LocalCodeHost
 from speclino.adapters.queue.inprocess import InProcessQueue
 from speclino.adapters.storage.fs import FileSystemBlobStore
-from speclino.db.repositories import PolicyRevisionRepository, ProjectRepository
+from speclino.db.repositories import (
+    FindingRepository,
+    PolicyRevisionRepository,
+    ProjectRepository,
+)
+from speclino.domain.finding import Finding
 from speclino.domain.knowledge import (
     ArtifactContent,
     ArtifactKind,
@@ -54,6 +62,7 @@ from speclino.services import knowledge_registry as kr
 from speclino.services import knowledge_sync as ks
 from speclino.services import policy_governance as pg
 from speclino.services import workspace_admin as wa
+from speclino.services.attestations import attest, attestation_target
 from speclino.services.knowledge_inputs import make_knowledge_resolver
 from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
 from speclino.settings import Settings
@@ -331,6 +340,35 @@ async def _active_policy(f: async_sessionmaker[AsyncSession], team: str) -> Poli
         return await PolicyRevisionRepository(s).active_revision(team)
 
 
+async def attest_baseline_no_issue(
+    f: async_sessionmaker[AsyncSession], n: Names, run_id: Any
+) -> int:
+    """main の検査の LLM 支援の「指摘なし」を owner が確定する（チームが main の評価を一度
+    確かめた前提）。確定した件数を返す。"""
+    async with f() as s:
+        rows = await FindingRepository(s).list_for_run(run_id)
+    targets = sorted(
+        {
+            t
+            for row in rows
+            if (x := Finding.model_validate(row.payload)).assessment_outcome == "no_issue"
+            and (t := attestation_target(x)) is not None
+        }
+    )
+    async with f() as s, s.begin():
+        for fingerprint, content_hash in targets:
+            await attest(
+                s,
+                fingerprint=fingerprint,
+                content_hash=content_hash,
+                disposition="attested",
+                actor=OWNER,
+                workspace=n.workspace,
+                via="seed",
+            )
+    return len(targets)
+
+
 async def run_checks(
     f: async_sessionmaker[AsyncSession],
     n: Names,
@@ -360,10 +398,18 @@ async def run_checks(
     )
     holder["svc"] = service
     pid = uuid.UUID(project_id)
+    baseline = await service.create_run(
+        project_id=pid, head_sha=main_sha, base_sha=None, pr_number=None, trigger="push"
+    )
+    await attest_baseline_no_issue(f, n, baseline)
     runs = {
         "main": str(
             await service.create_run(
-                project_id=pid, head_sha=main_sha, base_sha=None, pr_number=None, trigger="push"
+                project_id=pid,
+                head_sha=main_sha,
+                base_sha=None,
+                pr_number=None,
+                trigger="attestation",
             )
         )
     }

@@ -96,7 +96,6 @@ from speclino.services.attestations import (
     CONFIG_CHANGE_REQUIREMENT_ID,
     applied_attestations,
     apply_attestations,
-    informational_ids,
     self_attested_ids,
 )
 from speclino.services.knowledge_inputs import OperationResolver, SpecUnit, bundle_hash, spec_units
@@ -413,10 +412,10 @@ def _run_check(req: CheckRequest, *, is_base: bool) -> CheckResult:
     waived = frozenset(w.finding_id for w in waivers)
     rejected = rejected_exceptions_for(combined, exceptions, today, policy_result.rules_by_id)
     combined = _annotate_rejected_waivers(combined, rejected)
-    # S70: LLM 支援の「指摘なし」と、attested の確定が一致する REVIEW は阻止しない（verdict は
-    # REVIEW のまま。確定は manifest に残す）
+    # S70: attested の確定が一致する REVIEW は阻止しない（verdict は REVIEW のまま。確定は
+    # manifest に残す）。LLM 支援の「指摘なし」も人の確定までは阻止する（#114 のユーザー判断）
     attestations = list(req.attestations)
-    cleared = informational_ids(combined) | apply_attestations(combined, attestations)
+    cleared = apply_attestations(combined, attestations)
     gate = replace(
         aggregate_gate(
             combined, levels, GatePolicy(fail_on=fail_on, mode=req.mode), waived, cleared

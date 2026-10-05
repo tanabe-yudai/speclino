@@ -361,10 +361,10 @@ function FindingsByVerdict({ run, supplements }: { run: ReviewRunDetail; supplem
             <ToneBadge tone="exempt">{CLEARED_LABEL}</ToneBadge>
             {cleared.length} 件
           </h3>
-          <p className="text-xs text-ink-3">判定は要確認（REVIEW）のまま。LLM 支援の「指摘なし」と人が問題なしと確定した指摘で、ゲートを止めません。</p>
+          <p className="text-xs text-ink-3">判定は要確認（REVIEW）のまま。owner / approver が問題なしと確定した指摘で、ゲートを止めません（LLM 支援の「指摘なし」も、必須の規約では確定するまで止めます）。</p>
           {sortFindingsForDisplay(cleared).map((finding) => (
             <div key={finding.id} className="space-y-2">
-              <FindingCard finding={finding} repoFullName={run.repo_full_name} headSha={run.head_sha} />
+              <FindingCard finding={finding} repoFullName={run.repo_full_name} headSha={run.head_sha} cleared />
               <FindingAttest slug={slug} run={run} finding={finding} mayAttest={false} />
             </div>
           ))}

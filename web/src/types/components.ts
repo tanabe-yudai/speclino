@@ -27,6 +27,8 @@ export interface FindingCardProps {
   /** GitHub リンク生成に使う。無ければリンクを出さずテキストのみ表示する。 */
   repoFullName: string | null
   headSha: string
+  /** ゲートの cleared（人が確定して阻止しない REVIEW）として出すか */
+  cleared?: boolean
 }
 
 export interface ScopeBlockProps {

@@ -316,7 +316,7 @@ function LlmPanel({ llm }: { llm: LlmStability | null }) {
       ) : (
         <>
         <p className="text-xs text-ink-3">
-          指摘・split の件数とキャッシュの当たり率はワークスペース全体の直近 10 回の完了した検査から（当たり＝検査の作成（受付）より前から評価の記録があった）。人の確定は今の件数。
+          指摘・split の件数とキャッシュの当たり率はワークスペース全体の直近 10 回の完了した検査から（当たり＝検査の作成（受付）より前から評価の記録があった）。人の確定は今の件数。必須の規約は「指摘なし」も人が確定するまでゲートを止める。
         </p>
         <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
           <Stat label="指摘あり" value={String(llm.issue)} />

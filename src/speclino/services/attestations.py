@@ -33,12 +33,13 @@ CONFIG_CHANGE_REQUIREMENT_ID = "KNOWLEDGE-BINDINGS-001"
 def attestation_target(f: Finding) -> tuple[str, str] | None:
     """確定できる Finding なら (指紋, 内容の hash)。
 
-    確定できるのは REVIEW で、指紋と hash を持つものだけ: LLM 支援の issue / split と、
+    確定できるのは REVIEW で、指紋と hash を持つものだけ: LLM 支援のすべての区分（issue / split /
+    no_issue。no_issue も機械検証ではないので、必須の規約では人の確定まで阻止する。#114）と、
     対応・契約・免除・規約の変更の通知（`KNOWLEDGE-BINDINGS-001`）。
     """
     if f.verdict != "REVIEW":
         return None
-    if f.assessment_outcome not in ("issue", "split") and (
+    if f.assessment_outcome is None and (
         f.requirement_id != CONFIG_CHANGE_REQUIREMENT_ID or f.assessment_outcome is not None
     ):
         return None
@@ -52,15 +53,6 @@ def attestation_target(f: Finding) -> tuple[str, str] | None:
     if not fp or not ch:
         return None
     return fp, ch
-
-
-def informational_ids(findings: Findings) -> frozenset[str]:
-    """LLM 支援の「指摘なし」。REVIEW だが情報としてだけ出し、ゲートを止めない。"""
-    return frozenset(
-        f.id
-        for f in findings.findings
-        if f.verdict == "REVIEW" and f.assessment_outcome == "no_issue"
-    )
 
 
 def _effective(attestations: list[Attestation]) -> dict[tuple[str, str], Attestation]:
@@ -328,7 +320,6 @@ __all__ = [
     "attest_as_member",
     "in_pr_findings",
     "attestation_target",
-    "informational_ids",
     "list_attestations",
     "BINDINGS_VIA_PR_COMMENT_REASON",
     "BindingsAttestRequiresPrComment",

@@ -21,7 +21,7 @@ export const VERDICT_LABELS: Record<Verdict, string> = {
   REVIEW: '要確認',
 }
 
-/** ゲートを止めない REVIEW（LLM 支援の指摘なし・人が確定した指摘）の区分。verdict は REVIEW のまま */
+/** ゲートを止めない REVIEW（人が問題なしと確定した指摘）の区分。verdict は REVIEW のまま */
 export const CLEARED_LABEL = '確定済み・情報'
 
 /** VIOLATED → REVIEW → UNKNOWN → VERIFIED_IN_SCOPE の表示順。 */
@@ -183,15 +183,29 @@ export function auditLabel(action: string, decision: string): string {
   return `${action} ${decision}`
 }
 
-/** LLM 支援の規約の区分（S70）。指摘なしは機械検証ではないことを明記する独自の区分。 */
+/**
+ * LLM 支援の規約の区分（S70）。指摘なしは機械検証ではないことを明記する独自の区分。
+ * 指摘なしも人の確定まではゲートを止める（#114）ので「人の確定が必要」と出す。
+ */
 export const ASSESSMENT_OUTCOME_LABELS: Record<AssessmentOutcome, string> = {
   issue: 'LLM の指摘あり（人の確定待ち）',
   split: 'LLM の評価が割れた（人の確定待ち）',
-  no_issue: 'LLM で確認、指摘なし（機械検証ではない）',
+  no_issue: 'LLM で確認、指摘なし（機械検証ではない）— 人の確定が必要',
+}
+
+/** 確定済み（ゲートの cleared）の LLM 支援の区分。確定待ちの文言を外す。 */
+export const ASSESSMENT_OUTCOME_CLEARED_LABELS: Record<AssessmentOutcome, string> = {
+  issue: 'LLM の指摘あり（人が問題なしと確定）',
+  split: 'LLM の評価が割れた（人が問題なしと確定）',
+  no_issue: 'LLM で確認、指摘なし（機械検証ではない）— 人が確定',
+}
+
+export function assessmentOutcomeLabel(outcome: AssessmentOutcome, cleared: boolean): string {
+  return (cleared ? ASSESSMENT_OUTCOME_CLEARED_LABELS : ASSESSMENT_OUTCOME_LABELS)[outcome]
 }
 
 export const ASSESSMENT_OUTCOME_TONE: Record<AssessmentOutcome, VerdictTone> = {
   issue: 'rev',
   split: 'rev',
-  no_issue: 'exempt',
+  no_issue: 'rev',
 }

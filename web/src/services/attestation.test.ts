@@ -39,12 +39,12 @@ function finding(over: Partial<Finding>): Finding {
 }
 
 describe('attestationTarget', () => {
-  it('LLM 支援の issue / split は指紋と hash を返す', () => {
+  it('LLM 支援の issue / split / no_issue は指紋と hash を返す（指摘なしも人の確定まで止める）', () => {
     expect(attestationTarget(finding({}))).toEqual({ fingerprint: 'R:i:abc', contentHash: HASH })
     expect(attestationTarget(finding({ assessment_outcome: 'split' }))).not.toBeNull()
+    expect(attestationTarget(finding({ assessment_outcome: 'no_issue' }))).toEqual({ fingerprint: 'R:i:abc', contentHash: HASH })
   })
-  it('指摘なし・REVIEW 以外・指紋の無いものは確定できない', () => {
-    expect(attestationTarget(finding({ assessment_outcome: 'no_issue' }))).toBeNull()
+  it('REVIEW 以外・指紋の無いもの・LLM 支援でも対応の変更でもないものは確定できない', () => {
     expect(attestationTarget(finding({ verdict: 'UNKNOWN' }))).toBeNull()
     expect(attestationTarget(finding({ evidence_refs: [] }))).toBeNull()
     expect(attestationTarget(finding({ assessment_outcome: null }))).toBeNull()

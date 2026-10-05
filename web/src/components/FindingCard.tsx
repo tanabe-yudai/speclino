@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils'
 import { CounterexamplePanel } from './CounterexamplePanel'
 import { githubBlobUrl } from '../services/github'
 import {
-  ASSESSMENT_OUTCOME_LABELS,
+  assessmentOutcomeLabel,
   ASSESSMENT_OUTCOME_TONE,
   BASE_HEAD_STATUS_LABELS,
   BASE_HEAD_STATUS_TONE,
@@ -69,7 +69,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 /** 1 つの要求の判定。違反は左端に細い線を入れる。 */
-export function FindingCard({ finding, repoFullName, headSha }: FindingCardProps) {
+export function FindingCard({ finding, repoFullName, headSha, cleared = false }: FindingCardProps) {
   const needsNextSteps = finding.verdict === 'UNKNOWN' || finding.verdict === 'REVIEW'
   const base = finding.base_head_status
   const outcome = finding.assessment_outcome ?? null
@@ -81,7 +81,9 @@ export function FindingCard({ finding, repoFullName, headSha }: FindingCardProps
         {base && base !== 'unchanged' && (
           <ToneBadge tone={BASE_HEAD_STATUS_TONE[base]}>base 比: {BASE_HEAD_STATUS_LABELS[base]}</ToneBadge>
         )}
-        {outcome && <ToneBadge tone={ASSESSMENT_OUTCOME_TONE[outcome]}>{ASSESSMENT_OUTCOME_LABELS[outcome]}</ToneBadge>}
+        {outcome && (
+          <ToneBadge tone={cleared ? 'exempt' : ASSESSMENT_OUTCOME_TONE[outcome]}>{assessmentOutcomeLabel(outcome, cleared)}</ToneBadge>
+        )}
         <span className="ml-auto text-xs text-ink-3">
           {/* LLM 支援の Finding は分類の代わりに区分を出す（「適合」と誤読させない） */}
           {outcome ? 'LLM 支援の規約' : CATEGORY_LABELS[finding.category]} ・ 重要度{' '}

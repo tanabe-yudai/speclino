@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { describeGateReason } from './gate'
+import { assessmentOutcomeLabel } from './labels'
 import { countByVerdict, splitCleared } from './verdict'
 import type { Finding } from '@/types/finding'
 
@@ -57,5 +58,23 @@ describe('件数と失敗の理由は cleared を除いた同じ集合から作�
     const { active, cleared } = splitCleared(findings, ['v', 'u'])
     expect(cleared).toEqual([])
     expect(active).toHaveLength(5)
+  })
+})
+
+describe('LLM 支援の「指摘なし」も人の確定までは要確認として数える（#114）', () => {
+  const findings = [
+    finding({ id: 'n1', assessment_outcome: 'no_issue' }),
+    finding({ id: 'n2', assessment_outcome: 'no_issue' }),
+  ]
+
+  it('cleared_ids に無い指摘なしは要確認に残り、失敗の理由に入る', () => {
+    const { active, cleared } = splitCleared(findings, [])
+    expect(cleared).toEqual([])
+    expect(describeGateReason('fail', null, active)).toBe('要確認 2件 が残っているため失敗しました')
+  })
+
+  it('確定待ちと確定済みで区分の文言を分ける', () => {
+    expect(assessmentOutcomeLabel('no_issue', false)).toBe('LLM で確認、指摘なし（機械検証ではない）— 人の確定が必要')
+    expect(assessmentOutcomeLabel('no_issue', true)).not.toContain('確定が必要')
   })
 })

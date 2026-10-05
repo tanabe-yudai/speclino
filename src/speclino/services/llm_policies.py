@@ -9,8 +9,9 @@
    LLM を呼ばずにそれを返す。プロンプトの版にはチェック項目と規約の本文の hash を含める
    （項目を変えたら前の記録は使わない）
 2. 新しいキーは 3 回評価する（temperature 0、項目ごとに「該当する／しない＋引用」だけ）。
-   「該当する」が 2 回以上 → issue、1 回 → split、0 回 → no_issue。ゲートを止めない no_issue は
-   全員一致のときだけにする（安全側）
+   「該当する」が 2 回以上 → issue、1 回 → split、0 回 → no_issue（全員一致のときだけ）。
+   どの区分も REVIEW で、必須の規約なら人が確定（attested）するまでゲートを止める（#114 の
+   ユーザー判断: no_issue も自動では通さない）
 3. 指紋 = (ルール ID, シンボル, 単位の hash, 項目)。内容が変われば指紋も変わり、確定は外れる
 
 LLM の失敗（例外・時間切れ・形式違反）と費用枠の超過は、その単位の UNKNOWN にする
@@ -53,6 +54,8 @@ CONTENT_HASH_REF = "content_hash:"
 ASSESSMENT_KEY_REF = "assessment_key:"
 
 NO_ISSUE_LABEL = "LLM で確認、指摘なし（機械検証ではない）"
+# 必須の規約の no_issue。人の確定（attested）までゲートを止める（#114）
+NO_ISSUE_BLOCKING_LABEL = f"{NO_ISSUE_LABEL}— 人の確定が必要"
 
 RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -301,16 +304,17 @@ def _item_finding(
     elif outcome == "split":
         message = f"{rule.id}: 「{item.question}」の評価が割れた（LLM {n} 回中 {yes} 回が該当）"
         severity = "medium"
+    elif rule.level == "mandatory":
+        message = f"{rule.id}: 「{item.question}」 — {NO_ISSUE_BLOCKING_LABEL}"
+        severity = "medium"
     else:
         message = f"{rule.id}: 「{item.question}」 — {NO_ISSUE_LABEL}"
         severity = "info"
+    attest_cmd = f"（PR コメント `/speclino attest {fp} {unit.unit_hash}`）"
     next_steps = (
-        [
-            "指摘どおりなら直す。問題が無ければ owner / approver が確定する"
-            f"（PR コメント `/speclino attest {fp} {unit.unit_hash}`）"
-        ]
+        [f"指摘どおりなら直す。問題が無ければ owner / approver が確定する{attest_cmd}"]
         if outcome != "no_issue"
-        else []
+        else [f"機械検証ではないため、内容を確かめて owner / approver が確定する{attest_cmd}"]
     )
     return Finding(
         id=f"llm:{fp}",
@@ -468,6 +472,7 @@ __all__ = [
     "BEHAVIOR_ID",
     "CONTENT_HASH_REF",
     "FINGERPRINT_REF",
+    "NO_ISSUE_BLOCKING_LABEL",
     "NO_ISSUE_LABEL",
     "PROMPT_VERSION",
     "RESPONSE_SCHEMA",

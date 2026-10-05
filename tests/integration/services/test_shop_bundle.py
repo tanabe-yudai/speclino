@@ -26,14 +26,38 @@ pytestmark = [
 ]
 
 LLM_RULE = "SHOP-ERR-001"
+# PR ごとの、確定が効いていない LLM 支援の Finding の区分（変わった単位だけ）
+PENDING_LLM: dict[str, list[str]] = {
+    "01-missing-charge": ["no_issue"],
+    "02-ship-from-pending": ["no_issue"],
+    "03-refund-on-cancel": ["no_issue"],
+    "04-notify-between": ["no_issue"],
+    "05-dynamic-charge": ["no_issue"],
+    "06-rebind-charge": [],  # bindings だけを変える（コードの単位は同じ）
+    "07-terse-error": ["issue"],
+}
 
 
 async def _findings(f: async_sessionmaker, run_id: str) -> tuple[str | None, list[Finding]]:  # type: ignore[type-arg]
+    gate, found, _ = await _run(f, run_id)
+    return gate, found
+
+
+async def _run(
+    f: async_sessionmaker,  # type: ignore[type-arg]
+    run_id: str,
+) -> tuple[str | None, list[Finding], set[str]]:
+    """(ゲート, Findings, ゲートの cleared の ID)。"""
     async with f() as s:
         run = await ReviewRunRepository(s).get(uuid.UUID(run_id))
         assert run is not None and run.exec_state == "completed", run
         rows = await FindingRepository(s).list_for_run(uuid.UUID(run_id))
-    return run.gate_status, [Finding.model_validate(r.payload) for r in rows]
+    gate = (run.manifest or {}).get("gate") or {}
+    return (
+        run.gate_status,
+        [Finding.model_validate(r.payload) for r in rows],
+        set(gate.get("cleared_ids") or []),
+    )
 
 
 async def test_seeded_runs_have_the_intended_verdicts(engine: AsyncEngine, tmp_path: Path) -> None:
@@ -53,11 +77,13 @@ async def test_seeded_runs_have_the_intended_verdicts(engine: AsyncEngine, tmp_p
         revs = [await kr.revision_at(s, aid, 1) for aid in result.artifacts.values()]
     assert {(r.status, r.author, r.approver) for r in revs} == {("active", "spec-author", "judge")}
 
-    gate, main = await _findings(f, result.runs["main"])
+    gate, main, main_cleared = await _run(f, result.runs["main"])
     lock = [x for x in main if x.requirement_id == "KNOWLEDGE-LOCK-001"]
     assert [x.verdict for x in lock] == ["VERIFIED_IN_SCOPE"]  # sync した lock が main にある
     llm = [x for x in main if x.requirement_id.startswith(LLM_RULE)]
     assert llm and {x.assessment_outcome for x in llm} == {"no_issue"}
+    # 必須の規約の「指摘なし」も人の確定まで止める（#114）。seed は main の分を owner が確定済み
+    assert {x.id for x in llm} <= main_cleared
     base = {
         (x.requirement_id, x.behavior_id): x.verdict
         for x in main
@@ -67,7 +93,7 @@ async def test_seeded_runs_have_the_intended_verdicts(engine: AsyncEngine, tmp_p
     assert gate == "pass"
 
     for mutation, expected in EXPECTED_CHANGES.items():
-        gate, found = await _findings(f, result.runs[f"pr/{mutation}"])
+        gate, found, cleared = await _run(f, result.runs[f"pr/{mutation}"])
         got = {
             (x.requirement_id, x.behavior_id): x.verdict
             for x in found
@@ -78,13 +104,19 @@ async def test_seeded_runs_have_the_intended_verdicts(engine: AsyncEngine, tmp_p
         outcomes = sorted(
             x.assessment_outcome or "" for x in found if x.requirement_id.startswith(LLM_RULE)
         )
+        # main で確定した単位は内容が同じなので確定が効く。PR で変わった単位は確定し直すまで止める
+        pending = sorted(
+            x.assessment_outcome or ""
+            for x in found
+            if x.requirement_id.startswith(LLM_RULE) and x.id not in cleared
+        )
+        assert pending == PENDING_LLM[mutation], (mutation, pending)
         if mutation == "07-terse-error":
             # 短すぎるメッセージだけを LLM 支援の規約が REVIEW（issue）にする。確定は人
             assert outcomes == ["issue", "no_issue", "no_issue", "no_issue"], outcomes
-            assert gate == "fail"
         else:
             assert set(outcomes) == {"no_issue"}, (mutation, outcomes)
-            assert gate == ("pass" if not expected else "fail"), mutation
+        assert gate == ("pass" if not expected and not pending else "fail"), mutation
 
 
 async def test_run_api_returns_the_cleared_ids(engine: AsyncEngine, tmp_path: Path) -> None:
@@ -123,10 +155,12 @@ async def test_run_api_returns_the_cleared_ids(engine: AsyncEngine, tmp_path: Pa
         app.router.lifespan_context(app),
         httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c,
     ):
+        # cleared は人が確定した REVIEW だけ（seed が main で確定した「指摘なし」）。PR で変わった
+        # 単位は確定し直すまで cleared に入らない（#114）
         for branch, expected in (
             ("main", 4),
             ("pr/07-terse-error", 3),
-            ("pr/01-missing-charge", 4),
+            ("pr/01-missing-charge", 3),
         ):
             body = (await c.get(f"/api/review-runs/{result.runs[branch]}", headers=judge)).json()
             by_id = {x["id"]: x for x in body["findings"]}
