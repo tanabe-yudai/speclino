@@ -551,6 +551,21 @@
         ],
         "title": "TokenRequest",
         "type": "object"
+      },
+      "UserIdRequest": {
+        "properties": {
+          "login": {
+            "maxLength": 39,
+            "minLength": 1,
+            "title": "Login",
+            "type": "string"
+          }
+        },
+        "required": [
+          "login"
+        ],
+        "title": "UserIdRequest",
+        "type": "object"
       }
     }
   },
@@ -2969,6 +2984,68 @@
           }
         },
         "summary": "Health"
+      }
+    },
+    "/internal/github/user-id": {
+      "post": {
+        "operationId": "github_user_id_internal_github_user_id_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserIdRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "title": "Response Github User Id Internal Github User Id Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Github User Id",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/mcp/context": {

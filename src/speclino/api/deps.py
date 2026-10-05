@@ -61,7 +61,7 @@ class AppState:
     github_user_oauth: GitHubUserOAuth | None = None
     # A2A のスキルの処理（S59）。None なら state から本物を組み立てる。テストで差し替える
     a2a_handlers: dict[SkillId, SkillHandler] | None = None
-    # 承認者のログイン名 → GitHub ユーザー ID（S61）。公開 API を認証なしで呼ぶので web でも使える
+    # 承認者のログイン名 → GitHub ユーザー ID（S61）。引き先は `build_github_user_lookup`
     github_users: GitHubUserLookup = field(default_factory=PublicGitHubUserLookup)
 
 
@@ -105,21 +105,45 @@ def make_team_policy_resolver(
     return resolve
 
 
-def build_code_host(settings: Settings, installation_id: int | None = None) -> CodeHost:
-    if settings.code_host_kind == "local":
-        return LocalCodeHost(repos={k: Path(v) for k, v in settings.local_repos.items()})
+def _github_app_auth(settings: Settings) -> GitHubAppAuth | None:
+    """GitHub App の認証。App ID か秘密鍵が無ければ None。"""
     pem = settings.github_private_key
     if pem is None and settings.github_private_key_path is not None:
         pem = settings.github_private_key_path.read_text(encoding="utf-8")
     if settings.github_app_id is None or pem is None:
+        return None
+    return GitHubAppAuth(settings.github_app_id, pem)
+
+
+def build_code_host(settings: Settings, installation_id: int | None = None) -> CodeHost:
+    if settings.code_host_kind == "local":
+        return LocalCodeHost(repos={k: Path(v) for k, v in settings.local_repos.items()})
+    auth = _github_app_auth(settings)
+    if auth is None:
         raise RuntimeError("GitHub App の設定（SPECLINO_GITHUB_APP_ID / PRIVATE_KEY）が無い")
-    auth = GitHubAppAuth(settings.github_app_id, pem)
     return GitHubClient(
         auth,
         installation_id or 0,
         httpx.AsyncClient(timeout=30.0),
         base_url=settings.github_api_base,
     )
+
+
+def build_github_user_lookup(settings: Settings) -> GitHubUserLookup:
+    """承認者のログイン名 → GitHub ユーザー ID の引き先（S61）。
+
+    web の本番は秘密鍵を持つ worker に任せる。鍵があれば（worker、admin ジョブの CLI）App の
+    認証で引く。どちらも無いローカルだけ、認証なしの公開 API で引く（共有 IP ではレート制限に
+    当たるので本番では使わない）。
+    """
+    if settings.role == "web" and settings.cloud_tasks_worker_url:
+        from speclino.adapters.worker.github_user_client import WorkerGitHubUserLookup
+
+        return WorkerGitHubUserLookup(settings.cloud_tasks_worker_url)
+    auth = _github_app_auth(settings)
+    if auth is None:
+        return PublicGitHubUserLookup(api_base=settings.github_api_base)
+    return GitHubClient(auth, 0, httpx.AsyncClient(timeout=30.0), base_url=settings.github_api_base)
 
 
 def build_sandbox(settings: Settings) -> Sandbox:
@@ -273,7 +297,7 @@ def build_state(settings: Settings) -> AppState:
         service,
         context_source,
         user_oauth,
-        github_users=PublicGitHubUserLookup(api_base=settings.github_api_base),
+        github_users=build_github_user_lookup(settings),
     )
 
 

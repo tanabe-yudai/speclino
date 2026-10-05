@@ -31,6 +31,7 @@ class GitHubAppAuth:
     private_key_pem: str
     _cache: dict[int, _CachedToken] = field(default_factory=dict, init=False, repr=False)
     _installations: dict[str, int] = field(default_factory=dict, init=False, repr=False)
+    _any_installation: int | None = field(default=None, init=False, repr=False)
 
     def app_jwt(self, now: int | None = None) -> str:
         """App 認証用 JWT（RS256）を発行する。"""
@@ -64,6 +65,29 @@ class GitHubAppAuth:
         installation_id = int(response.json()["id"])
         self._installations[repo] = installation_id
         return installation_id
+
+    async def any_installation_id(self, http: httpx.AsyncClient, base_url: str) -> int:
+        """App のインストールのどれか 1 つの ID（App JWT で認証）。無ければ LookupError。
+
+        リポジトリに紐付かない読み取り（公開のユーザー情報、S61）は、どのインストールの token でも
+        よい。一度引いたら使い回す。
+        """
+        if self._any_installation is not None:
+            return self._any_installation
+        response = await http.get(
+            f"{base_url}/app/installations",
+            params={"per_page": 1},
+            headers={
+                "Authorization": f"Bearer {self.app_jwt()}",
+                "Accept": "application/vnd.github+json",
+            },
+        )
+        response.raise_for_status()
+        installations = response.json()
+        if not installations:
+            raise LookupError("GitHub App のインストールが無い")
+        self._any_installation = int(installations[0]["id"])
+        return self._any_installation
 
     async def installation_token(
         self, installation_id: int, http: httpx.AsyncClient, base_url: str
