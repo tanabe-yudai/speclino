@@ -76,15 +76,17 @@ async def test_replay_uses_recorded_output(engine: AsyncEngine, tmp_path: Path) 
     # worker と同じ手順で評価し、記録を DB に残す
     llm = FakeLlm([_answer(True, "def restore", item="intent")])
     llm.model = f"fake-{slug}"
-    ((rule, revision),) = llm_assisted_rules(req)
+    (target,) = llm_assisted_rules(req)
+    rule = target.rule
     units = extract_units(head, checklist_params(rule), rule.applies_to.paths)
     async with f() as s, s.begin():
         found, keys = await assess(
             rule,
             units.units,
             llm=llm,
-            store=AssessmentRepository(s),
-            policy_revision=revision,
+            store=AssessmentRepository(s, slug),
+            policy_revision=target.policy_revision,
+            origin=target.origin,
             now=NOW,
         )
     req.llm_findings, req.llm_assessment_keys = {rule.id: found}, tuple(keys)

@@ -51,6 +51,8 @@ def _gate_dict(gate: GateResult, waivers: list[Waiver] | None = None) -> dict[st
     if gate.cleared:
         # 阻止しない REVIEW（S70: LLM 支援の指摘なし・人の確定）。無い run の gate.json は変えない
         out["cleared_ids"] = sorted(f.id for f in gate.cleared)
+    if gate.self_attested_ids:
+        out["self_attested_ids"] = sorted(gate.self_attested_ids)
     return out
 
 

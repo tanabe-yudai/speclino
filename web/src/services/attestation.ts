@@ -4,7 +4,7 @@
  * KNOWLEDGE-BINDINGS-001）だけ。確定ボタンを出せるのは owner / approver だけ。
  */
 
-import type { AttestationTarget } from '../types/attestation'
+import type { Attestation, AttestationTarget } from '../types/attestation'
 import type { Finding } from '../types/finding'
 import type { WorkspaceRole } from '../types/me'
 
@@ -27,6 +27,24 @@ export function attestationTarget(finding: Finding): AttestationTarget | null {
   const contentHash = refValue(finding.evidence_refs, CONTENT_HASH_REF)
   if (!fingerprint || !contentHash) return null
   return { fingerprint, contentHash }
+}
+
+/** この run のゲートで効いた確定のうち、対象に一致するもの。 */
+export function recordedAttestation(
+  target: AttestationTarget,
+  attestations: Attestation[] | undefined,
+): Attestation | null {
+  return (
+    (attestations ?? []).find(
+      (a) => a.fingerprint === target.fingerprint && a.content_hash === target.contentHash,
+    ) ?? null
+  )
+}
+
+/** 確定の表示の文言。自己確定（PR の作成者による確定）は必ず明示する。 */
+export function describeAttestation(a: Pick<Attestation, 'disposition' | 'self_attested'>): string {
+  const base = a.disposition === 'attested' ? '問題なしとして確定済み' : '問題として記録済み（阻止したまま）'
+  return a.self_attested ? `${base}・自己確定` : base
 }
 
 export function canAttest(role: WorkspaceRole | null | undefined): boolean {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -17,7 +18,12 @@ from speclino.domain.policy import (
     PolicyVerifierRef,
 )
 from speclino.services.attestations import attestation_target
-from speclino.services.check_pipeline import CheckResult, llm_assisted_rules, run_check
+from speclino.services.check_pipeline import (
+    CheckResult,
+    llm_assisted_rules,
+    run_check,
+    write_result,
+)
 from speclino.services.llm_policies import InMemoryAssessmentStore, assess, checklist_params
 from speclino.services.llm_units import extract_units
 from tests.unit.services.test_check_pipeline_bundle import (
@@ -68,7 +74,8 @@ async def _llm_findings(
         llm=FakeLlm([answer]),
         store=store or InMemoryAssessmentStore(),
         policy_revision=policy.revision,
-        unreadable=units.unreadable,
+        unassessable=units.problems,
+        origin=f"team:w#{policy.revision}",
     )
     return {rule.id: found}, keys
 
@@ -203,7 +210,7 @@ def test_llm_assisted_rules_follow_policy_precedence(tmp_path: Path) -> None:
     root = make_repo(tmp_path / "r")
     k = knowledge(spec_revision("u", UML), policy=_llm_policy())
     rules = llm_assisted_rules(request(root, k))
-    assert [(r.id, rev) for r, rev in rules] == [(RULE_ID, 4)]
+    assert [(t.rule.id, t.policy_revision, t.origin) for t in rules] == [(RULE_ID, 4, "team:w#4")]
     assert llm_assisted_rules(request(root, knowledge(spec_revision("u", UML)))) == []
 
 
@@ -252,3 +259,39 @@ def test_cleared_ids_only_clear_review() -> None:
         Findings(findings=[f("a", "REVIEW")]), {}, cleared_ids=frozenset({"a"})
     )
     assert only_review.status == "pass"
+
+
+def test_project_rule_origin_follows_the_file_content(tmp_path: Path) -> None:
+    """プロジェクト固有の規約は改訂番号が無い（1）ので、出所にファイルの内容の hash を入れる。"""
+    import yaml
+
+    root = make_repo(tmp_path / "r")
+    policy_dir = root / ".speclino" / "policy"
+    policy_dir.mkdir(exist_ok=True)
+    package = _llm_policy().package.model_dump(mode="json", by_alias=True)
+    (policy_dir / "llm.yaml").write_text(yaml.safe_dump(package, allow_unicode=True))
+    (first,) = llm_assisted_rules(request(root, None))
+    package["rules"][0]["text"] = "別の本文"
+    (policy_dir / "llm.yaml").write_text(yaml.safe_dump(package, allow_unicode=True))
+    (second,) = llm_assisted_rules(request(root, None))
+    assert first.policy_revision == second.policy_revision == 1
+    assert first.origin.startswith("project:") and first.origin != second.origin
+
+
+async def test_self_attestation_is_marked_in_gate_and_manifest(tmp_path: Path) -> None:
+    root = make_repo(tmp_path / "r")
+    policy = _llm_policy()
+    k = knowledge(spec_revision("u", UML), policy=policy)
+    llm, _ = await _llm_findings(root, policy, _answer(True, "def restore", item="intent"))
+    target = _llm(run_check(request(root, k, llm_findings=llm)))[0]
+    own = _attest(target, self_attested=True)
+    res = run_check(request(root, k, llm_findings=llm, attestations=(own,)))
+    assert target.id in _ids(res.gate.cleared)  # 拒否はしない
+    assert res.gate.self_attested_ids == [target.id]
+    assert [a.self_attested for a in res.manifest.attestations] == [True]
+    out = tmp_path / "out"
+    write_result(res, out)
+    gate = json.loads((out / "gate.json").read_text())
+    assert gate["self_attested_ids"] == [target.id]
+    other = run_check(request(root, k, llm_findings=llm, attestations=(_attest(target),)))
+    assert other.gate.self_attested_ids == []

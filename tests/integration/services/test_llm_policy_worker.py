@@ -10,6 +10,7 @@ import uuid
 from pathlib import Path
 
 import pytest
+from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from speclino.adapters.localgit.local_code_host import LocalCodeHost
@@ -143,3 +144,52 @@ async def test_worker_without_llm_leaves_the_rule_unknown(
         ]
     assert run is not None and run.gate_status == "fail"
     assert [x.verdict for x in found] == ["UNKNOWN"]
+
+
+async def test_same_code_in_two_workspaces_is_assessed_separately(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """記録はワークスペースごと。別のワークスペースの評価でゲートが決まらない。"""
+    tag = uuid.uuid4().hex[:8]
+    slugs = [f"e2e-llmw{n}-{tag}" for n in "ab"]
+    repos = [f"e2e/{s}-orders" for s in slugs]
+    for slug, repo in zip(slugs, repos, strict=True):
+        await register_repo(engine, repo, {"owner1": "owner"}, team=slug)
+    f = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def resolve_team_policy(team: str) -> PolicyRevision | None:
+        # 同じ改訂番号・同じ規約（出所も team 名以外は同じ）。記録の区切りはワークスペース
+        return _llm_policy().model_copy(update={"team": team})
+
+    llm = FakeLlm([_answer(True, "def restore", item="intent")])
+    llm.model = f"fake-{tag}"
+    base, head, _ = make_demo_repo(tmp_path / "repo")
+    host = LocalCodeHost(
+        repos={r: tmp_path / "repo" for r in repos}, repo_ids={r: repo_id_of(r) for r in repos}
+    )
+    holder: dict[str, ReviewRunService] = {}
+    svc = ReviewRunService(
+        session_factory=f,
+        code_host=host,
+        queue=InProcessQueue(lambda run_id: holder["svc"].execute(run_id), immediate=True),
+        blobs=FileSystemBlobStore(tmp_path / "blobs"),
+        config=ReviewRunConfig(
+            agent_enabled=False, resolve_team_policy=resolve_team_policy, policy_llm=llm
+        ),
+    )
+    holder["svc"] = svc
+    for n, repo in enumerate(repos, start=1):
+        await svc.create_run(
+            project_id=await project_id_of(engine, repo),
+            head_sha=head,
+            base_sha=base,
+            pr_number=1,
+            trigger="pull_request",
+        )
+        assert llm.calls == 3 * n
+    async with engine.connect() as conn:
+        rows = await conn.execute(
+            sql_text("SELECT workspace FROM llm_assessments WHERE key LIKE :m ORDER BY workspace"),
+            {"m": f"%fake-{tag}%"},
+        )
+        assert [r[0] for r in rows] == sorted(slugs)

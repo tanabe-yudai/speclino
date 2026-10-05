@@ -21,15 +21,21 @@ from speclino.domain.assessment import (
 class AssessmentRepository:
     """LLM 支援の評価の記録（`services.llm_policies.AssessmentStore` の実体）。
 
-    同じキーは最初の記録が正本（`ON CONFLICT DO NOTHING`）。並行する run が同じキーを同時に
-    評価しても、片方の記録だけが残り、以後はそれを返す。
+    記録はワークスペースごとに区切る（同じコードでも別のワークスペースの評価は共有しない。
+    あるワークスペースの記録で別のワークスペースのゲートが決まらないように）。
+    同じ (workspace, キー) は最初の記録が正本（`ON CONFLICT DO NOTHING`）。並行する run が同じ
+    キーを同時に評価しても、片方の記録だけが残り、以後はそれを返す。
     """
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, workspace: str) -> None:
         self._session = session
+        self._workspace = workspace
 
     async def get(self, key: AssessmentKey) -> AssessmentRecord | None:
-        stmt = select(LlmAssessmentRecord).where(LlmAssessmentRecord.key == key.as_str())
+        stmt = select(LlmAssessmentRecord).where(
+            LlmAssessmentRecord.workspace == self._workspace,
+            LlmAssessmentRecord.key == key_str(key),
+        )
         row = (await self._session.execute(stmt)).scalar_one_or_none()
         if row is None:
             return None
@@ -44,13 +50,14 @@ class AssessmentRepository:
         stmt = (
             insert(LlmAssessmentRecord)
             .values(
-                key=record.key.as_str(),
+                workspace=self._workspace,
+                key=key_str(record.key),
                 key_fields=record.key.model_dump(mode="json"),
                 unit_symbol=record.unit_symbol,
                 items=[i.model_dump(mode="json") for i in record.items],
                 created_at=record.created_at,
             )
-            .on_conflict_do_nothing(index_elements=["key"])
+            .on_conflict_do_nothing(index_elements=["workspace", "key"])
         )
         await self._session.execute(stmt)
         await self._session.flush()
@@ -63,16 +70,24 @@ class SessionFactoryAssessmentStore:
     呼出しごとに作る。
     """
 
-    def __init__(self, factory: async_sessionmaker[AsyncSession]) -> None:
+    def __init__(self, factory: async_sessionmaker[AsyncSession], workspace: str) -> None:
         self._factory = factory
+        self._workspace = workspace
 
     async def get(self, key: AssessmentKey) -> AssessmentRecord | None:
         async with self._factory() as session:
-            return await AssessmentRepository(session).get(key)
+            return await AssessmentRepository(session, self._workspace).get(key)
 
     async def put(self, record: AssessmentRecord) -> None:
         async with self._factory() as session, session.begin():
-            await AssessmentRepository(session).put(record)
+            await AssessmentRepository(session, self._workspace).put(record)
+
+
+def key_str(key: AssessmentKey) -> str:
+    # llm_policies.key_str と同じ正規 JSON（services → db の循環を避けて遅延 import）
+    from speclino.services.llm_policies import key_str as canonical
+
+    return canonical(key)
 
 
 def _attestation(row: AttestationRecord) -> Attestation:
@@ -83,6 +98,7 @@ def _attestation(row: AttestationRecord) -> Attestation:
         actor=row.actor,
         workspace=row.workspace,
         created_at=row.created_at,
+        self_attested=row.self_attested,
     )
 
 
@@ -100,6 +116,7 @@ class AttestationRepository:
         content_hash: str,
         disposition: Disposition,
         actor: str,
+        self_attested: bool = False,
         now: datetime | None = None,
     ) -> Attestation:
         created_at = now or datetime.now(UTC)
@@ -111,11 +128,17 @@ class AttestationRepository:
                 content_hash=content_hash,
                 disposition=disposition,
                 actor=actor,
+                self_attested=self_attested,
                 created_at=created_at,
             )
             .on_conflict_do_update(
                 constraint="uq_attestations_workspace_fingerprint_hash",
-                set_={"disposition": disposition, "actor": actor, "created_at": created_at},
+                set_={
+                    "disposition": disposition,
+                    "actor": actor,
+                    "self_attested": self_attested,
+                    "created_at": created_at,
+                },
             )
             .returning(AttestationRecord)
             .execution_options(populate_existing=True)

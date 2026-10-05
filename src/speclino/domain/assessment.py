@@ -65,6 +65,9 @@ class Attestation(IRModel):
     actor: str = Field(min_length=1)
     workspace: str = Field(min_length=1)
     created_at: datetime
+    self_attested: bool = Field(
+        default=False, description="PR の作成者が自分で確定した（拒否はしないが印を残す）"
+    )
 
 
 __all__ = [

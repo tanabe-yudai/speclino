@@ -65,6 +65,12 @@
           "format": "date-time",
           "title": "Created At",
           "type": "string"
+        },
+        "self_attested": {
+          "default": false,
+          "description": "PR の作成者が自分で確定した（拒否はしないが印を残す）",
+          "title": "Self Attested",
+          "type": "boolean"
         }
       },
       "required": [

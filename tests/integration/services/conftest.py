@@ -125,7 +125,7 @@ async def engine() -> AsyncIterator[AsyncEngine]:
             )
         )
         # LLM 支援の評価の記録（S70）。テストはモデル名を fake- で始める
-        await conn.execute(sql_text("DELETE FROM llm_assessments WHERE key LIKE '%|fake-%'"))
+        await conn.execute(sql_text("DELETE FROM llm_assessments WHERE key LIKE '%\"fake-%'"))
         for table, col, sub in (
             ("findings", "run_id", rid),
             ("run_events", "run_id", rid),

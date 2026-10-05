@@ -213,17 +213,19 @@ def _is_llm_assisted(f: Finding) -> bool:
 
 
 def _models_by_rule(keys: list[str]) -> dict[str, str]:
-    """manifest の評価のキー（`改訂|ルール|hash|モデル|版`）→ ルール ID ごとのモデル。"""
+    """manifest の評価のキー（正規 JSON）→ キーのルール部分（ID と出所）ごとのモデル。"""
+    from speclino.services.llm_policies import parse_key
+
     out: dict[str, str] = {}
-    for key in keys:
-        parts = key.split("|")
-        if len(parts) == 5:
-            out.setdefault(parts[1], parts[3])
+    for text in keys:
+        key = parse_key(text)
+        if key is not None:
+            out.setdefault(key.rule_id, key.model)
     return out
 
 
 async def _recorded_llm_findings(
-    session: AsyncSession, req: CheckRequest, keys: list[str]
+    session: AsyncSession, req: CheckRequest, keys: list[str], workspace: str
 ) -> tuple[dict[str, list[Finding]], list[str]]:
     """LLM 支援の規約を記録だけで再評価する（LLM は呼ばない。記録の無いキーは UNKNOWN）。
 
@@ -231,15 +233,16 @@ async def _recorded_llm_findings(
     （検査器が「評価していない」UNKNOWN を出す）。
     """
     from speclino.db.repositories.assessments import AssessmentRepository
-    from speclino.services.llm_policies import assess, checklist_params
+    from speclino.services.llm_policies import assess, checklist_params, rule_key
     from speclino.services.llm_units import extract_units
 
     models = _models_by_rule(keys)
-    store = AssessmentRepository(session)
+    store = AssessmentRepository(session, workspace)
     out: dict[str, list[Finding]] = {}
     used: list[str] = []
-    for rule, revision in llm_assisted_rules(req):
-        model = models.get(rule.id)
+    for target in llm_assisted_rules(req):
+        rule = target.rule
+        model = models.get(rule_key(rule, target.origin))
         if model is None:
             continue
         units = extract_units(req.repo_root, checklist_params(rule), rule.applies_to.paths)
@@ -248,9 +251,10 @@ async def _recorded_llm_findings(
             units.units,
             llm=None,
             store=store,
-            policy_revision=revision,
+            policy_revision=target.policy_revision,
             model=model,
-            unreadable=units.unreadable,
+            unassessable=units.problems,
+            origin=target.origin,
             now=req.now,
         )
         out[rule.id] = found
@@ -323,7 +327,7 @@ async def replay_bundle(
     )
     # S70: LLM 支援は記録で再評価する（呼び直さない）。確定は manifest の記録をそのまま渡す
     llm_findings, llm_keys = await _recorded_llm_findings(
-        session, req, manifest.llm_assessment_keys
+        session, req, manifest.llm_assessment_keys, project.team
     )
     req = replace(
         req,
@@ -349,9 +353,14 @@ def compare_llm_findings(saved: Findings, fresh: Findings) -> list[str]:
     """LLM 支援の評価（REVIEW）を指紋（ID）と区分で突き合わせる。記録から作り直すので一致するはず。
 
     元の run で評価できなかったもの（UNKNOWN）は比べない（記録が無いので再現できない）。
+    両方向に比べる: 再評価で増えた評価（保存結果に無い指紋）も差異にする。
     """
     new = {f.id: f for f in fresh.findings if f.assessment_outcome is not None}
-    diffs: list[str] = []
+    old_ids = {f.id for f in saved.findings if f.assessment_outcome is not None}
+    diffs: list[str] = [
+        f"{new[fid].requirement_id}（{fid}）: 再評価で LLM 支援の評価が増えた（保存結果に無い）"
+        for fid in sorted(new.keys() - old_ids)
+    ]
     for f in sorted(
         (f for f in saved.findings if f.assessment_outcome is not None), key=lambda x: x.id
     ):

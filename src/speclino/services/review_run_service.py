@@ -77,7 +77,9 @@ from speclino.services.cost_guard import CostGuard
 from speclino.services.investigation import InvestigationResult, investigate
 from speclino.services.knowledge_inputs import KnowledgeResolver
 from speclino.services.llm_policies import (
+    DEFAULT_MAX_CALLS_PER_RUN,
     AssessmentStore,
+    CallBudget,
     assess,
     checklist_params,
     unknown_finding,
@@ -127,6 +129,7 @@ class ReviewRunConfig:
     # UNKNOWN（ゲートは通らない）。評価の記録は DB（llm_assessments）に残し、同じキーは呼ばない
     policy_llm: TextLlm | None = None
     policy_llm_timeout_s: float = 60.0
+    policy_llm_max_calls: int = DEFAULT_MAX_CALLS_PER_RUN
 
 
 @dataclass
@@ -205,8 +208,12 @@ class ReviewRunService:
         pr_number: int | None,
         trigger: str,
         parent_run_id: UUID | None = None,
+        pr_author: str | None = None,
     ) -> UUID:
         """呼び出し側のトランザクションの中で run を queued で作る。enqueue はしない。
+
+        `pr_author`（PR の作成者の GitHub ログイン。S70 の自己確定の印）が無ければ、同じ PR の
+        前の run から引き継ぐ（コメント・再実行・確定の後の再検査）。
 
         呼び出し側は commit のあとで `queue.enqueue(run_id)` する（webhook は重複排除の記録と
         run の作成を 1 つのトランザクションにするため、これを直接使う。S53）。
@@ -221,6 +228,9 @@ class ReviewRunService:
                 raise ValueError(
                     f"親 run {parent_run_id} は {project.repo_full_name} の run ではない"
                 )
+        if pr_author is None and pr_number is not None:
+            previous = await runs.latest_run_for_pr(project.id, pr_number)
+            pr_author = previous.pr_author if previous is not None else None
         run = await runs.create(
             project_id=project.id,
             pr_number=pr_number,
@@ -228,6 +238,7 @@ class ReviewRunService:
             base_sha=base_sha,
             trigger=trigger,
             parent_run_id=parent_run_id,
+            pr_author=pr_author,
         )
         superseded = await runs.supersede_open_runs(project.id, pr_number, run.id)
         await RunEventRepository(session).append(
@@ -395,7 +406,9 @@ class ReviewRunService:
                     trusted_sha=trusted_sha,
                     attestations=tuple(attestations),
                 )
-                llm_findings, llm_keys = await self._assess_llm_policies(req, str(run_id))
+                llm_findings, llm_keys = await self._assess_llm_policies(
+                    req, str(run_id), team if team is not None else f"project:{project_id}"
+                )
                 req = replace(req, llm_findings=llm_findings, llm_assessment_keys=tuple(llm_keys))
                 with span("speclino.check", head=head_sha):
                     result = run_check(req)
@@ -658,25 +671,29 @@ class ReviewRunService:
                         {"status": "error", "error": f"{type(e).__name__}: {e}"[:500]},
                     )
 
-    def _assessment_store(self) -> AssessmentStore:
-        return SessionFactoryAssessmentStore(self.session_factory)
+    def _assessment_store(self, workspace: str) -> AssessmentStore:
+        return SessionFactoryAssessmentStore(self.session_factory, workspace)
 
     async def _assess_llm_policies(
-        self, req: CheckRequest, run_id: str
+        self, req: CheckRequest, run_id: str, workspace: str
     ) -> tuple[dict[str, list[Finding]] | None, list[str]]:
         """LLM 支援の規約を run_check の前に評価する（S70）。LLM の設定が無ければ None。
 
         単位は head のスナップショットから AST で取り出す（対象のコードは import しない）。
         ルールのパラメーターの誤り・取り出しの失敗はそのルールの UNKNOWN にして run を続ける。
+        評価の記録はワークスペースごと（`workspace`。未登録のプロジェクトは `project:<id>`）に
+        区切る。呼出しの上限は 1 run で全ルールが共有する。
         """
         rules = llm_assisted_rules(req)
         llm = self.config.policy_llm
         if not rules or llm is None:
             return None, []
-        store = self._assessment_store()
+        store = self._assessment_store(workspace)
+        calls = CallBudget(self.config.policy_llm_max_calls)
         out: dict[str, list[Finding]] = {}
         keys: list[str] = []
-        for rule, revision in rules:
+        for target in rules:
+            rule = target.rule
             try:
                 params = checklist_params(rule)
                 units = extract_units(req.repo_root, params, rule.applies_to.paths)
@@ -685,11 +702,13 @@ class ReviewRunService:
                     units.units,
                     llm=llm,
                     store=store,
-                    policy_revision=revision,
+                    policy_revision=target.policy_revision,
                     cost_guard=self.cost_guard,
                     run_id=run_id,
                     timeout_s=self.config.policy_llm_timeout_s,
-                    unreadable=units.unreadable,
+                    unassessable=units.problems,
+                    origin=target.origin,
+                    call_budget=calls,
                 )
             except Exception as e:  # noqa: BLE001 - そのルールの UNKNOWN にして run を続ける
                 found, used = (
@@ -874,13 +893,14 @@ def _regate(findings: Findings, result: CheckResult, fail_on: tuple[str, ...]) -
     チーム規約の mandatory を advisory に落とせた（承認も不要）。免除も渡していなかったので、
     エージェントが動いた run では例外が効かなくなっていた（どちらも codex レビューで実測）。
     """
-    return aggregate_gate(
+    gate = aggregate_gate(
         findings,
         result.gate_levels,
         GatePolicy(fail_on=tuple(fail_on), mode="blocking"),  # type: ignore[arg-type]
         result.waived_finding_ids,
         result.cleared_finding_ids,
     )
+    return replace(gate, self_attested_ids=result.gate.self_attested_ids)
 
 
 def _model_name(model: str | BaseLlm) -> str:

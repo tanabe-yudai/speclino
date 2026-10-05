@@ -3,7 +3,8 @@ import { Button } from '@/components/ui/button'
 import { createAttestation } from '../api/attestations'
 import { ApiError } from '../api/errors'
 import type { AttestButtonProps } from '../types/components'
-import type { Disposition } from '../types/attestation'
+import { describeAttestation } from '../services/attestation'
+import type { Attestation, Disposition } from '../types/attestation'
 
 /**
  * REVIEW の確定（S70）。owner / approver にだけ出す。verdict は変わらず、確定は次の検査の
@@ -12,7 +13,7 @@ import type { Disposition } from '../types/attestation'
 export function AttestButton({ slug, runId, target, onDone }: AttestButtonProps) {
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [done, setDone] = useState<Disposition | null>(null)
+  const [done, setDone] = useState<Attestation | null>(null)
 
   function submit(disposition: Disposition) {
     setPending(true)
@@ -24,7 +25,7 @@ export function AttestButton({ slug, runId, target, onDone }: AttestButtonProps)
       run_id: runId,
     })
       .then((res) => {
-        setDone(disposition)
+        setDone(res.attestation)
         onDone(res.recheck_run_id)
       })
       .catch((err: unknown) => {
@@ -36,8 +37,7 @@ export function AttestButton({ slug, runId, target, onDone }: AttestButtonProps)
   if (done) {
     return (
       <p className="text-sm text-ink-2">
-        {done === 'attested' ? '問題なしとして確定しました' : '問題として記録しました'}
-        （再検査で反映されます）
+        {describeAttestation(done)}（再検査で反映されます）
       </p>
     )
   }

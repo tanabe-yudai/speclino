@@ -56,14 +56,19 @@ def _record(outcome: str = "issue") -> AssessmentRecord:
         ),
         unit_symbol="app/api.py::f",
         items=[
-            ItemVerdict(item_id="next", outcome=outcome, votes=[True, True, False], quote="q")  # type: ignore[arg-type]
+            ItemVerdict(
+                item_id="next",
+                outcome=outcome,  # type: ignore[arg-type]
+                votes=[True, True, False],
+                quote="q",
+            )
         ],
         created_at=datetime(2026, 10, 5, tzinfo=UTC),
     )
 
 
 async def test_assessment_round_trip_and_first_record_wins(session: AsyncSession) -> None:
-    repo = AssessmentRepository(session)
+    repo = AssessmentRepository(session, "ws-a")
     assert await repo.get(_record().key) is None
     await repo.put(_record())
     await repo.put(_record("no_issue"))  # 同じキーは上書きしない
@@ -105,3 +110,29 @@ async def test_attestation_upsert_and_workspace_isolation(session: AsyncSession)
         (_OTHER, "attested"),
     ]
     assert {r.workspace for r in rows} == {"ws-a"}
+
+
+async def test_assessments_are_scoped_by_workspace(session: AsyncSession) -> None:
+    """同じキーでも別のワークスペースの記録は見えない（別々に評価する）。"""
+    a = AssessmentRepository(session, "ws-a")
+    b = AssessmentRepository(session, "ws-b")
+    await a.put(_record())
+    assert await b.get(_record().key) is None
+    await b.put(_record("no_issue"))
+    got_a, got_b = await a.get(_record().key), await b.get(_record().key)
+    assert got_a is not None and got_a.items[0].outcome == "issue"
+    assert got_b is not None and got_b.items[0].outcome == "no_issue"
+
+
+async def test_attestation_keeps_the_self_attested_mark(session: AsyncSession) -> None:
+    repo = AttestationRepository(session)
+    saved = await repo.upsert(
+        workspace="ws-a",
+        fingerprint="R:i:9",
+        content_hash=_HASH,
+        disposition="attested",
+        actor="u1",
+        self_attested=True,
+    )
+    assert saved.self_attested
+    assert [a.self_attested for a in await repo.list_for_workspace("ws-a")] == [True]

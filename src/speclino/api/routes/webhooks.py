@@ -89,6 +89,7 @@ async def _dispatch(
             base_sha=pr.base_sha,
             pr_number=pr.pr_number,
             trigger=f"pull_request.{event.action}",
+            pr_author=pr.author_login or None,
         )
         return {"status": "queued", "run_id": str(run_id), "fork": pr.is_fork}, [run_id]
 
@@ -205,8 +206,14 @@ async def _record_attestation(
         actor=f"github:{cm.author_login}",
         workspace=project.team,
         via=f"pr_comment:{cm.comment_url}",
+        # PR の作成者が自分で確定した（拒否はせず印を残す）
+        self_attested=bool(cm.issue_author_login) and cm.issue_author_login == cm.author_login,
     )
-    return {"accepted": True, "disposition": saved.disposition}
+    return {
+        "accepted": True,
+        "disposition": saved.disposition,
+        "self_attested": saved.self_attested,
+    }
 
 
 async def _record_answer(

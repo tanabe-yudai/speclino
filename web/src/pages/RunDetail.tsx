@@ -12,7 +12,7 @@ import { RerunButton } from '../components/RerunButton'
 import { ScopeBlock } from '../components/ScopeBlock'
 import { SupplementList } from '../components/SupplementList'
 import { Timeline } from '../components/Timeline'
-import { attestationTarget, canAttest } from '../services/attestation'
+import { attestationTarget, canAttest, describeAttestation, recordedAttestation } from '../services/attestation'
 import { describeGateReason } from '../services/gate'
 import { useMe } from '../hooks/useMe'
 import { formatDateTime, shortSha } from '../services/format'
@@ -26,8 +26,9 @@ import { paths } from '@/services/paths'
 import { describeLimits, describeSemanticDiff, describeTeamPolicy } from '../services/manifest'
 import { collectScopeAndAssumptions, collectUnresolvedItems, countByVerdict, groupFindingsByVerdict } from '../services/verdict'
 import type { RunEvent } from '../types/events'
+import type { FindingAttestProps } from '../types/components'
 import type { RerunResponse, ReviewRunDetail } from '../types/run'
-import type { Finding, Verdict } from '../types/finding'
+import type { Verdict } from '../types/finding'
 import type { AgentSupplement } from '../types/supplement'
 
 type Tab = 'timeline' | 'markdown'
@@ -255,20 +256,33 @@ function CountTile({ verdict, count }: { verdict: Verdict; count: number }) {
   )
 }
 
-/** 確定できる REVIEW にだけボタンを出す（S70）。確定の後は再検査の run へ移る。 */
-function FindingAttest({ slug, runId, finding }: { slug: string; runId: string; finding: Finding }) {
+/**
+ * 確定できる REVIEW に、この run で効いた確定（自己確定の印つき）を出し、owner / approver には
+ * ボタンを出す（S70）。確定の後は再検査の run へ移る。
+ */
+function FindingAttest({ slug, run, finding, mayAttest }: FindingAttestProps) {
   const navigate = useNavigate()
   const target = attestationTarget(finding)
   if (!target) return null
+  const recorded = recordedAttestation(target, run.manifest?.attestations)
   return (
-    <AttestButton
-      slug={slug}
-      runId={runId}
-      target={target}
-      onDone={(recheck) => {
-        if (recheck) navigate(paths.run(recheck))
-      }}
-    />
+    <div className="space-y-2">
+      {recorded && (
+        <p className="text-sm text-ink-2">
+          {describeAttestation(recorded)}（{recorded.actor}）
+        </p>
+      )}
+      {mayAttest && slug && (
+        <AttestButton
+          slug={slug}
+          runId={run.id}
+          target={target}
+          onDone={(recheck) => {
+            if (recheck) navigate(paths.run(recheck))
+          }}
+        />
+      )}
+    </div>
   )
 }
 
@@ -298,7 +312,7 @@ function FindingsByVerdict({ run, supplements }: { run: ReviewRunDetail; supplem
                 {verdict === 'REVIEW' && (
                   <SupplementList supplements={supplements.filter((s) => s.requirement_id === finding.requirement_id)} />
                 )}
-                {mayAttest && slug && <FindingAttest slug={slug} runId={run.id} finding={finding} />}
+                <FindingAttest slug={slug} run={run} finding={finding} mayAttest={mayAttest} />
               </div>
             ))}
           </div>

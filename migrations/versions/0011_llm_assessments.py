@@ -6,7 +6,9 @@ Create Date: 2026-10-05 18:00:00.000000
 
 追加だけ（S70、design/2026-10-05-team-knowledge-registry.md 6.2–6.3）。既存の表は変えない。
 `llm_assessments` は LLM 支援の評価の記録（キーが同じなら LLM を呼ばない・replay が読む）、
-`attestations` は人の確定（ゲートの処置。verdict は書き換えない）。
+`attestations` は人の確定（ゲートの処置。verdict は書き換えない）。評価の記録はワークスペース
+ごとに区切る。`review_runs.pr_author`（PR の作成者の GitHub ログイン。自己確定の印に使う）は
+NULL 可の列の追加だけ。
 """
 
 from collections.abc import Sequence
@@ -27,11 +29,13 @@ def upgrade() -> None:
     op.create_table(
         "llm_assessments",
         sa.Column("id", sa.UUID(), primary_key=True),
-        sa.Column("key", sa.String(), nullable=False, unique=True),
+        sa.Column("workspace", sa.String(), nullable=False),
+        sa.Column("key", sa.String(), nullable=False),
         sa.Column("key_fields", postgresql.JSONB(), nullable=False),
         sa.Column("unit_symbol", sa.String(), nullable=False),
         sa.Column("items", postgresql.JSONB(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.UniqueConstraint("workspace", "key", name="uq_llm_assessments_workspace_key"),
     )
     op.create_table(
         "attestations",
@@ -41,6 +45,7 @@ def upgrade() -> None:
         sa.Column("content_hash", sa.String(), nullable=False),
         sa.Column("disposition", sa.String(), nullable=False),
         sa.Column("actor", sa.String(), nullable=False),
+        sa.Column("self_attested", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -55,10 +60,12 @@ def upgrade() -> None:
         ),
     )
     op.create_index("ix_attestations_workspace", "attestations", ["workspace"])
+    op.add_column("review_runs", sa.Column("pr_author", sa.String(), nullable=True))
 
 
 def downgrade() -> None:
     """Downgrade schema."""
+    op.drop_column("review_runs", "pr_author")
     op.drop_index("ix_attestations_workspace", table_name="attestations")
     op.drop_table("attestations")
     op.drop_table("llm_assessments")

@@ -36,6 +36,8 @@ class GateResult:
     reason: str = ""
     # 阻止しない REVIEW（S70: LLM 支援の no_issue と、人が確定した指摘）。verdict は REVIEW のまま
     cleared: list[Finding] = field(default_factory=list)
+    # cleared のうち PR の作成者が自分で確定したもの（S70。拒否はせず印を残す）
+    self_attested_ids: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

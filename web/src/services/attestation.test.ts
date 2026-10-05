@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { attestationTarget, canAttest } from './attestation'
+import { attestationTarget, canAttest, describeAttestation, recordedAttestation } from './attestation'
 import type { Finding } from '@/types/finding'
 
 const HASH = 'sha256:' + 'a'.repeat(64)
@@ -44,6 +44,26 @@ describe('attestationTarget', () => {
   it('対応・規約の変更の通知（KNOWLEDGE-BINDINGS-001）も確定できる', () => {
     const notice = finding({ requirement_id: 'KNOWLEDGE-BINDINGS-001', assessment_outcome: null })
     expect(attestationTarget(notice)?.contentHash).toBe(HASH)
+  })
+})
+
+describe('recordedAttestation / describeAttestation', () => {
+  const att = {
+    fingerprint: 'R:i:abc',
+    content_hash: HASH,
+    disposition: 'attested' as const,
+    actor: 'u',
+    workspace: 'w',
+    created_at: '2026-10-05T00:00:00Z',
+    self_attested: true,
+  }
+  it('指紋と hash が一致する確定を返す', () => {
+    expect(recordedAttestation({ fingerprint: 'R:i:abc', contentHash: HASH }, [att])).toBe(att)
+    expect(recordedAttestation({ fingerprint: 'R:i:abc', contentHash: 'x' }, [att])).toBeNull()
+  })
+  it('自己確定を明示する', () => {
+    expect(describeAttestation(att)).toContain('自己確定')
+    expect(describeAttestation({ ...att, self_attested: false })).not.toContain('自己確定')
   })
 })
 

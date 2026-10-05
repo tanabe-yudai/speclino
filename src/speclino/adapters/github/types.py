@@ -46,6 +46,8 @@ class IssueCommentRef(_GitHubModel):
     author_login: str
     comment_url: str
     is_pull_request: bool
+    # issue（PR）の作成者のログイン（S70: 自己確定の印）。ペイロードに無ければ空
+    issue_author_login: str = ""
 
 
 class RerunRef(_GitHubModel):

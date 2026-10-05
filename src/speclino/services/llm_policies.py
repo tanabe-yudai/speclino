@@ -89,10 +89,10 @@ class InMemoryAssessmentStore:
     records: dict[str, AssessmentRecord] = field(default_factory=dict)
 
     async def get(self, key: AssessmentKey) -> AssessmentRecord | None:
-        return self.records.get(key.as_str())
+        return self.records.get(key_str(key))
 
     async def put(self, record: AssessmentRecord) -> None:
-        self.records.setdefault(record.key.as_str(), record)
+        self.records.setdefault(key_str(record.key), record)
 
 
 class AssessmentFailed(Exception):
@@ -118,12 +118,47 @@ def prompt_version(rule: PolicyRule, params: LlmChecklistParams) -> str:
     return f"{PROMPT_VERSION}+{hashlib.sha256(material.encode()).hexdigest()[:16]}"
 
 
+# 1 run あたりの LLM 呼出しの上限（費用の枠とは別の、暴走の歯止め）
+DEFAULT_MAX_CALLS_PER_RUN = 300
+
+
+@dataclass
+class CallBudget:
+    """1 run の中で全ルールが共有する呼出しの上限。超える新しい単位は UNKNOWN。"""
+
+    max_calls: int = DEFAULT_MAX_CALLS_PER_RUN
+    used: int = 0
+
+
+def key_str(key: AssessmentKey) -> str:
+    """キーの文字列（記録の検索・manifest）。区切り文字の衝突が無い正規 JSON。"""
+    return json.dumps(key.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+
+
+def parse_key(text: str) -> AssessmentKey | None:
+    try:
+        return AssessmentKey.model_validate(json.loads(text))
+    except (ValueError, TypeError):
+        return None
+
+
+def rule_key(rule: PolicyRule, origin: str | None) -> str:
+    """キーのルール部分。規約の出所（チーム規約の改訂・プロジェクト規約のファイルの hash）を含め、
+    出所の違う同じ ID のルールの記録を取り違えない。"""
+    return f"{rule.id}@{origin}" if origin else rule.id
+
+
 def assessment_key(
-    rule: PolicyRule, unit: AssessmentUnit, *, model: str, policy_revision: int
+    rule: PolicyRule,
+    unit: AssessmentUnit,
+    *,
+    model: str,
+    policy_revision: int,
+    origin: str | None = None,
 ) -> AssessmentKey:
     return AssessmentKey(
         policy_revision=policy_revision,
-        rule_id=rule.id,
+        rule_id=rule_key(rule, origin),
         unit_hash=unit.unit_hash,
         model=model,
         prompt_version=prompt_version(rule, checklist_params(rule)),
@@ -192,6 +227,7 @@ class _Budget:
     guard: CostGuard | None
     today: date
     run_id: str | None
+    calls: CallBudget | None = None
     exhausted: str | None = None
 
 
@@ -211,6 +247,12 @@ async def _evaluate(
     for _ in range(TRIALS):
         if budget.exhausted is not None:
             raise AssessmentFailed(f"費用ガードにより停止: {budget.exhausted}")
+        if budget.calls is not None:
+            if budget.calls.used >= budget.calls.max_calls:
+                raise AssessmentFailed(
+                    f"1 run の LLM 呼出しの上限 {budget.calls.max_calls} 回に達した"
+                )
+            budget.calls.used += 1
         if budget.guard is not None:
             worst = budget.guard.estimate(llm.model, len(prompt), llm.max_output_tokens)
             ok, reason = await budget.guard.can_afford(budget.today, worst)
@@ -283,7 +325,7 @@ def _item_finding(
         evidence_refs=[
             f"{FINGERPRINT_REF}{fp}",
             f"{CONTENT_HASH_REF}{unit.unit_hash}",
-            f"{ASSESSMENT_KEY_REF}{key.as_str()}",
+            f"{ASSESSMENT_KEY_REF}{key_str(key)}",
         ],
         assumptions=["LLM による評価（機械検証ではない）。確定は人が行う"],
         claim_scope="persisted_state",
@@ -317,6 +359,16 @@ def _unit_unknown(
     return unknown_finding(rule, unit.symbol, reason, suffix=suffix, path=_path_of(unit.symbol))
 
 
+def _broken_record(record: AssessmentRecord) -> str | None:
+    """記録の各項目が TRIALS 回の票を持ち、区分が票と合っているか（書き換え・破損の検出）。"""
+    for item in record.items:
+        if len(item.votes) != TRIALS:
+            return f"{item.item_id} の票が {len(item.votes)} 件"
+        if item.outcome != outcome_of(item.votes):
+            return f"{item.item_id} の区分 {item.outcome} が票と合わない"
+    return None
+
+
 async def assess(
     rule: PolicyRule,
     units: list[AssessmentUnit],
@@ -330,23 +382,25 @@ async def assess(
     today: date | None = None,
     now: datetime | None = None,
     timeout_s: float = DEFAULT_TIMEOUT_S,
-    unreadable: Sequence[str] = (),
+    unassessable: Sequence[tuple[str, str]] = (),
+    origin: str | None = None,
+    call_budget: CallBudget | None = None,
 ) -> tuple[list[Finding], list[str]]:
     """ルール 1 つを単位ごとに評価し、(Finding, 使ったキー) を返す。verdict は常に REVIEW。
 
     `llm` が None なら記録だけを使う（replay）。記録の無いキーは UNKNOWN。その場合のモデル名は
     `model`（manifest のキーと同じもの）で、無ければ記録を引けないので全部 UNKNOWN。
-    `unreadable`（読めなかったファイル）はファイルごとの UNKNOWN。
+    `unassessable`（(パスかシンボル, 理由)。読めない・一意に決まらない・大きすぎる・対象外の言語）
+    はそれぞれ UNKNOWN。`origin` は規約の出所（キーのルール部分に入る）。`call_budget` は 1 run の
+    呼出しの上限（ルール間で共有する）。3 回を最後まで呼べない単位は呼び始めず UNKNOWN。
     """
     params = checklist_params(rule)
     model_name = llm.model if llm is not None else model
     now = now or datetime.now(UTC)
-    budget = _Budget(cost_guard, today or now.date(), run_id)
+    budget = _Budget(cost_guard, today or now.date(), run_id, call_budget)
     findings: list[Finding] = [
-        unknown_finding(
-            rule, path, "ファイルを読めない（構文エラーなど）", suffix="unreadable", path=path
-        )
-        for path in unreadable
+        unknown_finding(rule, target, reason, suffix="unassessable", path=_path_of(target))
+        for target, reason in unassessable
     ]
     keys: list[str] = []
     ordered = sorted(units, key=lambda u: u.symbol)
@@ -368,12 +422,24 @@ async def assess(
         if model_name is None:
             findings.append(_unit_unknown(rule, unit, "モデルが分からない"))
             continue
-        key = assessment_key(rule, unit, model=model_name, policy_revision=policy_revision)
+        key = assessment_key(
+            rule, unit, model=model_name, policy_revision=policy_revision, origin=origin
+        )
         record = await store.get(key)
+        if record is not None and (broken := _broken_record(record)) is not None:
+            findings.append(_unit_unknown(rule, unit, f"評価の記録が壊れている: {broken}"))
+            continue
         if record is None:
             if llm is None:
                 findings.append(
                     _unit_unknown(rule, unit, "評価の記録が無い（replay は LLM を呼ばない）")
+                )
+                continue
+            if call_budget is not None and call_budget.used + TRIALS > call_budget.max_calls:
+                findings.append(
+                    _unit_unknown(
+                        rule, unit, f"1 run の LLM 呼出しの上限 {call_budget.max_calls} 回に達した"
+                    )
                 )
                 continue
             try:
@@ -384,7 +450,7 @@ async def assess(
                 findings.append(_unit_unknown(rule, unit, str(e)))
                 continue
             await store.put(record)
-        keys.append(key.as_str())
+        keys.append(key_str(key))
         verdicts = {v.item_id: v for v in record.items}
         for item_id, item in by_id.items():
             verdict = verdicts.get(item_id)
@@ -408,6 +474,11 @@ __all__ = [
     "TRIALS",
     "AssessmentFailed",
     "AssessmentStore",
+    "CallBudget",
+    "DEFAULT_MAX_CALLS_PER_RUN",
+    "key_str",
+    "parse_key",
+    "rule_key",
     "InMemoryAssessmentStore",
     "assess",
     "assessment_key",

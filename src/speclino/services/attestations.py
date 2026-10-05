@@ -99,9 +99,14 @@ async def attest(
     actor: str,
     workspace: str,
     via: str = "api",
+    self_attested: bool = False,
     now: datetime | None = None,
 ) -> Attestation:
-    """確定を記録し（同じ指紋・hash は最新の処置で上書き）、監査に残す。"""
+    """確定を記録し（同じ指紋・hash は最新の処置で上書き）、監査に残す。
+
+    `self_attested`: PR の作成者が自分で確定した。1 人での運用（仕様の自己承認と同じ）のため拒否は
+    しないが、監査・gate.json・manifest に印を残す。
+    """
     # 入力の形を先に確かめる（hash の形式違反を DB に入れない）
     Attestation(
         fingerprint=fingerprint,
@@ -117,6 +122,7 @@ async def attest(
         content_hash=content_hash,
         disposition=disposition,
         actor=actor,
+        self_attested=self_attested,
         now=now,
     )
     await AuditRepository(session).record(
@@ -124,7 +130,7 @@ async def attest(
         "attestation.record",
         f"{workspace}:{fingerprint}",
         disposition,
-        {"content_hash": content_hash, "via": via},
+        {"content_hash": content_hash, "via": via, "self_attested": self_attested},
     )
     return saved
 
@@ -138,8 +144,12 @@ async def attest_as_member(
     content_hash: str,
     disposition: Disposition,
     audit_factory: async_sessionmaker[AsyncSession] | None = None,
-) -> Attestation:
-    """画面（REST）からの確定。owner / approver だけ。
+    run_id: uuid.UUID | None = None,
+) -> tuple[Attestation, tuple[Project, ReviewRun] | None]:
+    """画面（REST）からの確定。owner / approver だけ。戻り値は (確定, 再検査する (project, run))。
+
+    `run_id`（確定した画面の run）があれば、その PR の最新の run を再検査の対象にし、PR の作成者
+    と確定者が同じなら `self_attested`。run が無い確定は作成者を確かめられないので印を付けない。
 
     メンバーでなければ（別のワークスペースも）`WorkspaceNotFound`（404、存在を漏らさない）、
     member なら `PermissionError`（403）。拒否は `audit_factory` の別トランザクションで監査に残す
@@ -163,7 +173,8 @@ async def attest_as_member(
                     },
                 )
         raise PermissionError(f"{uid} は {workspace} の owner / approver ではない")
-    return await attest(
+    target = await recheck_target(session, workspace, run_id) if run_id is not None else None
+    saved = await attest(
         session,
         fingerprint=fingerprint,
         content_hash=content_hash,
@@ -171,6 +182,29 @@ async def attest_as_member(
         actor=uid,
         workspace=workspace,
         via="api",
+        self_attested=target is not None and authored_by(uid, target[1]),
+    )
+    return saved, target
+
+
+def authored_by(uid: str, run: ReviewRun) -> bool:
+    """uid が run の PR の作成者か（PR の作成者の GitHub ログイン、または手動 run の開始者）。
+
+    SpecLino の uid と GitHub のアカウントの対応はまだ持っていない（S61b の照合を取り込むまで）。
+    それまでは uid がログイン名と一致するときと、画面から手動で始めた run の開始者だけを作成者と
+    みなす。
+    """
+    if run.pr_author and uid in (run.pr_author, f"github:{run.pr_author}"):
+        return True
+    return run.trigger == f"manual:{uid}"
+
+
+def self_attested_ids(findings: Findings, attestations: list[Attestation]) -> list[str]:
+    """自己確定（PR の作成者による attested）で阻止から外れた Finding の ID。gate.json に残す。"""
+    return sorted(
+        f.id
+        for f in findings.findings
+        if (a := _matching(f, attestations)) is not None and a.self_attested
     )
 
 
@@ -205,5 +239,7 @@ __all__ = [
     "attestation_target",
     "informational_ids",
     "list_attestations",
+    "authored_by",
     "recheck_target",
+    "self_attested_ids",
 ]

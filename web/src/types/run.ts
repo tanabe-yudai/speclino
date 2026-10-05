@@ -3,6 +3,7 @@
  * src/speclino/api/routes/review_runs.py の `_run_view` に対応させる。
  */
 
+import type { Attestation } from './attestation'
 import type { Finding } from './finding'
 
 export type ExecState =
@@ -76,6 +77,8 @@ export interface RunManifest {
   /** 適用したチーム規約（S42/S43）。チーム規約の無い run は null */
   policy_team?: string | null
   policy_revision?: number | null
+  /** このゲートで効いた人の確定（S70） */
+  attestations?: Attestation[]
 }
 
 /** `GET /api/review-runs` の1件（findings を含まない）。 */

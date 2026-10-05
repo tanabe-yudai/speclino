@@ -128,6 +128,8 @@ class ReviewRun(Base):
         UUID(as_uuid=True), ForeignKey("review_runs.id"), nullable=True
     )
     check_run_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # PR の作成者の GitHub ログイン（S70: 自己確定の印）。PR 以外・記録前の run は NULL
+    pr_author: Mapped[str | None] = mapped_column(String, nullable=True)
     artifacts_uri: Mapped[str | None] = mapped_column(String, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -670,14 +672,19 @@ class KnowledgeFetchRecord(Base):
 class LlmAssessmentRecord(Base):
     """`llm_assessments`: LLM 支援の規約の評価の記録（S70）。キーが同じなら LLM を呼ばない。
 
-    `key` は `AssessmentKey.as_str()`、`key_fields` はその各欄（記録から型を復元する）。不変で、
-    同じキーは最初の記録が正本（replay はこれで再評価する）。
+    `key` はキーの正規 JSON（`llm_policies.key_str`）、`key_fields` はその各欄。不変で、同じ
+    (workspace, キー) は最初の記録が正本（replay はこれで再評価する）。ワークスペースごとに区切る
+    （未登録のプロジェクトは `project:<id>`）。
     """
 
     __tablename__ = "llm_assessments"
+    __table_args__ = (
+        UniqueConstraint("workspace", "key", name="uq_llm_assessments_workspace_key"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    key: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    workspace: Mapped[str] = mapped_column(String, nullable=False)
+    key: Mapped[str] = mapped_column(String, nullable=False)
     key_fields: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     unit_symbol: Mapped[str] = mapped_column(String, nullable=False)
     items: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
@@ -709,6 +716,10 @@ class AttestationRecord(Base):
     content_hash: Mapped[str] = mapped_column(String, nullable=False)
     disposition: Mapped[str] = mapped_column(String, nullable=False)
     actor: Mapped[str] = mapped_column(String, nullable=False)
+    # PR の作成者が自分で確定した（拒否はしないが印を残す）
+    self_attested: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

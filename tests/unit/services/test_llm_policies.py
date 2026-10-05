@@ -16,9 +16,12 @@ from speclino.services.cost_guard import CostGuard, InMemoryLedger
 from speclino.services.llm_policies import (
     CONTENT_HASH_REF,
     FINGERPRINT_REF,
+    CallBudget,
     InMemoryAssessmentStore,
     assess,
     fingerprint,
+    key_str,
+    parse_key,
 )
 from speclino.services.llm_units import normalized_hash
 
@@ -231,7 +234,7 @@ async def test_over_limit_and_unreadable_are_unknown() -> None:
         llm=FakeLlm([_answer(False, "")]),
         store=InMemoryAssessmentStore(),
         policy_revision=1,
-        unreadable=["app/broken.py"],
+        unassessable=[("app/broken.py", "ファイルを読めない（構文エラーなど）")],
     )
     verdicts = sorted((f.requirement_id, f.verdict) for f in findings)
     assert verdicts == [
@@ -239,3 +242,54 @@ async def test_over_limit_and_unreadable_are_unknown() -> None:
         ("ERRMSG-NEXT:app/a.py", "REVIEW"),
         ("ERRMSG-NEXT:app/broken.py", "UNKNOWN"),
     ]
+
+
+async def test_broken_record_is_unknown() -> None:
+    """記録の票の数・区分が合わなければ使わない（書き換え・破損で no_issue に化けさせない）。"""
+    store = InMemoryAssessmentStore()
+    await assess(_rule(), [_unit()], llm=FakeLlm([_answer(True)]), store=store, policy_revision=1)
+    (key,) = store.records
+    record = store.records[key]
+    item = record.items[0]
+    for broken in (
+        item.model_copy(update={"outcome": "no_issue"}),
+        item.model_copy(update={"votes": [False]}),
+    ):
+        store.records[key] = record.model_copy(update={"items": [broken]})
+        llm = FakeLlm([_answer(False, "")])
+        findings, keys = await assess(_rule(), [_unit()], llm=llm, store=store, policy_revision=1)
+        assert [f.verdict for f in findings] == ["UNKNOWN"] and keys == []
+        assert "壊れている" in findings[0].message and llm.calls == 0
+
+
+async def test_call_budget_per_run_is_shared_and_capped() -> None:
+    budget = CallBudget(max_calls=4)
+    llm = FakeLlm([_answer(True)])
+    units = [_unit("a", 'app/a.py::f::"a"'), _unit("b", 'app/b.py::f::"b"')]
+    findings, keys = await assess(
+        _rule(),
+        units,
+        llm=llm,
+        store=InMemoryAssessmentStore(),
+        policy_revision=1,
+        call_budget=budget,
+    )
+    assert llm.calls == 3 and budget.used == 3 and len(keys) == 1
+    assert sorted(f.verdict for f in findings) == ["REVIEW", "UNKNOWN"]
+    assert any("上限" in f.message for f in findings if f.verdict == "UNKNOWN")
+
+
+async def test_keys_are_json_and_include_the_rule_origin() -> None:
+    store = InMemoryAssessmentStore()
+    llm = FakeLlm([_answer(True)])
+    _, team = await assess(
+        _rule(), [_unit()], llm=llm, store=store, policy_revision=1, origin="team:w#1"
+    )
+    _, project = await assess(
+        _rule(), [_unit()], llm=llm, store=store, policy_revision=1, origin="project:abc"
+    )
+    assert llm.calls == 6  # 出所が違えば同じ ID・同じ改訂番号でも記録を共有しない
+    key = parse_key(team[0])
+    assert key is not None and key.rule_id == "ERRMSG-NEXT@team:w#1"
+    assert parse_key(project[0]) is not None and team != project
+    assert key_str(key) == team[0]

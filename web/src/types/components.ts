@@ -3,7 +3,7 @@
 import type { AttestationTarget } from './attestation'
 import type { Counterexample, Finding } from './finding'
 import type { RunEvent } from './events'
-import type { RerunResponse } from './run'
+import type { RerunResponse, ReviewRunDetail } from './run'
 import type { AgentSupplement } from './supplement'
 
 /** 判定の 4 値の色（design 3.1。意味と色の対応は固定）と、免除中（exempt）の色。 */
@@ -49,6 +49,15 @@ export interface AttestButtonProps {
   target: AttestationTarget
   /** 確定の後に呼ぶ（再検査の run があればその ID）。 */
   onDone: (recheckRunId: string | null) => void
+}
+
+export interface FindingAttestProps {
+  /** run のワークスペース（未登録なら null） */
+  slug: string | null
+  run: ReviewRunDetail
+  finding: Finding
+  /** owner / approver なら確定のボタンを出す */
+  mayAttest: boolean
 }
 
 export interface RerunButtonProps {

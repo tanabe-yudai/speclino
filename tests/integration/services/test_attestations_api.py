@@ -64,7 +64,7 @@ async def ctx(engine: AsyncEngine, tmp_path: Path) -> AsyncIterator[Ctx]:
     await register_repo(
         engine,
         repo,
-        {"owner1": "owner", "approver1": "approver", "member1": "member"},
+        {"owner1": "owner", "approver1": "approver", "member1": "member", "dev": "approver"},
         team=slug,
     )
     await register_repo(engine, other_repo, {"owner9": "owner"}, team=other)
@@ -184,3 +184,48 @@ async def test_pr_comment_attest_is_recorded_for_approvers(ctx: Ctx, engine: Asy
     )
     res = (await ctx.c.post("/webhooks/github", content=raw, headers=headers)).json()
     assert res["commands"][0]["accepted"] is False
+
+
+async def _audit_detail(engine: AsyncEngine, slug: str) -> list[tuple[str, bool]]:
+    async with engine.connect() as conn:
+        rows = await conn.execute(
+            sql_text(
+                "SELECT actor, detail FROM audit_events WHERE action = 'attestation.record' "
+                "AND decision <> 'rejected' AND target LIKE :t ORDER BY ts"
+            ),
+            {"t": f"{slug}:%"},
+        )
+        return [(r[0], bool(r[1].get("self_attested"))) for r in rows]
+
+
+async def test_rest_self_attestation_is_allowed_but_marked(ctx: Ctx, engine: AsyncEngine) -> None:
+    """PR の作成者（pr_payload の user は dev）が自分で確定しても拒否せず、印を残す。"""
+    run_id = await _pr_run(ctx, ctx.repo)
+    url = f"/api/workspaces/{ctx.slug}/attestations"
+    own = {
+        "fingerprint": "R:i:7",
+        "content_hash": HASH,
+        "disposition": "attested",
+        "run_id": run_id,
+    }
+    res = await ctx.c.post(url, json=own, headers={"X-Dev-User": "dev"})
+    assert res.status_code == 200, res.text
+    assert res.json()["attestation"]["self_attested"] is True
+    other = {**own, "fingerprint": "R:i:8"}
+    res = await ctx.c.post(url, json=other, headers=APPROVER)
+    assert res.json()["attestation"]["self_attested"] is False
+    assert await _audit_detail(engine, ctx.slug) == [("dev", True), ("approver1", False)]
+
+
+async def test_pr_comment_self_attestation_is_marked(ctx: Ctx, engine: AsyncEngine) -> None:
+    await _pr_run(ctx, ctx.repo)
+    await set_project_approvers(engine, ctx.repo, ["dev", "gh-approver"])
+    for login, fp in (("dev", "R:i:5"), ("gh-approver", "R:i:6")):
+        payload = comment_payload(ctx.repo, 1, f"/speclino attest {fp} {HASH}", login)
+        payload["issue"]["user"] = {"login": "dev"}  # PR の作成者
+        raw, headers = signed(payload, "issue_comment")
+        res = (await ctx.c.post("/webhooks/github", content=raw, headers=headers)).json()
+        assert res["commands"][0]["self_attested"] is (login == "dev"), res
+    async with async_sessionmaker(engine)() as s:
+        marks = {a.fingerprint: a.self_attested for a in await list_attestations(s, ctx.slug)}
+    assert marks == {"R:i:5": True, "R:i:6": False}

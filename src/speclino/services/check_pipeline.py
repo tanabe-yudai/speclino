@@ -43,7 +43,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from functools import partial
 from pathlib import Path
@@ -97,6 +97,7 @@ from speclino.services.attestations import (
     applied_attestations,
     apply_attestations,
     informational_ids,
+    self_attested_ids,
 )
 from speclino.services.knowledge_inputs import OperationResolver, SpecUnit, bundle_hash, spec_units
 from speclino.services.llm_policies import CONTENT_HASH_REF, FINGERPRINT_REF
@@ -416,8 +417,11 @@ def _run_check(req: CheckRequest, *, is_base: bool) -> CheckResult:
     # REVIEW のまま。確定は manifest に残す）
     attestations = list(req.attestations)
     cleared = informational_ids(combined) | apply_attestations(combined, attestations)
-    gate = aggregate_gate(
-        combined, levels, GatePolicy(fail_on=fail_on, mode=req.mode), waived, cleared
+    gate = replace(
+        aggregate_gate(
+            combined, levels, GatePolicy(fail_on=fail_on, mode=req.mode), waived, cleared
+        ),
+        self_attested_ids=self_attested_ids(combined, attestations),
     )
 
     compiled_versions = sorted(
@@ -1424,29 +1428,43 @@ def _policy_files(config_dir: Path | None) -> list[Path]:
     return sorted({*policy_dir.glob("*.yaml"), *policy_dir.glob("*.yml")})
 
 
-def llm_assisted_rules(req: CheckRequest) -> list[tuple[PolicyRule, int]]:
-    """この run で適用される LLM 支援の規約と、評価のキーに使う規約の改訂番号（S70）。
+@dataclass(frozen=True)
+class LlmRuleTarget:
+    """この run で評価する LLM 支援の規約 1 つ（S70）。"""
+
+    rule: PolicyRule
+    # 評価のキーに使う規約の改訂番号（プロジェクト固有の規約は改訂番号を持たないので 1）
+    policy_revision: int
+    # 規約の出所。キーのルール部分に入れ、同じ ID・同じ改訂番号の別の規約の記録を取り違えない
+    # （チーム規約は `team:<team>#<改訂>`、プロジェクト固有は `project:<ファイルの内容の hash>`）
+    origin: str
+
+
+def llm_assisted_rules(req: CheckRequest) -> list[LlmRuleTarget]:
+    """この run で適用される LLM 支援の規約（S70）。
 
     `_run_policies` と同じ優先順（チーム規約が先、同じ ID のプロジェクト固有は無視）と同じ読み先
-    （bundle の run は信頼側、Git の run はプロジェクト）。プロジェクト固有の規約は改訂番号を
-    持たないので 1（キーのプロンプトの版にチェック項目と本文の hash が入るので、内容を変えれば
-    前の記録は使わない）。読めない規約ファイルはここでは飛ばす（run_check がエラーにする）。
+    （bundle の run は信頼側、Git の run はプロジェクト）。読めない規約ファイルはここでは飛ばす
+    （run_check がエラーにする）。
     """
     knowledge = req.knowledge
     team_policy = knowledge.policy if knowledge is not None else req.team_policy
     config_dir = req.trusted_root if knowledge is not None else req.resolved_project_dir
-    rules: dict[str, tuple[PolicyRule, int]] = {}
+    rules: dict[str, LlmRuleTarget] = {}
     if team_policy is not None:
+        origin = f"team:{team_policy.team}#{team_policy.revision}"
         for rule in team_policy.package.rules:
-            rules[rule.id] = (rule, team_policy.revision)
+            rules[rule.id] = LlmRuleTarget(rule, team_policy.revision, origin)
     for path in _policy_files(config_dir):
         try:
-            package = PolicyPackage.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
+            text = path.read_text(encoding="utf-8")
+            package = PolicyPackage.model_validate(yaml.safe_load(text))
         except (OSError, ValueError, yaml.YAMLError):
             continue
+        origin = f"project:{content_hash(text)[7:23]}"
         for rule in package.rules:
-            rules.setdefault(rule.id, (rule, 1))
-    return [v for v in rules.values() if v[0].tier == "llm_assisted"]
+            rules.setdefault(rule.id, LlmRuleTarget(rule, 1, origin))
+    return [t for t in rules.values() if t.rule.tier == "llm_assisted"]
 
 
 def _policy_error_finding(rule: PolicyRule, error: Exception) -> Finding:
@@ -1485,6 +1503,7 @@ __all__ = [
     "CheckRequest",
     "CheckResult",
     "Mode",
+    "LlmRuleTarget",
     "changed_content_hash",
     "llm_assisted_rules",
     "policy_package_hash",

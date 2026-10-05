@@ -9,6 +9,8 @@ export interface Attestation {
   actor: string
   workspace: string
   created_at: string
+  /** PR の作成者が自分で確定した（拒否はせず印を残す） */
+  self_attested?: boolean
 }
 
 /** Finding から取り出した確定の対象（指紋と内容の hash）。 */

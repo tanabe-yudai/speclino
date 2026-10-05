@@ -46,7 +46,7 @@ async def create_attestation(
     recheck: uuid.UUID | None = None
     try:
         async with state.session_factory() as s, s.begin():
-            saved = await svc.attest_as_member(
+            saved, target = await svc.attest_as_member(
                 s,
                 workspace=slug,
                 uid=user.uid,
@@ -54,9 +54,10 @@ async def create_attestation(
                 content_hash=body.content_hash,
                 disposition=body.disposition,
                 audit_factory=state.session_factory,
+                run_id=body.run_id,
             )
-            if body.run_id is not None:
-                project, latest = await svc.recheck_target(s, slug, body.run_id)
+            if target is not None:
+                project, latest = target
                 recheck = await state.service.create_run_in(
                     s,
                     project=project,
@@ -64,6 +65,7 @@ async def create_attestation(
                     base_sha=latest.base_sha,
                     pr_number=latest.pr_number,
                     trigger="attestation",
+                    pr_author=latest.pr_author,
                 )
     except WorkspaceNotFound as e:
         raise api_error(404, "workspace_not_found", "ワークスペースが無い") from e
