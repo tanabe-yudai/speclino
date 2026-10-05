@@ -75,13 +75,16 @@ class FetchHealth(IRModel):
     channel: str = Field(description="sync / mcp など")
     token_id: str | None
     token_name: str | None
+    revoked: bool = Field(description="トークンが失効済み（遅れに数えない）")
     uid: str | None
     member_email: str | None
     project_id: str | None
     repo_full_name: str | None
     last_fetched_at: datetime | None = Field(description="None は期間内に取得が無い")
     last_generation: int | None
-    behind_by: int | None = Field(description="今の世代 − 最後に取得した世代。None は未計測")
+    behind_by: int | None = Field(
+        description="今の世代 − 最後に取得した世代。None は未計測か失効済み"
+    )
 
 
 class TrendRun(IRModel):

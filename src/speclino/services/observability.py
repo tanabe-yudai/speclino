@@ -12,7 +12,7 @@ from collections import Counter, defaultdict
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 
-from sqlalchemy import select, tuple_
+from sqlalchemy import or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from speclino.db.models import (
@@ -52,16 +52,25 @@ from speclino.services.project_overview import count_verdicts, policy_rule_id
 
 LLM_VERIFIER_ID = "llm.checklist"
 
-# 検査器（conformance/・analysis/・services/check_pipeline.py）が UNKNOWN に付ける決まった言い回し。
+# 検査器（conformance/・services/check_pipeline.py）が UNKNOWN に付ける決まった言い回しの接頭辞。
 # Finding に理由の欄は無い（契約を変えない）ので、言い回しで分類する。判別できなければ other。
+# 言い回しは test_observability_reasons.py が検査器のソースと突き合わせて固定する。
 _UNBOUND = re.compile(
-    r"対応する操作が見つからない|対応が見つからない|対応する列挙型の変数が見つからない"
-    r"|bindings に無い|対応に無い|^入口の操作に解析経路が無い|^解析経路が無い"
+    r"^図の要素に対応する操作が見つからない: "
+    r"|^状態の属性 \S+ に対応する列挙型の変数が見つからない$"
+    r"|^図の状態 .+ が列挙 \S+ に無い（対応が見つからない）$"
+    r"|^図の遷移を行うコードが対応に無い（"
+    r"|^入口の操作に解析経路が無い$"
+    r"|^解析経路が無い$"
 )
-_LIMIT = re.compile(r"上限")
+_LIMIT = re.compile(
+    r"^網羅性の判定がソルバー上限に達した$|^図の模擬が上限に達した（|の判定がソルバー上限（\d+ms）に達した$"
+)
 _INEXACT = re.compile(
-    r"精度が|不完全|条件付き（may）|未解決要因|確定できない|解決できない|判別できない"
-    r"|一意に決まらない|どの解析経路にも対応しない|値が分からない"
+    r"^経路 \S+ (は解析の精度が |は不完全なため|の未解決要因が|のイベント抽出が不完全なため"
+    r"|の呼出し .+ が条件付き（may）|の \S+ への代入が条件付き（may）)"
+    r"|^振る舞い全体の未解決要因が"
+    r"|入力の一部がどの解析経路にも対応しない（経路の列挙が不完全）$"
 )
 
 
@@ -111,32 +120,34 @@ def _canonical(project: str) -> str | None:
 
 async def _spec_requirements(
     session: AsyncSession, workspace: str, bundle: Bundle | None
-) -> tuple[list[RequirementRow], dict[str, list[RequirementRow]]]:
-    """今の bundle の spec の要求の表。(全プロジェクトに当たるもの, project ID → 行)。"""
+) -> dict[str, dict[tuple[uuid.UUID, str], RequirementRow]]:
+    """今の bundle の spec の要求の表。project ID → (spec artifact, 要求 ID) → 行（重複なし）。
+
+    spec のスコープは projects だけ（workspace スコープは skill / instructions の契約）。
+    """
     members = bundle.members if bundle is not None else []
     keys = [(uuid.UUID(m.artifact_id), m.revision) for m in members if m.kind == "spec"]
-    everywhere: list[RequirementRow] = []
-    by_project: dict[str, list[RequirementRow]] = defaultdict(list)
+    by_project: dict[str, dict[tuple[uuid.UUID, str], RequirementRow]] = defaultdict(dict)
     if not keys:
-        return everywhere, by_project
+        return by_project
     stmt = (
-        select(ArtifactRevisionRecord.content)
+        select(ArtifactRevisionRecord.artifact_id, ArtifactRevisionRecord.content)
         .join(ArtifactRecord, ArtifactRecord.id == ArtifactRevisionRecord.artifact_id)
         .where(
             ArtifactRecord.workspace == workspace,
+            ArtifactRecord.kind == "spec",
             tuple_(ArtifactRevisionRecord.artifact_id, ArtifactRevisionRecord.revision).in_(keys),
         )
     )
-    for content in (await session.execute(stmt)).scalars():
+    for artifact_id, content in (await session.execute(stmt)).tuples():
         compiled = content.get("compiled") or {}
         rows = [RequirementRow.model_validate(r) for r in compiled.get("requirements", [])]
         scope = content.get("scope") or {}
-        if scope.get("workspace"):
-            everywhere.extend(rows)
         for p in scope.get("projects", []):
             if (pid := _canonical(p)) is not None:
-                by_project[pid].extend(rows)
-    return everywhere, by_project
+                for row in rows:
+                    by_project[pid].setdefault((artifact_id, row.id), row)
+    return by_project
 
 
 async def _latest_runs(session: AsyncSession, pids: list[uuid.UUID]) -> list[ReviewRun]:
@@ -265,48 +276,58 @@ async def _fetches(
         .distinct(*key)
     )
     latest = list((await session.execute(stmt)).scalars())
-    sync_tokens = list(
-        (
-            await session.execute(select(SyncTokenRecord).where(SyncTokenRecord.team == workspace))
-        ).scalars()
+    fetched = {row.token_id for row in latest if row.token_id is not None}
+    # 失効していないトークン（未取得の行を出す）と、期間内に取得のあったトークン（名前と失効）だけ
+    sync_stmt = select(SyncTokenRecord).where(
+        SyncTokenRecord.team == workspace,
+        or_(SyncTokenRecord.revoked_at.is_(None), SyncTokenRecord.id.in_(fetched)),
     )
-    mcp_stmt = select(McpTokenRecord.id, McpTokenRecord.name).where(
-        McpTokenRecord.team == workspace
+    sync_tokens = list((await session.execute(sync_stmt)).scalars())
+    mcp_stmt = select(McpTokenRecord.id, McpTokenRecord.name, McpTokenRecord.revoked_at).where(
+        McpTokenRecord.team == workspace, McpTokenRecord.id.in_(fetched)
     )
-    names = {t.id: t.name for t in sync_tokens}
-    names.update({tid: name for tid, name in (await session.execute(mcp_stmt)).tuples()})
+    tokens: dict[uuid.UUID, tuple[str, bool]] = {
+        t.id: (t.name, t.revoked_at is not None) for t in sync_tokens
+    }
+    for tid, name, revoked_at in (await session.execute(mcp_stmt)).tuples():
+        tokens[tid] = (name, revoked_at is not None)
     member_stmt = select(WorkspaceMember.uid, WorkspaceMember.email).where(
         WorkspaceMember.team == workspace
     )
     emails = {uid: email for uid, email in (await session.execute(member_stmt)).tuples()}
 
     out: list[FetchHealth] = []
-    fetched_tokens: set[uuid.UUID] = set()
     for row in latest:
-        if row.token_id is not None:
-            fetched_tokens.add(row.token_id)
+        token = tokens.get(row.token_id) if row.token_id is not None else None
+        token_name = token[0] if token is not None else None
+        revoked = token is not None and token[1]
         out.append(
             FetchHealth(
                 channel=row.channel,
                 token_id=str(row.token_id) if row.token_id is not None else None,
-                token_name=names.get(row.token_id) if row.token_id is not None else None,
+                token_name=token_name,
+                revoked=revoked,
                 uid=row.uid,
                 member_email=emails.get(row.uid) if row.uid is not None else None,
                 project_id=str(row.project_id) if row.project_id is not None else None,
                 repo_full_name=repos.get(row.project_id) if row.project_id is not None else None,
                 last_fetched_at=row.created_at,
                 last_generation=row.bundle_generation,
-                behind_by=current - row.bundle_generation if current is not None else None,
+                # 失効したトークンはもう取得できないので、遅れに数えない
+                behind_by=current - row.bundle_generation
+                if current is not None and not revoked
+                else None,
             )
         )
     for t in sync_tokens:
-        if t.revoked_at is not None or t.id in fetched_tokens:
+        if t.revoked_at is not None or t.id in fetched:
             continue
         out.append(
             FetchHealth(
                 channel="sync",
                 token_id=str(t.id),
                 token_name=t.name,
+                revoked=False,
                 uid=None,
                 member_email=None,
                 project_id=str(t.project_id),
@@ -413,13 +434,13 @@ async def workspace_health(
     bundle = await BundleRepository(session).latest(workspace)
     current = bundle.generation if bundle is not None else None
 
-    everywhere, by_project = await _spec_requirements(session, workspace, bundle)
+    by_project = await _spec_requirements(session, workspace, bundle)
     latest = {r.project_id: r for r in await _latest_runs(session, pids)}
     latest_findings = await _findings(session, [r.id for r in latest.values()])
     project_health = [
         _project_health(
             p,
-            [*everywhere, *by_project.get(str(p.id), [])],
+            list(by_project.get(str(p.id), {}).values()),
             latest.get(p.id),
             latest_findings.get(latest[p.id].id, []) if p.id in latest else [],
             current,

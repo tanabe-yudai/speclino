@@ -74,11 +74,15 @@ def _finding(
     )
 
 
-def _spec_content(project: uuid.UUID, rows: list[tuple[str, list[str]]]) -> dict[str, Any]:
+def _spec_content(
+    project: uuid.UUID,
+    rows: list[tuple[str, list[str]]],
+    scope: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     return {
         "kind": "spec",
         "markdown": "# spec",
-        "scope": {"workspace": False, "projects": [str(project)]},
+        "scope": scope or {"workspace": False, "projects": [str(project)]},
         "compiled": {
             "parser_version": "1",
             "source_hash": HASH,
@@ -240,20 +244,47 @@ async def world(engine: AsyncEngine) -> World:
                 team=ws, revision=1, status="active", package=_policy_package(), author="a"
             )
         )
-        # 仕様: orders（P1、3 行のうち 2 行が形式化済み）と billing（P2、要求の表が空）
+        # 仕様: orders（P1、3 行のうち 2 行が形式化済み。同じ行の重複・同じプロジェクトの別表記は
+        # 1 つに数える）、payments（P1、別の spec の同じ ID R1 は別の要求）、
+        # billing（P2、要求の表が空）、
+        # workspace スコープの spec（契約外。どのプロジェクトにも数えない）
         orders = await _add_spec(
             s,
             ws,
             "orders",
             1,
             "active",
-            _spec_content(p1, [("R1", ["seq#a"]), ("R2", []), ("R3", ["ir:R3"])]),
+            _spec_content(
+                p1,
+                [("R1", ["seq#a"]), ("R2", []), ("R3", ["ir:R3"]), ("R1", ["seq#a"])],
+                {"workspace": False, "projects": [str(p1), str(p1).upper()]},
+            ),
+        )
+        payments = await _add_spec(s, ws, "payments", 1, "active", _spec_content(p1, [("R1", [])]))
+        broad = await _add_spec(
+            s,
+            ws,
+            "broad",
+            1,
+            "active",
+            _spec_content(p1, [("W1", [])], {"workspace": True, "projects": []}),
         )
         # bundle に入っていない下書きは数えない
         await _add_spec(s, ws, "orders", 2, "draft", _spec_content(p1, [("R9", [])]))
         billing = await _add_spec(s, ws, "billing", 1, "active", _spec_content(p2, []))
         s.add(_bundle(ws, 1, [_member(orders, "orders", 1)]))
-        s.add(_bundle(ws, 2, [_member(orders, "orders", 1), _member(billing, "billing", 1)]))
+        s.add(
+            _bundle(
+                ws,
+                2,
+                [
+                    _member(orders, "orders", 1),
+                    _member(payments, "payments", 1),
+                    _member(billing, "billing", 1),
+                    _member(broad, "broad", 1),
+                ],
+            )
+        )
         # 他のワークスペース: 世代 9 の bundle、P1 と同じ規約 ID の違反、取得
         other_spec = await _add_spec(
             s, other, "orders", 1, "active", _spec_content(p3, [("X1", [])])
@@ -343,14 +374,18 @@ async def world(engine: AsyncEngine) -> World:
                 revoked_at=NOW if revoked else None,
             )
 
-        ci, laptop, new, gone = (
+        ci, laptop, new, gone, old = (
             token("ci", p1),
             token("laptop", p2),
             token("new", p1),
             token("gone", p1, True),
+            token("old", p2, True),
         )
         mcp = McpTokenRecord(team=ws, name="agent", token_hash=uuid.uuid4().hex, created_by="o")
-        s.add_all([ci, laptop, new, gone, mcp])
+        mcp_old = McpTokenRecord(
+            team=ws, name="retired", token_hash=uuid.uuid4().hex, created_by="o", revoked_at=NOW
+        )
+        s.add_all([ci, laptop, new, gone, old, mcp, mcp_old])
         await s.flush()
 
         def fetch(
@@ -379,6 +414,9 @@ async def world(engine: AsyncEngine) -> World:
                 fetch("sync", 1, timedelta(days=3), p2, laptop.id),
                 fetch("mcp", 1, timedelta(days=40), p1, mcp.id, "member1"),  # 期間外
                 fetch("mcp", 2, timedelta(days=5), p1, None, "member1"),
+                # 失効したトークンの取得履歴は出すが、遅れには数えない
+                fetch("sync", 1, timedelta(days=4), p2, old.id),
+                fetch("mcp", 1, timedelta(days=4), p2, mcp_old.id),
             ]
         )
     return World(factory, ws, other, p1, p2, run1, run2)
@@ -394,7 +432,7 @@ async def test_workspace_health_numbers(world: World) -> None:
 
     a = by_repo[f"e2e/{world.ws}-a"]
     assert a.formalization is not None
-    assert (a.formalization.numerator, a.formalization.denominator) == (2, 3)
+    assert (a.formalization.numerator, a.formalization.denominator) == (2, 4)
     assert a.binding is not None
     assert (a.binding.numerator, a.binding.denominator) == (3, 4)
     assert a.unknown_breakdown is not None
@@ -428,7 +466,18 @@ async def test_fetch_health(world: World) -> None:
         h = await workspace_health(s, world.ws, now=NOW)
 
     rows = {(f.channel, f.token_name or f.uid): f for f in h.fetches}
-    assert set(rows) == {("sync", "ci"), ("sync", "laptop"), ("sync", "new"), ("mcp", "member1")}
+    assert set(rows) == {
+        ("sync", "ci"),
+        ("sync", "laptop"),
+        ("sync", "new"),
+        ("sync", "old"),
+        ("mcp", "retired"),
+        ("mcp", "member1"),
+    }
+    for key in (("sync", "old"), ("mcp", "retired")):
+        assert rows[key].revoked and rows[key].behind_by is None
+        assert rows[key].last_generation == 1
+    assert not rows[("sync", "ci")].revoked
     ci = rows[("sync", "ci")]
     assert (ci.last_generation, ci.behind_by) == (2, 0)
     assert ci.repo_full_name == f"e2e/{world.ws}-a"
@@ -529,7 +578,7 @@ async def test_api_member_sees_health(world: World, client: httpx.AsyncClient) -
     body = r.json()
     assert body["workspace"] == world.ws and body["current_generation"] == 2
     a = next(p for p in body["projects"] if p["repo_full_name"] == f"e2e/{world.ws}-a")
-    assert a["formalization"]["numerator"] == 2 and a["formalization"]["denominator"] == 3
+    assert a["formalization"]["numerator"] == 2 and a["formalization"]["denominator"] == 4
     b = next(p for p in body["projects"] if p["repo_full_name"] == f"e2e/{world.ws}-b")
     assert b["formalization"] is None and b["binding"] is None
 
