@@ -1,4 +1,4 @@
-"""conformance / analysis は LLM・adapters・agent に依存しない（CLAUDE.md の構成規約）。"""
+"""conformance / analysis / spec.uml は LLM・adapters・agent に依存しない（構成規約）。"""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ FORBIDDEN_PREFIXES = (
     "speclino.adapters",
     "speclino.api",
     "speclino.db",
+    "speclino.spec.spec_extractor",  # LLM の抽出器
 )
 
 
@@ -28,7 +29,7 @@ def _imports(path: Path) -> set[str]:
     return names
 
 
-@pytest.mark.parametrize("package", ["conformance", "analysis", "domain"])
+@pytest.mark.parametrize("package", ["conformance", "analysis", "domain", "spec/uml"])
 def test_pure_packages_do_not_import_llm_or_adapters(package: str) -> None:
     for py in (SRC / package).rglob("*.py"):
         bad = {n for n in _imports(py) if n.startswith(FORBIDDEN_PREFIXES)}
