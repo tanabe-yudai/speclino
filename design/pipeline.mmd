@@ -1,14 +1,15 @@
 flowchart LR
-  S1["<b>1 スナップショット</b><br/>base / head を固定"]
-  S2["<b>2 spec_validator</b><br/>承認ハッシュ照合<br/>base との Rule 差分"]
-  S3["<b>3 verifiers</b><br/>規約 MAKE-001 / SPEC-FMT-001<br/>CI-001 / API-ERR-001"]
+  S0["<b>0 bundle を固定</b><br/>承認済みの仕様・規約<br/>（署名・ハッシュを照合）"]
+  S1["<b>1 スナップショット</b><br/>head と信頼側<br/>（デフォルトブランチ）"]
+  S2["<b>2 仕様の IR</b><br/>承認時に parser が固定した IR<br/>（UML / 旧形式）"]
+  S3["<b>3 規約の検査器</b><br/>決定的な検査器<br/>LLM 支援は REVIEW のみ<br/>lock の鮮度"]
   S4["<b>4 path_analyzer</b><br/>Python 部分集合 → Code IR<br/>経路・イベント・上限"]
-  S5["<b>5 conformance_engine</b><br/>Z3: 仮定 ∧ 適用条件<br/>∧ 経路 ∧ ¬保証"]
+  S5["<b>5 conformance</b><br/>Z3 ・ オートマトン照合<br/>欠けた要求は UNKNOWN で補う"]
   S6{"未解決<br/>UNKNOWN / REVIEW<br/>が残るか"}
   S7["<b>6 ADK Agent ⇄ ToolGateway</b><br/>analyze_focus / repo_search<br/>test_run / human_ask"]
-  S8["<b>7 gate（フェイルクローズ）</b><br/>semantic_diff → reporter<br/>→ Checks API"]
+  S8["<b>7 gate（フェイルクローズ）</b><br/>確定（attestation）を適用<br/>→ Checks API"]
 
-  S1 --> S2 --> S3 --> S4 --> S5 --> S6
+  S0 --> S1 --> S2 --> S3 --> S4 --> S5 --> S6
   S6 -- "いいえ" --> S8
   S6 -- "はい" --> S7
   S7 -- "証拠を足して再評価<br/>（判定は engine のまま）" --> S5
@@ -16,5 +17,5 @@ flowchart LR
 
   classDef deterministic fill:#e8f0fe,stroke:#1a73e8
   classDef agent fill:#fef7e0,stroke:#f9ab00
-  class S1,S2,S3,S4,S5,S8 deterministic
+  class S0,S1,S2,S3,S4,S5,S8 deterministic
   class S7 agent
