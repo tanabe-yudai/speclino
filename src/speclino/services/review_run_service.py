@@ -44,6 +44,7 @@ from speclino.db.repositories import (
     ReviewRunRepository,
     RunEventRepository,
 )
+from speclino.db.repositories.assessments import SessionFactoryAssessmentStore
 from speclino.domain.code_ir import AnalysisLimits
 from speclino.domain.finding import Finding, Findings
 from speclino.domain.knowledge import ResolvedKnowledge
@@ -62,10 +63,12 @@ from speclino.reporter.check_report import (
     render_check,
     render_pr_comment,
 )
+from speclino.services.attestations import list_attestations
 from speclino.services.check_pipeline import (
     CheckInputError,
     CheckRequest,
     CheckResult,
+    llm_assisted_rules,
     rediff,
     run_check,
     write_result,
@@ -73,6 +76,13 @@ from speclino.services.check_pipeline import (
 from speclino.services.cost_guard import CostGuard
 from speclino.services.investigation import InvestigationResult, investigate
 from speclino.services.knowledge_inputs import KnowledgeResolver
+from speclino.services.llm_policies import (
+    AssessmentStore,
+    assess,
+    checklist_params,
+    unknown_finding,
+)
+from speclino.services.llm_units import extract_units
 from speclino.services.obligation_diff import effective_spec
 from speclino.services.project_settings import parse_stored
 from speclino.services.replay_service import DETERMINISTIC_FINDINGS
@@ -113,6 +123,10 @@ class ReviewRunConfig:
     # workspace と project は DB の project 行から取る（リクエストの値は使わない）。None なら従来の
     # Git の入力（仕様は specs/、チーム規約は resolve_team_policy）
     resolve_knowledge: KnowledgeResolver | None = None
+    # S70: LLM 支援の規約（tier=llm_assisted）を評価する LLM。None なら評価せず、そのルールは
+    # UNKNOWN（ゲートは通らない）。評価の記録は DB（llm_assessments）に残し、同じキーは呼ばない
+    policy_llm: TextLlm | None = None
+    policy_llm_timeout_s: float = 60.0
 
 
 @dataclass
@@ -289,6 +303,8 @@ class ReviewRunService:
             }
             for a in answers:
                 await events.append(run_id, "human_answer", a)
+            # S70: 人の確定は run の開始時に読む（確定の後は再検査の run が作られる）
+            attestations = await list_attestations(session, team) if team is not None else []
 
         mismatch = await repository_mismatch(self.code_host, repo_full_name, github_repo_id)
         if mismatch is not None:
@@ -377,7 +393,10 @@ class ReviewRunService:
                     github_repo_id=github_repo_id,
                     trusted_root=trusted_root,
                     trusted_sha=trusted_sha,
+                    attestations=tuple(attestations),
                 )
+                llm_findings, llm_keys = await self._assess_llm_policies(req, str(run_id))
+                req = replace(req, llm_findings=llm_findings, llm_assessment_keys=tuple(llm_keys))
                 with span("speclino.check", head=head_sha):
                     result = run_check(req)
                 findings = result.findings
@@ -451,6 +470,7 @@ class ReviewRunService:
                     policy_findings=result.policy_findings,
                     semantic_diff=semantic,
                     waived_finding_ids=result.waived_finding_ids,
+                    cleared_finding_ids=result.cleared_finding_ids,
                     waivers=result.waivers,
                 )
                 paths = write_result(final, out_dir)
@@ -638,6 +658,56 @@ class ReviewRunService:
                         {"status": "error", "error": f"{type(e).__name__}: {e}"[:500]},
                     )
 
+    def _assessment_store(self) -> AssessmentStore:
+        return SessionFactoryAssessmentStore(self.session_factory)
+
+    async def _assess_llm_policies(
+        self, req: CheckRequest, run_id: str
+    ) -> tuple[dict[str, list[Finding]] | None, list[str]]:
+        """LLM 支援の規約を run_check の前に評価する（S70）。LLM の設定が無ければ None。
+
+        単位は head のスナップショットから AST で取り出す（対象のコードは import しない）。
+        ルールのパラメーターの誤り・取り出しの失敗はそのルールの UNKNOWN にして run を続ける。
+        """
+        rules = llm_assisted_rules(req)
+        llm = self.config.policy_llm
+        if not rules or llm is None:
+            return None, []
+        store = self._assessment_store()
+        out: dict[str, list[Finding]] = {}
+        keys: list[str] = []
+        for rule, revision in rules:
+            try:
+                params = checklist_params(rule)
+                units = extract_units(req.repo_root, params, rule.applies_to.paths)
+                found, used = await assess(
+                    rule,
+                    units.units,
+                    llm=llm,
+                    store=store,
+                    policy_revision=revision,
+                    cost_guard=self.cost_guard,
+                    run_id=run_id,
+                    timeout_s=self.config.policy_llm_timeout_s,
+                    unreadable=units.unreadable,
+                )
+            except Exception as e:  # noqa: BLE001 - そのルールの UNKNOWN にして run を続ける
+                found, used = (
+                    [
+                        unknown_finding(
+                            rule,
+                            rule.id,
+                            f"{type(e).__name__}: {e}"[:300],
+                            suffix="error",
+                            path=None,
+                        )
+                    ],
+                    [],
+                )
+            out[rule.id] = found
+            keys.extend(used)
+        return out, keys
+
     async def _run_spec_bot(
         self,
         run_id: UUID,
@@ -809,6 +879,7 @@ def _regate(findings: Findings, result: CheckResult, fail_on: tuple[str, ...]) -
         result.gate_levels,
         GatePolicy(fail_on=tuple(fail_on), mode="blocking"),  # type: ignore[arg-type]
         result.waived_finding_ids,
+        result.cleared_finding_ids,
     )
 
 

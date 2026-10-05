@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from speclino.db.models import AttestationRecord, LlmAssessmentRecord
 from speclino.domain.assessment import (
@@ -54,6 +54,25 @@ class AssessmentRepository:
         )
         await self._session.execute(stmt)
         await self._session.flush()
+
+
+class SessionFactoryAssessmentStore:
+    """読み書きごとに短いトランザクションを開く store（worker 用）。
+
+    LLM の呼出し（数秒〜数十秒）の間 DB の接続を握らないため、`AssessmentRepository` を
+    呼出しごとに作る。
+    """
+
+    def __init__(self, factory: async_sessionmaker[AsyncSession]) -> None:
+        self._factory = factory
+
+    async def get(self, key: AssessmentKey) -> AssessmentRecord | None:
+        async with self._factory() as session:
+            return await AssessmentRepository(session).get(key)
+
+    async def put(self, record: AssessmentRecord) -> None:
+        async with self._factory() as session, session.begin():
+            await AssessmentRepository(session).put(record)
 
 
 def _attestation(row: AttestationRecord) -> Attestation:
@@ -114,4 +133,4 @@ class AttestationRepository:
         return [_attestation(r) for r in (await self._session.execute(stmt)).scalars()]
 
 
-__all__ = ["AssessmentRepository", "AttestationRepository"]
+__all__ = ["AssessmentRepository", "AttestationRepository", "SessionFactoryAssessmentStore"]

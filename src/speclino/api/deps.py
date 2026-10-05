@@ -251,6 +251,12 @@ def build_state(settings: Settings) -> AppState:
             resolve_knowledge=make_knowledge_resolver(factory),
             # Gemini のクライアントは初回呼出しで作る（web ロールや認証情報の無い環境でも
             # 起動できる。認証が無ければ bot は理由をコメントに書く）
+            # S70: LLM 支援の規約を評価する LLM（クライアントは初回呼出しで作る）
+            policy_llm=(
+                GeminiJsonLlm(settings.llm_policies_model or settings.agent_model)
+                if settings.llm_policies_enabled
+                else None
+            ),
             spec_llm=(
                 GeminiJsonLlm(settings.spec_bot_model or settings.agent_model)
                 if settings.spec_bot_enabled
