@@ -36,6 +36,7 @@ from speclino.ports.sandbox import Sandbox
 from speclino.ports.task_queue import TaskQueue
 from speclino.services import bundle_signing
 from speclino.services.cost_guard import CostGuard, CostLedger
+from speclino.services.knowledge_inputs import make_knowledge_resolver
 from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
 from speclino.settings import Settings
 
@@ -243,6 +244,8 @@ def build_state(settings: Settings) -> AppState:
             agent_enabled=settings.agent_enabled,
             sandbox=build_sandbox(settings),
             resolve_team_policy=make_team_policy_resolver(factory),
+            # S65: ワークスペースに登録されたプロジェクトの run は bundle を固定して検査する
+            resolve_knowledge=make_knowledge_resolver(factory),
             # Gemini のクライアントは初回呼出しで作る（web ロールや認証情報の無い環境でも
             # 起動できる。認証が無ければ bot は理由をコメントに書く）
             spec_llm=(

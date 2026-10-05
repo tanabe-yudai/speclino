@@ -46,6 +46,7 @@ from speclino.db.repositories import (
 )
 from speclino.domain.code_ir import AnalysisLimits
 from speclino.domain.finding import Finding, Findings
+from speclino.domain.knowledge import ResolvedKnowledge
 from speclino.domain.policy import PolicyRevision
 from speclino.domain.run import ExecState, GateStatus
 from speclino.domain.semantic_diff import SemanticDiff
@@ -71,6 +72,7 @@ from speclino.services.check_pipeline import (
 )
 from speclino.services.cost_guard import CostGuard
 from speclino.services.investigation import InvestigationResult, investigate
+from speclino.services.knowledge_inputs import KnowledgeResolver
 from speclino.services.obligation_diff import effective_spec
 from speclino.services.project_settings import parse_stored
 from speclino.services.run_freshness import should_publish
@@ -105,6 +107,11 @@ class ReviewRunConfig:
     resolve_team_policy: Callable[[str], Awaitable[PolicyRevision | None]] | None = None
     # S46: 仕様 PR bot が候補を作る LLM。None なら bot を動かさない
     spec_llm: TextLlm | None = None
+    # S65: ワークスペースに登録されたプロジェクトの run は、開始時に bundle を 1 つ固定する
+    # （(workspace, project_id) → ResolvedKnowledge。実体は make_knowledge_resolver）。
+    # workspace と project は DB の project 行から取る（リクエストの値は使わない）。None なら従来の
+    # Git の入力（仕様は specs/、チーム規約は resolve_team_policy）
+    resolve_knowledge: KnowledgeResolver | None = None
 
 
 @dataclass
@@ -310,10 +317,18 @@ class ReviewRunService:
                         spec_bot_input = collect_spec_changes(base_root, head_root)
                     except Exception as e:  # noqa: BLE001 - bot の失敗で run を落とさない
                         spec_bot_error = f"{type(e).__name__}: {e}"[:500]
-                overrides, extra = _reconcile_specs(base_root, head_root, server_approvals)
+                # S65: bundle を固定する（この run の中では再解決しない）。仕様の正本は bundle に
+                # あるので、Git の仕様の承認の付け替え（_reconcile_specs）は行わない
+                knowledge: ResolvedKnowledge | None = None
+                if self.config.resolve_knowledge is not None and team is not None:
+                    knowledge = await self.config.resolve_knowledge(team, str(project_id))
+                overrides: dict[str, SpecIR] | None = None
+                extra: list[Finding] = []
                 team_policy: PolicyRevision | None = None
-                if self.config.resolve_team_policy is not None and team is not None:
-                    team_policy = await self.config.resolve_team_policy(team)
+                if knowledge is None:
+                    overrides, extra = _reconcile_specs(base_root, head_root, server_approvals)
+                    if self.config.resolve_team_policy is not None and team is not None:
+                        team_policy = await self.config.resolve_team_policy(team)
                 req = CheckRequest(
                     repo_root=head_root,
                     head_sha=head_sha,
@@ -327,6 +342,8 @@ class ReviewRunService:
                     bindings_patch=bindings_patch or None,
                     base_root=base_root,
                     team_policy=team_policy,
+                    knowledge=knowledge,
+                    github_repo_id=github_repo_id,
                 )
                 with span("speclino.check", head=head_sha):
                     result = run_check(req)
