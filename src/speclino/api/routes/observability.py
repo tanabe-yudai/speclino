@@ -14,7 +14,7 @@ from speclino.api.auth import require_user
 from speclino.api.deps import AppState, get_state
 from speclino.api.errors import api_error, error_responses
 from speclino.domain.workspace import AuthUser
-from speclino.services.observability import workspace_health
+from speclino.services.observability import llm_usage_stats, workspace_health
 from speclino.services.workspaces import WorkspaceNotFound, require_member
 
 router = APIRouter(
@@ -29,7 +29,9 @@ async def get_observability(
     try:
         async with state.session_factory() as s:
             await require_member(s, slug, user.uid)
-            health = await workspace_health(s, slug, now=datetime.now(UTC))
+            health = await workspace_health(
+                s, slug, now=datetime.now(UTC), llm_stats=llm_usage_stats
+            )
     except WorkspaceNotFound as e:
         raise api_error(404, "workspace_not_found", "ワークスペースが無い") from e
     return health.model_dump(mode="json")

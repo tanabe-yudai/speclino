@@ -12,14 +12,16 @@ from collections import Counter, defaultdict
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 
-from sqlalchemy import or_, select, tuple_
+from sqlalchemy import func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from speclino.db.models import (
     ArtifactRecord,
     ArtifactRevisionRecord,
+    AttestationRecord,
     FindingRecord,
     KnowledgeFetchRecord,
+    LlmAssessmentRecord,
     McpTokenRecord,
     Project,
     ReviewRun,
@@ -107,7 +109,9 @@ FETCH_WINDOW_DAYS = 30
 TREND_RUNS = 10
 _DONE_STATES = ("completed", "awaiting_answer")
 
-LlmStatsSource = Callable[[AsyncSession, str], Awaitable[LlmUsageStats | None]]
+# 供給元は (session, ワークスペース, 推移の run（古い順）) を受け取る。
+# 当たり率は同じ run の窓で数える
+LlmStatsSource = Callable[[AsyncSession, str, list[ReviewRun]], Awaitable[LlmUsageStats | None]]
 
 
 def _canonical(project: str) -> str | None:
@@ -397,7 +401,8 @@ def _llm(
         for f in fs
         if f.assessment_outcome is not None
     )
-    if not outcomes and stats is None:
+    measured = stats is not None and (stats.cache_hit_rate is not None or bool(stats.attestations))
+    if not outcomes and not measured:
         return None
     return LlmStability(
         issue=outcomes.get("issue", 0),
@@ -405,6 +410,57 @@ def _llm(
         split=outcomes.get("split", 0),
         cache_hit_rate=stats.cache_hit_rate if stats else None,
         attestations=stats.attestations if stats else None,
+        self_attested=stats.self_attested if stats else None,
+        attestations_unverified=stats.attestations_unverified if stats else None,
+    )
+
+
+async def llm_usage_stats(
+    session: AsyncSession, workspace: str, runs: list[ReviewRun]
+) -> LlmUsageStats:
+    """LLM 支援の記録（S70 の `llm_assessments` / `attestations`）からの値。
+
+    キャッシュの当たり率: 推移の run（直近 10 の完了した run）の manifest の
+    `llm_assessment_keys` を 1 run・1 キーずつ数え、そのキーの記録（同じワークスペース）が
+    **run の作成より前**からあったものを当たり（LLM を呼ばずに記録を使った）、run の作成以後に
+    できたものを外れ（その run が評価した）とする。並行する run が先に評価した記録を使った場合も
+    外れに数えるので、当たり率は低めに出る側に倒れる。記録が見つからないキーは判別できないので
+    分母から外す。数えるものが無ければ None（未計測）。
+
+    確定の件数: ワークスペースの今の確定（同じ指紋・内容の確定は 1 件に上書きされる）の件数と、
+    そのうち自己確定（PR の作成者が自分で確定）・照合できない（self_attested が NULL）の件数。
+    run の窓ではなく現在の状態。
+    """
+    uses = [
+        (run.created_at, key)
+        for run in runs
+        for key in set((run.manifest or {}).get("llm_assessment_keys") or [])
+    ]
+    created: dict[str, datetime] = {}
+    if uses:
+        stmt = select(LlmAssessmentRecord.key, LlmAssessmentRecord.created_at).where(
+            LlmAssessmentRecord.workspace == workspace,
+            LlmAssessmentRecord.key.in_({k for _, k in uses}),
+        )
+        created = dict((await session.execute(stmt)).tuples().all())
+    known = [(at, created[key]) for at, key in uses if key in created]
+    hits = sum(1 for run_at, record_at in known if record_at < run_at)
+    rate = ratio(hits, len(known))
+
+    total, self_attested, unverified = (
+        await session.execute(
+            select(
+                func.count(),
+                func.count().filter(AttestationRecord.self_attested.is_(True)),
+                func.count().filter(AttestationRecord.self_attested.is_(None)),
+            ).where(AttestationRecord.workspace == workspace)
+        )
+    ).one()
+    return LlmUsageStats(
+        cache_hit_rate=rate.rate if rate is not None else None,
+        attestations=total,
+        self_attested=self_attested,
+        attestations_unverified=unverified,
     )
 
 
@@ -418,8 +474,8 @@ async def workspace_health(
     """ワークスペースの可観測性の集計（画面と REST の唯一の集計）。
 
     どのクエリもワークスペースで絞る（他のワークスペースのデータを数えない）。メンバーかどうかの
-    確認は呼び出し側（API）が行う。`llm_stats` は LLM 支援の記録（S70）の供給元で、無ければ
-    キャッシュの当たり率と確定の件数は未計測。
+    確認は呼び出し側（API）が行う。`llm_stats` は LLM 支援の記録（S70）の供給元（REST は
+    `llm_usage_stats` を渡す）で、無ければキャッシュの当たり率と確定の件数は未計測。
     """
     projects = list(
         (
@@ -450,7 +506,7 @@ async def workspace_health(
     trend = await _trend_runs(session, pids)
     trend_findings = await _findings(session, [r.id for r in trend], policy_only=True)
     rules = await _policy_rules(session, workspace, bundle)
-    stats = await llm_stats(session, workspace) if llm_stats is not None else None
+    stats = await llm_stats(session, workspace, trend) if llm_stats is not None else None
 
     return WorkspaceHealth(
         workspace=workspace,

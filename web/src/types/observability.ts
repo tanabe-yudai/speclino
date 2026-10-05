@@ -85,6 +85,10 @@ export interface LlmStability {
   split: number
   cache_hit_rate: number | null
   attestations: number | null
+  /** 確定のうち PR の作成者が自分で確定した件数 */
+  self_attested: number | null
+  /** 確定のうち自己確定かどうかを照合できなかった件数 */
+  attestations_unverified: number | null
 }
 
 export interface WorkspaceHealth {

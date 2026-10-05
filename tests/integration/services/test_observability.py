@@ -27,9 +27,11 @@ from speclino.api.deps import AppState
 from speclino.db.models import (
     ArtifactRecord,
     ArtifactRevisionRecord,
+    AttestationRecord,
     BundleRecord,
     FindingRecord,
     KnowledgeFetchRecord,
+    LlmAssessmentRecord,
     McpTokenRecord,
     PolicyRevisionRecord,
     ReviewRun,
@@ -39,7 +41,7 @@ from speclino.domain.assessment import AssessmentOutcome
 from speclino.domain.finding import Category, Finding, Verdict
 from speclino.domain.observability import LlmUsageStats, RulePoint
 from speclino.services.knowledge_sync import LOCK_REQUIREMENT_ID
-from speclino.services.observability import workspace_health
+from speclino.services.observability import llm_usage_stats, workspace_health
 from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
 from speclino.settings import Settings
 from tests.integration.services.conftest import project_id_of, register_repo
@@ -98,6 +100,7 @@ def _spec_content(
 def _policy_package() -> dict[str, Any]:
     def rule(rid: str, level: str, verifier: str | None) -> dict[str, Any]:
         return {
+            "tier": "llm_assisted" if verifier == "llm.checklist" else "deterministic",
             "id": rid,
             "version": "1",
             "level": level,
@@ -130,7 +133,11 @@ async def _add_run(
     state: str = "completed",
     gate: str | None = "fail",
     generation: int | None = 1,
+    llm_keys: list[str] | None = None,
 ) -> uuid.UUID:
+    manifest: dict[str, Any] = {"bundle_generation": generation} if generation is not None else {}
+    if llm_keys is not None:
+        manifest["llm_assessment_keys"] = llm_keys
     run = ReviewRun(
         project_id=project,
         pr_number=7,
@@ -138,7 +145,7 @@ async def _add_run(
         trigger="test",
         exec_state=state,
         gate_status=gate,
-        manifest={"bundle_generation": generation} if generation is not None else {},
+        manifest=manifest,
         created_at=created_at,
     )
     s.add(run)
@@ -296,6 +303,7 @@ async def world(engine: AsyncEngine) -> World:
             NOW - timedelta(hours=1),
             [_finding("MAKE-001:Makefile", "policy:make.targets", "VIOLATED", "missing_effect")],
             generation=9,
+            llm_keys=["k1"],
         )
         s.add(
             KnowledgeFetchRecord(
@@ -314,12 +322,14 @@ async def world(engine: AsyncEngine) -> World:
             p1,
             NOW - timedelta(days=2),
             [_finding("MAKE-001:Makefile", "policy:make.targets", "VIOLATED", "missing_effect")],
+            llm_keys=["k1", "k2"],
         )
         run2 = await _add_run(
             s,
             p1,
             NOW - timedelta(days=1),
-            [
+            llm_keys=["k1", "k3", "k-missing"],
+            findings=[
                 _finding("seq#a", "spec:orders", "VERIFIED_IN_SCOPE", "conformant"),
                 _finding(
                     "seq#b",
@@ -360,6 +370,52 @@ async def world(engine: AsyncEngine) -> World:
                 _finding(LOCK_REQUIREMENT_ID, "knowledge:lock", "UNKNOWN", message="lock が無い"),
             ],
         )
+
+        # LLM 支援の記録: k1 は両 run より前（当たり 2）、k2 は run1 の後（外れ）、k3 は run2 の後
+        # （外れ）、k-missing は記録が無い（分母から外す）→ 2/4。他のワークスペースの同じキーの
+        # 古い記録（混ざれば全部当たりになる）は数えない
+        def assessment(workspace: str, key: str, at: datetime) -> LlmAssessmentRecord:
+            return LlmAssessmentRecord(
+                workspace=workspace,
+                key=key,
+                key_fields={},
+                unit_symbol="src/a.py::f",
+                items=[],
+                created_at=at,
+            )
+
+        s.add_all(
+            [
+                assessment(ws, "k1", NOW - timedelta(days=3)),
+                assessment(ws, "k2", NOW - timedelta(days=2) + timedelta(minutes=1)),
+                assessment(ws, "k3", NOW - timedelta(days=1) + timedelta(minutes=1)),
+                assessment(other, "k1", NOW - timedelta(days=10)),
+                assessment(other, "k2", NOW - timedelta(days=10)),
+                assessment(other, "k3", NOW - timedelta(days=10)),
+            ]
+        )
+
+        # 人の確定: 自己確定 1・照合できない 1・他人の確定 1。他のワークスペースに自己確定 1
+        def attestation(workspace: str, n: int, self_attested: bool | None) -> AttestationRecord:
+            return AttestationRecord(
+                workspace=workspace,
+                fingerprint=f"fp{n}",
+                content_hash=HASH,
+                disposition="attested",
+                actor="github:1",
+                first_actor="github:1",
+                self_attested=self_attested,
+            )
+
+        s.add_all(
+            [
+                attestation(ws, 1, True),
+                attestation(ws, 2, None),
+                attestation(ws, 3, False),
+                attestation(other, 1, True),
+            ]
+        )
+
         # 実行中の run は最新の完了した run にも推移にも入らない
         await _add_run(s, p1, NOW, [], state="running", gate=None)
 
@@ -510,14 +566,44 @@ async def test_rule_trend_and_llm(world: World) -> None:
 
 
 async def test_llm_stats_from_optional_source(world: World) -> None:
-    async def source(session: AsyncSession, workspace: str) -> LlmUsageStats | None:
+    async def source(
+        session: AsyncSession, workspace: str, runs: list[ReviewRun]
+    ) -> LlmUsageStats | None:
         assert workspace == world.ws
+        assert [r.id for r in runs] == [world.run1, world.run2]
         return LlmUsageStats(cache_hit_rate=0.75, attestations=2)
 
     async with world.factory() as s:
         h = await workspace_health(s, world.ws, now=NOW, llm_stats=source)
     assert h.llm is not None
     assert (h.llm.cache_hit_rate, h.llm.attestations) == (0.75, 2)
+
+
+async def test_llm_usage_stats_from_records(world: World) -> None:
+    async with world.factory() as s:
+        h = await workspace_health(s, world.ws, now=NOW, llm_stats=llm_usage_stats)
+        o = await workspace_health(s, world.other, now=NOW, llm_stats=llm_usage_stats)
+
+    assert h.llm is not None
+    assert (h.llm.issue, h.llm.no_issue, h.llm.split) == (1, 0, 1)
+    assert h.llm.cache_hit_rate == 0.5
+    assert (h.llm.attestations, h.llm.self_attested, h.llm.attestations_unverified) == (3, 1, 1)
+    # 他のワークスペース: 自分の記録（k1 は run より前）と確定だけを数える
+    assert o.llm is not None
+    assert o.llm.cache_hit_rate == 1.0
+    assert (o.llm.attestations, o.llm.self_attested, o.llm.attestations_unverified) == (1, 1, 0)
+
+
+async def test_llm_usage_stats_unmeasured_without_records(engine: AsyncEngine) -> None:
+    ws = f"e2e-obl-{uuid.uuid4().hex[:8]}"
+    await register_repo(engine, f"e2e/{ws}", {"owner1": "owner"}, ws)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as s:
+        stats = await llm_usage_stats(s, ws, [])
+        h = await workspace_health(s, ws, now=NOW, llm_stats=llm_usage_stats)
+    assert stats.cache_hit_rate is None and stats.attestations == 0
+    # 検査結果も記録も無ければ LLM 支援の欄全体が未計測
+    assert h.llm is None
 
 
 async def test_other_workspace_never_counted(world: World) -> None:
@@ -581,6 +667,8 @@ async def test_api_member_sees_health(world: World, client: httpx.AsyncClient) -
     assert a["formalization"]["numerator"] == 2 and a["formalization"]["denominator"] == 4
     b = next(p for p in body["projects"] if p["repo_full_name"] == f"e2e/{world.ws}-b")
     assert b["formalization"] is None and b["binding"] is None
+    # REST は LLM 支援の記録の供給元を渡す（未計測にしない）
+    assert body["llm"]["cache_hit_rate"] == 0.5 and body["llm"]["attestations"] == 3
 
 
 async def test_api_hides_other_workspace(world: World, client: httpx.AsyncClient) -> None:

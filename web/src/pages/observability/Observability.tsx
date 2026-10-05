@@ -315,18 +315,26 @@ function LlmPanel({ llm }: { llm: LlmStability | null }) {
         <p className="text-sm text-ink-2">{UNMEASURED}（LLM 支援の規約の検査結果がまだありません）</p>
       ) : (
         <>
-        <p className="text-xs text-ink-3">指摘・split の件数はワークスペース全体の直近 10 回の完了した検査から。</p>
-        <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-5">
+        <p className="text-xs text-ink-3">
+          指摘・split の件数とキャッシュの当たり率はワークスペース全体の直近 10 回の完了した検査から（当たり＝検査の開始前から評価の記録があった）。人の確定は今の件数。
+        </p>
+        <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
           <Stat label="指摘あり" value={String(llm.issue)} />
           <Stat label="指摘なし（機械検証ではない）" value={String(llm.no_issue)} />
           <Stat label="割れた項目（split）" value={String(llm.split)} />
           <Stat label="キャッシュの当たり率" value={percent(llm.cache_hit_rate)} />
-          <Stat label="人の確定" value={llm.attestations === null ? UNMEASURED : String(llm.attestations)} />
+          <Stat label="人の確定" value={count(llm.attestations)} />
+          <Stat label="うち PR の作成者の自己確定" value={count(llm.self_attested)} />
+          <Stat label="うち自己確定か照合できない" value={count(llm.attestations_unverified)} />
         </dl>
         </>
       )}
     </Panel>
   )
+}
+
+function count(n: number | null): string {
+  return n === null ? UNMEASURED : String(n)
 }
 
 function Stat({ label, value }: { label: string; value: string }) {

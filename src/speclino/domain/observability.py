@@ -115,6 +115,8 @@ class LlmUsageStats(IRModel):
 
     cache_hit_rate: float | None = Field(default=None, ge=0, le=1)
     attestations: int | None = Field(default=None, ge=0)
+    self_attested: int | None = Field(default=None, ge=0)
+    attestations_unverified: int | None = Field(default=None, ge=0)
 
 
 class LlmStability(IRModel):
@@ -123,6 +125,13 @@ class LlmStability(IRModel):
     split: int = Field(ge=0, description="多数決で割れた項目の数")
     cache_hit_rate: float | None = Field(description="None は未計測")
     attestations: int | None = Field(description="人の確定の件数。None は未計測")
+    self_attested: int | None = Field(
+        default=None, description="確定のうち PR の作成者が自分で確定した件数。None は未計測"
+    )
+    attestations_unverified: int | None = Field(
+        default=None,
+        description="確定のうち自己確定かどうかを照合できなかった件数。None は未計測",
+    )
 
 
 class WorkspaceHealth(IRModel):
