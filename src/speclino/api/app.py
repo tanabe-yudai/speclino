@@ -23,6 +23,7 @@ from speclino.api.routes import (
     mcp_tokens,
     me,
     members,
+    observability,
     policies,
     project_settings,
     projects,
@@ -106,6 +107,7 @@ def create_app(settings: Settings, state: AppState | None = None) -> FastAPI:
         app.include_router(projects.router)
         app.include_router(policies.router)
         app.include_router(knowledge.router)
+        app.include_router(observability.router)
         app.include_router(spec_preview.router)
         app.include_router(spec_suggest.router)
         app.include_router(sync.router)

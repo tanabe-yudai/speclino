@@ -21,6 +21,7 @@ export const paths = {
   knowledgeNew: (slug: string, kind: ArtifactKind) => `${kn(slug, kind)}/new`,
   knowledgeItem: (slug: string, kind: ArtifactKind, id: string) => `${kn(slug, kind)}/${e(id)}`,
   knowledgeRevisions: (slug: string, kind: ArtifactKind, id: string) => `${kn(slug, kind)}/${e(id)}/revisions`,
+  observability: (slug: string) => `/w/${e(slug)}/observability`,
   settings: (slug: string, tab?: SettingsTab) => `/w/${e(slug)}/settings${tab ? `?tab=${tab}` : ''}`,
   run: (id: string) => `/runs/${e(id)}`,
 }
