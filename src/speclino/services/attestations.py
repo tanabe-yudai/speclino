@@ -119,7 +119,7 @@ async def attest(
         workspace=workspace,
         created_at=now or datetime.now().astimezone(),
     )
-    saved = await AttestationRepository(session).upsert(
+    saved, first_actor = await AttestationRepository(session).upsert(
         workspace=workspace,
         fingerprint=fingerprint,
         content_hash=content_hash,
@@ -131,8 +131,12 @@ async def attest(
     detail: dict[str, object] = {
         "content_hash": content_hash,
         "via": via,
+        # この確定の照合結果と、保存した印（true > null > false で強い方を保つ）
         "self_attested": self_attested,
         "self_attested_label": self_attest_label(self_attested),
+        "self_attested_stored": saved.self_attested,
+        "first_actor": first_actor,
+        "latest_actor": actor,
     }
     warning = config_change_warning(fingerprint, self_attested)
     if warning is not None:
@@ -277,6 +281,33 @@ async def recheck_target(
     return project, latest or run
 
 
+NOT_IN_PR_REASON = "この PR の検査に無い指紋"
+
+
+async def in_pr_findings(
+    session: AsyncSession,
+    *,
+    project_id: uuid.UUID,
+    pr_number: int,
+    fingerprint: str,
+    content_hash: str,
+) -> bool:
+    """(指紋, hash) がその PR の最新の完了した run の確定できる Finding にあるか（S70）。
+
+    PR コメントの確定はそのコメントが付いた PR の指摘に限る。他の PR の指摘を別の PR のコメントで
+    確定させると、自己確定の照合相手（この PR の作成者）と効く対象（別の PR）がずれる。
+    """
+    from speclino.db.repositories import FindingRepository
+
+    run = await ReviewRunRepository(session).latest_completed_for_pr(project_id, pr_number)
+    if run is None:
+        return False
+    for row in await FindingRepository(session).list_for_run(run.id):
+        if attestation_target(Finding.model_validate(row.payload)) == (fingerprint, content_hash):
+            return True
+    return False
+
+
 async def list_attestations(session: AsyncSession, workspace: str) -> list[Attestation]:
     return await AttestationRepository(session).list_for_workspace(workspace)
 
@@ -285,10 +316,12 @@ __all__ = [
     "CONFIG_CHANGE_REQUIREMENT_ID",
     "CONTENT_HASH_REF",
     "FINGERPRINT_REF",
+    "NOT_IN_PR_REASON",
     "applied_attestations",
     "apply_attestations",
     "attest",
     "attest_as_member",
+    "in_pr_findings",
     "attestation_target",
     "informational_ids",
     "list_attestations",

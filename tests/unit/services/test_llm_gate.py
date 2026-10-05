@@ -324,3 +324,23 @@ def test_self_attest_helpers() -> None:
     assert config_change_warning(cfg, True) and config_change_warning(cfg, None)
     assert config_change_warning(cfg, False) is None
     assert config_change_warning("R:i:1", True) is None
+
+
+async def test_regate_recounts_self_attest_marks_from_current_findings(tmp_path: Path) -> None:
+    """エージェントで Findings が変わった後の再ゲートは、今の Findings から印を数え直す。"""
+    from speclino.services.review_run_service import _regate
+
+    root = make_repo(tmp_path / "r")
+    policy = _llm_policy()
+    k = knowledge(spec_revision("u", UML), policy=policy)
+    llm, _ = await _llm_findings(root, policy, _answer(True, "def restore", item="intent"))
+    target = _llm(run_check(request(root, k, llm_findings=llm)))[0]
+    res = run_check(
+        request(root, k, llm_findings=llm, attestations=(_attest(target, self_attested=True),))
+    )
+    same = _regate(res.findings, res, ("VIOLATED", "UNKNOWN", "REVIEW"))
+    assert same.self_attested_ids == [target.id]
+    without = res.findings.model_copy(
+        update={"findings": [f for f in res.findings.findings if f.id != target.id]}
+    )
+    assert _regate(without, res, ("VIOLATED", "UNKNOWN", "REVIEW")).self_attested_ids == []

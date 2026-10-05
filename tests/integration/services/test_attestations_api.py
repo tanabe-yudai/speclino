@@ -94,6 +94,39 @@ async def _pr_run(ctx: Ctx, repo: str, number: int = 1) -> str:
     return str(res.json()["run_id"])
 
 
+async def _seed_targets(engine: AsyncEngine, run_id: str, *fingerprints: str) -> None:
+    """run の Findings に確定できる指摘（指紋と hash）を足す（PR の検査に出たものとして）。"""
+    from speclino.db.models import FindingRecord
+    from speclino.domain.finding import Finding
+
+    async with async_sessionmaker(engine)() as s, s.begin():
+        for fp in fingerprints:
+            outcome = None if fp.startswith("KNOWLEDGE-BINDINGS-001:") else "issue"
+            f = Finding(
+                id=f"seed:{fp}",
+                requirement_id="KNOWLEDGE-BINDINGS-001" if outcome is None else "R:app.py",
+                behavior_id="seed",
+                verdict="REVIEW",
+                category="potential_violation",
+                severity="high",
+                message="m",
+                claim_scope="persisted_state",
+                evidence_refs=[f"fingerprint:{fp}", f"content_hash:{HASH}"],
+                assessment_outcome=outcome,
+            )
+            s.add(
+                FindingRecord(
+                    run_id=uuid.UUID(run_id),
+                    requirement_id=f.requirement_id,
+                    behavior_id=f.behavior_id,
+                    verdict=f.verdict,
+                    category=f.category,
+                    severity=f.severity,
+                    payload=f.model_dump(mode="json"),
+                )
+            )
+
+
 async def _stored(engine: AsyncEngine, slug: str) -> list[tuple[str, str, str]]:
     async with async_sessionmaker(engine)() as s:
         return [(a.fingerprint, a.disposition, a.actor) for a in await list_attestations(s, slug)]
@@ -151,7 +184,7 @@ async def test_rest_attest_rechecks_the_pr_head(ctx: Ctx) -> None:
 
 
 async def test_pr_comment_attest_is_recorded_for_approvers(ctx: Ctx, engine: AsyncEngine) -> None:
-    await _pr_run(ctx, ctx.repo)
+    await _seed_targets(engine, await _pr_run(ctx, ctx.repo), "R:i:2")
     await set_project_approvers(engine, ctx.repo, ["gh-approver"])
     raw, headers = signed(
         comment_payload(ctx.repo, 1, f"/speclino attest R:i:2 {HASH}", "stranger"),
@@ -167,6 +200,7 @@ async def test_pr_comment_attest_is_recorded_for_approvers(ctx: Ctx, engine: Asy
     )
     res = (await ctx.c.post("/webhooks/github", content=raw, headers=headers)).json()
     assert res["status"] == "queued", res  # 確定の後は再検査の run
+    await _seed_targets(engine, res["run_id"], "R:i:2")  # 再検査の run にも同じ指摘
     assert await _stored(engine, ctx.slug) == [("R:i:2", "attested", "github:gh-approver")]
 
     raw, headers = signed(
@@ -267,9 +301,9 @@ async def test_bindings_attestation_is_rejected_over_rest(ctx: Ctx, engine: Asyn
 async def test_bindings_attestation_via_pr_comment_is_accepted(
     ctx: Ctx, engine: AsyncEngine
 ) -> None:
-    await _pr_run_by(ctx, DEV_ID)
-    await set_project_approvers(engine, ctx.repo, ["dev"])
     fp = f"KNOWLEDGE-BINDINGS-001:{HASH}"
+    await _seed_targets(engine, await _pr_run_by(ctx, DEV_ID), fp)
+    await set_project_approvers(engine, ctx.repo, ["dev"])
     payload = comment_payload(ctx.repo, 1, f"/speclino attest {fp} {HASH}", "dev")
     payload["comment"]["user"]["id"] = DEV_ID
     payload["issue"]["user"] = {"login": "dev", "id": DEV_ID}
@@ -299,7 +333,7 @@ async def test_self_attestation_is_null_without_author_id(ctx: Ctx, engine: Asyn
 
 
 async def test_pr_comment_self_attestation_is_matched_by_id(ctx: Ctx, engine: AsyncEngine) -> None:
-    await _pr_run_by(ctx, DEV_ID)
+    await _seed_targets(engine, await _pr_run_by(ctx, DEV_ID), "R:i:6", "R:i:7", "R:i:8")
     await set_project_approvers(engine, ctx.repo, ["dev", "gh-approver"])
     cases = (("dev", DEV_ID, "R:i:6", True), ("gh-approver", OTHER_ID, "R:i:7", False))
     for login, user_id, fp, expected in cases:
@@ -309,6 +343,7 @@ async def test_pr_comment_self_attestation_is_matched_by_id(ctx: Ctx, engine: As
         raw, headers = signed(payload, "issue_comment")
         res = (await ctx.c.post("/webhooks/github", content=raw, headers=headers)).json()
         assert res["commands"][0]["self_attested"] is expected, res
+        await _seed_targets(engine, res["run_id"], "R:i:6", "R:i:7", "R:i:8")
     # ID の無いペイロードは照合不可
     payload = comment_payload(ctx.repo, 1, f"/speclino attest R:i:8 {HASH}", "dev")
     raw, headers = signed(payload, "issue_comment")
@@ -317,3 +352,38 @@ async def test_pr_comment_self_attestation_is_matched_by_id(ctx: Ctx, engine: As
     async with async_sessionmaker(engine)() as s:
         marks = {a.fingerprint: a.self_attested for a in await list_attestations(s, ctx.slug)}
     assert marks == {"R:i:6": True, "R:i:7": False, "R:i:8": None}
+
+
+async def test_pr_comment_cannot_attest_another_prs_finding(ctx: Ctx, engine: AsyncEngine) -> None:
+    """承認者 X が自分の PR #1 の指紋を、他人の PR #2 へのコメントで確定 → 拒否・記録なし。"""
+    own = _pr_payload_by(ctx, 1, DEV_ID)
+    raw, headers = signed(own, "pull_request")
+    run1 = (await ctx.c.post("/webhooks/github", content=raw, headers=headers)).json()["run_id"]
+    await _seed_targets(engine, run1, "R:i:own")
+    raw, headers = signed(_pr_payload_by(ctx, 2, OTHER_ID), "pull_request")
+    await ctx.c.post("/webhooks/github", content=raw, headers=headers)
+    await set_project_approvers(engine, ctx.repo, ["dev"])
+    payload = comment_payload(ctx.repo, 2, f"/speclino attest R:i:own {HASH}", "dev")
+    payload["comment"]["user"]["id"] = DEV_ID
+    payload["issue"]["user"] = {"login": "someone", "id": OTHER_ID}
+    raw, headers = signed(payload, "issue_comment")
+    res = (await ctx.c.post("/webhooks/github", content=raw, headers=headers)).json()
+    assert res["status"] == "handled"  # 再検査も作らない
+    assert res["commands"][0] == {
+        "kind": "attest",
+        "accepted": False,
+        "reason": "この PR の検査に無い指紋",
+    }
+    assert await _stored(engine, ctx.slug) == []
+    assert await _audit(engine, ctx.slug) == [("github:dev", "rejected")]
+    # 自分の PR #1 へのコメントなら受理される
+    payload["issue"] = {"number": 1, "pull_request": {"url": "x"}, "user": {"id": DEV_ID}}
+    raw, headers = signed(payload, "issue_comment")
+    res = (await ctx.c.post("/webhooks/github", content=raw, headers=headers)).json()
+    assert res["commands"][0]["accepted"] is True and res["commands"][0]["self_attested"] is True
+
+
+def _pr_payload_by(ctx: Ctx, number: int, author_id: int) -> dict[str, object]:
+    payload = pr_payload(ctx.repo, ctx.head, ctx.base, number)
+    payload["pull_request"]["user"]["id"] = author_id  # type: ignore[index]
+    return payload

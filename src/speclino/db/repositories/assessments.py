@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import case, false, null, or_, select, true
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -118,25 +118,37 @@ class AttestationRepository:
         actor: str,
         self_attested: bool | None = None,
         now: datetime | None = None,
-    ) -> Attestation:
+    ) -> tuple[Attestation, str]:
+        """確定を記録し、(保存後の確定, 最初の確定者) を返す。
+
+        確定し直すと処置・確定者・時刻は最新にするが、自己確定の印は「true > null > false」で
+        強い方を保つ（別の人の確定し直しで自己確定・照合不可の印が消えない）。最初の確定者は変えない。
+        """
         created_at = now or datetime.now(UTC)
+        table = AttestationRecord.__table__
+        base = insert(AttestationRecord).values(
+            workspace=workspace,
+            fingerprint=fingerprint,
+            content_hash=content_hash,
+            disposition=disposition,
+            actor=actor,
+            first_actor=actor,
+            self_attested=self_attested,
+            created_at=created_at,
+        )
+        old, new = table.c.self_attested, base.excluded.self_attested
+        merged = case(
+            (or_(old.is_(True), new.is_(True)), true()),
+            (or_(old.is_(None), new.is_(None)), null()),
+            else_=false(),
+        )
         stmt = (
-            insert(AttestationRecord)
-            .values(
-                workspace=workspace,
-                fingerprint=fingerprint,
-                content_hash=content_hash,
-                disposition=disposition,
-                actor=actor,
-                self_attested=self_attested,
-                created_at=created_at,
-            )
-            .on_conflict_do_update(
+            base.on_conflict_do_update(
                 constraint="uq_attestations_workspace_fingerprint_hash",
                 set_={
                     "disposition": disposition,
                     "actor": actor,
-                    "self_attested": self_attested,
+                    "self_attested": merged,
                     "created_at": created_at,
                 },
             )
@@ -145,7 +157,7 @@ class AttestationRepository:
         )
         row = (await self._session.execute(stmt)).scalar_one()
         await self._session.flush()
-        return _attestation(row)
+        return _attestation(row), row.first_actor
 
     async def list_for_workspace(self, workspace: str) -> list[Attestation]:
         stmt = (

@@ -717,6 +717,8 @@ class AttestationRecord(Base):
     content_hash: Mapped[str] = mapped_column(String, nullable=False)
     disposition: Mapped[str] = mapped_column(String, nullable=False)
     actor: Mapped[str] = mapped_column(String, nullable=False)
+    # 最初に確定した人（確定し直しても変えない。監査に最初と最新の両方を残すため）
+    first_actor: Mapped[str] = mapped_column(String, nullable=False)
     # PR の作成者が自分で確定したか（GitHub の ID で照合、拒否はしない）。NULL は照合できない
     self_attested: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

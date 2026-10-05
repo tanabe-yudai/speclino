@@ -63,7 +63,7 @@ from speclino.reporter.check_report import (
     render_check,
     render_pr_comment,
 )
-from speclino.services.attestations import list_attestations
+from speclino.services.attestations import list_attestations, self_attested_ids
 from speclino.services.check_pipeline import (
     CheckInputError,
     CheckRequest,
@@ -900,10 +900,12 @@ def _regate(findings: Findings, result: CheckResult, fail_on: tuple[str, ...]) -
         result.waived_finding_ids,
         result.cleared_finding_ids,
     )
+    # 自己確定の印は今の Findings（エージェントの後）から数え直す
+    attestations = result.manifest.attestations
     return replace(
         gate,
-        self_attested_ids=result.gate.self_attested_ids,
-        self_attest_unverified_ids=result.gate.self_attest_unverified_ids,
+        self_attested_ids=self_attested_ids(findings, attestations, True),
+        self_attest_unverified_ids=self_attested_ids(findings, attestations, None),
     )
 
 

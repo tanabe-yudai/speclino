@@ -78,15 +78,15 @@ async def test_assessment_round_trip_and_first_record_wins(session: AsyncSession
 
 async def test_attestation_upsert_and_workspace_isolation(session: AsyncSession) -> None:
     repo = AttestationRepository(session)
-    first = await repo.upsert(
+    first, first_actor = await repo.upsert(
         workspace="ws-a",
         fingerprint="R:i:1",
         content_hash=_HASH,
         disposition="attested",
         actor="u1",
     )
-    assert first.disposition == "attested"
-    changed = await repo.upsert(
+    assert first.disposition == "attested" and first_actor == "u1"
+    changed, still_first = await repo.upsert(
         workspace="ws-a",
         fingerprint="R:i:1",
         content_hash=_HASH,
@@ -94,6 +94,7 @@ async def test_attestation_upsert_and_workspace_isolation(session: AsyncSession)
         actor="u2",
     )
     assert (changed.disposition, changed.actor) == ("acknowledged_violation", "u2")
+    assert still_first == "u1"  # 最初の確定者は変えない
     await repo.upsert(
         workspace="ws-a",
         fingerprint="R:i:1",
@@ -126,7 +127,7 @@ async def test_assessments_are_scoped_by_workspace(session: AsyncSession) -> Non
 
 async def test_attestation_keeps_the_self_attested_mark(session: AsyncSession) -> None:
     repo = AttestationRepository(session)
-    saved = await repo.upsert(
+    saved, _ = await repo.upsert(
         workspace="ws-a",
         fingerprint="R:i:9",
         content_hash=_HASH,
@@ -136,3 +137,28 @@ async def test_attestation_keeps_the_self_attested_mark(session: AsyncSession) -
     )
     assert saved.self_attested
     assert [a.self_attested for a in await repo.list_for_workspace("ws-a")] == [True]
+
+
+async def test_reattestation_keeps_the_strongest_self_mark(session: AsyncSession) -> None:
+    """確定し直しても自己確定の印は true > null > false で強い方を保つ。"""
+    repo = AttestationRepository(session)
+
+    async def put(fp: str, mark: bool | None, actor: str = "u") -> bool | None:
+        saved, _ = await repo.upsert(
+            workspace="ws-a",
+            fingerprint=fp,
+            content_hash=_HASH,
+            disposition="attested",
+            actor=actor,
+            self_attested=mark,
+        )
+        return saved.self_attested
+
+    assert await put("A", True) is True
+    assert await put("A", False, "other") is True  # 自己確定の印は消えない
+    assert await put("A", None) is True
+    assert await put("B", None) is None
+    assert await put("B", False) is None  # 照合不可は「作成者以外」に上書きされない
+    assert await put("B", True) is True
+    assert await put("C", False) is False
+    assert await put("C", None) is None

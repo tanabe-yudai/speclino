@@ -45,6 +45,7 @@ def upgrade() -> None:
         sa.Column("content_hash", sa.String(), nullable=False),
         sa.Column("disposition", sa.String(), nullable=False),
         sa.Column("actor", sa.String(), nullable=False),
+        sa.Column("first_actor", sa.String(), nullable=False),
         sa.Column("self_attested", sa.Boolean(), nullable=True),
         sa.Column(
             "created_at",

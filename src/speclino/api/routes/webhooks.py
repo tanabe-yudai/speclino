@@ -39,7 +39,12 @@ from speclino.db.repositories import (
     WebhookDeliveryRepository,
 )
 from speclino.services.approvals import attest_disposition, authorize_command, parse_commands
-from speclino.services.attestations import attest, same_github_user
+from speclino.services.attestations import (
+    NOT_IN_PR_REASON,
+    attest,
+    in_pr_findings,
+    same_github_user,
+)
 from speclino.services.workspaces import resolve_github_project
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
@@ -195,9 +200,32 @@ async def _record_attestation(
 
     承認者の照合は `authorize_command` で済んでいる。確定はワークスペースに属するので、
     ワークスペースに登録されていないリポジトリでは記録しない。actor は `github:<login>`。
+    確定できるのはこの PR の最新の完了した run の指摘（指紋と hash）だけ。無ければ記録せず、
+    監査に拒否を残して応答で知らせる（answer の S52 と同じく、webhook はコメントを書かない）。
     """
     if project is None or project.team is None:
         return {"accepted": False, "reason": "ワークスペースに登録されていないリポジトリ"}
+    # このコメントの PR の検査に出た指紋だけ（他の PR の指摘をここで確定させない。S52 と同じ考え方）
+    if not await in_pr_findings(
+        session,
+        project_id=project.id,
+        pr_number=cm.issue_number,
+        fingerprint=args[0],
+        content_hash=args[1],
+    ):
+        await AuditRepository(session).record(
+            f"github:{cm.author_login}",
+            "attestation.record",
+            f"{project.team}:{args[0]}",
+            "rejected",
+            {
+                "content_hash": args[1],
+                "via": f"pr_comment:{cm.comment_url}",
+                "reason": NOT_IN_PR_REASON,
+                "pr_number": cm.issue_number,
+            },
+        )
+        return {"accepted": False, "reason": NOT_IN_PR_REASON}
     saved = await attest(
         session,
         fingerprint=args[0],
