@@ -121,20 +121,16 @@ def _ruff_check(text: str, config_path: str, required: list[str]) -> tuple[list[
     select = base_select + _string_list(lint.get("extend-select"))
     ignore = _string_list(lint.get("ignore")) + _string_list(lint.get("extend-ignore"))
 
-    def specificity(entries: list[str], code: str, *, is_ignore: bool) -> int:
-        # ALL の具体性は 0。ignore の ALL は全体を無効にする（どの select にも勝つ）
-        scores = [
-            (10**6 if is_ignore else 0) if e == "ALL" else len(e)
-            for e in entries
-            if _ruff_matches(e, code)
-        ]
+    def specificity(entries: list[str], code: str) -> int:
+        # ALL の具体性は 0（select でも ignore でも）。具体的な指定が勝ち、同じなら ignore が勝つ
+        scores = [0 if e == "ALL" else len(e) for e in entries if _ruff_matches(e, code)]
         return max(scores) if scores else -1
 
     missing: list[str] = []
     undetermined: list[str] = []
     for code in required:
-        selected = specificity(select, code, is_ignore=False)
-        ignored = specificity(ignore, code, is_ignore=True)
+        selected = specificity(select, code)
+        ignored = specificity(ignore, code)
         if selected >= 0 and ignored < selected:
             continue
         if ignored >= 0:

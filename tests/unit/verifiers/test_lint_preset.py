@@ -262,7 +262,7 @@ def test_ruff_all_has_lowest_specificity(
         '[tool.ruff.lint]\nselect = ["E"]\nignore = ["ALL"]\n',
         ["E501"],
     )
-    assert f.verdict == "VIOLATED"
+    assert f.verdict == "VERIFIED_IN_SCOPE"  # E(1) は ALL(0) より具体的
     f = _ruff(tmp_path, make_rule, write_files, '[tool.ruff.lint]\nselect = ["ALL"]\n', ["E501"])
     assert f.verdict == "VERIFIED_IN_SCOPE"
 
