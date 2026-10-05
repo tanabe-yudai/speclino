@@ -1,0 +1,21 @@
+schema_version: "0.1"
+
+enums:
+  OrderStatus: [PENDING, PAID, SHIPPED, CANCELLED]
+
+opaque_types: []
+
+variables:
+  order.status: OrderStatus
+  order.quantity: integer
+  inventory.available: integer
+
+assumptions: []
+
+observation_scope:
+  - サービス関数の中の order.status への代入
+  - 在庫・決済・通知の操作の呼出しとその順序
+
+out_of_scope:
+  - 在庫・決済・通知の外部サービスの中の処理
+  - 永続化の成否、並行実行

@@ -1,0 +1,11 @@
+diff --git a/examples/shop/app/service.py b/examples/shop/app/service.py
+--- a/examples/shop/app/service.py
++++ b/examples/shop/app/service.py
+@@ -27,7 +27,6 @@ class OrderService:
+                 "在庫が足りないため注文を確定できません。数量を減らしてやり直してください。"
+             )
+         self.inventory.reserve(order.id, order.quantity)
+-        self.payment.charge(order.id)
+         order.status = OrderStatus.PAID
+ 
+     def ship_order(self, order: Order) -> None:
