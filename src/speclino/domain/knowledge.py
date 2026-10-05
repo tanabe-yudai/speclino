@@ -255,6 +255,13 @@ class SuggestionResult(Suggestion):
     after: SuggestionOutcome
 
 
+class SpecSuggestions(IRModel):
+    """REST の `POST /specs/suggest` の応答（S67）。提案と、今の本文のエラー数。"""
+
+    errors_before: int = Field(ge=0)
+    suggestions: list[SuggestionResult] = Field(default_factory=list)
+
+
 __all__ = [
     "BODY_MAX_BYTES",
     "MANAGED_BEGIN",
@@ -275,4 +282,5 @@ __all__ = [
     "KnowledgeLock",
     "SkillContent",
     "SpecContent",
+    "SpecSuggestions",
 ]
