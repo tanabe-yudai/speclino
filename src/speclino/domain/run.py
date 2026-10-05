@@ -83,3 +83,10 @@ class RunManifest(IRModel):
         default=None,
         description="適用したチーム規約の改訂番号（S42）。replay はこの改訂を解決して照合する",
     )
+    bundle_generation: int | None = Field(default=None, description="run の開始時に固定した bundle")
+    bundle_hash: str | None = None
+    uml_parser_version: str | None = None
+    expected_requirement_ids: list[str] = Field(
+        default_factory=list, description="出るべき要求 ID（欠けたら UNKNOWN）"
+    )
+    llm_assessment_keys: list[str] = Field(default_factory=list)

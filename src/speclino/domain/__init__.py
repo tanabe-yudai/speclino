@@ -1,5 +1,12 @@
 """IR の型定義（ロジックを置かない）。"""
 
+from speclino.domain.assessment import (
+    AssessmentKey,
+    AssessmentRecord,
+    AssessmentUnit,
+    Attestation,
+    ItemVerdict,
+)
 from speclino.domain.bindings import BehaviorBinding, Bindings, OperationBinding, OperationContract
 from speclino.domain.code_ir import (
     AnalysisLimits,
@@ -31,6 +38,18 @@ from speclino.domain.finding import (
     Verdict,
     VerdictCounts,
 )
+from speclino.domain.knowledge import (
+    ArtifactRevision,
+    ArtifactScope,
+    Bundle,
+    BundleMember,
+    InstructionsContent,
+    KnowledgeLock,
+    ResolvedKnowledge,
+    SkillContent,
+    SpecContent,
+    Suggestion,
+)
 from speclino.domain.run import (
     BehaviorAnalysis,
     ExecState,
@@ -49,8 +68,35 @@ from speclino.domain.spec_ir import (
     SpecIR,
 )
 from speclino.domain.trace import TraceRecord
+from speclino.domain.uml import (
+    Automaton,
+    CompiledSpec,
+    ParseResult,
+    SpecDiagnostic,
+    TraceObligation,
+)
 
 __all__ = [
+    "AssessmentKey",
+    "AssessmentRecord",
+    "AssessmentUnit",
+    "Attestation",
+    "ItemVerdict",
+    "ArtifactRevision",
+    "ArtifactScope",
+    "Bundle",
+    "BundleMember",
+    "InstructionsContent",
+    "KnowledgeLock",
+    "ResolvedKnowledge",
+    "SkillContent",
+    "SpecContent",
+    "Suggestion",
+    "Automaton",
+    "CompiledSpec",
+    "ParseResult",
+    "SpecDiagnostic",
+    "TraceObligation",
     "SCHEMA_VERSION",
     "AnalysisLimits",
     "ApprovalRecord",

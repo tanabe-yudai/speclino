@@ -134,7 +134,8 @@
             "vacuous_applicability",
             "potential_violation",
             "solver_limit",
-            "conformant"
+            "conformant",
+            "missing_finding"
           ],
           "title": "Category",
           "type": "string"
@@ -284,6 +285,24 @@
           },
           "title": "Next Steps",
           "type": "array"
+        },
+        "assessment_outcome": {
+          "anyOf": [
+            {
+              "enum": [
+                "issue",
+                "no_issue",
+                "split"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "LLM 支援の規約だけ。verdict は常に REVIEW",
+          "title": "Assessment Outcome"
         }
       },
       "required": [

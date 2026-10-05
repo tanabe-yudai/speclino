@@ -26,6 +26,7 @@ Category = Literal[
     "potential_violation",
     "solver_limit",
     "conformant",
+    "missing_finding",
 ]
 
 Severity = Literal["high", "medium", "low", "info"]
@@ -65,6 +66,9 @@ class Finding(IRModel):
     )
     next_steps: list[str] = Field(
         default_factory=list, description="未検証を検証可能にする具体策（UNKNOWN / REVIEW 用）"
+    )
+    assessment_outcome: Literal["issue", "no_issue", "split"] | None = Field(
+        default=None, description="LLM 支援の規約だけ。verdict は常に REVIEW"
     )
 
 

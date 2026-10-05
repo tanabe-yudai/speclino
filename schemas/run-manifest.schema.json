@@ -368,6 +368,58 @@
       "default": null,
       "description": "適用したチーム規約の改訂番号（S42）。replay はこの改訂を解決して照合する",
       "title": "Policy Revision"
+    },
+    "bundle_generation": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "run の開始時に固定した bundle",
+      "title": "Bundle Generation"
+    },
+    "bundle_hash": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Bundle Hash"
+    },
+    "uml_parser_version": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Uml Parser Version"
+    },
+    "expected_requirement_ids": {
+      "description": "出るべき要求 ID（欠けたら UNKNOWN）",
+      "items": {
+        "type": "string"
+      },
+      "title": "Expected Requirement Ids",
+      "type": "array"
+    },
+    "llm_assessment_keys": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Llm Assessment Keys",
+      "type": "array"
     }
   },
   "required": [
