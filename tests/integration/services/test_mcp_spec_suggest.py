@@ -32,8 +32,12 @@ from speclino.services.review_run_service import ReviewRunConfig, ReviewRunServi
 from speclino.settings import Settings
 from tests.integration.services.conftest import project_id_of, register_repo
 from tests.integration.services.test_mcp_flow import _issue as issue_mcp_token
-from tests.integration.services.test_spec_suggest_routes import clear_scripted_ledger
-from tests.unit.services.suggest_samples import BAD, FULL, RESPONSE
+from tests.integration.services.test_spec_suggest_routes import (
+    TEST_MODEL,
+    clear_scripted_ledger,
+    scripted_llm,
+)
+from tests.unit.services.suggest_samples import BAD, FULL
 
 pytestmark = [
     pytest.mark.integration,
@@ -54,7 +58,7 @@ async def _client(
         InMemoryLedger([]),
         Decimal(limit),
         per_run_limit_usd=Decimal("0"),
-        pricing={"scripted": (Decimal("1"), Decimal("1"))},
+        pricing={TEST_MODEL: (Decimal("1"), Decimal("1"))},
     )
     service = ReviewRunService(
         f, host, queue, blobs, ReviewRunConfig(agent_enabled=False), cost_guard=guard
@@ -92,7 +96,7 @@ async def _workspace(engine: AsyncEngine) -> tuple[str, str, str]:
 async def test_mcp_token_gets_suggestions(engine: AsyncEngine, tmp_path: Path) -> None:
     slug, repo, other_repo = await _workspace(engine)
     token = await issue_mcp_token(engine, slug)
-    llm = ScriptedJsonLlm(RESPONSE)
+    llm = scripted_llm()
     async with _client(engine, tmp_path, token, llm) as c:
         res = await c.call_tool("spec_suggest", {"markdown": BAD, "repo_full_name": repo})
         assert not res.is_error, _text(res)
@@ -116,7 +120,7 @@ async def test_sync_token_cannot_call_spec_suggest(engine: AsyncEngine, tmp_path
             name="t",
             actor_uid="owner1",
         )
-    llm = ScriptedJsonLlm(RESPONSE)
+    llm = scripted_llm()
     async with _client(engine, tmp_path, issued.token, llm) as c:
         res = await c.call_tool("spec_suggest", {"markdown": BAD, "repo_full_name": repo})
     assert res.is_error and "読み取り専用" in _text(res)
@@ -126,7 +130,7 @@ async def test_sync_token_cannot_call_spec_suggest(engine: AsyncEngine, tmp_path
 async def test_over_budget_is_an_error_result(engine: AsyncEngine, tmp_path: Path) -> None:
     slug, _, _ = await _workspace(engine)
     token = await issue_mcp_token(engine, slug)
-    llm = ScriptedJsonLlm(RESPONSE)
+    llm = scripted_llm()
     async with _client(engine, tmp_path, token, llm, limit="0") as c:
         res = await c.call_tool("spec_suggest", {"markdown": BAD})
     assert res.is_error and "費用" in _text(res)

@@ -7,6 +7,7 @@ import { RequirementTrace } from '@/components/spec-editor/RequirementTrace'
 import { SuggestionPanel } from '@/components/spec-editor/SuggestionPanel'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useSuggestions } from '@/hooks/useSuggestions'
 import { focusLine } from '@/lib/textarea'
 import { countErrors, parseJsonField, requirementTrace } from '@/services/specPreview'
 import type { DomainSpecJson, SpecIrJson } from '@/types/knowledge'
@@ -35,6 +36,8 @@ export function SpecEditorPane({ slug, content, onChange, preview, previewError,
   const compiled = preview?.parse_result.compiled ?? null
   const trace = requirementTrace(compiled)
 
+  // タブを切り替えても提案を失わないよう、状態はここ（常に表示される親）で持つ
+  const suggestions = useSuggestions(slug, content.markdown, (markdown) => onChange({ ...content, markdown }))
   const suggestBlocked = saving
     ? '保存中は提案を求められません。'
     : previewPending
@@ -149,12 +152,12 @@ export function SpecEditorPane({ slug, content, onChange, preview, previewError,
           </TabsContent>
           <TabsContent value="suggest" className="mt-3">
             <SuggestionPanel
-              slug={slug}
-              markdown={content.markdown}
-              domain={content.domain}
-              legacyIr={content.legacy_ir}
+              state={suggestions.state}
+              stale={suggestions.stale}
               blockedReason={suggestBlocked}
-              onApply={(markdown) => onChange({ ...content, markdown })}
+              onRequest={() => suggestions.request({ markdown: content.markdown, domain: content.domain, legacy_ir: content.legacy_ir })}
+              onApply={suggestions.apply}
+              onReject={suggestions.reject}
             />
           </TabsContent>
         </Tabs>

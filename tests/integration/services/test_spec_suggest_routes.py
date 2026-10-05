@@ -42,6 +42,16 @@ MEMBER = {"X-Dev-User": "member1"}
 STRANGER = {"X-Dev-User": "owner9"}
 
 
+# 台帳の後片付けで自分の行だけを消すため、他のテストの "scripted" と別のモデル名にする
+TEST_MODEL = "scripted-s67-suggest"
+
+
+def scripted_llm() -> ScriptedJsonLlm:
+    llm = ScriptedJsonLlm(RESPONSE)
+    llm.model = TEST_MODEL
+    return llm
+
+
 @dataclass
 class Ctx:
     client: httpx.AsyncClient
@@ -67,13 +77,13 @@ async def _make(engine: AsyncEngine, tmp_path: Path, limit: str | None) -> Async
             InMemoryLedger([]),
             Decimal(limit),
             per_run_limit_usd=Decimal("0"),
-            pricing={"scripted": (Decimal("1"), Decimal("1"))},
+            pricing={TEST_MODEL: (Decimal("1"), Decimal("1"))},
         )
     )
     service = ReviewRunService(
         factory, host, queue, blobs, ReviewRunConfig(agent_enabled=False), cost_guard=guard
     )
-    llm = ScriptedJsonLlm(RESPONSE)
+    llm = scripted_llm()
     state = AppState(settings, engine, factory, host, queue, blobs, service, spec_suggest_llm=llm)
     app = create_app(settings, state)
     try:
@@ -87,9 +97,9 @@ async def _make(engine: AsyncEngine, tmp_path: Path, limit: str | None) -> Async
 
 
 async def clear_scripted_ledger(engine: AsyncEngine) -> None:
-    """台本の LLM の予約・精算を台帳から消す（今日の合計を見る他のテストに残さない）。"""
+    """この試験の LLM の予約・精算だけを台帳から消す（今日の合計を見る試験に残さない）。"""
     async with engine.begin() as conn:
-        await conn.execute(sql_text("DELETE FROM cost_ledger WHERE model = 'scripted'"))
+        await conn.execute(sql_text("DELETE FROM cost_ledger WHERE model = :m"), {"m": TEST_MODEL})
 
 
 @pytest_asyncio.fixture

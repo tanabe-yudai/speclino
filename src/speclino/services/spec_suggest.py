@@ -14,7 +14,9 @@ AI ができるのは**本文の置換の提案**だけ。IR を書かない・�
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -39,10 +41,12 @@ from speclino.spec import uml
 from speclino.spec.uml import compile_spec
 
 MAX_SUGGESTIONS = 10
-MAX_REPLACEMENT_CHARS = 32 * 1024
+MAX_REPLACEMENT_BYTES = 32 * 1024  # UTF-8 のバイト数
+LLM_TIMEOUT_SECONDS = 120.0
 GRAMMAR_MAX_CHARS = 32_000
 MAX_PROMPT_DIAGNOSTICS = 50
 _REASON_MAX_CHARS = 2000
+logger = logging.getLogger(__name__)
 _GRAMMAR_PATH = Path(uml.__file__).resolve().parent / "grammar.md"
 
 SUGGESTION_SCHEMA: dict[str, Any] = {
@@ -148,6 +152,11 @@ class _Lines:
         return cls(text, starts)
 
     @property
+    def newline(self) -> str:
+        """本文の改行（CRLF が 1 つでもあれば CRLF）。"""
+        return "\r\n" if "\r\n" in self.text else "\n"
+
+    @property
     def count(self) -> int:
         return len(self.starts)
 
@@ -159,7 +168,7 @@ class _Lines:
         body = self.text.split("\n")
         if self.text.endswith("\n"):
             body = body[:-1]
-        return "\n".join(f"{i:>5}| {ln}" for i, ln in enumerate(body, 1))
+        return "\n".join(f"{i:>5}| {ln.removesuffix(chr(13))}" for i, ln in enumerate(body, 1))
 
 
 def _to_suggestion(lines: _Lines, item: Any) -> Suggestion | None:
@@ -176,23 +185,26 @@ def _to_suggestion(lines: _Lines, item: Any) -> Suggestion | None:
         or not isinstance(replacement, str)
         or not isinstance(reason, str)
         or not reason.strip()
-        or len(replacement) > MAX_REPLACEMENT_CHARS
+        or len(replacement.encode()) > MAX_REPLACEMENT_BYTES
     ):
         return None
     n = lines.count
     if not (1 <= start_line <= n + 1 and start_line - 1 <= end_line <= n):
         return None
     text = lines.text
+    nl = lines.newline
+    if nl == "\r\n":  # CRLF の本文: 置換の改行も CRLF に揃える
+        replacement = replacement.replace("\r\n", "\n").replace("\n", "\r\n")
     start = lines.start_of(start_line)
     end = lines.start_of(end_line + 1) if end_line >= start_line else start
     if start_line == n + 1 and text and not text.endswith("\n"):
         # 改行で終わらない本文の末尾に足す: 前の行と繋がらないよう改行を先に置く
-        replacement = "\n" + replacement
+        replacement = nl + replacement
     elif end == len(text) and end > start and not text.endswith("\n"):
         pass  # 最終行（改行なし）を置き換える: 改行を補わない
     elif replacement and not replacement.endswith("\n"):
         # 行を丸ごと置き換える・行の前に挿入する: 行の構造を保つため改行を補う
-        replacement += "\n"
+        replacement += nl
     if not (0 <= start <= end <= len(text)):
         return None
     if text[start:end] == replacement:
@@ -257,6 +269,14 @@ def build_prompt(markdown: str, diagnostics: list[SpecDiagnostic]) -> str:
     )
 
 
+async def _settle_quietly(budget: SuggestBudget, reservation: CostReservation) -> None:
+    """失敗の後の精算。精算の失敗で元の例外を上書きしない（記録だけ残す）。"""
+    try:
+        await budget.settle(reservation, 0, 0)
+    except Exception:
+        logger.exception("提案の費用の予約を戻せなかった")
+
+
 def _errors(diagnostics: list[SpecDiagnostic]) -> int:
     return sum(1 for d in diagnostics if d.severity == "error")
 
@@ -285,14 +305,15 @@ async def suggest(
     )
     if reservation is None:
         raise SuggestBudgetExceeded(f"費用の上限により提案を作れません: {reason}")
-    tokens = (0, 0)
     try:
-        gen = await llm.generate_json(prompt, SUGGESTION_SCHEMA)
-        tokens = (gen.input_tokens, gen.output_tokens)
-    except Exception as e:
-        raise SuggestFailed(f"AI の呼出しに失敗しました: {type(e).__name__}") from e
-    finally:
-        await budget.settle(reservation, *tokens)
+        async with asyncio.timeout(LLM_TIMEOUT_SECONDS):
+            gen = await llm.generate_json(prompt, SUGGESTION_SCHEMA)
+    except BaseException as e:  # 取り消しも含め、予約を (0, 0) で戻してから投げ直す
+        await _settle_quietly(budget, reservation)
+        if isinstance(e, Exception):
+            raise SuggestFailed(f"AI の呼出しに失敗しました: {type(e).__name__}") from e
+        raise
+    await budget.settle(reservation, gen.input_tokens, gen.output_tokens)
 
     proposals = _parse(_Lines.of(markdown), gen.text)
     legacy = list(legacy_ir or [])
@@ -300,7 +321,8 @@ async def suggest(
     results: list[SuggestionResult] = []
     for s in sorted(proposals, key=lambda p: (p.start, p.end)):
         revised = markdown[: s.start] + s.replacement + markdown[s.end :]
-        after = compile_spec(revised, domain=domain, legacy_ir=legacy)
+        # compile_spec は CPU を使う同期処理。イベントループを止めないようスレッドで動かす
+        after = await asyncio.to_thread(compile_spec, revised, domain=domain, legacy_ir=legacy)
         results.append(
             SuggestionResult(
                 **s.model_dump(),
@@ -317,7 +339,8 @@ async def suggest(
 
 __all__ = [
     "GRAMMAR_MAX_CHARS",
-    "MAX_REPLACEMENT_CHARS",
+    "LLM_TIMEOUT_SECONDS",
+    "MAX_REPLACEMENT_BYTES",
     "MAX_SUGGESTIONS",
     "SUGGESTION_SCHEMA",
     "SuggestBudget",

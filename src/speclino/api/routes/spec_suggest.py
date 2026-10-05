@@ -8,6 +8,7 @@ body は preview と同じく 512KB でストリームを打ち切る。費用�
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Any
 
@@ -64,7 +65,8 @@ async def run_suggest(
     if cost_guard is None:
         raise SuggestUnavailable("費用ガードが設定されていないため、AI の提案を使えません")
     legacy = list(legacy_ir or [])
-    diagnostics = compile_spec(markdown, domain=domain, legacy_ir=legacy).diagnostics
+    parsed = await asyncio.to_thread(compile_spec, markdown, domain=domain, legacy_ir=legacy)
+    diagnostics = parsed.diagnostics
     suggestions = await suggest(
         markdown,
         diagnostics,

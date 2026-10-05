@@ -1,26 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { ApiError } from '@/api/errors'
-import { suggestSpec } from '@/api/suggestions'
+import { useMemo } from 'react'
 import { ToneBadge } from '@/components/app/ToneBadge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { afterApply, applySuggestion, excerpt, toPending } from '@/services/suggestions'
+import { excerpt } from '@/services/suggestions'
 import { diffLines } from '@/services/textDiff'
 import type { PendingSuggestion, SuggestionPanelProps } from '@/types/suggestion'
-
-type PanelState =
-  | { kind: 'idle' }
-  | { kind: 'loading' }
-  | { kind: 'error'; message: string }
-  | {
-      kind: 'ready'
-      /** 提案の位置が指している本文（求めた本文に、適用した提案を当てたもの） */
-      base: string
-      items: PendingSuggestion[]
-      errorsBefore: number
-      /** 先に適用した提案と重なって外した件数 */
-      dropped: number
-    }
 
 const OP_CLASS = { same: '', add: 'bg-ok-bg/60', del: 'bg-bad-bg/60' } as const
 const OP_MARK = { same: ' ', add: '+', del: '-' } as const
@@ -51,44 +35,12 @@ function ExcerptDiff({ text, suggestion }: { text: string; suggestion: PendingSu
 
 /**
  * AI の書き換え提案（S67、設計 D5）。提案は本文の置換の案だけで、IR・判定・承認には関わらない。
+ * 表示だけを受け持ち、状態は `useSuggestions`（エディタの側）が持つ（タブを切り替えても失わない）。
  * 「適用」は編集欄の本文だけを変える（保存と承認は人が行う）。適用すると重ならない提案は位置をずらして残し、
  * 重なる提案は外す。提案を受け取った後に本文を手で変えたら、残りは古いものとして適用できなくする。
  */
-export function SuggestionPanel({ slug, markdown, domain, legacyIr, blockedReason, onApply }: SuggestionPanelProps) {
-  const [state, setState] = useState<PanelState>({ kind: 'idle' })
-  const controller = useRef<AbortController | null>(null)
-  useEffect(() => () => controller.current?.abort(), [])
-
-  function request() {
-    controller.current?.abort()
-    const c = new AbortController()
-    controller.current = c
-    const base = markdown
-    setState({ kind: 'loading' })
-    suggestSpec(slug, { markdown: base, domain, legacy_ir: legacyIr }, c.signal)
-      .then((res) => setState({ kind: 'ready', base, items: toPending(base, res.suggestions), errorsBefore: res.errors_before, dropped: 0 }))
-      .catch((err: unknown) => {
-        if (c.signal.aborted) return
-        setState({ kind: 'error', message: err instanceof ApiError ? err.message : '提案を取得できませんでした' })
-      })
-  }
-
+export function SuggestionPanel({ state, stale, blockedReason, onRequest, onApply, onReject }: SuggestionPanelProps) {
   const ready = state.kind === 'ready' ? state : null
-  const stale = ready !== null && ready.base !== markdown
-
-  function apply(s: PendingSuggestion) {
-    if (!ready || stale) return
-    const next = applySuggestion(ready.base, s)
-    const { remaining, dropped } = afterApply(ready.items, s)
-    setState({ ...ready, base: next, items: remaining, dropped: ready.dropped + dropped })
-    onApply(next)
-  }
-
-  function reject(s: PendingSuggestion) {
-    if (!ready) return
-    setState({ ...ready, items: ready.items.filter((x) => x.id !== s.id) })
-  }
-
   const loading = state.kind === 'loading'
   return (
     <section className="space-y-3" aria-labelledby="suggestion-heading">
@@ -96,7 +48,7 @@ export function SuggestionPanel({ slug, markdown, domain, legacyIr, blockedReaso
         <h3 id="suggestion-heading" className="text-sm font-semibold">
           AI の書き換え提案
         </h3>
-        <Button type="button" size="sm" variant="outline" onClick={request} disabled={loading || blockedReason !== null} aria-describedby="suggestion-help">
+        <Button type="button" size="sm" variant="outline" onClick={onRequest} disabled={loading || blockedReason !== null} aria-describedby="suggestion-help">
           {loading ? '提案を求めています…' : 'AI に提案を求める'}
         </Button>
       </div>
@@ -117,7 +69,7 @@ export function SuggestionPanel({ slug, markdown, domain, legacyIr, blockedReaso
             。各提案のエラー数は、求めたときの本文にその提案だけを当てて parser で検証し直した値です。
           </p>
         )}
-        {stale && ready.items.length > 0 && (
+        {stale && ready && ready.items.length > 0 && (
           <p role="status" className="mt-1 text-sm text-unk">
             提案を受け取った後に本文が変わったため、残りの提案は適用できません。もう一度提案を求めてください。
           </p>
@@ -137,10 +89,10 @@ export function SuggestionPanel({ slug, markdown, domain, legacyIr, blockedReaso
               <p className="text-sm break-words whitespace-pre-wrap">{s.reason}</p>
               <ExcerptDiff text={ready.base} suggestion={s} />
               <div className="flex gap-2">
-                <Button type="button" size="sm" onClick={() => apply(s)} disabled={stale}>
+                <Button type="button" size="sm" onClick={() => onApply(s)} disabled={stale}>
                   適用
                 </Button>
-                <Button type="button" size="sm" variant="ghost" onClick={() => reject(s)}>
+                <Button type="button" size="sm" variant="ghost" onClick={() => onReject(s)}>
                   却下
                 </Button>
               </div>

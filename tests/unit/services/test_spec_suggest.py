@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import date
 from decimal import Decimal
@@ -16,7 +17,7 @@ from speclino.ports.text_llm import JsonGeneration
 from speclino.services import spec_suggest
 from speclino.services.cost_guard import CostGuard, InMemoryLedger
 from speclino.services.spec_suggest import (
-    MAX_REPLACEMENT_CHARS,
+    MAX_REPLACEMENT_BYTES,
     MAX_SUGGESTIONS,
     SuggestBudgetExceeded,
     SuggestFailed,
@@ -165,7 +166,7 @@ async def test_malformed_and_overlapping_suggestions_are_dropped() -> None:
             _item(0, 1, "x", "範囲外（0 行目）"),
             _item(9, 9, "x", "範囲外（本文の外）"),
             _item(3, 1, "x", "逆順"),
-            _item(5, 5, "y" * (MAX_REPLACEMENT_CHARS + 1), "大きすぎる"),
+            _item(5, 5, "あ" * (MAX_REPLACEMENT_BYTES // 3 + 1), "UTF-8 で大きすぎる"),
             _item(5, 5, "line5\n", "何も変えない"),
             _item(1, 1, "x", " "),
             {"start_line": "1", "end_line": 1, "replacement": "x", "reason": "型が違う"},
@@ -241,3 +242,51 @@ async def test_prompt_treats_spec_as_untrusted_data() -> None:
 
 def test_grammar_summary_is_bounded() -> None:
     assert 0 < len(spec_suggest.grammar_summary()) <= spec_suggest.GRAMMAR_MAX_CHARS
+
+
+async def test_crlf_text_keeps_crlf_in_replacements() -> None:
+    text = "a\r\nbb\r\nccc\r\n"
+    out, llm, _ = await _run(
+        text, _resp(_item(2, 2, "BB\nB2", "置換"), _item(4, 3, "tail", "末尾"))
+    )
+    by_reason = {s.reason: s for s in out}
+    r = by_reason["置換"]
+    assert text[r.start : r.end] == "bb\r\n"
+    assert r.replacement == "BB\r\nB2\r\n"
+    assert by_reason["末尾"].replacement == "tail\r\n"
+    assert "    2| bb\n" in llm.prompts[0]  # 行番号付きの本文に CR を見せない
+
+
+async def test_crlf_insert_at_end_without_trailing_newline() -> None:
+    out, _, _ = await _run("a\r\nb", _resp(_item(3, 2, "c")))
+    [s] = out
+    assert s.replacement == "\r\nc"
+
+
+class SlowLlm(RaisingLlm):
+    async def generate_json(self, prompt: str, schema: dict[str, Any]) -> JsonGeneration:
+        self.calls += 1
+        await asyncio.sleep(10)
+        raise AssertionError("unreachable")
+
+
+async def test_model_timeout_fails_and_settles(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(spec_suggest, "LLM_TIMEOUT_SECONDS", 0.01)
+    budget = Budget()
+    with pytest.raises(SuggestFailed, match="TimeoutError"):
+        await suggest(BAD, [], llm=SlowLlm(), budget=budget, cost_guard=_guard(), today=TODAY)
+    assert budget.settled == [(0, 0)]
+
+
+class BrokenSettleBudget(Budget):
+    async def settle(
+        self, reservation: CostReservation, input_tokens: int, output_tokens: int
+    ) -> None:
+        raise RuntimeError("ledger down")
+
+
+async def test_settle_failure_does_not_hide_the_model_error() -> None:
+    with pytest.raises(SuggestFailed, match="RuntimeError"):
+        await suggest(
+            BAD, [], llm=RaisingLlm(), budget=BrokenSettleBudget(), cost_guard=_guard(), today=TODAY
+        )

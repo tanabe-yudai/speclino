@@ -8,6 +8,7 @@ LLM の呼出しは門番（ツール名 `spec_suggest`）と日次の費用枠�
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from a2a.helpers import new_data_part, new_text_part
@@ -52,23 +53,32 @@ async def _suggest(call: SkillCall, deps: ConsultDeps, gateway: ToolGateway) -> 
     if budget is None or guard is None:
         raise _Stop("費用枠が設定されていないため、提案を作れません")
     await call.updater.start_work()
-    diagnostics = compile_spec(markdown, domain=None, legacy_ir=[]).diagnostics
+    parsed = await asyncio.to_thread(compile_spec, markdown, domain=None, legacy_ir=[])
+    diagnostics = parsed.diagnostics
+    suggestions: list[SuggestionResult] = []
 
     async def run() -> dict[str, Any]:
+        # 監査に残るのは返した dict だけ。本文の断片を残さないよう件数だけを返す
         try:
-            results = await suggest(
-                markdown, diagnostics, llm=llm, budget=budget, cost_guard=guard, today=deps.today()
+            suggestions.extend(
+                await suggest(
+                    markdown,
+                    diagnostics,
+                    llm=llm,
+                    budget=budget,
+                    cost_guard=guard,
+                    today=deps.today(),
+                )
             )
         except SuggestRefused as e:
             return {"refused": str(e)}
-        return {"suggestions": [r.model_dump(mode="json") for r in results]}
+        return {"count": len(suggestions)}
 
     out = await guarded(gateway, "spec_suggest", {"chars": len(markdown)}, run, truncate=False)
     if out.get("error"):  # 門番が拒否した（実行していない）
         raise _Stop(f"門番が拒否しました: {out.get('reason', out['error'])}")
     if "refused" in out:
         raise _Stop(str(out["refused"]))
-    suggestions = [SuggestionResult.model_validate(s) for s in out["suggestions"]]
     errors_before = sum(1 for d in diagnostics if d.severity == "error")
     updater = call.updater
     await updater.add_artifact(

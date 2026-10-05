@@ -1,6 +1,6 @@
 /** AI の書き換え提案（S67、POST /specs/suggest）の型。サーバの `SpecSuggestions` に合わせる。 */
 
-import type { DomainSpecJson, SpecDiagnostic, SpecIrJson } from './knowledge'
+import type { SpecDiagnostic } from './knowledge'
 
 export interface SuggestionOutcome {
   errors_before: number
@@ -41,14 +41,28 @@ export interface SuggestionExcerpt {
   firstLine: number
 }
 
+export type SuggestionPanelState =
+  | { kind: 'idle' }
+  | { kind: 'loading' }
+  | { kind: 'error'; message: string }
+  | {
+      kind: 'ready'
+      /** 提案の位置が指している本文（求めた本文に、適用した提案を当てたもの） */
+      base: string
+      items: PendingSuggestion[]
+      errorsBefore: number
+      /** 先に適用した提案と重なって外した件数 */
+      dropped: number
+    }
+
 export interface SuggestionPanelProps {
-  slug: string
-  markdown: string
-  /** 提案を求める body に入れる旧形式の入口（プレビューと同じもの） */
-  domain: DomainSpecJson | null
-  legacyIr: SpecIrJson[]
+  state: SuggestionPanelState
+  /** 提案を受け取った後に本文が手で変わった（残りの提案は適用できない） */
+  stale: boolean
   /** 提案を求められない理由（保存中・プレビュー中・JSON 欄が読めない）。null なら求められる */
   blockedReason: string | null
-  /** 適用した本文（編集欄だけを変える。保存はしない） */
-  onApply: (markdown: string) => void
+  onRequest: () => void
+  /** 編集欄だけを変える。保存はしない */
+  onApply: (s: PendingSuggestion) => void
+  onReject: (s: PendingSuggestion) => void
 }

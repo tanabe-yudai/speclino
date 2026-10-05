@@ -38,7 +38,9 @@ async def test_returns_only_suggestions_and_summary() -> None:
     assert "判定ではありません" in summary
     # 予約した最悪の費用は実費に精算され、門番の監査に残る
     assert len(budget.reserved) == 1 and budget.settled[0][1:] == llm.usage
-    assert any(e["tool"] == "spec_suggest" for e in call.audit.entries)
+    [entry] = [e for e in call.audit.entries if e["tool"] == "spec_suggest"]
+    # 監査には件数だけを残し、本文や置換の断片を残さない
+    assert "注文" not in str(entry) and "OrderStatus" not in str(entry)
 
 
 async def test_budget_refusal_fails_without_calling_the_model() -> None:
