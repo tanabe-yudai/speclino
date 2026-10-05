@@ -174,9 +174,18 @@ class ArtifactRepository:
         return _to_domain(artifact, row) if row is not None and artifact is not None else None
 
     async def approve(
-        self, *, artifact_id: uuid.UUID, revision: int, approver: str, self_approved: bool
+        self,
+        *,
+        artifact_id: uuid.UUID,
+        revision: int,
+        approver: str,
+        self_approved: bool,
+        content: dict[str, Any],
+        content_hash: str,
     ) -> ArtifactRevision | None:
         """draft を active にし、それまでの active を superseded にする。
+
+        `content` / `content_hash` は承認時に確定した内容（spec はサーバが作った IR 入り）。
 
         active 化は `status='draft'` を条件にし、0 行なら None（並行する承認で状態が変わった。
         `PolicyRevisionRepository.approve` と同じ TOCTOU 対策）。先に行った superseded 化は
@@ -201,6 +210,8 @@ class ArtifactRepository:
                 status="active",
                 approver=approver,
                 self_approved=self_approved,
+                content=content,
+                content_hash=content_hash,
                 approved_at=func.now(),
             )
             .returning(ArtifactRevisionRecord)

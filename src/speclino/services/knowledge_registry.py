@@ -19,6 +19,7 @@ import json
 import re
 import uuid
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -31,6 +32,7 @@ from speclino.db.repositories.audit import AuditRepository
 from speclino.db.repositories.bundles import BundleRepository
 from speclino.db.repositories.policy_revisions import PolicyRevisionRepository
 from speclino.db.repositories.teams import TeamRepository
+from speclino.domain.domain_spec import DomainSpec
 from speclino.domain.knowledge import (
     ArtifactContent,
     ArtifactKind,
@@ -43,6 +45,8 @@ from speclino.domain.knowledge import (
     SpecContent,
 )
 from speclino.domain.knowledge_view import ArtifactSummary
+from speclino.domain.spec_ir import SpecIR
+from speclino.domain.uml import ParseResult, SpecDiagnostic
 from speclino.services import bundle_signing
 from speclino.services.check_pipeline import policy_package_hash
 from speclino.services.policy_governance import DraftConflict
@@ -53,6 +57,20 @@ _DRAFT = "knowledge.draft"
 _APPROVE = "knowledge.approve"
 _FRONTMATTER = re.compile(r"\A---\r?\n(.*?)\r?\n---", re.DOTALL)
 _FM_NAME = re.compile(r"^name:\s*(.+?)\s*$", re.MULTILINE)
+
+
+SpecCompiler = Callable[[str, DomainSpec | None, list[SpecIR]], ParseResult]
+"""spec の本文（Markdown・domain・旧形式の IR）から IR を作る（S63 の `compile_spec`）。"""
+
+
+def unavailable_compiler(
+    markdown: str, domain: DomainSpec | None, legacy: list[SpecIR]
+) -> ParseResult:
+    """parser が入るまでの既定。常にエラーにして spec の承認を拒否する（偽の承認を作らない）。"""
+    diag = SpecDiagnostic(
+        code="E_PARSER_UNAVAILABLE", severity="error", message="仕様の変換器がまだ無い"
+    )
+    return ParseResult(compiled=None, diagnostics=[diag])
 
 
 class ArtifactNotFound(LookupError):
@@ -67,8 +85,8 @@ class InvalidArtifact(ValueError):
     """kind と内容が合わない、スコープのプロジェクトがワークスペースに属さない、など。"""
 
 
-class SpecNotApprovable(ValueError):
-    """spec の変換結果（`content.compiled`）が無い＝診断にエラーが残っている。"""
+class SpecNotCompilable(ValueError):
+    """spec の本文をサーバで変換したら診断にエラーが残った（承認できない）。"""
 
 
 class BundleConflict(ValueError):
@@ -96,6 +114,15 @@ def bundle_payload(bundle: Bundle) -> bytes:
 
 def verify_bundle(bundle: Bundle) -> bool:
     return bundle_signing.verify(bundle_payload(bundle), bundle.signature)
+
+
+def _reject_client_derived(content: ArtifactContent) -> None:
+    """下書きに入れてよいのは人が書く入力だけ。IR（`compiled`）は承認時にサーバが本文から作る。
+
+    クライアントの IR を受け取ると、人が読んだ本文と違う IR を承認させられる（黙って捨てずに拒否）。
+    """
+    if isinstance(content, SpecContent) and content.compiled is not None:
+        raise InvalidArtifact("compiled はサーバが承認時に作る。下書きに含めない")
 
 
 def _target(workspace: str, artifact_id: str, revision: int) -> str:
@@ -154,6 +181,7 @@ async def create_draft(
     """新しい artifact と、その改訂 1（draft）を作る。同じ名前があれば `ArtifactExists`。"""
     if content.kind != kind:
         raise InvalidArtifact(f"kind {kind} と内容の kind {content.kind} が違う")
+    _reject_client_derived(content)
     await _lock_workspace(session, workspace)
     problems = await _scope_problems(session, workspace, [(name, content.scope)])
     if problems:
@@ -199,6 +227,7 @@ async def update_draft(
         raise ArtifactNotFound(artifact_id)
     if content.kind != artifact.kind:
         raise InvalidArtifact(f"kind {artifact.kind} の artifact に {content.kind} は保存できない")
+    _reject_client_derived(content)
     await _lock_workspace(session, artifact.workspace)
     problems = await _scope_problems(session, artifact.workspace, [(artifact.name, content.scope)])
     if problems:
@@ -244,12 +273,17 @@ async def approve(
     expected_hash: str,
     approver: str,
     audit_factory: async_sessionmaker[AsyncSession] | None = None,
+    compiler: SpecCompiler = unavailable_compiler,
 ) -> Bundle:
     """承認者が見た下書き（番号と content_hash）を承認し、新しい bundle を返す。
 
     ワークスペース行のロック → 承認者の確認 → 見た内容の照合 → active 切替 → bundle の作成
     （競合の検査）→ 監査を、呼び出し側の 1 トランザクションで行う。例外のときは呼び出し側が
     rollback する（拒否の監査は `audit_factory` で別に確定させる）。
+
+    spec は保存済みの本文から `compiler` で IR を作り、それを入れた内容で active にする。
+    承認者が照合する `expected_hash` は下書き（IR なし）の hash で、active 行の hash は IR 込みで
+    計算し直す（監査に両方残す）。変換にエラーがあれば `SpecNotCompilable`。
     """
     aid = _parse_id(artifact_id)
     repo = ArtifactRepository(session)
@@ -272,13 +306,18 @@ async def approve(
         raise PermissionError(f"{approver} は {workspace} の承認者ではない")
     if draft is None or draft.revision != expected_revision or draft.content_hash != expected_hash:
         raise DraftConflict(f"{artifact_id}@{expected_revision} は承認者が見た下書きではない")
-    if isinstance(draft.content, SpecContent) and draft.content.compiled is None:
-        raise SpecNotApprovable(f"{artifact.name}: 仕様の変換結果が無い（診断のエラーを直す）")
+    final = _compile(artifact.name, draft.content, compiler)
+    final_hash = content_hash(final)
     target = _target(workspace, artifact_id, draft.revision)
     editors = await AuditRepository(session).actors_for(target, _DRAFT)
     self_approved = approver == draft.author or approver in editors
     approved = await repo.approve(
-        artifact_id=aid, revision=draft.revision, approver=approver, self_approved=self_approved
+        artifact_id=aid,
+        revision=draft.revision,
+        approver=approver,
+        self_approved=self_approved,
+        content=final.model_dump(mode="json"),
+        content_hash=final_hash,
     )
     if approved is None:
         raise DraftConflict(f"{artifact_id}@{expected_revision} は並行する承認で状態が変わった")
@@ -291,10 +330,26 @@ async def approve(
         {
             "author": draft.author,
             "self_approved": self_approved,
+            "draft_hash": draft.content_hash,
+            "content_hash": final_hash,
             "bundle_generation": bundle.generation,
         },
     )
     return bundle
+
+
+def _compile(name: str, content: ArtifactContent, compiler: SpecCompiler) -> ArtifactContent:
+    """active にする内容。spec は本文から IR を作って入れる（下書きの値は使わない）。"""
+    if not isinstance(content, SpecContent):
+        return content
+    result = compiler(content.markdown, content.domain, list(content.legacy_ir))
+    errors = [d for d in result.diagnostics if d.severity == "error"]
+    if errors or result.compiled is None:
+        detail = ", ".join(f"{d.code}: {d.message}" for d in errors) or "変換結果が無い"
+        raise SpecNotCompilable(f"{name}: 仕様の変換にエラーがある（{detail}）")
+    data = content.model_dump(mode="json")
+    data["compiled"] = result.compiled.model_dump(mode="json")
+    return SpecContent.model_validate(data)
 
 
 def _skill_name(rev: ArtifactRevision) -> str:
@@ -306,11 +361,14 @@ def _skill_name(rev: ArtifactRevision) -> str:
 
 
 def _requirement_ids(rev: ArtifactRevision) -> set[str]:
+    """承認時にサーバが作った IR（active 行の `compiled`）の要求 ID だけを使う。"""
     assert isinstance(rev.content, SpecContent)
-    ids = {r.id for ir in rev.content.legacy_ir for r in ir.rules}
-    if rev.content.compiled is not None:
-        ids |= {r.id for r in rev.content.compiled.requirements}
-    return ids
+    compiled = rev.content.compiled
+    if compiled is None:
+        return set()
+    return {r.id for r in compiled.requirements} | {
+        r.id for ir in compiled.legacy for r in ir.rules
+    }
 
 
 def _overlaps(a: ArtifactScope, b: ArtifactScope) -> bool:
@@ -483,7 +541,9 @@ __all__ = [
     "BundleConflict",
     "BundleNotFound",
     "InvalidArtifact",
-    "SpecNotApprovable",
+    "SpecCompiler",
+    "SpecNotCompilable",
+    "unavailable_compiler",
     "approve",
     "build_bundle",
     "bundle_payload",

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -19,6 +20,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from speclino.db.models import AuditEvent
+from speclino.domain.domain_spec import DomainSpec
 from speclino.domain.knowledge import (
     ArtifactScope,
     Bundle,
@@ -26,7 +28,8 @@ from speclino.domain.knowledge import (
     SkillContent,
     SpecContent,
 )
-from speclino.domain.uml import CompiledSpec, RequirementRow
+from speclino.domain.spec_ir import SpecIR
+from speclino.domain.uml import CompiledSpec, ParseResult, RequirementRow, SpecDiagnostic
 from speclino.services import bundle_signing
 from speclino.services import knowledge_registry as kr
 from speclino.services.policy_governance import DraftConflict
@@ -96,8 +99,18 @@ def _compiled(*req_ids: str) -> CompiledSpec:
     )
 
 
-def _spec(scope: ArtifactScope, compiled: CompiledSpec | None) -> SpecContent:
-    return SpecContent(kind="spec", markdown="# 仕様", scope=scope, compiled=compiled)
+def stub_compiler(markdown: str, domain: DomainSpec | None, legacy: list[SpecIR]) -> ParseResult:
+    """本文の `REQ: <ID>` 行を要求にする。`ERROR` を含めばエラー診断（S63 の parser の代わり）。"""
+    if "ERROR" in markdown:
+        diag = SpecDiagnostic(code="E_STUB", severity="error", message="壊れている")
+        return ParseResult(compiled=None, diagnostics=[diag])
+    ids = re.findall(r"^REQ: (\S+)$", markdown, re.MULTILINE)
+    return ParseResult(compiled=_compiled(*ids).model_copy(update={"parser_version": "stub"}))
+
+
+def _spec(scope: ArtifactScope, *req_ids: str, markdown: str | None = None) -> SpecContent:
+    md = markdown or "# 仕様\n" + "".join(f"REQ: {r}\n" for r in req_ids)
+    return SpecContent(kind="spec", markdown=md, scope=scope)
 
 
 async def _create(w: Ws, kind: str, name: str, content: object, author: str = "member1") -> str:
@@ -125,6 +138,7 @@ async def _approve(w: Ws, artifact_id: str, approver: str = "owner1") -> Bundle:
             expected_hash=draft.content_hash,
             approver=approver,
             audit_factory=w.f,
+            compiler=stub_compiler,
         )
 
 
@@ -283,9 +297,9 @@ async def test_skill_name_and_requirement_ids_conflict(ws: Ws) -> None:
     with pytest.raises(kr.BundleConflict, match="review"):
         await _approve(ws, c)
 
-    s1 = await _create(ws, "spec", "orders", _spec(_projects(ws.p1), _compiled("REQ-1")))
+    s1 = await _create(ws, "spec", "orders", _spec(_projects(ws.p1), "REQ-1"))
     await _approve(ws, s1)
-    s2 = await _create(ws, "spec", "orders2", _spec(_projects(ws.p1, ws.p2), _compiled("REQ-1")))
+    s2 = await _create(ws, "spec", "orders2", _spec(_projects(ws.p1, ws.p2), "REQ-1"))
     with pytest.raises(kr.BundleConflict, match="REQ-1"):
         await _approve(ws, s2)
 
@@ -307,18 +321,86 @@ async def test_scope_project_must_belong_to_workspace(ws: Ws) -> None:
 
 
 async def test_spec_with_errors_cannot_be_approved(ws: Ws) -> None:
-    aid = await _create(ws, "spec", "orders", _spec(_projects(ws.p1), None))
-    with pytest.raises(kr.SpecNotApprovable):
+    aid = await _create(ws, "spec", "orders", _spec(_projects(ws.p1), markdown="# ERROR\n"))
+    with pytest.raises(kr.SpecNotCompilable, match="E_STUB"):
         await _approve(ws, aid)
+    # 既定の compiler（S63 の parser が入るまで）は常に拒否する
+    async with ws.f() as s:
+        draft = await kr.current_draft(s, aid)
+    assert draft is not None
     async with ws.f() as s, s.begin():
         await kr.update_draft(
             s,
             artifact_id=aid,
             expected_revision=1,
-            content=_spec(_projects(ws.p1), _compiled("REQ-1")),
+            content=_spec(_projects(ws.p1), "REQ-1"),
             author="member1",
         )
+    async with ws.f() as s:
+        draft = await kr.current_draft(s, aid)
+    assert draft is not None
+    with pytest.raises(kr.SpecNotCompilable, match="E_PARSER_UNAVAILABLE"):
+        async with ws.f() as s, s.begin():
+            await kr.approve(
+                s,
+                artifact_id=aid,
+                expected_revision=1,
+                expected_hash=draft.content_hash,
+                approver="owner1",
+            )
     assert (await _approve(ws, aid)).generation == 1
+
+
+async def test_client_compiled_is_rejected(ws: Ws) -> None:
+    """承認される IR は人が読んだ本文からサーバが作る。クライアントの IR は受け付けない。"""
+    forged = SpecContent(
+        kind="spec", markdown="# 仕様\n", scope=_projects(ws.p1), compiled=_compiled("FORGED")
+    )
+    with pytest.raises(kr.InvalidArtifact, match="compiled"):
+        await _create(ws, "spec", "orders", forged)
+    aid = await _create(ws, "spec", "orders", _spec(_projects(ws.p1), "REQ-1"))
+    with pytest.raises(kr.InvalidArtifact, match="compiled"):
+        async with ws.f() as s, s.begin():
+            await kr.update_draft(
+                s, artifact_id=aid, expected_revision=1, content=forged, author="member1"
+            )
+
+
+async def test_approved_spec_is_compiled_by_the_server(ws: Ws) -> None:
+    content = _spec(_projects(ws.p1), "REQ-1", "REQ-2")
+    aid = await _create(ws, "spec", "orders", content)
+    async with ws.f() as s:
+        draft = await kr.current_draft(s, aid)
+    assert draft is not None and isinstance(draft.content, SpecContent)
+    assert draft.content.compiled is None
+    assert draft.content_hash == kr.content_hash(content)
+
+    # 承認者が照合するのは下書き（compiled なし）の hash。違えば DraftConflict
+    with pytest.raises(DraftConflict):
+        async with ws.f() as s, s.begin():
+            await kr.approve(
+                s,
+                artifact_id=aid,
+                expected_revision=1,
+                expected_hash=kr.content_hash(
+                    content.model_copy(update={"compiled": _compiled("REQ-1", "REQ-2")})
+                ),
+                approver="owner1",
+                compiler=stub_compiler,
+            )
+    bundle = await _approve(ws, aid)
+    async with ws.f() as s:
+        (active,) = await kr.list_revisions(s, aid)
+        audit = await _audit(s, ws.slug)
+    assert isinstance(active.content, SpecContent) and active.content.compiled is not None
+    expected = stub_compiler(content.markdown, None, []).compiled
+    assert active.content.compiled == expected
+    assert [r.id for r in active.content.compiled.requirements] == ["REQ-1", "REQ-2"]
+    assert active.content_hash == kr.content_hash(active.content) != draft.content_hash
+    assert bundle.members[0].content_hash == active.content_hash
+    (approved,) = [a for a in audit if a.decision == "approved"]
+    assert approved.detail["draft_hash"] == draft.content_hash
+    assert approved.detail["content_hash"] == active.content_hash
 
 
 async def test_create_rejects_duplicates_and_kind_mismatch(ws: Ws) -> None:
@@ -332,7 +414,7 @@ async def test_create_rejects_duplicates_and_kind_mismatch(ws: Ws) -> None:
 async def test_resolve_for_project(ws: Ws) -> None:
     instr = await _create(ws, "instructions", "agents", _instr())
     skill = await _create(ws, "skill", "only-a", _skill("only-a", _projects(ws.p1)))
-    spec = await _create(ws, "spec", "orders", _spec(_projects(ws.p2), _compiled("REQ-1")))
+    spec = await _create(ws, "spec", "orders", _spec(_projects(ws.p2), "REQ-1"))
     for aid in (instr, skill, spec):
         bundle = await _approve(ws, aid)
     async with ws.f() as s:
