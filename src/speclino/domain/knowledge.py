@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import posixpath
+import re
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
@@ -20,14 +21,41 @@ InstructionsTarget = Literal["agents_md", "claude_md"]
 
 MANAGED_BEGIN = "<!-- speclino:begin"
 MANAGED_END = "<!-- speclino:end -->"
+BODY_MAX_BYTES = 256 * 1024
 SKILL_FILE_MAX_BYTES = 256 * 1024
 SKILL_TOTAL_MAX_BYTES = 1024 * 1024
 
+_MARKER_PREFIXES = ("<!--speclino:begin", "<!--speclino:end")
+_DRIVE_LETTER = re.compile(r"^[A-Za-z]:")
+
 
 def _reject_markers(text: str) -> str:
-    if MANAGED_BEGIN in text or MANAGED_END in text:
+    squeezed = re.sub(r"\s+", "", text).lower()
+    if any(m in squeezed for m in _MARKER_PREFIXES):
         raise ValueError("本文に SpecLino の管理区画のマーカーを含められない")
     return text
+
+
+def _limit_body(text: str) -> str:
+    if len(text.encode()) > BODY_MAX_BYTES:
+        raise ValueError("本文が大きすぎる")
+    return text
+
+
+def _check_skill_path(path: str) -> None:
+    norm = posixpath.normpath(path) if path else ""
+    if (
+        not path
+        or "\x00" in path
+        or "\\" in path
+        or path.startswith("/")
+        or _DRIVE_LETTER.match(path)
+        or norm != path
+        or norm.split("/")[0] == ".."
+        or any(seg in (".", "..") for seg in path.split("/"))
+        or path.lower() == "skill.md"
+    ):
+        raise ValueError(f"付属ファイルのパスが不正: {path!r}")
 
 
 class ArtifactScope(IRModel):
@@ -56,31 +84,28 @@ class SkillContent(IRModel):
     @field_validator("files")
     @classmethod
     def _safe_files(cls, v: dict[str, str]) -> dict[str, str]:
-        total = 0
+        seen: set[str] = set()
         for path, body in v.items():
-            norm = posixpath.normpath(path) if path else ""
-            if (
-                not path
-                or "\\" in path
-                or path.startswith("/")
-                or norm.startswith("..")
-                or norm != path
-                or path == "SKILL.md"
-            ):
-                raise ValueError(f"付属ファイルのパスが不正: {path!r}")
-            size = len(body.encode())
-            if size > SKILL_FILE_MAX_BYTES:
+            _check_skill_path(path)
+            if path.lower() in seen:
+                raise ValueError(f"付属ファイルのパスが大文字小文字違いで重複: {path!r}")
+            seen.add(path.lower())
+            if len(body.encode()) > SKILL_FILE_MAX_BYTES:
                 raise ValueError(f"付属ファイルが大きすぎる: {path}")
-            total += size
             _reject_markers(body)
-        if total > SKILL_TOTAL_MAX_BYTES:
-            raise ValueError("付属ファイルの合計が大きすぎる")
         return v
 
     @field_validator("skill_md")
     @classmethod
     def _md(cls, v: str) -> str:
-        return _reject_markers(v)
+        return _reject_markers(_limit_body(v))
+
+    @model_validator(mode="after")
+    def _total_size(self) -> SkillContent:
+        total = len(self.skill_md.encode()) + sum(len(b.encode()) for b in self.files.values())
+        if total > SKILL_TOTAL_MAX_BYTES:
+            raise ValueError("skill の合計が大きすぎる")
+        return self
 
 
 class InstructionsContent(IRModel):
@@ -92,7 +117,7 @@ class InstructionsContent(IRModel):
     @field_validator("body")
     @classmethod
     def _body(cls, v: str) -> str:
-        return _reject_markers(v)
+        return _reject_markers(_limit_body(v))
 
 
 class SpecContent(IRModel):
@@ -106,6 +131,11 @@ class SpecContent(IRModel):
     )
     scope: ArtifactScope
     compiled: CompiledSpec | None = Field(default=None, description="承認時に固定した変換結果")
+
+    @field_validator("markdown")
+    @classmethod
+    def _markdown(cls, v: str) -> str:
+        return _limit_body(v)
 
     @model_validator(mode="after")
     def _projects_only(self) -> SpecContent:
@@ -134,6 +164,12 @@ class ArtifactRevision(IRModel):
     note: str = ""
     created_at: datetime
     approved_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def _kind_matches_content(self) -> ArtifactRevision:
+        if self.kind != self.content.kind:
+            raise ValueError("kind と content.kind が一致しない")
+        return self
 
 
 class BundleMember(IRModel):
@@ -175,6 +211,12 @@ class KnowledgeLock(IRModel):
     expires_at: datetime
     signature: str = Field(min_length=1)
 
+    @model_validator(mode="after")
+    def _expiry_after_issue(self) -> KnowledgeLock:
+        if self.expires_at <= self.issued_at:
+            raise ValueError("expires_at は issued_at より後")
+        return self
+
 
 class ResolvedKnowledge(IRModel):
     """bundle をあるプロジェクトに当てた結果。
@@ -199,6 +241,7 @@ class Suggestion(IRModel):
 
 
 __all__ = [
+    "BODY_MAX_BYTES",
     "MANAGED_BEGIN",
     "MANAGED_END",
     "ArtifactContent",

@@ -125,6 +125,15 @@ class StateMachine(IRModel):
     transitions: list[StateTransition]
     level: RuleLevel
 
+    @model_validator(mode="after")
+    def _closed_states(self) -> StateMachine:
+        known = set(self.states)
+        refs = {self.initial} | {t.source for t in self.transitions}
+        refs |= {t.target for t in self.transitions}
+        if not refs <= known:
+            raise ValueError(f"未宣言の状態: {sorted(refs - known)}")
+        return self
+
 
 class StructureObligation(IRModel):
     id: str = Field(min_length=1, description="<図 ID>#<クラス ID>")

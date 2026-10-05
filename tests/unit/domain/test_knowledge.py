@@ -1,7 +1,10 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from pydantic import ValidationError
 
 from speclino.domain.knowledge import (
+    ArtifactRevision,
     ArtifactScope,
     Bundle,
     BundleMember,
@@ -74,7 +77,126 @@ def test_bundle_and_lock_roundtrip() -> None:
         members=[m],
         files={"AGENTS.md": "sha256:" + "2" * 64},
         issued_at=b.created_at,
-        expires_at=b.created_at,
+        expires_at=b.created_at + timedelta(hours=1),
         signature="sig",
     )
     assert KnowledgeLock.model_validate_json(lock.model_dump_json()) == lock
+
+
+_SKILL_MD = "---\nname: a\ndescription: b\n---\n"
+_WS = ArtifactScope(workspace=True)
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "",
+        "a\x00b",
+        "a\\b",
+        "/abs",
+        "C:/x",
+        "c:x",
+        "../x",
+        "a/../../b",
+        "a/../b",
+        "./a",
+        "a/./b",
+        "a//b",
+        "a/",
+        "..",
+        "SKILL.md",
+        "skill.md",
+        "Skill.MD",
+    ],
+)
+def test_skill_path_rejections(bad: str) -> None:
+    with pytest.raises(ValidationError):
+        SkillContent(kind="skill", skill_md=_SKILL_MD, files={bad: "y"}, scope=_WS)
+
+
+def test_skill_path_allows_dotdot_prefixed_names() -> None:
+    ok = SkillContent(kind="skill", skill_md=_SKILL_MD, files={"..foo/x.md": "y"}, scope=_WS)
+    assert "..foo/x.md" in ok.files
+
+
+def test_skill_paths_case_insensitive_duplicates_rejected() -> None:
+    with pytest.raises(ValidationError):
+        SkillContent(kind="skill", skill_md=_SKILL_MD, files={"a.md": "1", "A.md": "2"}, scope=_WS)
+
+
+def test_skill_size_limits() -> None:
+    big = "x" * (256 * 1024 + 1)
+    with pytest.raises(ValidationError):
+        SkillContent(kind="skill", skill_md=big, scope=_WS)
+    with pytest.raises(ValidationError):
+        InstructionsContent(kind="instructions", target="agents_md", body=big, scope=_WS)
+    with pytest.raises(ValidationError):
+        SpecContent(kind="spec", markdown=big, scope=ArtifactScope(projects=["p"]))
+    # skill_md も合計に含まれる: 4 x 256KiB のファイル + skill_md で 1MiB 超
+    chunk = "x" * (256 * 1024)
+    files = {f"f{i}.md": chunk for i in range(4)}
+    with pytest.raises(ValidationError):
+        SkillContent(kind="skill", skill_md=_SKILL_MD, files=files, scope=_WS)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "x <!-- speclino:begin id=1 --> y",
+        "x <!-- speclino:end --> y",
+        "<!--speclino:begin",
+        "<!--\n  SpecLino : END -->",
+        "<!--  speclino:Begin",
+    ],
+)
+def test_markers_rejected_everywhere(text: str) -> None:
+    with pytest.raises(ValidationError):
+        SkillContent(kind="skill", skill_md=text, scope=_WS)
+    with pytest.raises(ValidationError):
+        SkillContent(kind="skill", skill_md=_SKILL_MD, files={"a.md": text}, scope=_WS)
+    with pytest.raises(ValidationError):
+        InstructionsContent(kind="instructions", target="claude_md", body=text, scope=_WS)
+
+
+def _rev(kind: str, content: object) -> ArtifactRevision:
+    return ArtifactRevision.model_validate(
+        {
+            "artifact_id": "a1",
+            "workspace": "w",
+            "kind": kind,
+            "name": "n",
+            "revision": 1,
+            "status": "draft",
+            "content": content,
+            "content_hash": "sha256:" + "0" * 64,
+            "author": "u",
+            "created_at": datetime.now(UTC),
+        }
+    )
+
+
+def test_revision_kind_must_match_content() -> None:
+    spec = {"kind": "spec", "markdown": "# x", "scope": {"projects": ["p"]}}
+    assert _rev("spec", spec).content.kind == "spec"
+    with pytest.raises(ValidationError):
+        _rev("skill", spec)
+
+
+def test_spec_content_valid() -> None:
+    sc = SpecContent(kind="spec", markdown="# x", scope=ArtifactScope(projects=["p1"]))
+    assert sc.compiled is None and sc.legacy_ir == []
+
+
+def test_lock_expiry_must_follow_issue() -> None:
+    now = datetime.now(UTC)
+    with pytest.raises(ValidationError):
+        KnowledgeLock(
+            workspace="w",
+            github_repo_id=1,
+            bundle_generation=1,
+            members=[],
+            files={},
+            issued_at=now,
+            expires_at=now,
+            signature="s",
+        )

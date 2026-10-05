@@ -1,3 +1,6 @@
+import pytest
+from pydantic import ValidationError
+
 from speclino.domain.assessment import AssessmentKey
 from speclino.domain.finding import Finding
 
@@ -15,3 +18,20 @@ def test_key_is_stable_string() -> None:
 
 def test_finding_accepts_assessment_outcome() -> None:
     assert "assessment_outcome" in Finding.model_fields
+
+
+def test_finding_assessment_outcome_validated() -> None:
+    base = {
+        "id": "f1",
+        "requirement_id": "R1",
+        "behavior_id": "b",
+        "verdict": "REVIEW",
+        "category": "missing_finding",
+        "severity": "info",
+        "message": "m",
+        "claim_scope": "service_outcome",
+    }
+    ok = Finding.model_validate({**base, "assessment_outcome": "issue"})
+    assert ok.assessment_outcome == "issue"
+    with pytest.raises(ValidationError):
+        Finding.model_validate({**base, "assessment_outcome": "bogus"})
