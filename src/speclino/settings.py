@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -76,3 +77,10 @@ class Settings(BaseSettings):
     # 知識の bundle の署名鍵（S62、HMAC-SHA256）。本番は Secret Manager から環境変数へ。
     # 未設定なら env=local は固定の開発鍵、env=prod は起動時にエラー（services/bundle_signing.py）
     bundle_signing_key: str | None = None
+
+    @model_validator(mode="after")
+    def _no_local_code_host_in_prod(self) -> Settings:
+        # ローカルのコードホストは手元の git をそのまま信じる（GitHub の認証も ID の照合も無い）
+        if self.env == "prod" and self.code_host_kind == "local":
+            raise ValueError("env=prod では code_host_kind=local を使えない")
+        return self
