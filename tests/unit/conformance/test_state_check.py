@@ -175,3 +175,35 @@ def test_global_write_cause_is_unknown() -> None:
 
 def test_uncovered_input_is_unknown() -> None:
     assert _one(_code(_path("p1", is_("PENDING"), ["PAID"]))).verdict == "UNKNOWN"
+
+
+# ---------------------------------------------------------------- レビュー fix round 1
+def test_write_to_initial_without_transition_is_unknown() -> None:
+    # プローブ B: 前の状態を絞らずに初期状態 PENDING を代入 → 生成か遷移か判別できない
+    f = _one(_code(_path("p1", TRUE, ["PENDING"])))
+    assert (f.verdict, f.category) == ("UNKNOWN", "unsupported_analysis")
+    assert "初期状態" in f.message
+
+
+def test_write_to_initial_with_allowed_transition_is_judged_normally() -> None:
+    sm = _sm().model_copy(
+        update={
+            "transitions": [
+                *_sm().transitions,
+                StateTransition(id="t5", source="CANCELLED", target="PENDING", event="reopen"),
+            ]
+        }
+    )
+    ok = _path("p1", is_("CANCELLED"), ["PENDING"])
+    rest = _rest("p2", ne(STATUS, S("CANCELLED")))
+    assert _one(_code(ok, rest), sm).verdict == "VERIFIED_IN_SCOPE"
+
+
+def test_cause_touching_transition_guard_variable_is_unknown() -> None:
+    cause = UnknownCause(
+        code="unresolved_attribute", detail="paid", may_affect=["write:order.paid"]
+    )
+    p = _path("p1", and_(is_("PENDING"), eq(ref("before.order.paid"), TRUE)), ["PAID"])
+    p = p.model_copy(update={"unknown_causes": [cause]})
+    rest = _rest("p2", not_(and_(is_("PENDING"), eq(ref("before.order.paid"), TRUE))))
+    assert _one(_code(p, rest), _sm(guarded=True)).verdict == "UNKNOWN"

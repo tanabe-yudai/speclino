@@ -12,11 +12,17 @@ from typing import Any
 
 import z3
 
-from speclino.conformance.engine import ConformanceEngine, EngineConfig
+from speclino.conformance.engine import (
+    ConformanceEngine,
+    EngineConfig,
+    post_state_constraints,
+    symbolic_counterexample,
+)
 from speclino.conformance.obligation import (
     ObligationContext,
     ObligationResult,
     blocking_causes,
+    guard_channels,
     inexact_reason,
     scope_text,
     solver_limit,
@@ -36,6 +42,7 @@ class _StateChecker:
         self.sm = sm
         self.code = code
         self.config = config
+        self.domain = domain
         self.engine = ConformanceEngine(domain, config)
         self.ctx = self.engine.ctx
         self.channel = f"write:{sm.attribute}"
@@ -44,10 +51,12 @@ class _StateChecker:
             t.id: self.ctx.encode_bool(t.guard) for t in sm.transitions if t.guard is not None
         }
         self.before = self.ctx.variable(f"before.{sm.attribute}", ty)
+        self.initial = self.state[sm.initial]
         self.allowed_text = ", ".join(f"{t.source}→{t.target}" for t in sm.transitions)
+        self.guard_channels = guard_channels(t.guard for t in sm.transitions if t.guard is not None)
 
     def touches(self, channel: str) -> bool:
-        return channel == self.channel
+        return channel == self.channel or channel in self.guard_channels
 
     def allowed(self, prev: Any, new: Any) -> Any:
         parts = [prev == new]  # 同じ値の再代入は遷移ではない
@@ -77,7 +86,7 @@ class _StateChecker:
         base = [
             *self.engine.assumptions,
             self.ctx.encode_bool(path.guard),
-            *self.engine._post_state(path),
+            *post_state_constraints(self.ctx, self.domain, path),
             in_states,
         ]
         s = self.ctx.solver(timeout)
@@ -115,11 +124,14 @@ class _StateChecker:
             )
         expected = f"{self.sm.attribute} の代入が許された遷移（{self.allowed_text}）"
         prev = self.before
-        for seq, value, _ in writes:
+        for i, (seq, value, _) in enumerate(writes):
             assert value is not None
             new = self.ctx.encode(value)
             s = self.ctx.solver(timeout)
             s.add(*base, z3.Not(self.allowed(prev, new)))
+            if i == 0:
+                # 初期状態への代入は生成かもしれないので、ここでは初期状態以外の値だけを判定する
+                s.add(new != self.initial)
             r = s.check()
             if r == z3.unknown:
                 return solver_limit(f"経路 {path.path_id} の遷移", timeout)
@@ -129,7 +141,7 @@ class _StateChecker:
                 dst = model.eval(new, model_completion=True)
                 at = f"seq {seq} の" if seq is not None else ""
                 actual = f"{at}代入 {self.sm.attribute} = {describe_expr(value)}（{src} → {dst}）"
-                cex = self.engine._counterexample(path, model, actual)
+                cex = symbolic_counterexample(self.ctx, path, model, actual)
                 return ObligationResult(
                     "VIOLATED",
                     "state_mismatch",
@@ -138,8 +150,33 @@ class _StateChecker:
                     actual,
                     cex,
                 )
+            if i == 0:
+                unknown = self._initial_write(path, base, new)
+                if unknown is not None:
+                    return unknown
             prev = new
         return ObligationResult("VERIFIED_IN_SCOPE", "conformant", "成立", expected)
+
+    def _initial_write(self, path: Path, base: list[Any], new: Any) -> ObligationResult | None:
+        """入口の状態から初期状態への代入で、図に無い遷移になり得るなら判定しない。
+
+        生成（オブジェクトを作って初期状態にする）か遷移か、Code IR からは判別できない。
+        経路条件の下でありうる前の状態から初期状態への遷移が図にあれば通常どおり成立。
+        """
+        timeout = self.config.solver_timeout_ms
+        s = self.ctx.solver(timeout)
+        s.add(*base, new == self.initial, z3.Not(self.allowed(self.before, new)))
+        r = s.check()
+        if r == z3.unknown:
+            return solver_limit(f"経路 {path.path_id} の初期状態への代入", timeout)
+        if r == z3.unsat:
+            return None
+        return ObligationResult(
+            "UNKNOWN",
+            "unsupported_analysis",
+            f"経路 {path.path_id}: 初期状態 {self.sm.initial} への代入。生成か遷移か判別できない",
+            next_steps=["生成の経路を別の振る舞いに分けるか、経路条件で前の状態を限定する"],
+        )
 
 
 def check_state_machine(
