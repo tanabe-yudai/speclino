@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from uuid import UUID
 
@@ -38,7 +38,12 @@ from speclino.domain.finding import Finding, Findings
 from speclino.domain.policy import PolicyRevision
 from speclino.domain.run import RunManifest
 from speclino.domain.spec_ir import SpecIR
-from speclino.services.check_pipeline import CheckRequest, policy_package_hash, run_check
+from speclino.services.check_pipeline import (
+    CheckRequest,
+    llm_assisted_rules,
+    policy_package_hash,
+    run_check,
+)
 
 
 @dataclass
@@ -199,8 +204,58 @@ class BundleReplayResult:
     replayed: Findings | None = None
 
 
+_LLM_BEHAVIOR_ID = "policy:llm.checklist"
+
+
 def _is_llm_assisted(f: Finding) -> bool:
-    return f.assessment_outcome is not None
+    """LLM 支援の規約の Finding（REVIEW の評価と、評価できなかった UNKNOWN）。"""
+    return f.assessment_outcome is not None or f.behavior_id == _LLM_BEHAVIOR_ID
+
+
+def _models_by_rule(keys: list[str]) -> dict[str, str]:
+    """manifest の評価のキー（`改訂|ルール|hash|モデル|版`）→ ルール ID ごとのモデル。"""
+    out: dict[str, str] = {}
+    for key in keys:
+        parts = key.split("|")
+        if len(parts) == 5:
+            out.setdefault(parts[1], parts[3])
+    return out
+
+
+async def _recorded_llm_findings(
+    session: AsyncSession, req: CheckRequest, keys: list[str]
+) -> tuple[dict[str, list[Finding]], list[str]]:
+    """LLM 支援の規約を記録だけで再評価する（LLM は呼ばない。記録の無いキーは UNKNOWN）。
+
+    元の run でキーが 1 つも無いルール（LLM の設定が無かった・全部失敗した）は評価しない
+    （検査器が「評価していない」UNKNOWN を出す）。
+    """
+    from speclino.db.repositories.assessments import AssessmentRepository
+    from speclino.services.llm_policies import assess, checklist_params
+    from speclino.services.llm_units import extract_units
+
+    models = _models_by_rule(keys)
+    store = AssessmentRepository(session)
+    out: dict[str, list[Finding]] = {}
+    used: list[str] = []
+    for rule, revision in llm_assisted_rules(req):
+        model = models.get(rule.id)
+        if model is None:
+            continue
+        units = extract_units(req.repo_root, checklist_params(rule), rule.applies_to.paths)
+        found, rule_keys = await assess(
+            rule,
+            units.units,
+            llm=None,
+            store=store,
+            policy_revision=revision,
+            model=model,
+            unreadable=units.unreadable,
+            now=req.now,
+        )
+        out[rule.id] = found
+        used.extend(rule_keys)
+    return out, used
 
 
 async def replay_bundle(
@@ -248,34 +303,67 @@ async def replay_bundle(
             f"（manifest={manifest.bundle_hash} 再計算={bundle_hash(bundle)}）"
         )
     knowledge = await kr.resolve_for_project(session, bundle, project_id)
-    fresh = run_check(
-        CheckRequest(
-            repo_root=repo_root,
-            head_sha=manifest.inputs.head_commit,
-            base_sha=manifest.inputs.base_commit,
-            base_root=base_root,
-            limits=manifest.limits,
-            fail_on=tuple(manifest.fail_on),  # type: ignore[arg-type]
-            mode=manifest.mode,
-            run_id=manifest.run_id,
-            source_roots=tuple(manifest.source_roots) or (".", "src"),
-            today=manifest.today,
-            bindings_patch=manifest.bindings_patch or None,
-            knowledge=knowledge,
-            github_repo_id=project.github_repo_id,
-            now=manifest.created_at,
-            trusted_root=trusted_root if manifest.trusted_commit is not None else None,
-            trusted_sha=manifest.trusted_commit,
-        )
+    req = CheckRequest(
+        repo_root=repo_root,
+        head_sha=manifest.inputs.head_commit,
+        base_sha=manifest.inputs.base_commit,
+        base_root=base_root,
+        limits=manifest.limits,
+        fail_on=tuple(manifest.fail_on),  # type: ignore[arg-type]
+        mode=manifest.mode,
+        run_id=manifest.run_id,
+        source_roots=tuple(manifest.source_roots) or (".", "src"),
+        today=manifest.today,
+        bindings_patch=manifest.bindings_patch or None,
+        knowledge=knowledge,
+        github_repo_id=project.github_repo_id,
+        now=manifest.created_at,
+        trusted_root=trusted_root if manifest.trusted_commit is not None else None,
+        trusted_sha=manifest.trusted_commit,
     )
+    # S70: LLM 支援は記録で再評価する（呼び直さない）。確定は manifest の記録をそのまま渡す
+    llm_findings, llm_keys = await _recorded_llm_findings(
+        session, req, manifest.llm_assessment_keys
+    )
+    req = replace(
+        req,
+        llm_findings=llm_findings,
+        llm_assessment_keys=tuple(llm_keys),
+        attestations=tuple(manifest.attestations),
+    )
+    fresh = run_check(req)
     saved_path = run_dir / DETERMINISTIC_FINDINGS
     if not saved_path.is_file():
         saved_path = run_dir / "findings.json"
     saved = Findings.model_validate(json.loads(saved_path.read_text()))
     diffs, compared, llm = compare_findings(saved, fresh.findings)
+    diffs.extend(compare_llm_findings(saved, fresh.findings))
+    missing_keys = sorted(set(manifest.llm_assessment_keys) - set(llm_keys))
+    diffs.extend(f"LLM 支援の評価の記録が無い（UNKNOWN）: {k}" for k in missing_keys)
     return BundleReplayResult(
         manifest.run_id, bundle.generation, not diffs, compared, diffs, llm, fresh.findings
     )
+
+
+def compare_llm_findings(saved: Findings, fresh: Findings) -> list[str]:
+    """LLM 支援の評価（REVIEW）を指紋（ID）と区分で突き合わせる。記録から作り直すので一致するはず。
+
+    元の run で評価できなかったもの（UNKNOWN）は比べない（記録が無いので再現できない）。
+    """
+    new = {f.id: f for f in fresh.findings if f.assessment_outcome is not None}
+    diffs: list[str] = []
+    for f in sorted(
+        (f for f in saved.findings if f.assessment_outcome is not None), key=lambda x: x.id
+    ):
+        got = new.get(f.id)
+        if got is None:
+            diffs.append(f"{f.requirement_id}（{f.id}）: LLM 支援の評価を記録から再現できない")
+        elif got.assessment_outcome != f.assessment_outcome:
+            diffs.append(
+                f"{f.requirement_id}（{f.id}）: 保存 {f.assessment_outcome}"
+                f" → 再評価 {got.assessment_outcome}"
+            )
+    return diffs
 
 
 def compare_findings(saved: Findings, fresh: Findings) -> tuple[list[str], int, list[str]]:
