@@ -1,15 +1,18 @@
 /**
  * チームの知識レジストリの通し確認（S72）。scripts/seed_demo.py で用意した DB に対して動かす。
- * スクリーンショットは docs/screenshots/knowledge-*.png に保存する（docs/demo-knowledge-registry.md）。
+ * E2E_SHOTS_DIR=../docs/screenshots でスクリーンショットを knowledge-*.png として保存する
+ * （docs/demo-knowledge-registry.md）。
  */
 import { expect, test, type Page } from '@playwright/test'
 import path from 'node:path'
 
 const SLUG = process.env.E2E_WORKSPACE ?? 'shop-team'
-const SHOTS = path.resolve(import.meta.dirname, '../../docs/screenshots')
+// スクリーンショットは E2E_SHOTS_DIR を設定したときだけ保存する（docs の画像を撮り直すとき）
+const SHOTS = process.env.E2E_SHOTS_DIR ? path.resolve(process.env.E2E_SHOTS_DIR) : null
 const DEV_HEADERS = { 'X-Dev-User': 'judge' }
 
 async function shot(page: Page, name: string) {
+  if (!SHOTS) return
   await page.screenshot({ path: path.join(SHOTS, `knowledge-${name}.png`), fullPage: false })
 }
 
@@ -45,6 +48,20 @@ test('仕様の編集・診断・承認、skill、可観測性、検査結果の
   await expect(page.getByRole('tab', { name: /診断（[1-9]/ })).toBeVisible()
   await diagnostic.click() // 本文のその行へ移る
   await shot(page, 'spec-diagnostic')
+
+  // 2b. `<` と `>=` を含むガードの辺ラベルも描ける（Mermaid のラベルの中の比較演算子。保存はしない）
+  const withComparison = original.replace(
+    '    notify -->|"[e4]"| done',
+    '    notify -->|"[e4]"| done\n    check -->|"[e5] before.order.quantity < 1 and before.inventory.available >= 0"| done',
+  )
+  expect(withComparison).not.toBe(original)
+  await body.fill(withComparison)
+  await expect(page.getByText('診断はありません。')).toBeVisible()
+  await page.getByRole('tab', { name: '図' }).click()
+  await expect(page.locator('figure svg')).toHaveCount(4)
+  await expect(page.getByText('描画できない')).toHaveCount(0)
+  await expect(page.locator('figure svg').last()).toContainText('before.order.quantity < 1 and before.inventory.available >= 0')
+  await page.getByRole('tab', { name: /診断/ }).click()
 
   // 3. 直す（説明の 1 文も足して保存できる差分にする）→ 診断が消え、図が描ける
   const fixed = original.replace('挟んでもよい（シーケンス図は「この順で含む」の義務）。', '挟んでもよい（シーケンス図は「この順で含む」の義務）。在庫が足りなければ何も呼ばない。')
@@ -131,6 +148,9 @@ test('仕様の編集・診断・承認、skill、可観測性、検査結果の
     .toBe(0)
   const attested = page.getByText(/問題なしとして確定済み/).first()
   await expect(attested).toBeVisible()
+  // 件数と理由は同じ集合から: 確定した指摘と LLM の「指摘なし」は「確定済み・情報」、残る要確認は lock だけ
+  await expect(page.getByText('要確認 1件 が残っているため失敗しました')).toBeVisible()
+  await expect(page.getByText('確定済み・情報').first()).toBeVisible()
   await shot(page, 'run-recheck')
   await attested.evaluate((el) => el.scrollIntoView({ block: 'center' }))
   await shot(page, 'run-recheck-attested')

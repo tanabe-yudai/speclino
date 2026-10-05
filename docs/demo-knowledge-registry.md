@@ -97,6 +97,8 @@ PR #7: LLM 支援の規約は 3 回の評価の多数で「指摘あり」。ver
 ![LLM 支援の REVIEW と確定のボタン](screenshots/knowledge-run-llm-review.png)
 
 「問題なしとして確定」を押すと、同じ PR の再検査（trigger = attestation）に移る。確定した指摘はゲートを止めない。
+判定は REVIEW のままだが、ゲートを止めない REVIEW（確定した指摘と LLM の「指摘なし」）は「確定済み・情報」として
+要確認とは別に数える（件数・失敗の理由・一覧は、ゲートが決めた同じ集合 `cleared_ids` から作る）。
 残る REVIEW は `KNOWLEDGE-LOCK-001`（1 で承認して世代 5 になったのに、ブランチの lock は世代 4 のまま）。
 `speclino sync` で最新にすれば消える。
 
@@ -119,7 +121,7 @@ PR #7: LLM 支援の規約は 3 回の評価の多数で「指摘あり」。ver
 上の画面は Playwright で撮っている（`web/e2e/knowledge.spec.ts`）。seed 直後の DB とサーバーに対して:
 
 ```sh
-cd web && E2E_BASE_URL=http://localhost:8080 npx playwright test
+cd web && E2E_BASE_URL=http://localhost:8080 E2E_SHOTS_DIR=../docs/screenshots npx playwright test
 ```
 
 仕様を承認して世代を進めるので、撮り直すときは DB を作り直して seed からやり直す
