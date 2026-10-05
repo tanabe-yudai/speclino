@@ -7,11 +7,28 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import Field, model_validator
+import regex
+from pydantic import AfterValidator, Field, model_validator
 
 from speclino.domain.common import IRModel
+
+MAX_PATTERN_LENGTH = 256
+
+
+def _validate_pattern(value: str) -> str:
+    """利用者入力の正規表現: 長さ上限とコンパイル可否（ReDoS 対策の一部）。"""
+    if len(value) > MAX_PATTERN_LENGTH:
+        raise ValueError(f"正規表現は {MAX_PATTERN_LENGTH} 文字以下にしてください")
+    try:
+        regex.compile(value)
+    except regex.error as e:
+        raise ValueError(f"正規表現として不正です: {e}") from e
+    return value
+
+
+RegexPattern = Annotated[str, AfterValidator(_validate_pattern)]
 
 
 class ApiErrorFormatParams(IRModel):
@@ -48,10 +65,10 @@ class ApiConventionsParams(IRModel):
 class NamingIdentifiersParams(IRModel):
     """`naming.identifiers`。各正規表現は fullmatch で評価する。"""
 
-    function: str | None = None
-    class_: str | None = Field(default=None, alias="class")
-    constant: str | None = None
-    module: str | None = None
+    function: RegexPattern | None = None
+    class_: RegexPattern | None = Field(default=None, alias="class")
+    constant: RegexPattern | None = None
+    module: RegexPattern | None = None
     forbidden_words: list[str] = Field(default_factory=list)
 
 
@@ -60,7 +77,7 @@ class ErrorMessageFormatParams(IRModel):
 
     call_names: list[str] = Field(default_factory=lambda: ["api_error", "HTTPException"])
     message_arg: str = "message"
-    pattern: str | None = None
+    pattern: RegexPattern | None = None
     require_code: bool = False
     forbid_trailing_period: bool = False
     language: Literal["ja", "en"] | None = None
@@ -73,4 +90,10 @@ class LintPresetParams(IRModel):
     config_path: str
     required_rules: list[str] = Field(default_factory=list)
     ci_glob: str | None = None
-    ci_command_pattern: str | None = None
+    ci_command_pattern: RegexPattern | None = None
+
+    @model_validator(mode="after")
+    def _ci_pattern_needs_glob(self) -> LintPresetParams:
+        if self.ci_command_pattern is not None and self.ci_glob is None:
+            raise ValueError("ci_command_pattern には ci_glob が必要です")
+        return self

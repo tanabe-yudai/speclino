@@ -156,3 +156,14 @@ def test_invalid_params_raise_value_error(
         _run(tmp_path, make_rule, write_files, None, {"pattern": "(["})
     with pytest.raises(ValueError):
         _run(tmp_path, make_rule, write_files, None, {"language": "fr"})
+
+
+def test_catastrophic_pattern_times_out_to_unknown(
+    tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
+) -> None:
+    src = f"api_error(1, code='a', message='{'a' * 40}!')\n"
+    findings = _run(tmp_path, make_rule, write_files, src, {"pattern": "(a|aa)+$"})
+    assert findings[0].verdict == "UNKNOWN"
+    assert "タイムアウト" in (findings[0].actual or "")
+    with pytest.raises(ValueError):
+        _run(tmp_path, make_rule, write_files, src, {"pattern": "a" * 300})

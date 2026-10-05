@@ -6,8 +6,6 @@
 
 from __future__ import annotations
 
-import re
-
 from speclino.domain.common import IRModel, SourceRef
 from speclino.domain.finding import Category, Finding, Severity, Verdict
 from speclino.domain.policy import PolicyRule
@@ -22,13 +20,6 @@ def parse_params[P: IRModel](model: type[P], rule: PolicyRule) -> P:
         raise ValueError(
             f"{rule.id}: 検証器 {rule.verifier_ref.id} のパラメーターが不正です: {e}"
         ) from e
-
-
-def compile_regex(rule: PolicyRule, name: str, pattern: str) -> re.Pattern[str]:
-    try:
-        return re.compile(pattern)
-    except re.error as e:
-        raise ValueError(f"{rule.id}: パラメーター {name} が正規表現として不正です: {e}") from e
 
 
 def severity_of(rule: PolicyRule) -> Severity:

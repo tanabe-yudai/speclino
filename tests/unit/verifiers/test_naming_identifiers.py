@@ -123,3 +123,23 @@ def test_invalid_params_raise_value_error(
         _run(tmp_path, make_rule, write_files, {}, {"function": "[a-"})
     with pytest.raises(ValueError):
         _run(tmp_path, make_rule, write_files, {}, {"funtion": "x"})
+
+
+def test_catastrophic_pattern_times_out_to_unknown(
+    tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
+) -> None:
+    src = f"def {'a' * 40}_(): ...\n"
+    findings = _run(tmp_path, make_rule, write_files, {"src/m.py": src}, {"function": "(a|aa)+$"})
+    assert findings[0].verdict == "UNKNOWN"
+    assert findings[0].category == "unsupported_analysis"
+    assert "タイムアウト" in findings[0].message
+
+
+def test_overlong_identifier_is_unknown_and_long_pattern_rejected(
+    tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
+) -> None:
+    src = f"def {'a' * 1001}(): ...\n"
+    findings = _run(tmp_path, make_rule, write_files, {"src/m.py": src}, {"function": "a+"})
+    assert findings[0].verdict == "UNKNOWN"
+    with pytest.raises(ValueError):
+        _run(tmp_path, make_rule, write_files, {}, {"function": "a" * 257})

@@ -9,7 +9,8 @@
 
 params:
 
-- ``pattern``: メッセージが fullmatch すべき正規表現。
+- ``pattern``: メッセージが fullmatch すべき正規表現（タイムアウト付き。タイムアウトや 1000 文字
+  超の文字列はその呼び出しを判定不能にする）。
 - ``require_code``: 呼び出しに ``code=`` キーワードがあること（``**kwargs`` があれば判定不能）。
 - ``forbid_trailing_period``: 文末が ``.`` / ``。`` でないこと。
 - ``language``: ``ja`` は日本語（ひらがな・カタカナ・漢字）を 1 文字以上含む、``en`` は ASCII のみ。
@@ -30,15 +31,17 @@ from __future__ import annotations
 import ast
 import re
 
+import regex
+
 from speclino.domain.finding import Finding
 from speclino.domain.policy import PolicyRule
 from speclino.domain.policy_params import ErrorMessageFormatParams
 from speclino.verifiers._findings import (
-    compile_regex,
     make_finding,
     parse_params,
     unknown_finding,
 )
+from speclino.verifiers._safe_regex import RegexTimeout, compile_param, fullmatch
 from speclino.verifiers.base import Snapshot
 
 VERIFIER_ID = "error_message.format"
@@ -62,7 +65,7 @@ class ErrorMessageFormatVerifier:
 
     def run(self, rule: PolicyRule, snapshot: Snapshot) -> list[Finding]:
         params = parse_params(ErrorMessageFormatParams, rule)
-        pattern = compile_regex(rule, "pattern", params.pattern) if params.pattern else None
+        pattern = compile_param(params.pattern) if params.pattern else None
         paths = sorted({p for g in rule.applies_to.paths for p in snapshot.glob(g)})
         return [
             self._check_file(rule, snapshot, p, params, pattern) for p in paths if p.endswith(".py")
@@ -74,7 +77,7 @@ class ErrorMessageFormatVerifier:
         snapshot: Snapshot,
         path: str,
         params: ErrorMessageFormatParams,
-        pattern: re.Pattern[str] | None,
+        pattern: regex.Pattern[str] | None,
     ) -> Finding:
         try:
             tree = ast.parse(snapshot.read_text(path) or "", filename=path)
@@ -137,7 +140,7 @@ class ErrorMessageFormatVerifier:
         call: ast.Call,
         label: str,
         params: ErrorMessageFormatParams,
-        pattern: re.Pattern[str] | None,
+        pattern: regex.Pattern[str] | None,
         unknowns: list[str],
     ) -> list[str]:
         bad: list[str] = []
@@ -155,7 +158,10 @@ class ErrorMessageFormatVerifier:
 
         if isinstance(message, ast.Constant) and isinstance(message.value, str):
             text = message.value
-            bad.extend(self._check_text(label, text, params, pattern))
+            try:
+                bad.extend(self._check_text(label, text, params, pattern))
+            except RegexTimeout as e:
+                unknowns.append(f"{label}: {e}")
         elif isinstance(message, ast.JoinedStr):
             self._check_joined(message, label, params, bad, unknowns)
         else:
@@ -167,10 +173,10 @@ class ErrorMessageFormatVerifier:
         label: str,
         text: str,
         params: ErrorMessageFormatParams,
-        pattern: re.Pattern[str] | None,
+        pattern: regex.Pattern[str] | None,
     ) -> list[str]:
         bad: list[str] = []
-        if pattern is not None and not pattern.fullmatch(text):
+        if pattern is not None and not fullmatch(pattern, text):
             bad.append(f"{label}: '{text}' が {pattern.pattern} に合いません")
         if params.forbid_trailing_period and text.endswith(_TRAILING_PERIODS):
             bad.append(f"{label}: '{text}' の文末に句点・ピリオドがあります")

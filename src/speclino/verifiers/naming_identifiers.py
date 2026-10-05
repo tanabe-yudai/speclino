@@ -25,15 +25,17 @@ from __future__ import annotations
 import ast
 import re
 
+import regex
+
 from speclino.domain.finding import Finding
 from speclino.domain.policy import PolicyRule
 from speclino.domain.policy_params import NamingIdentifiersParams
 from speclino.verifiers._findings import (
-    compile_regex,
     make_finding,
     parse_params,
     unknown_finding,
 )
+from speclino.verifiers._safe_regex import RegexTimeout, compile_param, fullmatch
 from speclino.verifiers.base import Snapshot
 
 VERIFIER_ID = "naming.identifiers"
@@ -58,7 +60,7 @@ class NamingIdentifiersVerifier:
     def run(self, rule: PolicyRule, snapshot: Snapshot) -> list[Finding]:
         params = parse_params(NamingIdentifiersParams, rule)
         patterns = {
-            kind: compile_regex(rule, kind, pattern)
+            kind: compile_param(pattern)
             for kind, pattern in (
                 ("function", params.function),
                 ("class", params.class_),
@@ -80,7 +82,7 @@ class NamingIdentifiersVerifier:
         rule: PolicyRule,
         snapshot: Snapshot,
         path: str,
-        patterns: dict[str, re.Pattern[str]],
+        patterns: dict[str, regex.Pattern[str]],
         forbidden: set[str],
     ) -> Finding:
         try:
@@ -91,6 +93,7 @@ class NamingIdentifiersVerifier:
             )
 
         details: list[str] = []
+        timeouts: list[str] = []
         lines: list[int] = []
 
         def check(kind: str, name: str, line: int | None) -> None:
@@ -98,8 +101,11 @@ class NamingIdentifiersVerifier:
                 return
             problems: list[str] = []
             pattern = patterns.get(kind)
-            if pattern is not None and not pattern.fullmatch(name.lstrip("_")):
-                problems.append(f"{kind} '{name}' が {pattern.pattern} に合いません")
+            try:
+                if pattern is not None and not fullmatch(pattern, name.lstrip("_")):
+                    problems.append(f"{kind} '{name}' が {pattern.pattern} に合いません")
+            except RegexTimeout as e:
+                timeouts.append(f"{kind} '{name[:50]}': {e}")
             hit = sorted(_words(name) & forbidden)
             if hit:
                 problems.append(f"{kind} '{name}' に禁止語 {', '.join(hit)} を含みます")
@@ -140,6 +146,14 @@ class NamingIdentifiersVerifier:
                 expected=expected,
                 actual="\n".join(details),
                 lines=sorted(set(lines)),
+            )
+        if timeouts:
+            return unknown_finding(
+                rule,
+                snapshot,
+                path,
+                f"{path}: 正規表現の照合がタイムアウトした識別子があります",
+                "\n".join(timeouts),
             )
         return make_finding(
             rule,
