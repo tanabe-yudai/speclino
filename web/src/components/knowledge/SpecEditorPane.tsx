@@ -4,6 +4,7 @@ import { DiagnosticsList } from '@/components/spec-editor/DiagnosticsList'
 import { MarkdownInput } from '@/components/spec-editor/MarkdownInput'
 import { MermaidPreview } from '@/components/spec-editor/MermaidPreview'
 import { RequirementTrace } from '@/components/spec-editor/RequirementTrace'
+import { SuggestionPanel } from '@/components/spec-editor/SuggestionPanel'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { focusLine } from '@/lib/textarea'
@@ -14,7 +15,7 @@ import type { PaneValidity, SpecPaneProps } from '@/types/specEditor'
 const pretty = (v: unknown) => (v === null || (Array.isArray(v) && v.length === 0) ? '' : JSON.stringify(v, null, 2))
 
 /** 仕様エディタ（設計 9 章）: 左に本文、右に図・正規形・診断・要求の追跡。 */
-export function SpecEditorPane({ content, onChange, preview, previewError, previewPending, onInvalidChange, resetKey }: SpecPaneProps & PaneValidity) {
+export function SpecEditorPane({ slug, content, onChange, preview, previewError, previewPending, saving, onInvalidChange, resetKey }: SpecPaneProps & PaneValidity) {
   const textarea = useRef<HTMLTextAreaElement>(null)
   const [tab, setTab] = useState('diagnostics')
   const [domainText, setDomainText] = useState(() => pretty(content.domain))
@@ -33,6 +34,16 @@ export function SpecEditorPane({ content, onChange, preview, previewError, previ
   const errors = countErrors(diagnostics)
   const compiled = preview?.parse_result.compiled ?? null
   const trace = requirementTrace(compiled)
+
+  const suggestBlocked = saving
+    ? '保存中は提案を求められません。'
+    : previewPending
+      ? '診断を更新しています。終わってから提案を求めてください。'
+      : domain.error || legacy.error
+        ? '旧形式の入口の JSON が読めないため、提案を求められません。'
+        : !content.markdown.trim()
+          ? '本文を入力すると提案を求められます。'
+          : null
 
   function jump(line: number, column: number) {
     if (textarea.current) focusLine(textarea.current, line, column)
@@ -121,6 +132,7 @@ export function SpecEditorPane({ content, onChange, preview, previewError, previ
               <TabsTrigger value="diagrams">図</TabsTrigger>
               <TabsTrigger value="canonical">正規形</TabsTrigger>
               <TabsTrigger value="trace">要求の追跡</TabsTrigger>
+              <TabsTrigger value="suggest">AI の提案</TabsTrigger>
             </TabsList>
           </div>
           <TabsContent value="diagnostics" className="mt-3">
@@ -134,6 +146,16 @@ export function SpecEditorPane({ content, onChange, preview, previewError, previ
           </TabsContent>
           <TabsContent value="trace" className="mt-3">
             <RequirementTrace trace={trace} hasCompiled={compiled !== null} />
+          </TabsContent>
+          <TabsContent value="suggest" className="mt-3">
+            <SuggestionPanel
+              slug={slug}
+              markdown={content.markdown}
+              domain={content.domain}
+              legacyIr={content.legacy_ir}
+              blockedReason={suggestBlocked}
+              onApply={(markdown) => onChange({ ...content, markdown })}
+            />
           </TabsContent>
         </Tabs>
       </div>

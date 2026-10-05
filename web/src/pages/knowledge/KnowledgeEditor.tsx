@@ -220,6 +220,7 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
             preview={shownPreview}
             previewError={previewError}
             previewPending={previewPending}
+            saving={saving}
             onInvalidChange={setPaneInvalid}
             resetKey={resetKey}
           />
