@@ -11,7 +11,11 @@ from speclino.db.repositories.teams import TeamRepository
 from speclino.domain.policy_view import PoliciesView, RuleResult
 from speclino.domain.project_overview import PolicyView
 from speclino.ports.blob_store import BlobStore
-from speclino.services.policy_governance import KNOWN_VERIFIERS, draft_hash
+from speclino.services.policy_governance import (
+    KNOWN_VERIFIERS,
+    draft_hash,
+    llm_scope_warnings,
+)
 from speclino.services.project_overview import latest_assembled, worst_verdict
 from speclino.services.workspaces import require_member
 
@@ -64,4 +68,5 @@ async def load_policies(
         can_approve=uid in await TeamRepository(session).list_approvers(slug),
         verifiers=dict(KNOWN_VERIFIERS),
         results=aggregate_results(per_project),
+        draft_warnings=llm_scope_warnings(draft.package) if draft is not None else [],
     )

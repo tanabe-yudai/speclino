@@ -43,3 +43,5 @@ class PoliciesView(IRModel):
     can_approve: bool
     verifiers: dict[str, str]
     results: dict[str, RuleResult]
+    # 下書きの LLM 支援の規約の送り先の範囲の警告（#114。承認は拒否しない）
+    draft_warnings: list[str] = []

@@ -9,7 +9,14 @@ import time
 
 import pytest
 
-from speclino.services.secret_scan import MASK, find_secrets, mask_secrets, secret_kinds
+from speclino.services.secret_scan import (
+    MASK,
+    NAME_KIND,
+    VALUE_KIND,
+    find_secrets,
+    mask_secrets,
+    secret_kinds,
+)
 
 GITHUB = "gh" + "p_" + "A1b2C3d4E5" * 4
 AWS = "AK" + "IA" + "ABCDEFGHIJ234567"
@@ -55,14 +62,87 @@ def test_example_domains_and_plain_code_are_not_flagged() -> None:
     assert secret_kinds(code, python=True) == []
 
 
-def test_high_entropy_string_literal_is_flagged_but_identifiers_are_not() -> None:
-    secret = "q8Zr2LmX9vB4nT7kP1sD6fH3jW5yC0aE"  # 32 文字・英数字混在
-    assert "高いエントロピーの文字列" in secret_kinds(f'API_KEY = "{secret}"', python=True)
-    # 長い識別子（文字列リテラルではない）は対象外
+def test_value_like_string_literal_is_flagged_but_identifiers_are_not() -> None:
+    """値による検出: 20 文字以上・空白なし・英字と数字が混在する Base64 / 16 進 / URL セーフ。"""
+    for value in (
+        "q8Zr2LmX9vB4nT7kP1sD",  # 20 文字の英数字
+        "3f9a1c0e7b2d4a6f8e1c3b5d",  # 16 進
+        "dGhpcyBpcyBhIHNlY3JldDEy==",  # Base64
+        "a1-b2_c3-d4_e5-f6_g7-h8",  # URL セーフ
+    ):
+        assert VALUE_KIND in secret_kinds(f'X = "{value}"', python=True), value
+        assert VALUE_KIND in secret_kinds(f"send({value!r})", python=True), value
+    # 長い識別子（文字列リテラルではない）・空白を含む文・繰り返しの多い文字列・短い値は対象外
     ident = "def handle_order_cancellation_request_with_retry_policy_v2(): pass"
     assert secret_kinds(ident, python=True) == []
-    # 繰り返しの多い（エントロピーの低い）文字列も対象外
+    assert (
+        secret_kinds('m = "注文 12345 が見つからない。もう一度お試しください"', python=True) == []
+    )
     assert secret_kinds('PAD = "' + "0a" * 32 + '"', python=True) == []
+    assert secret_kinds('code = "ORD-2024"', python=True) == []
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        'password = "hunter2"',
+        'self.api_key = "abc"',
+        'cfg["client_secret"] = "x"',
+        'connect(host="db", passwd="x")',
+        'headers = {"Authorization": "Bearer abc"}',
+        'def login(user, pwd="admin"): pass',
+        'def f(*, session_cookie="c"): pass',
+        'if token == "letmein": pass',
+        'SIGNING_KEY: str = "k"',
+        'AccessKey = b"raw"',
+        'token = os.getenv("API_TOKEN", "fallback")',
+    ],
+)
+def test_sensitive_names_bound_to_literals_are_flagged(code: str) -> None:
+    """名前による検出: 値の形に関係なく、秘密らしい名前に結びつくリテラルは送らない。"""
+    assert NAME_KIND in secret_kinds(code, python=True)
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        'token = os.environ["API_TOKEN"]',
+        'password = os.getenv("DB_PASSWORD")',
+        'api_key = os.environ.get("OPENAI_API_KEY")',
+        "client = Client(api_key=settings.api_key)",
+        "session = make_session(engine)",
+        'token = ""',
+    ],
+)
+def test_values_read_from_env_or_settings_are_sent(code: str) -> None:
+    """環境変数・設定から読む式（リテラルを含まない）は送ってよい。変数名のリテラルも同じ。"""
+    assert secret_kinds(code, python=True) == []
+
+
+def test_env_default_literal_is_checked_by_value() -> None:
+    value = "q8Zr2LmX9vB4nT7kP1sD6fH3"
+    assert VALUE_KIND in secret_kinds(f'url = os.getenv("DB_URL", "{value}")', python=True)
+    assert secret_kinds('region = os.getenv("REGION", "asia-northeast1")', python=True) == []
+
+
+def test_ordinary_code_is_sent() -> None:
+    code = (
+        "@router.post('/orders/{order_id}/cancel')\n"
+        "async def cancel_order(order_id: str, reason: str | None = None) -> dict[str, str]:\n"
+        '    """注文を取り消す。"""\n'
+        "    order = await repo.get(order_id)\n"
+        "    if order is None:\n"
+        "        raise OrderError(f'注文 {order_id} が無い。番号を確かめてください。')\n"
+        "    await inventory.restore(order.items)\n"
+        "    return {'status': 'cancelled', 'order_id': order_id}\n"
+    )
+    assert secret_kinds(code, python=True) == []
+
+
+def test_text_that_is_not_python_uses_the_textual_name_check() -> None:
+    assert NAME_KIND in secret_kinds("host=db user=app password=hunter2")
+    assert NAME_KIND in secret_kinds('"api_key": "abc"')
+    assert secret_kinds("注文が無い。番号を確かめてください。") == []
 
 
 def test_mask_replaces_only_the_detected_ranges() -> None:
@@ -71,6 +151,9 @@ def test_mask_replaces_only_the_detected_ranges() -> None:
     assert GITHUB not in masked and MASK in masked
     assert masked.startswith('raise Error("token ') and masked.endswith(' は無効")')
     assert mask_secrets("注文が無い") == "注文が無い"
+    # 名前による検出も引用に効く（名前は残し、値だけを伏せる）
+    assert mask_secrets('password = "hunter2"') == f'password = "{MASK}"'
+    assert "hunter2" not in mask_secrets("db_password=hunter2 host=db")
 
 
 @pytest.mark.parametrize(

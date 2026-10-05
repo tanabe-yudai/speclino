@@ -470,10 +470,21 @@ PR コメントの承認者は GitHub のユーザー ID で照合する（ロ�
 - 送り先は worker が呼ぶ Gemini（本番は Vertex AI。`GOOGLE_CLOUD_PROJECT` のプロジェクト、
   `SPECLINO_LLM_POLICIES_MODEL`、未指定なら `SPECLINO_AGENT_MODEL`）。費用は `SPECLINO_DAILY_COST_LIMIT_USD`
   の枠を共有する
-- **秘密情報・個人情報らしい値を含む単位は送らない**: 秘密鍵のヘッダー、AWS / GCP / GitHub / Slack /
-  `sk-` 形式のトークン、JWT、認証情報つきの URL、メールアドレス（`example.com` などの例示用ドメインを除く）、
-  文字列リテラルの中の 32 文字以上の高エントロピーな文字列。その単位は UNKNOWN（「秘密情報らしい値を含むため
-  LLM に送らない」）になり、必須の規約ならゲートを止める。モデルが返した引用も同じ検出器で伏せてから保存・表示する
+- **秘密情報・個人情報らしい値を含む単位は送らない**。検出は 3 段:
+  - 形: 秘密鍵のヘッダー、AWS / GCP / GitHub / Slack / `sk-` 形式のトークン、JWT、認証情報つきの URL、
+    メールアドレス（`example.com` などの例示用ドメインを除く）
+  - 名前: 代入先・キーワード引数・引数の既定値・dict のキー・属性名・比較の相手が秘密らしい名前
+    （password / passwd / pwd / secret / token / api_key / access_key / private_key / credential / auth /
+    cookie / session / signing_key / client_secret など。大文字小文字・区切りを無視した部分一致）なら、
+    結びつくリテラルは形に関係なく秘密とみなす。環境変数・設定から読む式は送ってよい
+  - 値: 文字列リテラルの中の、長さ 20 以上・空白なし・英字と数字が混在する Base64 / 16 進 / URL セーフの
+    連なり（`os.environ` / `getenv` の変数名は除き、既定値は対象）
+
+  その単位は UNKNOWN（「秘密情報らしい値を含むため LLM に送らない」と検出の種類）になり、必須の規約なら
+  ゲートを止める。モデルが返した引用も同じ検出器で伏せてから保存・表示する
+- **検出は完全ではない**。LLM 支援の規約は、送ってよいと確かめたパスだけを `params.paths`（無ければ
+  `applies_to.paths`）に指定する。`params.paths` が無い・リポジトリ全体に当たる（`**/*` など）規約は、
+  承認の画面と監査に警告が出る（拒否はしない）
 - 評価の結果（区分・票・伏せた引用）は `llm_assessments` にワークスペースごとに残し、同じ内容の単位は
   呼び直さない
 - 全体で止めるには `SPECLINO_LLM_POLICIES_ENABLED=false`（LLM 支援のルールはすべて UNKNOWN になる）

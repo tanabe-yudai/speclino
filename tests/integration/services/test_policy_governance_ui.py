@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from pathlib import Path
 
 import pytest
 from sqlalchemy import text
@@ -344,3 +345,56 @@ async def test_verifier_version_must_match(engine: AsyncEngine) -> None:
                 expected_revision=None,
                 expected_hash=None,
             )
+
+
+async def test_broad_llm_rule_is_approved_with_a_warning(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """#114: LLM に送るパスが広すぎる規約も承認はできるが、画面の下書きと監査に警告を残す。"""
+    from speclino.adapters.storage.fs import FileSystemBlobStore
+    from speclino.services.team_policies import load_policies
+
+    slug = await _workspace(engine)
+    f = async_sessionmaker(engine, expire_on_commit=False)
+    rule = PolicyRule.model_validate(
+        {
+            "id": "LLM-001",
+            "version": "1",
+            "level": "advisory",
+            "title": "t",
+            "text": "t",
+            "applies_to": {"paths": ["**/*.py"]},
+            "verifier": {
+                "id": "llm.checklist",
+                "version": gov.KNOWN_VERIFIERS["llm.checklist"],
+                "params": {"items": [{"id": "i", "question": "q"}], "unit_kind": "function"},
+            },
+            "on_missing_input": "unknown",
+            "tier": "llm_assisted",
+        }
+    )
+    async with f() as s, s.begin():
+        draft = await gov.save_draft(
+            s,
+            team=slug,
+            package=_pkg(rule),
+            author="owner1",
+            note="",
+            expected_revision=None,
+            expected_hash=None,
+        )
+    async with f() as s:
+        view = await load_policies(s, FileSystemBlobStore(tmp_path), slug, "owner1")
+    assert len(view.draft_warnings) == 2
+    async with f() as s, s.begin():
+        await gov.approve_draft(
+            s,
+            team=slug,
+            expected_revision=draft.revision,
+            expected_hash=gov.draft_hash(draft),
+            approver="owner1",
+            audit_factory=f,
+        )
+    async with f() as s:
+        [approved] = await AuditRepository(s).list_for_team(slug, ("policy.approve",), 10)
+    assert approved.detail["warnings"] == view.draft_warnings

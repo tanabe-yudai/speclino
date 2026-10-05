@@ -112,6 +112,13 @@ gcloud run jobs logs read speclino-admin --project=$P --region=$REGION --limit=5
    （PR のレビューで中身を確かめる）。
 6. **検査し直す**: 開いている PR は main を取り込んで push するか、PR に `/speclino rerun` とコメントする。
 
+### LLM 支援の規約を使うプロジェクト
+
+LLM 支援の規約（`tier: llm_assisted`）は、`params.paths` に一致する Python の単位を外部のモデル
+（Vertex AI の Gemini）に送る。秘密情報・個人情報らしい値を含む単位は送らないが、**検出は完全ではない**。
+規約を承認する前に、`params.paths` が送ってよいディレクトリだけを指していることを確かめる（無指定や
+`**/*` のような広いパターンは、承認の画面に警告が出る）。止めるときは `SPECLINO_LLM_POLICIES_ENABLED=false`。
+
 ## 7. 確かめる
 
 ```sh

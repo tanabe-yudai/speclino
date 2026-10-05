@@ -111,6 +111,13 @@ export function DraftBanner({ slug, view, onChanged }: { slug: string; view: Pol
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {(view.draft_warnings ?? []).length > 0 && (
+        <ul role="alert" className="list-disc space-y-1 pl-5 text-sm text-bad">
+          {(view.draft_warnings ?? []).map((w) => (
+            <li key={w}>{w}</li>
+          ))}
+        </ul>
+      )}
     </Panel>
   )
 }

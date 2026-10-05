@@ -24,6 +24,40 @@ from speclino.verifiers.catalog import KNOWN_VERIFIERS
 SEED_ACTOR = "seed"
 
 
+# LLM 支援の規約で「広すぎる」とみなすパターン（リポジトリ全体に当たる）
+_BROAD_PATTERNS = frozenset({"*", "**", "**/*", "**/*.py", "*.py", "./**", "./**/*"})
+
+
+def llm_scope_warnings(package: PolicyPackage) -> list[str]:
+    """LLM 支援の規約（`llm.checklist`）の送り先の範囲の警告（#114）。承認は拒否しない。
+
+    秘密情報の検出は完全ではないので、LLM に送るのは送ってよいと確かめたパスだけにする。
+    `params.paths` が無い（`applies_to.paths` をそのまま送る）・リポジトリ全体に当たるパターンを
+    含む場合に警告する。
+    """
+    from speclino.domain.policy import LLM_CHECKLIST_VERIFIER_ID
+
+    warnings: list[str] = []
+    for rule in package.rules:
+        if rule.verifier is None or rule.verifier.id != LLM_CHECKLIST_VERIFIER_ID:
+            continue
+        raw = rule.verifier.params.get("paths") if isinstance(rule.verifier.params, dict) else None
+        paths = [p for p in raw if isinstance(p, str)] if isinstance(raw, list) else []
+        if not paths:
+            warnings.append(
+                f"{rule.id}: LLM に送るパス（params.paths）が無い。applies_to.paths に一致する"
+                "ファイルをすべて送る。送ってよいパスだけを指定する"
+            )
+        effective = paths or list(rule.applies_to.paths)
+        broad = sorted({p for p in effective if p.strip() in _BROAD_PATTERNS})
+        if broad:
+            warnings.append(
+                f"{rule.id}: LLM に送るパスが広すぎる（{', '.join(broad)}）。秘密情報の検出は"
+                "完全ではないので、送ってよいディレクトリに絞る"
+            )
+    return warnings
+
+
 class InvalidPackage(ValueError):
     """下書きにできない規約（重複したルール ID・未登録の検証器）。"""
 
@@ -243,7 +277,14 @@ async def _approve(
         action="policy.approve",
         target=f"{team}@{revision}",
         decision="approved",
-        detail={"author": approved.author, "self_approved": self_approved},
+        detail={
+            "author": approved.author,
+            "self_approved": self_approved,
+            # LLM 支援の規約の送り先の範囲の警告（#114。拒否はしない）
+            **(
+                {"warnings": warnings} if (warnings := llm_scope_warnings(approved.package)) else {}
+            ),
+        },
     )
     return approved
 
@@ -305,6 +346,7 @@ __all__ = [
     "approve_draft",
     "create_draft",
     "draft_hash",
+    "llm_scope_warnings",
     "save_draft",
     "seed_from_package",
 ]

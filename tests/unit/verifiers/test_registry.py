@@ -182,3 +182,38 @@ def test_every_executable_verifier_passes_approval_validation() -> None:
     )
     with pytest.raises(gov.InvalidPackage):
         gov._validate(_package(unknown))
+
+
+def test_llm_scope_warnings_for_missing_or_broad_paths() -> None:
+    """#114: LLM 支援の規約の送り先が無指定・広すぎるときは承認時に警告する（拒否はしない）。"""
+    from speclino.domain.policy import PolicyApplicability, PolicyVerifierRef
+    from speclino.services import policy_governance as gov
+
+    def llm_rule(rule_id: str, applies: list[str], paths: list[str] | None) -> PolicyRule:
+        params: dict[str, object] = {
+            "items": [{"id": "i", "question": "q"}],
+            "unit_kind": "function",
+        }
+        if paths is not None:
+            params["paths"] = paths
+        return PolicyRule(
+            id=rule_id,
+            version="1",
+            level="mandatory",
+            title="t",
+            text="t",
+            applies_to=PolicyApplicability(paths=applies),
+            verifier=PolicyVerifierRef(id="llm.checklist", version="1", params=params),
+            on_missing_input="unknown",
+            tier="llm_assisted",
+        )
+
+    narrow = llm_rule("OK", ["app/api/*.py"], ["app/api/*.py"])
+    assert gov.llm_scope_warnings(_package(narrow)) == []
+    missing = gov.llm_scope_warnings(_package(llm_rule("NOPATHS", ["app/api/*.py"], None)))
+    assert len(missing) == 1 and "params.paths" in missing[0]
+    broad = gov.llm_scope_warnings(_package(llm_rule("BROAD", ["src/*.py"], ["**/*"])))
+    assert len(broad) == 1 and "広すぎる" in broad[0] and "**/*" in broad[0]
+    both = gov.llm_scope_warnings(_package(llm_rule("BOTH", ["**/*.py"], None)))
+    assert len(both) == 2
+    gov._validate(_package(llm_rule("BOTH", ["**/*.py"], None)))  # 拒否はしない
