@@ -124,6 +124,7 @@ class _StateChecker:
             )
         expected = f"{self.sm.attribute} の代入が許された遷移（{self.allowed_text}）"
         prev = self.before
+        undecided: ObligationResult | None = None
         for i, (seq, value, _) in enumerate(writes):
             assert value is not None
             new = self.ctx.encode(value)
@@ -150,11 +151,12 @@ class _StateChecker:
                     actual,
                     cex,
                 )
-            if i == 0:
-                unknown = self._initial_write(path, base, new)
-                if unknown is not None:
-                    return unknown
+            if i == 0 and undecided is None:
+                # 判別できない初期状態への代入は理由として残し、後の代入（前の値は確定）も判定する
+                undecided = self._initial_write(path, base, new)
             prev = new
+        if undecided is not None:
+            return undecided
         return ObligationResult("VERIFIED_IN_SCOPE", "conformant", "成立", expected)
 
     def _initial_write(self, path: Path, base: list[Any], new: Any) -> ObligationResult | None:

@@ -468,3 +468,12 @@ def test_many_guarded_opts_hit_config_limit_as_unknown() -> None:
     f = _one(ob, _code(_path("p1", TRUE, [f"X.op{i}" for i in range(14)])))
     assert f.verdict == "UNKNOWN"
     assert "上限" in f.message
+
+
+def test_closed_activity_out_of_range_path_without_calls_is_violated() -> None:
+    # プローブ G2: 図の範囲外で呼出しが無い経路も、closed なら違反
+    ob = _express_only_activity(True)
+    f = _one(ob, _code(OUTSIDE[0], _path("p2", NORMAL, [])))
+    assert f.verdict == "VIOLATED"
+    assert f.counterexample is not None and f.counterexample.path_id == "p2"
+    assert "範囲外" in f.message

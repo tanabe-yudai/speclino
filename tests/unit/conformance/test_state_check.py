@@ -207,3 +207,11 @@ def test_cause_touching_transition_guard_variable_is_unknown() -> None:
     p = p.model_copy(update={"unknown_causes": [cause]})
     rest = _rest("p2", not_(and_(is_("PENDING"), eq(ref("before.order.paid"), TRUE))))
     assert _one(_code(p, rest), _sm(guarded=True)).verdict == "UNKNOWN"
+
+
+# ---------------------------------------------------------------- レビュー fix round 2
+def test_illegal_write_after_undecided_initial_write_is_violated() -> None:
+    # プローブ B3: PENDING（生成か遷移か判別できない）の後の PENDING → SHIPPED は確定した違反
+    f = _one(_code(_path("p1", TRUE, ["PENDING", "SHIPPED"])))
+    assert (f.verdict, f.category) == ("VIOLATED", "state_mismatch")
+    assert "PENDING → SHIPPED" in f.message
