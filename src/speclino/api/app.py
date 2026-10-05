@@ -28,6 +28,7 @@ from speclino.api.routes import (
     projects,
     repositories,
     review_runs,
+    spec_preview,
     sync,
     tasks,
     webhooks,
@@ -104,6 +105,7 @@ def create_app(settings: Settings, state: AppState | None = None) -> FastAPI:
         app.include_router(projects.router)
         app.include_router(policies.router)
         app.include_router(knowledge.router)
+        app.include_router(spec_preview.router)
         app.include_router(sync.router)
         app.include_router(sync.bundle_router)
         app.include_router(project_settings.router)
