@@ -6,7 +6,8 @@ Create Date: 2026-10-05 18:00:00.000000
 
 追加だけ（S70、design/2026-10-05-team-knowledge-registry.md 6.2–6.3）。既存の表は変えない。
 `llm_assessments` は LLM 支援の評価の記録（キーが同じなら LLM を呼ばない・replay が読む）、
-`attestations` は人の確定（ゲートの処置。verdict は書き換えない）。評価の記録はワークスペース
+`attestations` は人の確定（ゲートの処置。verdict は書き換えない）。確定はプロジェクトに属する
+（#114: 同じ指紋でも別のプロジェクトの run には効かせない）。評価の記録はワークスペース
 ごとに区切る。`review_runs.pr_author_id`（PR の作成者の GitHub ユーザー ID。自己確定の照合）は
 NULL 可の列の追加だけ。
 """
@@ -41,6 +42,12 @@ def upgrade() -> None:
         "attestations",
         sa.Column("id", sa.UUID(), primary_key=True),
         sa.Column("workspace", sa.String(), sa.ForeignKey("teams.team"), nullable=False),
+        sa.Column(
+            "project_id",
+            sa.UUID(),
+            sa.ForeignKey("projects.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("fingerprint", sa.String(), nullable=False),
         sa.Column("content_hash", sa.String(), nullable=False),
         sa.Column("disposition", sa.String(), nullable=False),
@@ -55,18 +62,21 @@ def upgrade() -> None:
         ),
         sa.UniqueConstraint(
             "workspace",
+            "project_id",
             "fingerprint",
             "content_hash",
-            name="uq_attestations_workspace_fingerprint_hash",
+            name="uq_attestations_workspace_project_fingerprint_hash",
         ),
     )
     op.create_index("ix_attestations_workspace", "attestations", ["workspace"])
+    op.create_index("ix_attestations_project_id", "attestations", ["project_id"])
     op.add_column("review_runs", sa.Column("pr_author_id", sa.BigInteger(), nullable=True))
 
 
 def downgrade() -> None:
     """Downgrade schema."""
     op.drop_column("review_runs", "pr_author_id")
+    op.drop_index("ix_attestations_project_id", table_name="attestations")
     op.drop_index("ix_attestations_workspace", table_name="attestations")
     op.drop_table("attestations")
     op.drop_table("llm_assessments")

@@ -3,7 +3,9 @@
 確定できるのは owner / approver（member は 403、拒否は監査に残る）。対応表・免除・規約の変更
 （KNOWLEDGE-BINDINGS-001）の確定は、PR の作成者と照合できる PR コメントだけで受け付け、ここでは
 403（`bindings_attest_requires_pr_comment`、裁定 35）。メンバーでない・別の
-ワークスペースは 404（存在を漏らさない）。`run_id` を渡すと、その PR の最新の head で再検査の
+ワークスペースは 404（存在を漏らさない）。`run_id` は必須で、その run がこのワークスペースの
+プロジェクトのものであり、(指紋, hash) がその run の確定できる指摘であるときだけ受け付ける
+（それ以外は 404。#114）。確定はその run のプロジェクトに属し、その PR の最新の head で再検査の
 run を作る（PR コメントの承認と同じく、確定は次の run のゲートに効く）。
 """
 
@@ -34,8 +36,8 @@ class AttestRequest(BaseModel):
     fingerprint: str = Field(min_length=1, max_length=300, pattern=r"^\S+$")
     content_hash: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     disposition: Disposition
-    # 確定した画面の run。あればその PR の最新の head で再検査する
-    run_id: uuid.UUID | None = None
+    # 確定した画面の run（必須）。その run の指摘だけを確定でき、その PR の最新の head で再検査する
+    run_id: uuid.UUID
 
 
 @router.post("/attestations", responses=error_responses(403, 422))
@@ -45,7 +47,6 @@ async def create_attestation(
     state: AppState = Depends(get_state),
     user: AuthUser = Depends(require_user),
 ) -> dict[str, Any]:
-    recheck: uuid.UUID | None = None
     try:
         async with state.session_factory() as s, s.begin():
             saved, target = await svc.attest_as_member(
@@ -58,27 +59,27 @@ async def create_attestation(
                 audit_factory=state.session_factory,
                 run_id=body.run_id,
             )
-            if target is not None:
-                project, latest = target
-                recheck = await state.service.create_run_in(
-                    s,
-                    project=project,
-                    head_sha=latest.head_sha,
-                    base_sha=latest.base_sha,
-                    pr_number=latest.pr_number,
-                    trigger="attestation",
-                )
+            project, latest = target
+            recheck = await state.service.create_run_in(
+                s,
+                project=project,
+                head_sha=latest.head_sha,
+                base_sha=latest.base_sha,
+                pr_number=latest.pr_number,
+                trigger="attestation",
+            )
     except WorkspaceNotFound as e:
         raise api_error(404, "workspace_not_found", "ワークスペースが無い") from e
+    except svc.AttestTargetNotFound as e:
+        raise api_error(404, "attestation_target_not_found", "確定できる指摘が無い") from e
     except svc.BindingsAttestRequiresPrComment as e:
         raise api_error(403, "bindings_attest_requires_pr_comment", str(e)) from e
     except PermissionError as e:
         raise api_error(403, "not_an_approver", "確定できるのは owner / approver だけ") from e
     except LookupError as e:
         raise api_error(404, "run_not_found", "run が無い") from e
-    if recheck is not None:
-        await state.queue.enqueue(recheck)
+    await state.queue.enqueue(recheck)
     return {
         "attestation": saved.model_dump(mode="json"),
-        "recheck_run_id": str(recheck) if recheck is not None else None,
+        "recheck_run_id": str(recheck),
     }

@@ -107,22 +107,16 @@
             "type": "string"
           },
           "run_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Run Id"
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
           }
         },
         "required": [
           "fingerprint",
           "content_hash",
-          "disposition"
+          "disposition",
+          "run_id"
         ],
         "title": "AttestRequest",
         "type": "object"

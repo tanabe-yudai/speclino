@@ -695,23 +695,32 @@ class LlmAssessmentRecord(Base):
 class AttestationRecord(Base):
     """`attestations`: 人の確定（S70）。指紋と内容の hash に結びつき、内容が変われば効かない。
 
-    同じ (workspace, fingerprint, content_hash) は最新の処置で上書きする（取り消し・変更は監査に
-    残る）。actor は SpecLino の uid、または PR コメントなら `github:<GitHub ユーザー ID>`。
+    確定はプロジェクトに属し（#114）、そのプロジェクトの run にだけ効く。
+    同じ (workspace, project_id, fingerprint, content_hash) は最新の処置で上書きする
+    （取り消し・変更は監査に残る）。actor は SpecLino の uid、または PR コメントなら
+    `github:<GitHub ユーザー ID>`。
     """
 
     __tablename__ = "attestations"
     __table_args__ = (
         UniqueConstraint(
             "workspace",
+            "project_id",
             "fingerprint",
             "content_hash",
-            name="uq_attestations_workspace_fingerprint_hash",
+            name="uq_attestations_workspace_project_fingerprint_hash",
         ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     workspace: Mapped[str] = mapped_column(
         String, ForeignKey("teams.team"), nullable=False, index=True
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     fingerprint: Mapped[str] = mapped_column(String, nullable=False)
     content_hash: Mapped[str] = mapped_column(String, nullable=False)

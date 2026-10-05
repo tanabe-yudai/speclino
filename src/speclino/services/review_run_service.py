@@ -315,7 +315,10 @@ class ReviewRunService:
             for a in answers:
                 await events.append(run_id, "human_answer", a)
             # S70: 人の確定は run の開始時に読む（確定の後は再検査の run が作られる）
-            attestations = await list_attestations(session, team) if team is not None else []
+            # 確定はプロジェクトに属する（#114）。他のプロジェクトの同じ指紋の確定は効かせない
+            attestations = (
+                await list_attestations(session, team, run.project_id) if team is not None else []
+            )
 
         mismatch = await repository_mismatch(self.code_host, repo_full_name, github_repo_id)
         if mismatch is not None:

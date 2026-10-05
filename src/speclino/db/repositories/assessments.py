@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import case, false, null, or_, select, true
@@ -97,13 +98,17 @@ def _attestation(row: AttestationRecord) -> Attestation:
         disposition=row.disposition,
         actor=row.actor,
         workspace=row.workspace,
+        project_id=str(row.project_id),
         created_at=row.created_at,
         self_attested=row.self_attested,
     )
 
 
 class AttestationRepository:
-    """人の確定。同じ (workspace, fingerprint, content_hash) は最新の処置で上書きする。"""
+    """人の確定。同じ (workspace, project_id, fingerprint, content_hash) は最新で上書きする。
+
+    確定はプロジェクトに属する（#114）。
+    """
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -112,6 +117,7 @@ class AttestationRepository:
         self,
         *,
         workspace: str,
+        project_id: uuid.UUID,
         fingerprint: str,
         content_hash: str,
         disposition: Disposition,
@@ -128,6 +134,7 @@ class AttestationRepository:
         table = AttestationRecord.__table__
         base = insert(AttestationRecord).values(
             workspace=workspace,
+            project_id=project_id,
             fingerprint=fingerprint,
             content_hash=content_hash,
             disposition=disposition,
@@ -144,7 +151,7 @@ class AttestationRepository:
         )
         stmt = (
             base.on_conflict_do_update(
-                constraint="uq_attestations_workspace_fingerprint_hash",
+                constraint="uq_attestations_workspace_project_fingerprint_hash",
                 set_={
                     "disposition": disposition,
                     "actor": actor,
@@ -159,10 +166,14 @@ class AttestationRepository:
         await self._session.flush()
         return _attestation(row), row.first_actor
 
-    async def list_for_workspace(self, workspace: str) -> list[Attestation]:
+    async def list_for_project(self, workspace: str, project_id: uuid.UUID) -> list[Attestation]:
+        """そのプロジェクトの確定（run のゲートに効かせるのはこれだけ。#114）。"""
         stmt = (
             select(AttestationRecord)
-            .where(AttestationRecord.workspace == workspace)
+            .where(
+                AttestationRecord.workspace == workspace,
+                AttestationRecord.project_id == project_id,
+            )
             .order_by(AttestationRecord.fingerprint, AttestationRecord.content_hash)
         )
         return [_attestation(r) for r in (await self._session.execute(stmt)).scalars()]

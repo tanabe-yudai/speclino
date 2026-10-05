@@ -23,6 +23,7 @@ from speclino.services.review_run_service import ReviewRunConfig, ReviewRunServi
 from speclino.settings import Settings
 from tests.integration.services.conftest import (
     login_id,
+    project_id_of,
     register_repo,
     repo_id_of,
     set_project_approvers,
@@ -135,9 +136,15 @@ async def _seed_targets(engine: AsyncEngine, run_id: str, *fingerprints: str) ->
             )
 
 
-async def _stored(engine: AsyncEngine, slug: str) -> list[tuple[str, str, str]]:
+async def _stored(
+    engine: AsyncEngine, slug: str, repo: str | None = None
+) -> list[tuple[str, str, str]]:
+    """そのワークスペースのプロジェクト（既定は `e2e/<slug>`）の確定。"""
+    pid = await project_id_of(engine, repo or f"e2e/{slug}")
     async with async_sessionmaker(engine)() as s:
-        return [(a.fingerprint, a.disposition, a.actor) for a in await list_attestations(s, slug)]
+        return [
+            (a.fingerprint, a.disposition, a.actor) for a in await list_attestations(s, slug, pid)
+        ]
 
 
 async def _audit(engine: AsyncEngine, slug: str) -> list[tuple[str, str]]:
@@ -153,16 +160,27 @@ async def _audit(engine: AsyncEngine, slug: str) -> list[tuple[str, str]]:
 
 
 async def test_rest_attest_is_for_owner_and_approver_only(ctx: Ctx, engine: AsyncEngine) -> None:
+    run_id = await _pr_run(ctx, ctx.repo)
+    await _seed_targets(engine, run_id, "R:i:1")
     url = f"/api/workspaces/{ctx.slug}/attestations"
-    body = {"fingerprint": "R:i:1", "content_hash": HASH, "disposition": "attested"}
+    body = {
+        "fingerprint": "R:i:1",
+        "content_hash": HASH,
+        "disposition": "attested",
+        "run_id": run_id,
+    }
     assert (await ctx.c.post(url, json=body, headers=MEMBER)).status_code == 403
     assert (await ctx.c.post(url, json=body, headers=STRANGER)).status_code == 404
     bad = {**body, "content_hash": "sha256:xyz"}
     assert (await ctx.c.post(url, json=bad, headers=OWNER)).status_code == 422
+    # run_id は必須（#114）
+    no_run = {k: v for k, v in body.items() if k != "run_id"}
+    assert (await ctx.c.post(url, json=no_run, headers=OWNER)).status_code == 422
     ok = await ctx.c.post(url, json=body, headers=OWNER)
     assert ok.status_code == 200, ok.text
     assert ok.json()["attestation"]["actor"] == "owner1"
-    assert ok.json()["recheck_run_id"] is None
+    assert ok.json()["attestation"]["project_id"] == str(await project_id_of(engine, ctx.repo))
+    assert ok.json()["recheck_run_id"] is not None
     ack = {**body, "disposition": "acknowledged_violation"}
     assert (await ctx.c.post(url, json=ack, headers=APPROVER)).status_code == 200
     assert await _stored(engine, ctx.slug) == [("R:i:1", "acknowledged_violation", "approver1")]
@@ -174,9 +192,11 @@ async def test_rest_attest_is_for_owner_and_approver_only(ctx: Ctx, engine: Asyn
     ]
 
 
-async def test_rest_attest_rechecks_the_pr_head(ctx: Ctx) -> None:
+async def test_rest_attest_rechecks_the_pr_head(ctx: Ctx, engine: AsyncEngine) -> None:
     run_id = await _pr_run(ctx, ctx.repo)
     other_run = await _pr_run(ctx, ctx.other_repo)
+    await _seed_targets(engine, run_id, "R:i:1")
+    await _seed_targets(engine, other_run, "R:i:1")
     url = f"/api/workspaces/{ctx.slug}/attestations"
     body = {"fingerprint": "R:i:1", "content_hash": HASH, "disposition": "attested"}
     res = await ctx.c.post(url, json={**body, "run_id": run_id}, headers=OWNER)
@@ -292,6 +312,7 @@ async def _attest_via_service(
 async def test_self_attestation_is_matched_by_github_id(ctx: Ctx, engine: AsyncEngine) -> None:
     """確定者の連携済み GitHub ID と PR の作成者の ID で照合する（ログイン名・uid は使わない）。"""
     run_id = await _pr_run_by(ctx, DEV_ID)
+    await _seed_targets(engine, run_id, "R:i:1", "R:i:2", "R:i:3")
     linked = {"approver1": DEV_ID, "owner1": OTHER_ID}
     assert await _attest_via_service(engine, ctx, run_id, "approver1", "R:i:1", linked) is True
     assert await _attest_via_service(engine, ctx, run_id, "owner1", "R:i:2", linked) is False
@@ -355,6 +376,7 @@ async def test_bindings_attestation_via_pr_comment_is_accepted(
 
 async def test_self_attestation_is_null_without_author_id(ctx: Ctx, engine: AsyncEngine) -> None:
     run_id = await _pr_run_by(ctx, None)
+    await _seed_targets(engine, run_id, "R:i:4", "R:i:5")
     linked = {"approver1": DEV_ID}
     assert await _attest_via_service(engine, ctx, run_id, "approver1", "R:i:4", linked) is None
     # REST（連携の無い現状）は照合不可で記録する
@@ -386,8 +408,9 @@ async def test_pr_comment_self_attestation_is_matched_by_id(ctx: Ctx, engine: As
     raw, headers = signed(payload, "issue_comment")
     res = (await ctx.c.post("/webhooks/github", content=raw, headers=headers)).json()
     assert res["commands"][0]["self_attested"] is None
+    pid = await project_id_of(engine, ctx.repo)
     async with async_sessionmaker(engine)() as s:
-        marks = {a.fingerprint: a.self_attested for a in await list_attestations(s, ctx.slug)}
+        marks = {a.fingerprint: a.self_attested for a in await list_attestations(s, ctx.slug, pid)}
     assert marks == {"R:i:6": True, "R:i:7": False, "R:i:8": None}
 
 
@@ -424,3 +447,46 @@ def _pr_payload_by(ctx: Ctx, number: int, author_id: int) -> dict[str, object]:
     payload = pr_payload(ctx.repo, ctx.head, ctx.base, number)
     payload["pull_request"]["user"]["id"] = author_id  # type: ignore[index]
     return payload
+
+
+async def test_rest_attest_requires_a_finding_of_that_run(ctx: Ctx, engine: AsyncEngine) -> None:
+    """#114: その run の保存済みの確定できる指摘でなければ 404。記録せず、拒否は監査に残す。"""
+    run_id = await _pr_run(ctx, ctx.repo)
+    await _seed_targets(engine, run_id, "R:i:1")
+    url = f"/api/workspaces/{ctx.slug}/attestations"
+    body = {
+        "fingerprint": "R:i:9",
+        "content_hash": HASH,
+        "disposition": "attested",
+        "run_id": run_id,
+    }
+    res = await ctx.c.post(url, json=body, headers=OWNER)
+    assert res.status_code == 404
+    assert res.json()["error"]["code"] == "attestation_target_not_found"
+    # 指紋が合っても hash が違えば同じ
+    other_hash = {**body, "fingerprint": "R:i:1", "content_hash": "sha256:" + "c" * 64}
+    assert (await ctx.c.post(url, json=other_hash, headers=OWNER)).status_code == 404
+    # 存在しない run も 404
+    missing = {**body, "fingerprint": "R:i:1", "run_id": str(uuid.uuid4())}
+    assert (await ctx.c.post(url, json=missing, headers=OWNER)).status_code == 404
+    assert await _stored(engine, ctx.slug) == []
+    assert await _audit(engine, ctx.slug) == [("owner1", "rejected")] * 3
+
+
+async def test_attestation_does_not_cross_projects(ctx: Ctx, engine: AsyncEngine) -> None:
+    """#114: 同じワークスペースの別プロジェクトに同じ指紋があっても、確定は run の
+    プロジェクトだけ。"""
+    second = f"e2e/{ctx.slug}-second"
+    await register_repo(engine, second, {"owner1": "owner"}, team=ctx.slug)
+    run_a = await _pr_run(ctx, ctx.repo)
+    await _seed_targets(engine, run_a, "R:i:x")
+    url = f"/api/workspaces/{ctx.slug}/attestations"
+    body = {
+        "fingerprint": "R:i:x",
+        "content_hash": HASH,
+        "disposition": "attested",
+        "run_id": run_a,
+    }
+    assert (await ctx.c.post(url, json=body, headers=OWNER)).status_code == 200
+    assert await _stored(engine, ctx.slug) == [("R:i:x", "attested", "owner1")]
+    assert await _stored(engine, ctx.slug, second) == []

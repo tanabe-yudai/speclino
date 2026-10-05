@@ -8,6 +8,8 @@ export interface Attestation {
   disposition: Disposition
   actor: string
   workspace: string
+  /** 確定の属するプロジェクト（#114）。古い run の manifest には無い */
+  project_id?: string | null
   created_at: string
   /**
    * PR の作成者が自分で確定したか（GitHub のユーザー ID で照合。拒否はせず印を残す）。
@@ -26,7 +28,8 @@ export interface AttestRequest {
   fingerprint: string
   content_hash: string
   disposition: Disposition
-  run_id?: string
+  /** 確定した画面の run（必須。その run の指摘だけを確定できる） */
+  run_id: string
 }
 
 export interface AttestResponse {

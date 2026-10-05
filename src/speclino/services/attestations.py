@@ -3,7 +3,8 @@
 - `attested`: その指紋・内容の hash の REVIEW をゲートの阻止から外す
 - `acknowledged_violation`: 問題を認めたうえで阻止したままにする（記録だけ）
 
-確定は指紋と内容の hash に結びつく。コードが変われば単位の hash（LLM 支援）や変わった
+確定は指紋と内容の hash に結びつき、プロジェクトに属する（#114: 別のプロジェクトの run には
+効かない）。コードが変われば単位の hash（LLM 支援）や変わった
 ファイルの hash（`KNOWLEDGE-BINDINGS-001`）が変わり、前の確定は効かない。確定できるのは
 ワークスペースの owner / approver（REST）か、PR コメントの承認者（webhook）だけで、権限の
 確認は呼び出し側で行う。ここでは記録と監査とゲートへの適用だけを行う。
@@ -91,6 +92,7 @@ async def attest(
     disposition: Disposition,
     actor: str,
     workspace: str,
+    project_id: uuid.UUID,
     via: str = "api",
     self_attested: bool | None = None,
     actor_login: str | None = None,
@@ -112,10 +114,12 @@ async def attest(
         disposition=disposition,
         actor=actor,
         workspace=workspace,
+        project_id=str(project_id),
         created_at=now or datetime.now().astimezone(),
     )
     saved, first_actor = await AttestationRepository(session).upsert(
         workspace=workspace,
+        project_id=project_id,
         fingerprint=fingerprint,
         content_hash=content_hash,
         disposition=disposition,
@@ -125,6 +129,7 @@ async def attest(
     )
     detail: dict[str, object] = {
         "content_hash": content_hash,
+        "project_id": str(project_id),
         "via": via,
         # この確定の照合結果と、保存した印（true > null > false で強い方を保つ）
         "self_attested": self_attested,
@@ -183,6 +188,13 @@ class BindingsAttestRequiresPrComment(PermissionError):
 GithubIdOf = Callable[[str], Awaitable[int | None]]
 
 
+class AttestTargetNotFound(LookupError):
+    """確定の対象が見つからない（run が無い・他のワークスペース・その run に無い指摘）。404。"""
+
+
+NOT_IN_RUN_REASON = "この run の検査に無い指紋"
+
+
 async def attest_as_member(
     session: AsyncSession,
     *,
@@ -191,16 +203,19 @@ async def attest_as_member(
     fingerprint: str,
     content_hash: str,
     disposition: Disposition,
+    run_id: uuid.UUID,
     audit_factory: async_sessionmaker[AsyncSession] | None = None,
-    run_id: uuid.UUID | None = None,
     github_id_of: GithubIdOf | None = None,
-) -> tuple[Attestation, tuple[Project, ReviewRun] | None]:
+) -> tuple[Attestation, tuple[Project, ReviewRun]]:
     """画面（REST）からの確定。owner / approver だけ。戻り値は (確定, 再検査する (project, run))。
 
-    `run_id`（確定した画面の run）があれば、その PR の最新の run を再検査の対象にする。
+    `run_id`（確定した画面の run）は必須（#114）。run がこのワークスペースのプロジェクトのもので、
+    (指紋, hash) がその run の保存済みの Findings の確定できる指摘に一致するときだけ受け付け、確定は
+    その run のプロジェクトに属する。どちらでもなければ `AttestTargetNotFound`（404、存在を漏らさ
+    ない）。再検査はその PR の最新の run の head で行う。
     自己確定は GitHub のユーザー ID で照合する: 確定者の uid → 連携済みの GitHub ID
     （`github_id_of`）と、run の PR の作成者の ID（`pr_author_id`）。どちらかが無い（未連携・
-    run 無し・作成者の ID の無い run）なら None（照合不可）。
+    作成者の ID の無い run）なら None（照合不可）。
 
     メンバーでなければ（別のワークスペースも）`WorkspaceNotFound`（404、存在を漏らさない）、
     member なら `PermissionError`（403）。拒否は `audit_factory` の別トランザクションで監査に残す
@@ -215,6 +230,14 @@ async def attest_as_member(
     elif fingerprint.startswith(f"{CONFIG_CHANGE_REQUIREMENT_ID}:"):
         # 裁定 35: 信頼側の設定の変更は、作成者との照合（GitHub の ID）ができる PR コメントだけ
         reject = BindingsAttestRequiresPrComment(BINDINGS_VIA_PR_COMMENT_REASON)
+    else:
+        found = await _run_in_workspace(session, workspace, run_id)
+        if found is None:
+            reject = AttestTargetNotFound(f"run {run_id} が無い")
+        elif not await in_run_findings(
+            session, run_id=run_id, fingerprint=fingerprint, content_hash=content_hash
+        ):
+            reject = AttestTargetNotFound(NOT_IN_RUN_REASON)
     if reject is not None:
         if audit_factory is not None:
             async with audit_factory() as s, s.begin():
@@ -223,10 +246,16 @@ async def attest_as_member(
                     "attestation.record",
                     f"{workspace}:{fingerprint}",
                     "rejected",
-                    {"content_hash": content_hash, "via": "api", "reason": str(reject)},
+                    {
+                        "content_hash": content_hash,
+                        "via": "api",
+                        "run_id": str(run_id),
+                        "reason": str(reject),
+                    },
                 )
         raise reject
-    target = await recheck_target(session, workspace, run_id) if run_id is not None else None
+    target = await recheck_target(session, workspace, run_id)
+    project, _ = target
     saved = await attest(
         session,
         fingerprint=fingerprint,
@@ -234,10 +263,21 @@ async def attest_as_member(
         disposition=disposition,
         actor=uid,
         workspace=workspace,
+        project_id=project.id,
         via="api",
         self_attested=await _self_attested(uid, target, github_id_of),
     )
     return saved, target
+
+
+async def _run_in_workspace(
+    session: AsyncSession, workspace: str, run_id: uuid.UUID
+) -> tuple[Project, ReviewRun] | None:
+    run = await ReviewRunRepository(session).get(run_id)
+    project = await ProjectRepository(session).get(run.project_id) if run is not None else None
+    if run is None or project is None or project.team != workspace:
+        return None
+    return project, run
 
 
 async def _self_attested(
@@ -269,11 +309,11 @@ async def recheck_target(
 
     run がこのワークスペースのプロジェクトのものでなければ LookupError（404。存在を漏らさない）。
     """
-    runs = ReviewRunRepository(session)
-    run = await runs.get(run_id)
-    project = await ProjectRepository(session).get(run.project_id) if run is not None else None
-    if run is None or project is None or project.team != workspace:
+    found = await _run_in_workspace(session, workspace, run_id)
+    if found is None:
         raise LookupError(f"run {run_id} が無い")
+    project, run = found
+    runs = ReviewRunRepository(session)
     latest = await runs.latest_run_for_pr(project.id, run.pr_number) if run.pr_number else None
     return project, latest or run
 
@@ -294,19 +334,31 @@ async def in_pr_findings(
     PR コメントの確定はそのコメントが付いた PR の指摘に限る。他の PR の指摘を別の PR のコメントで
     確定させると、自己確定の照合相手（この PR の作成者）と効く対象（別の PR）がずれる。
     """
-    from speclino.db.repositories import FindingRepository
-
     run = await ReviewRunRepository(session).latest_completed_for_pr(project_id, pr_number)
     if run is None:
         return False
-    for row in await FindingRepository(session).list_for_run(run.id):
+    return await in_run_findings(
+        session, run_id=run.id, fingerprint=fingerprint, content_hash=content_hash
+    )
+
+
+async def in_run_findings(
+    session: AsyncSession, *, run_id: uuid.UUID, fingerprint: str, content_hash: str
+) -> bool:
+    """(指紋, hash) がその run の保存済みの Findings の確定できる指摘にあるか。"""
+    from speclino.db.repositories import FindingRepository
+
+    for row in await FindingRepository(session).list_for_run(run_id):
         if attestation_target(Finding.model_validate(row.payload)) == (fingerprint, content_hash):
             return True
     return False
 
 
-async def list_attestations(session: AsyncSession, workspace: str) -> list[Attestation]:
-    return await AttestationRepository(session).list_for_workspace(workspace)
+async def list_attestations(
+    session: AsyncSession, workspace: str, project_id: uuid.UUID
+) -> list[Attestation]:
+    """そのプロジェクトの確定（run のゲートに効かせるもの）。"""
+    return await AttestationRepository(session).list_for_project(workspace, project_id)
 
 
 __all__ = [
@@ -314,6 +366,9 @@ __all__ = [
     "CONTENT_HASH_REF",
     "FINGERPRINT_REF",
     "NOT_IN_PR_REASON",
+    "NOT_IN_RUN_REASON",
+    "AttestTargetNotFound",
+    "in_run_findings",
     "applied_attestations",
     "apply_attestations",
     "attest",

@@ -92,6 +92,10 @@ async def test_worker_assesses_records_and_applies_attestations(
     # 確定すると、次の run でその指紋の REVIEW は阻止から外れ、manifest に残る
     target = attestation_target(finding)
     assert target is not None
+    # 同じワークスペースの別のプロジェクトの確定は効かない（#114）
+    other_repo = f"e2e/{slug}-other"
+    await register_repo(engine, other_repo, {"owner1": "owner"}, team=slug)
+    other_pid = await project_id_of(engine, other_repo)
     async with f() as s, s.begin():
         await attest(
             s,
@@ -100,6 +104,19 @@ async def test_worker_assesses_records_and_applies_attestations(
             disposition="attested",
             actor="owner1",
             workspace=slug,
+            project_id=other_pid,
+        )
+    _, crossed, crossed_gate = await run_once()
+    assert crossed["attestations"] == [] and crossed_gate == "fail"
+    async with f() as s, s.begin():
+        await attest(
+            s,
+            fingerprint=target[0],
+            content_hash=target[1],
+            disposition="attested",
+            actor="owner1",
+            workspace=slug,
+            project_id=pid,
         )
     third, manifest3, _ = await run_once()
     applied = manifest3["attestations"]

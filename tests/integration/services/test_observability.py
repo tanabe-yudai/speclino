@@ -399,6 +399,7 @@ async def world(engine: AsyncEngine) -> World:
         def attestation(workspace: str, n: int, self_attested: bool | None) -> AttestationRecord:
             return AttestationRecord(
                 workspace=workspace,
+                project_id=p1 if workspace == ws else p3,
                 fingerprint=f"fp{n}",
                 content_hash=HASH,
                 disposition="attested",

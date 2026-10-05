@@ -341,7 +341,7 @@ async def _active_policy(f: async_sessionmaker[AsyncSession], team: str) -> Poli
 
 
 async def attest_baseline_no_issue(
-    f: async_sessionmaker[AsyncSession], n: Names, run_id: Any
+    f: async_sessionmaker[AsyncSession], n: Names, run_id: Any, project_id: Any
 ) -> int:
     """main の検査の LLM 支援の「指摘なし」を owner が確定する（チームが main の評価を一度
     確かめた前提）。確定した件数を返す。"""
@@ -364,6 +364,7 @@ async def attest_baseline_no_issue(
                 disposition="attested",
                 actor=OWNER,
                 workspace=n.workspace,
+                project_id=project_id,
                 via="seed",
             )
     return len(targets)
@@ -401,7 +402,7 @@ async def run_checks(
     baseline = await service.create_run(
         project_id=pid, head_sha=main_sha, base_sha=None, pr_number=None, trigger="push"
     )
-    await attest_baseline_no_issue(f, n, baseline)
+    await attest_baseline_no_issue(f, n, baseline, pid)
     runs = {
         "main": str(
             await service.create_run(

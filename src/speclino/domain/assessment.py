@@ -64,6 +64,8 @@ class Attestation(IRModel):
     disposition: Disposition
     actor: str = Field(min_length=1)
     workspace: str = Field(min_length=1)
+    # 確定の属するプロジェクト（#114）。欄の無い古い manifest も読めるよう既定は None
+    project_id: str | None = None
     created_at: datetime
     self_attested: bool | None = Field(
         default=None,

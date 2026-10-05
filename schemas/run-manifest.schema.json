@@ -61,6 +61,18 @@
           "title": "Workspace",
           "type": "string"
         },
+        "project_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Project Id"
+        },
         "created_at": {
           "format": "date-time",
           "title": "Created At",

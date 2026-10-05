@@ -243,6 +243,7 @@ async def _record_attestation(
         actor=actor,
         actor_login=cm.author_login,
         workspace=project.team,
+        project_id=project.id,
         via=f"pr_comment:{cm.comment_url}",
         # PR の作成者が自分で確定した（GitHub の ID で照合。拒否はせず印を残す。照合不可は None）
         self_attested=same_github_user(cm.author_id, cm.issue_author_id),
