@@ -159,7 +159,7 @@ def _activity(t: TraceObligation) -> str:
             lines.append(f"    {s}{{{s}}}")
     for tr in a.transitions:
         guard = f" {render_expr(tr.guard)}" if tr.guard is not None else ""
-        lines.append(f"    {tr.source} -->|[{tr.id}]{guard}| {tr.target}")
+        lines.append(f'    {tr.source} -->|"[{tr.id}]{guard}"| {tr.target}')
     return _fence(lines)
 
 

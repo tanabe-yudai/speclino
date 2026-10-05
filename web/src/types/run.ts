@@ -104,6 +104,8 @@ export interface ReviewRunDetail extends ReviewRunSummary {
   findings: Finding[]
   /** run のプロジェクトのワークスペース（S70: 確定の宛先）。未登録なら null */
   workspace?: string | null
+  /** ゲートを止めない REVIEW の ID（gate の cleared: LLM 支援の指摘なし・人の確定）。件数と理由の正本 */
+  cleared_ids?: string[]
 }
 
 /** `POST /api/review-runs/{id}/rerun`（デモ再実行、S39）の応答。 */

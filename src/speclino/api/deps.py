@@ -122,7 +122,10 @@ def _github_app_auth(settings: Settings) -> GitHubAppAuth | None:
 
 def build_code_host(settings: Settings, installation_id: int | None = None) -> CodeHost:
     if settings.code_host_kind == "local":
-        return LocalCodeHost(repos={k: Path(v) for k, v in settings.local_repos.items()})
+        return LocalCodeHost(
+            repos={k: Path(v) for k, v in settings.local_repos.items()},
+            repo_ids=dict(settings.local_repo_ids),
+        )
     auth = _github_app_auth(settings)
     if auth is None:
         raise RuntimeError("GitHub App の設定（SPECLINO_GITHUB_APP_ID / PRIVATE_KEY）が無い")

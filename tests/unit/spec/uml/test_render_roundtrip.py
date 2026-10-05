@@ -322,4 +322,6 @@ def test_render_full_sample() -> None:
     assert "OrderService->>InventoryService: [m1] reserve" in canonical
     assert "    else [g2]\n" in canonical  # 省いたガードは省いたまま
     assert "%%@ closed: true" in canonical
+    # アクティビティ図の辺のラベルは引用符で囲む（Mermaid は `|[` で始まるラベルを描けない）
+    assert '    d -->|"[e2] before.order.paid"| r' in canonical
     assert semantic_dump(_compile_ok(canonical)) == semantic_dump(first)

@@ -137,6 +137,15 @@
   * {
     @apply border-border outline-ring/50;
   }
+  /* 等幅の欄は書いたとおりの文字を見せる。JetBrains Mono の合字は `!=` を ≠、`-->` を矢印 1 字に
+     描き、仕様の構文（ガードの演算子・矢印）を読み違える */
+  .font-mono,
+  code,
+  pre,
+  kbd,
+  samp {
+    font-variant-ligatures: none;
+  }
   body {
     @apply text-foreground font-sans antialiased;
     min-height: 100vh;

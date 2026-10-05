@@ -14,6 +14,7 @@ import { countByVerdict } from './verdict'
 
 const DEFAULT_FAIL_ON: Verdict[] = ['VIOLATED', 'UNKNOWN', 'REVIEW']
 
+/** `findings` は cleared（阻止しない REVIEW）を除いたもの（`splitCleared` の active）。 */
 export function describeGateReason(
   gateStatus: GateStatus | null,
   manifest: RunManifest | null,

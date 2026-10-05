@@ -190,12 +190,18 @@ def _line(ctx: Ctx, cur: Cursor, st: _State, result: DiagramResult) -> None:
     if arrow.text != "-->":
         raise LineError("E_UNKNOWN_ARROW", f"矢印 {arrow.text} は使えない（-->）", arrow)
     cur.take("ir", text="|", what="辺の `|[ID]|`", code="E_MISSING_ID")
+    # `|"[ID] guard"|`（Mermaid が描ける形）と `|[ID] guard|` の両方を受ける。引用符は見た目だけ
+    quoted = cur.at('"')
+    if quoted:
+        cur.take("ignored")
     id_tok = take_bracket_id(cur)
     register_id(st.ids, id_tok)
     guard = None
-    if not cur.at("|"):
+    if not cur.at("|") and not (quoted and cur.at('"')):
         guard = parse_guard(cur)
         result.guards.append((guard, ctx.at(id_tok)))
+    if quoted:
+        cur.take("ignored", text='"', what='辺のラベルを閉じる `"`')
     cur.take("ir", text="|", what="辺のラベルの `|`")
     target = _node(ctx, cur, st)
     nxt = cur.peek()
