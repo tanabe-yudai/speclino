@@ -135,3 +135,35 @@ async def test_installation_token_cache_is_per_installation() -> None:
 
     assert token1 == "ghs_1"
     assert token2 == "ghs_2"
+
+
+# ---------------------------------------------------------------- any_installation_id
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_any_installation_id_takes_one_of_the_apps_installations_once() -> None:
+    """S61: リポジトリに紐付かない問い合わせ（ユーザー ID）に使うインストール。"""
+    auth = GitHubAppAuth(app_id=1, private_key_pem=PRIVATE_KEY_PEM)
+    route = respx.get(f"{BASE_URL}/app/installations").mock(
+        return_value=httpx.Response(200, json=[{"id": 31}, {"id": 32}])
+    )
+
+    async with httpx.AsyncClient() as http:
+        first = await auth.any_installation_id(http, BASE_URL)
+        second = await auth.any_installation_id(http, BASE_URL)
+
+    assert first == second == 31
+    assert route.call_count == 1
+    assert route.calls.last.request.headers["authorization"].startswith("Bearer ")
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_any_installation_id_without_installations_is_lookup_error() -> None:
+    auth = GitHubAppAuth(app_id=1, private_key_pem=PRIVATE_KEY_PEM)
+    respx.get(f"{BASE_URL}/app/installations").mock(return_value=httpx.Response(200, json=[]))
+
+    async with httpx.AsyncClient() as http:
+        with pytest.raises(LookupError):
+            await auth.any_installation_id(http, BASE_URL)

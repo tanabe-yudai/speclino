@@ -284,6 +284,8 @@ async def test_github_lookup_failure_is_503_and_writes_nothing(
     res = await client.put(path, json={**before, "approvers": ["octo-cat"]}, headers=_as("own"))
     assert res.status_code == 503, res.text
     assert res.json()["error"]["code"] == "github_lookup_failed"
+    # 次の失敗を診断できるよう、GitHub 側の理由（応答コードなど）をメッセージに残す
+    assert "rate limited" in res.json()["error"]["message"]
     assert await _stored(engine, pid) == {}
 
 

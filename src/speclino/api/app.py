@@ -17,6 +17,7 @@ from starlette.types import Scope
 from speclino.api.deps import AppState, build_state
 from speclino.api.errors import error_responses, install_error_handlers
 from speclino.api.routes import (
+    internal_github,
     internal_mcp,
     mcp_tokens,
     me,
@@ -106,6 +107,7 @@ def create_app(settings: Settings, state: AppState | None = None) -> FastAPI:
     if settings.role in ("worker", "all"):
         app.include_router(tasks.router)
         app.include_router(internal_mcp.router)
+        app.include_router(internal_github.router)
     # sandbox ロールは Cloud Run sandboxes の疎通確認（probe）と本実装（runner）を持つ（S38）。
     # 呼べるのは worker SA のみ（Cloud Run の IAM で制限）。
     if settings.role == "sandbox":

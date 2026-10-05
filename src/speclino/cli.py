@@ -578,11 +578,12 @@ def workspace_set_pr_approvers(
     ] = None,
 ) -> None:
     """PR の承認者（GitHub ログイン名）を置き換える。照合に使う GitHub のユーザー ID も保存する。"""
-    from speclino.adapters.github.user_lookup import PublicGitHubUserLookup
+    from speclino.api.deps import build_github_user_lookup
     from speclino.services import workspace_admin
+    from speclino.settings import Settings
 
     approvers = logins or []
-    users = PublicGitHubUserLookup()
+    users = build_github_user_lookup(Settings())
     _with_github_lookup(
         lambda: _in_transaction(
             lambda s: workspace_admin.set_pr_approvers(
@@ -602,14 +603,15 @@ def workspace_backfill_approver_ids(
 ) -> None:
     """保存済みの PR 承認者（ログイン名）に GitHub のユーザー ID を補う（S61 の移行）。
 
-    ID の無い承認者は承認できない（ログイン名では照合しない）。公開 API `GET /users/{login}` で
-    引く。引くのは今そのログイン名を持つ人の ID なので、既定は `login → id` を表示するだけにし、
-    確かめてから `--yes` で保存する。
+    ID の無い承認者は承認できない（ログイン名では照合しない）。`GET /users/{login}` で引く
+    （GitHub App の鍵があれば App の認証で、無ければ認証なしで）。引くのは今そのログイン名を
+    持つ人の ID なので、既定は `login → id` を表示するだけにし、確かめてから `--yes` で保存する。
     """
-    from speclino.adapters.github.user_lookup import PublicGitHubUserLookup
+    from speclino.api.deps import build_github_user_lookup
     from speclino.services import workspace_admin
+    from speclino.settings import Settings
 
-    users = PublicGitHubUserLookup()
+    users = build_github_user_lookup(Settings())
     pairs = _with_github_lookup(
         lambda: _in_transaction(
             lambda s: workspace_admin.backfill_approver_ids(

@@ -2,7 +2,8 @@
 
 ログイン名は改名後に他人が取得できるので、承認者は ID で照合する。ID は承認者を保存するときに
 引く。設定の保存は web ロールで動き、web は GitHub App の秘密鍵を持たないので、CodeHost とは
-別のポートにする（公開のユーザー情報は認証なしで読める）。
+別のポートにする。web の本番は worker に任せ、worker は App の認証で引く（認証なしの公開 API は
+Cloud Run の共有 IP でレート制限に当たる。実装の選択は `api/deps.build_github_user_lookup`）。
 """
 
 from __future__ import annotations
