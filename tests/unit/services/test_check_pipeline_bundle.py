@@ -301,7 +301,9 @@ def test_missing_obligation_finding_is_synthesized(
     assert "status" in res.manifest.expected_requirement_ids
 
 
-def _policy(rule_id: str = "MAKE-001", level: str = "mandatory") -> PolicyRevision:
+def _policy(
+    rule_id: str = "MAKE-001", level: str = "mandatory", on_missing: str = "unknown"
+) -> PolicyRevision:
     rule = PolicyRule(
         id=rule_id,
         version="1.0.0",
@@ -310,7 +312,7 @@ def _policy(rule_id: str = "MAKE-001", level: str = "mandatory") -> PolicyRevisi
         text="setup/test/lint を持つこと",
         applies_to=PolicyApplicability(paths=["Makefile"]),
         verifier=PolicyVerifierRef(id="makefile.required_targets", version="1.0.0"),
-        on_missing_input="unknown",
+        on_missing_input=on_missing,  # type: ignore[arg-type]
     )
     package = PolicyPackage(
         id="team-core", version="1.0.0", status="active", owner="w", rules=[rule]
@@ -428,3 +430,71 @@ def test_selfcheck_still_reads_frozen_copy(tmp_path: Path) -> None:
     assert res.manifest.expected_requirement_ids == []
     assert [s.behavior_id for s in res.spec_irs] == ["cancel_order"]
     assert not any(f.behavior_id.startswith("knowledge:") for f in res.findings.findings)
+
+
+# ---------------------------------------------------------------- セキュリティ（base-trusted）
+
+
+def _fake_call_head(root: Path) -> None:
+    """攻撃: 在庫を戻す呼出しを消し、bindings で図の Inventory.restore を audit.record に向ける。"""
+    svc = root / "examples" / "orders" / "app" / "service.py"
+    svc.write_text(
+        svc.read_text().replace(
+            "    inventory.restore(order.items)\n",
+            "    audit.record(user.id, AuditAction.CANCEL_ORDER)\n",
+        )
+    )
+    path = root / ".speclino" / "bindings.yaml"
+    data = yaml.safe_load(path.read_text())
+    data["operations"]["Inventory.restore"]["symbol"] = "examples.orders.app.audit.record"
+    path.write_text(yaml.safe_dump(data, allow_unicode=True))
+
+
+def test_pr_bindings_cannot_fake_a_call(tmp_path: Path) -> None:
+    """PR の bindings.yaml は判定に使わない（base の対応で判定し、変更は REVIEW）。"""
+    base = make_repo(tmp_path / "base")
+    head = make_repo(tmp_path / "head")
+    _fake_call_head(head)
+    k = knowledge(spec_revision("u", UML))
+    # base が無ければ head が信頼側になり、書き換えた対応で偽の成立になりうる（攻撃の再現）
+    naive = by_req(run_check(request(head, k)).findings.findings)
+    assert naive["cancel#OrderService.cancel_order"].verdict == "VERIFIED_IN_SCOPE"
+
+    res = run_check(request(head, k, base_root=base, base_sha="BASE"))
+    f = by_req(res.findings.findings)
+    assert f["cancel#OrderService.cancel_order"].verdict == "VIOLATED"
+    notice = f["KNOWLEDGE-BINDINGS-001"]
+    assert notice.verdict == "REVIEW" and ".speclino/bindings.yaml" in notice.message
+    assert res.gate.status == "fail"
+
+
+def test_pr_cannot_drop_project_policy_or_add_exception(tmp_path: Path) -> None:
+    """プロジェクト固有の規約と免除は base から読む（PR で消す・足すことはできない）。"""
+    base = make_repo(tmp_path / "base")
+    head = make_repo(tmp_path / "head")
+    team = _policy(on_missing="violation")
+    from tests.unit.services.test_check_pipeline import _write_project_exceptions
+
+    _write_project_exceptions(head)
+    k = knowledge(policy=team)
+    res = run_check(request(head, k, base_root=base, base_sha="BASE", today=NOW.date()))
+    make = [x for x in res.findings.findings if x.requirement_id.startswith("MAKE-001")]
+    assert make and all(x.verdict == "VIOLATED" for x in make)
+    assert res.waivers == []
+    assert (
+        ".speclino/exceptions.yaml"
+        in by_req(res.findings.findings)["KNOWLEDGE-BINDINGS-001"].message
+    )
+    # 同じ例外が base にあれば効く（取り込んだ後）
+    _write_project_exceptions(base)
+    merged = run_check(request(head, k, base_root=base, base_sha="BASE", today=NOW.date()))
+    assert merged.waivers and "KNOWLEDGE-BINDINGS-001" not in by_req(merged.findings.findings)
+
+
+def test_git_specs_notice_also_looks_at_base(tmp_path: Path) -> None:
+    """PR で specs/ を消しても、取り込み待ちの通知は消えない。"""
+    base = make_repo(tmp_path / "base")
+    head = make_repo(tmp_path / "head")
+    shutil.rmtree(head / "specs")
+    res = run_check(request(head, knowledge(), base_root=base, base_sha="BASE"))
+    assert by_req(res.findings.findings)["KNOWLEDGE-SPEC-001"].verdict == "UNKNOWN"

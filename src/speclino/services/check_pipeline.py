@@ -314,7 +314,11 @@ def _run_check(req: CheckRequest, *, is_base: bool) -> CheckResult:
     levels: dict[str, RuleLevel] = {rule.id: rule.level for spec in spec_irs for rule in spec.rules}
 
     team_policy = knowledge.policy if knowledge is not None else req.team_policy
-    policy_result = _run_policies(project_dir, team_policy, tolerate_errors=knowledge is not None)
+    # bundle の run は規約の定義・免除を信頼側（PR なら base）から読む。検査の対象は head
+    config_dir = _trusted_dir(req) if knowledge is not None else project_dir
+    policy_result = _run_policies(
+        project_dir, team_policy, tolerate_errors=knowledge is not None, config_dir=config_dir
+    )
     knowledge_findings: list[Finding] = []
     if knowledge is not None:
         codes = {
@@ -328,9 +332,12 @@ def _run_check(req: CheckRequest, *, is_base: bool) -> CheckResult:
         levels.update(uml_levels)
         if not is_base:
             knowledge_findings.append(_lock_finding(req, knowledge, created_at))
-            notice = _git_specs_notice(project_dir, inputs)
+            notice = _git_specs_notice([project_dir, config_dir], inputs)
             if notice is not None:
                 knowledge_findings.append(notice)
+            changed = _config_change_notice(project_dir, config_dir)
+            if changed is not None:
+                knowledge_findings.append(changed)
     combined = _with_extra_findings(
         combined, [*knowledge_findings, *policy_result.findings, *req.extra_findings]
     )
@@ -357,7 +364,7 @@ def _run_check(req: CheckRequest, *, is_base: bool) -> CheckResult:
     # 例外（免除）: 有効期限内で対象が一致する VIOLATED だけ。適合には書き換えず別記する（AC-009）。
     # exceptions_allowed=False のルール（チーム規約 + プロジェクト固有の規約の両方）は
     # policy_result.rules_by_id に載っているので、対象・期限が一致していても免除しない。
-    exceptions = _load_exceptions(project_dir)
+    exceptions = _load_exceptions(config_dir)
     today = req.today or date.today()
     waivers = waivers_for(combined, exceptions, today, policy_result.rules_by_id)
     waived = frozenset(w.finding_id for w in waivers)
@@ -481,19 +488,36 @@ def _canonical(data: object) -> str:
     return json.dumps(data, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
 
 
+def _trusted_dir(req: CheckRequest) -> Path:
+    """bundle の run で、対応・契約・免除・プロジェクト固有の規約を読む場所（base-trusted）。
+
+    PR の head は攻撃者が書き換えられる。図の操作とコードの対応（bindings.yaml）や契約・免除・規約を
+    head から読むと、PR だけで「呼んでいる」ことにしたり違反を免除したりできる。base（デフォルト
+    ブランチ）があればそこから読み、head の変更はマージ後の run で効く。base が無い run（push・
+    CLI）は head がそのまま信頼側。
+    """
+    if req.base_root is not None:
+        return req.base_project_dir if req.base_project_dir is not None else req.base_root
+    return req.resolved_project_dir
+
+
+def _read_bindings(config_dir: Path) -> tuple[str | None, Bindings]:
+    path = config_dir / ".speclino" / "bindings.yaml"
+    if not path.is_file():
+        return None, Bindings()
+    return path.read_text(encoding="utf-8"), load_bindings(path)
+
+
 def _bundle_inputs(req: CheckRequest, project_dir: Path, knowledge: ResolvedKnowledge) -> _Inputs:
     """bundle の入力: 仕様は spec の改訂の compiled と domain、対応・契約はリポジトリから（D9）。
 
-    `specs/` は読まない。bindings.yaml が無ければ空（図の要素はどれも対応なし → UNKNOWN）。
+    `specs/` は読まない。対応・契約は信頼側（`_trusted_dir`、PR なら base）から読む。
+    bindings.yaml が無ければ空（図の要素はどれも対応なし → UNKNOWN）。
     """
-    bindings_path = project_dir / ".speclino" / "bindings.yaml"
-    if bindings_path.is_file():
-        bindings_text: str | None = bindings_path.read_text(encoding="utf-8")
-        bindings = load_bindings(bindings_path)
-    else:
-        bindings_text, bindings = None, Bindings()
+    config_dir = _trusted_dir(req)
+    bindings_text, bindings = _read_bindings(config_dir)
     bindings = _patched_bindings(bindings, req.bindings_patch)
-    contracts_dir = project_dir / ".speclino" / "contracts"
+    contracts_dir = config_dir / ".speclino" / "contracts"
     contracts = load_contracts(contracts_dir) if contracts_dir.is_dir() else {}
 
     units = spec_units(knowledge)
@@ -679,13 +703,17 @@ def _lock_finding(req: CheckRequest, knowledge: ResolvedKnowledge, now: datetime
 GIT_SPECS_REQUIREMENT_ID = "KNOWLEDGE-SPEC-001"
 
 
-def _git_specs_notice(project_dir: Path, inputs: _Inputs) -> Finding | None:
+def _git_specs_notice(dirs: list[Path], inputs: _Inputs) -> Finding | None:
     """bundle に仕様が 1 つも無いのにリポジトリに旧形式の仕様がある → UNKNOWN（取り込み待ち）。
 
     bundle の run は `specs/` を読まない。取り込み前のリポジトリで仕様が黙って外れないようにする。
     """
-    spec_ir_dir = project_dir / "specs" / "ir"
-    if inputs.spec_units or not (spec_ir_dir.is_dir() and any(spec_ir_dir.glob("*.spec-ir.json"))):
+    # head だけを見ると、PR で specs/ を消せばこの通知も消せる。信頼側（base）も見る
+    has_git_specs = any(
+        (d / "specs" / "ir").is_dir() and any((d / "specs" / "ir").glob("*.spec-ir.json"))
+        for d in dirs
+    )
+    if inputs.spec_units or not has_git_specs:
         return None
     return Finding(
         id=f"knowledge:{GIT_SPECS_REQUIREMENT_ID}",
@@ -701,6 +729,55 @@ def _git_specs_notice(project_dir: Path, inputs: _Inputs) -> Finding | None:
         claim_scope="command_invocation",
         code_refs=[SourceRef(snapshot_id="specs", path="specs/ir")],
         next_steps=["speclino import-specs で取り込み、承認する"],
+    )
+
+
+CONFIG_CHANGE_REQUIREMENT_ID = "KNOWLEDGE-BINDINGS-001"
+_TRUSTED_CONFIG = ("bindings.yaml", "contracts", "exceptions.yaml", "policy")
+
+
+def _config_fingerprint(root: Path) -> dict[str, str]:
+    """対応・契約・免除・規約のファイル → 中身のハッシュ（信頼側との比較用）。"""
+    out: dict[str, str] = {}
+    for name in _TRUSTED_CONFIG:
+        target = root / ".speclino" / name
+        if target.is_file():
+            files = [target]
+        elif target.is_dir():
+            files = sorted(p for p in target.rglob("*") if p.is_file())
+        else:
+            files = []
+        for f in files:
+            out[f.relative_to(root).as_posix()] = content_hash(f.read_text(encoding="utf-8"))
+    return out
+
+
+def _config_change_notice(head_dir: Path, trusted_dir: Path) -> Finding | None:
+    """PR が対応・契約・免除・規約を変えていれば REVIEW（その変更は判定に使っていない）。
+
+    bundle の run はそれらを信頼側（base）から読むので、head の変更はこの run の判定に効かない。
+    黙って無視せず、人が見て取り込むべき変更として必須の REVIEW にする（ゲートは止まる）。
+    """
+    if head_dir == trusted_dir:
+        return None
+    head, base = _config_fingerprint(head_dir), _config_fingerprint(trusted_dir)
+    changed = sorted(p for p in {*head, *base} if head.get(p) != base.get(p))
+    if not changed:
+        return None
+    return Finding(
+        id=f"knowledge:{CONFIG_CHANGE_REQUIREMENT_ID}",
+        requirement_id=CONFIG_CHANGE_REQUIREMENT_ID,
+        behavior_id="knowledge:config",
+        verdict="REVIEW",
+        category="stale_approval",
+        severity="high",
+        message=(
+            "PR が対応・契約・免除・規約のファイルを変えている。判定は base の内容で行い、"
+            "この変更はマージ後の run で効く: " + ", ".join(changed)
+        ),
+        claim_scope="persisted_state",
+        code_refs=[SourceRef(snapshot_id="head", path=p) for p in changed],
+        next_steps=["変更をレビューしてから取り込む（取り込んだ後の run で判定に使われる）"],
     )
 
 
@@ -1099,7 +1176,11 @@ class _PolicyRunResult:
 
 
 def _run_policies(
-    project_dir: Path, team_policy: PolicyRevision | None, *, tolerate_errors: bool = False
+    project_dir: Path,
+    team_policy: PolicyRevision | None,
+    *,
+    tolerate_errors: bool = False,
+    config_dir: Path | None = None,
 ) -> _PolicyRunResult:
     """チーム規約（`team_policy.package`）と `.speclino/policy/*.yaml`（プロジェクト固有の
     追加規約）の両方を VerifierRegistry で実行する。
@@ -1125,7 +1206,9 @@ def _run_policies(
                 out.append(_policy_error_finding(rule, e))
         return out
 
-    exceptions = _load_exceptions(project_dir)
+    # 規約の定義と免除は config_dir（bundle の run では信頼側）から、検査の対象は project_dir
+    config_dir = config_dir if config_dir is not None else project_dir
+    exceptions = _load_exceptions(config_dir)
     snapshot = DirectorySnapshot(root=project_dir)
     registry = _policy_registry()
 
@@ -1145,7 +1228,7 @@ def _run_policies(
         levels.update(_policy_levels(team_policy.package, team_findings))
         rules_by_id.update({rule.id: rule for rule in team_policy.package.rules})
 
-    policy_dir = project_dir / ".speclino" / "policy"
+    policy_dir = config_dir / ".speclino" / "policy"
     policy_files = (
         sorted({*policy_dir.glob("*.yaml"), *policy_dir.glob("*.yml")})
         if policy_dir.is_dir()
