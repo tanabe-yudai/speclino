@@ -18,6 +18,7 @@ from speclino.a2a_server.mount import mount_a2a
 from speclino.api.deps import AppState, build_state
 from speclino.api.errors import error_responses, install_error_handlers
 from speclino.api.routes import (
+    attestations,
     internal_mcp,
     knowledge,
     mcp_tokens,
@@ -105,6 +106,7 @@ def create_app(settings: Settings, state: AppState | None = None) -> FastAPI:
         app.include_router(projects.router)
         app.include_router(policies.router)
         app.include_router(knowledge.router)
+        app.include_router(attestations.router)
         app.include_router(spec_preview.router)
         app.include_router(sync.router)
         app.include_router(sync.bundle_router)

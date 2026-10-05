@@ -38,7 +38,8 @@ from speclino.db.repositories import (
     ReviewRunRepository,
     WebhookDeliveryRepository,
 )
-from speclino.services.approvals import authorize_command, parse_commands
+from speclino.services.approvals import attest_disposition, authorize_command, parse_commands
+from speclino.services.attestations import attest
 from speclino.services.workspaces import resolve_github_project
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
@@ -161,6 +162,10 @@ async def _handle_comment(
                 approver=cm.author_login,
                 comment_url=cm.comment_url,
             )
+        if cmd.kind == "attest":
+            outcome = await _record_attestation(session, cmd.args, cm, project)
+            results.append({"kind": cmd.kind, **outcome})
+            continue
         if cmd.kind == "answer":
             outcome = await _record_answer(session, cmd.args, cm, project, latest)
             results.append({"kind": cmd.kind, **outcome})
@@ -180,6 +185,28 @@ async def _handle_comment(
         )
         return {"status": "queued", "run_id": str(run_id), "commands": results}, [run_id]
     return {"status": "handled", "commands": results}, []
+
+
+async def _record_attestation(
+    session: AsyncSession, args: tuple[str, ...], cm: IssueCommentRef, project: Project | None
+) -> dict[str, Any]:
+    """`/speclino attest <指紋> <sha256:hash> [ack]` を確定として記録する（S70）。
+
+    承認者の照合は `authorize_command` で済んでいる。確定はワークスペースに属するので、
+    ワークスペースに登録されていないリポジトリでは記録しない。actor は `github:<login>`。
+    """
+    if project is None or project.team is None:
+        return {"accepted": False, "reason": "ワークスペースに登録されていないリポジトリ"}
+    saved = await attest(
+        session,
+        fingerprint=args[0],
+        content_hash=args[1],
+        disposition=attest_disposition(args),
+        actor=f"github:{cm.author_login}",
+        workspace=project.team,
+        via=f"pr_comment:{cm.comment_url}",
+    )
+    return {"accepted": True, "disposition": saved.disposition}
 
 
 async def _record_answer(

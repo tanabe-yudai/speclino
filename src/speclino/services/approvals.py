@@ -53,9 +53,25 @@ def authorize_command(cmd: Command, author_login: str, approvers: set[str]) -> C
         )
     if cmd.kind == "answer" and len(cmd.args) != 2:
         return CommandDecision(False, "answer の引数は <質問ID> <選択肢>", cmd)
-    if cmd.kind == "attest" and len(cmd.args) < 2:
-        return CommandDecision(False, "attest の引数は <要求ID> <理由>", cmd)
+    if cmd.kind == "attest" and not _attest_args_ok(cmd.args):
+        return CommandDecision(
+            False, "attest の引数は <指紋> <sha256:内容の hash> [ack]（S70）", cmd
+        )
     return CommandDecision(True, "承認者のコマンド", cmd)
+
+
+_CONTENT_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+def _attest_args_ok(args: tuple[str, ...]) -> bool:
+    """`/speclino attest <指紋> <sha256:hash> [ack]`。ack は acknowledged_violation。"""
+    if len(args) not in (2, 3) or not _CONTENT_HASH_RE.match(args[1]):
+        return False
+    return len(args) == 2 or args[2] == "ack"
+
+
+def attest_disposition(args: tuple[str, ...]) -> Literal["attested", "acknowledged_violation"]:
+    return "acknowledged_violation" if len(args) == 3 else "attested"
 
 
 def approval_from_command(

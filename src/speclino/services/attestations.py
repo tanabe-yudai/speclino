@@ -11,14 +11,19 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from speclino.db.models import Project, ReviewRun
+from speclino.db.repositories import ProjectRepository, ReviewRunRepository
 from speclino.db.repositories.assessments import AttestationRepository
 from speclino.db.repositories.audit import AuditRepository
 from speclino.domain.assessment import Attestation, Disposition
 from speclino.domain.finding import Finding, Findings
+from speclino.domain.workspace import APPROVER_ROLES
+from speclino.services.workspaces import WorkspaceNotFound, role_of
 from speclino.services.llm_policies import CONTENT_HASH_REF, FINGERPRINT_REF
 
 CONFIG_CHANGE_REQUIREMENT_ID = "KNOWLEDGE-BINDINGS-001"
@@ -124,6 +129,67 @@ async def attest(
     return saved
 
 
+async def attest_as_member(
+    session: AsyncSession,
+    *,
+    workspace: str,
+    uid: str,
+    fingerprint: str,
+    content_hash: str,
+    disposition: Disposition,
+    audit_factory: async_sessionmaker[AsyncSession] | None = None,
+) -> Attestation:
+    """画面（REST）からの確定。owner / approver だけ。
+
+    メンバーでなければ（別のワークスペースも）`WorkspaceNotFound`（404、存在を漏らさない）、
+    member なら `PermissionError`（403）。拒否は `audit_factory` の別トランザクションで監査に残す
+    （呼び出し側のトランザクションは例外で巻き戻るため）。
+    """
+    role = await role_of(session, workspace, uid)
+    if role is None:
+        raise WorkspaceNotFound(workspace)
+    if role not in APPROVER_ROLES:
+        if audit_factory is not None:
+            async with audit_factory() as s, s.begin():
+                await AuditRepository(s).record(
+                    uid,
+                    "attestation.record",
+                    f"{workspace}:{fingerprint}",
+                    "rejected",
+                    {
+                        "content_hash": content_hash,
+                        "via": "api",
+                        "reason": "owner / approver ではない",
+                    },
+                )
+        raise PermissionError(f"{uid} は {workspace} の owner / approver ではない")
+    return await attest(
+        session,
+        fingerprint=fingerprint,
+        content_hash=content_hash,
+        disposition=disposition,
+        actor=uid,
+        workspace=workspace,
+        via="api",
+    )
+
+
+async def recheck_target(
+    session: AsyncSession, workspace: str, run_id: uuid.UUID
+) -> tuple[Project, ReviewRun]:
+    """確定のあとに再検査する (project, その PR の最新の run)。
+
+    run がこのワークスペースのプロジェクトのものでなければ LookupError（404。存在を漏らさない）。
+    """
+    runs = ReviewRunRepository(session)
+    run = await runs.get(run_id)
+    project = await ProjectRepository(session).get(run.project_id) if run is not None else None
+    if run is None or project is None or project.team != workspace:
+        raise LookupError(f"run {run_id} が無い")
+    latest = await runs.latest_run_for_pr(project.id, run.pr_number) if run.pr_number else None
+    return project, latest or run
+
+
 async def list_attestations(session: AsyncSession, workspace: str) -> list[Attestation]:
     return await AttestationRepository(session).list_for_workspace(workspace)
 
@@ -135,7 +201,9 @@ __all__ = [
     "applied_attestations",
     "apply_attestations",
     "attest",
+    "attest_as_member",
     "attestation_target",
     "informational_ids",
     "list_attestations",
+    "recheck_target",
 ]
