@@ -162,9 +162,10 @@ def test_unrecognized_is_other(message: str) -> None:
     assert unknown_reason(_f(message)) == "other"
 
 
-def _rule(verifier: str | None, level: str = "advisory") -> PolicyRule:
+def _rule(verifier: str | None, level: str = "advisory", tier: str = "deterministic") -> PolicyRule:
     return PolicyRule.model_validate(
         {
+            "tier": tier,
             "id": "R",
             "version": "1",
             "level": level,
@@ -179,7 +180,7 @@ def _rule(verifier: str | None, level: str = "advisory") -> PolicyRule:
 
 def test_rule_tier() -> None:
     assert rule_tier(_rule(None)) == "unverified"
-    assert rule_tier(_rule("llm.checklist")) == "llm_assisted"
+    assert rule_tier(_rule("llm.checklist", tier="llm_assisted")) == "llm_assisted"
     assert rule_tier(_rule("make.targets", "mandatory")) == "deterministic"
 
 

@@ -50,8 +50,6 @@ from speclino.domain.uml import RequirementRow
 from speclino.services.knowledge_sync import LOCK_REQUIREMENT_ID
 from speclino.services.project_overview import count_verdicts, policy_rule_id
 
-LLM_VERIFIER_ID = "llm.checklist"
-
 # 検査器（conformance/・services/check_pipeline.py）が UNKNOWN に付ける決まった言い回しの接頭辞。
 # Finding に理由の欄は無い（契約を変えない）ので、言い回しで分類する。判別できなければ other。
 # 言い回しは test_observability_reasons.py が検査器のソースと突き合わせて固定する。
@@ -90,9 +88,10 @@ def unknown_reason(f: Finding) -> UnknownReason:
 
 
 def rule_tier(rule: PolicyRule) -> RuleTier:
+    """規約の段。段は PolicyRule.tier（S70）が正本で、検査器の無いルールだけ unverified にする。"""
     if rule.verifier is None:
         return "unverified"
-    return "llm_assisted" if rule.verifier.id == LLM_VERIFIER_ID else "deterministic"
+    return rule.tier
 
 
 def ratio(numerator: int, denominator: int) -> Ratio | None:
