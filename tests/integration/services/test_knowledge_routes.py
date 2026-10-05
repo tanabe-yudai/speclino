@@ -86,7 +86,11 @@ async def test_create_update_approve_and_bundle(ctx: Ctx) -> None:
 
     put = await c.put(
         f"/api/w/{slug}/artifacts/{aid}/draft",
-        json={"expected_revision": 1, "content": _instr("直した")},
+        json={
+            "expected_revision": 1,
+            "expected_hash": created["content_hash"],
+            "content": _instr("直した"),
+        },
         headers=MEMBER,
     )
     assert put.status_code == 200, put.text
@@ -136,7 +140,7 @@ async def test_other_workspace_is_404(ctx: Ctx) -> None:
         (
             "PUT",
             f"/api/w/{slug}/artifacts/{aid}/draft",
-            {"expected_revision": 1, "content": _instr()},
+            {"expected_revision": 1, "expected_hash": "h", "content": _instr()},
         ),
         (
             "POST",

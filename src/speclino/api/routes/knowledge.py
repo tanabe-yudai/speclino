@@ -37,8 +37,9 @@ class CreateArtifactRequest(BaseModel):
 class DraftRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # 保存する人が前提にした改訂（下書きがあればその番号、無ければ今の active の番号）
+    # 保存する人が前提にした改訂（下書きがあればその下書き、無ければ今の active）の番号と hash
     expected_revision: int = Field(ge=1)
+    expected_hash: str = Field(min_length=1, max_length=200)
     content: ArtifactContent
 
 
@@ -130,6 +131,7 @@ async def put_draft(
                 s,
                 artifact_id=artifact_id,
                 expected_revision=body.expected_revision,
+                expected_hash=body.expected_hash,
                 content=body.content,
                 author=user.uid,
             )

@@ -142,6 +142,12 @@ async def _approve(w: Ws, artifact_id: str, approver: str = "owner1") -> Bundle:
         )
 
 
+async def _latest_hash(w: Ws, artifact_id: str) -> str:
+    """今の最新の改訂（下書きがあれば下書き）の hash。保存する人が見た内容として送る。"""
+    async with w.f() as s:
+        return (await kr.list_revisions(s, artifact_id))[0].content_hash
+
+
 async def _audit(s: AsyncSession, slug: str) -> list[AuditEvent]:
     stmt = select(AuditEvent).where(
         AuditEvent.target.startswith(f"{slug}/", autoescape=True),
@@ -162,13 +168,35 @@ async def test_draft_update_approve_and_new_revision(ws: Ws) -> None:
     aid = await _create(ws, "instructions", "agents", _instr("v1"))
     async with ws.f() as s, s.begin():
         updated = await kr.update_draft(
-            s, artifact_id=aid, expected_revision=1, content=_instr("v1.1"), author="appr1"
+            s,
+            artifact_id=aid,
+            expected_revision=1,
+            expected_hash=await _latest_hash(ws, aid),
+            content=_instr("v1.1"),
+            author="appr1",
         )
     assert updated.revision == 1 and updated.status == "draft"
+    with pytest.raises(
+        DraftConflict
+    ):  # 同じ番号でも、見た内容（hash）が古ければ拒否（後勝ちを防ぐ）
+        async with ws.f() as s, s.begin():
+            await kr.update_draft(
+                s,
+                artifact_id=aid,
+                expected_revision=1,
+                expected_hash=kr.content_hash(_instr("v1")),
+                content=_instr("x"),
+                author="member1",
+            )
     with pytest.raises(DraftConflict):
         async with ws.f() as s, s.begin():
             await kr.update_draft(
-                s, artifact_id=aid, expected_revision=2, content=_instr("x"), author="member1"
+                s,
+                artifact_id=aid,
+                expected_revision=2,
+                expected_hash=await _latest_hash(ws, aid),
+                content=_instr("x"),
+                author="member1",
             )
 
     bundle = await _approve(ws, aid)
@@ -178,6 +206,9 @@ async def test_draft_update_approve_and_new_revision(ws: Ws) -> None:
     async with ws.f() as s:
         stored = await kr.current_bundle(s, ws.slug)
         assert stored == bundle
+        # DB から読み戻した bundle（created_at の µs・tz、JSONB の members）でも署名が通る
+        assert stored is not None and kr.verify_bundle(stored)
+        assert stored.created_at.tzinfo is not None
         assert await kr.get_bundle(s, ws.slug, 1) == bundle
         with pytest.raises(kr.BundleNotFound):
             await kr.get_bundle(s, ws.slug, 99)
@@ -185,7 +216,12 @@ async def test_draft_update_approve_and_new_revision(ws: Ws) -> None:
     # active から次の下書きを始める（見た番号は今の active）
     async with ws.f() as s, s.begin():
         second = await kr.update_draft(
-            s, artifact_id=aid, expected_revision=1, content=_instr("v2"), author="member1"
+            s,
+            artifact_id=aid,
+            expected_revision=1,
+            expected_hash=await _latest_hash(ws, aid),
+            content=_instr("v2"),
+            author="member1",
         )
     assert second.revision == 2 and second.status == "draft"
     bundle2 = await _approve(ws, aid)
@@ -238,7 +274,12 @@ async def test_editor_approval_counts_as_self_approval(ws: Ws) -> None:
     aid = await _create(ws, "instructions", "agents", _instr(), author="member1")
     async with ws.f() as s, s.begin():
         await kr.update_draft(
-            s, artifact_id=aid, expected_revision=1, content=_instr("直した"), author="appr1"
+            s,
+            artifact_id=aid,
+            expected_revision=1,
+            expected_hash=await _latest_hash(ws, aid),
+            content=_instr("直した"),
+            author="appr1",
         )
     await _approve(ws, aid, approver="appr1")
     async with ws.f() as s:
@@ -293,8 +334,8 @@ async def test_skill_name_and_requirement_ids_conflict(ws: Ws) -> None:
     await _approve(ws, a)
     b = await _create(ws, "skill", "review-b", _skill("review", _projects(ws.p2)))
     await _approve(ws, b)  # スコープが重ならなければ同名でよい
-    c = await _create(ws, "skill", "review-c", _skill("review", _ws_scope()))
-    with pytest.raises(kr.BundleConflict, match="review"):
+    c = await _create(ws, "skill", "review-c", _skill("Review", _ws_scope()))  # 大文字違いも同名
+    with pytest.raises(kr.BundleConflict, match="(?i)review"):
         await _approve(ws, c)
 
     s1 = await _create(ws, "spec", "orders", _spec(_projects(ws.p1), "REQ-1"))
@@ -305,7 +346,16 @@ async def test_skill_name_and_requirement_ids_conflict(ws: Ws) -> None:
 
 
 async def test_scope_project_must_belong_to_workspace(ws: Ws) -> None:
-    for bad in (ws.other_project, str(uuid.uuid4()), "not-a-uuid"):
+    u = uuid.UUID(ws.p1)
+    for bad in (
+        ws.other_project,
+        str(uuid.uuid4()),
+        "not-a-uuid",
+        ws.p1.upper(),
+        u.hex,
+        u.urn,
+        "{" + ws.p1 + "}",
+    ):
         with pytest.raises(kr.InvalidArtifact):
             await _create(ws, "instructions", "agents", _instr(scope=_projects(bad)))
 
@@ -333,6 +383,7 @@ async def test_spec_with_errors_cannot_be_approved(ws: Ws) -> None:
             s,
             artifact_id=aid,
             expected_revision=1,
+            expected_hash=draft.content_hash,
             content=_spec(_projects(ws.p1), "REQ-1"),
             author="member1",
         )
@@ -362,7 +413,12 @@ async def test_client_compiled_is_rejected(ws: Ws) -> None:
     with pytest.raises(kr.InvalidArtifact, match="compiled"):
         async with ws.f() as s, s.begin():
             await kr.update_draft(
-                s, artifact_id=aid, expected_revision=1, content=forged, author="member1"
+                s,
+                artifact_id=aid,
+                expected_revision=1,
+                expected_hash=await _latest_hash(ws, aid),
+                content=forged,
+                author="member1",
             )
 
 
@@ -416,7 +472,11 @@ async def test_resolve_for_project(ws: Ws) -> None:
     skill = await _create(ws, "skill", "only-a", _skill("only-a", _projects(ws.p1)))
     spec = await _create(ws, "spec", "orders", _spec(_projects(ws.p2), "REQ-1"))
     for aid in (instr, skill, spec):
-        bundle = await _approve(ws, aid)
+        await _approve(ws, aid)
+    async with ws.f() as s:
+        stored = await kr.current_bundle(s, ws.slug)  # DB から読み戻したもので解決する
+    assert stored is not None
+    bundle = stored
     async with ws.f() as s:
         ra = await kr.resolve_for_project(s, bundle, ws.p1)
         rb = await kr.resolve_for_project(s, bundle, ws.p2)
@@ -492,3 +552,44 @@ async def test_policy_activation_creates_bundle(ws: Ws) -> None:
     async with ws.f() as s:
         resolved = await kr.resolve_for_project(s, bundle, ws.p1)
     assert resolved.policy is not None and resolved.policy.revision == draft.revision
+
+
+async def test_ensure_bundle_creates_the_first_bundle_once(ws: Ws) -> None:
+    """S62 より前からあるワークスペースには bundle が無い。最初の run で 1 回だけ作る。"""
+    async with ws.f() as s:
+        assert await kr.current_bundle(s, ws.slug) is None
+    async with ws.f() as s, s.begin():
+        first = await kr.ensure_bundle(s, ws.slug)
+    async with ws.f() as s, s.begin():
+        again = await kr.ensure_bundle(s, ws.slug)
+    assert first.generation == 1 and first.members == [] and again == first
+    assert kr.verify_bundle(again)
+
+
+async def test_concurrent_ensure_bundle_makes_one(ws: Ws) -> None:
+    async def go() -> Bundle:
+        async with ws.f() as s, s.begin():
+            return await kr.ensure_bundle(s, ws.slug)
+
+    a, b = await asyncio.gather(go(), go())
+    assert a == b and a.generation == 1
+
+
+async def test_draft_audit_has_the_content_hash(ws: Ws) -> None:
+    aid = await _create(ws, "instructions", "agents", _instr("v1"))
+    async with ws.f() as s, s.begin():
+        await kr.update_draft(
+            s,
+            artifact_id=aid,
+            expected_revision=1,
+            expected_hash=kr.content_hash(_instr("v1")),
+            content=_instr("v2"),
+            author="member1",
+        )
+    async with ws.f() as s:
+        audit = await _audit(s, ws.slug)
+    hashes = {a.decision: a.detail["content_hash"] for a in audit if a.action == "knowledge.draft"}
+    assert hashes == {
+        "created": kr.content_hash(_instr("v1")),
+        "updated": kr.content_hash(_instr("v2")),
+    }

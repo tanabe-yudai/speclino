@@ -2289,6 +2289,12 @@
             ],
             "title": "Content"
           },
+          "expected_hash": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Expected Hash",
+            "type": "string"
+          },
           "expected_revision": {
             "minimum": 1.0,
             "title": "Expected Revision",
@@ -2297,6 +2303,7 @@
         },
         "required": [
           "expected_revision",
+          "expected_hash",
           "content"
         ],
         "title": "DraftRequest",

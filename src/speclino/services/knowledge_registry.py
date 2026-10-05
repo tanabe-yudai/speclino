@@ -140,13 +140,7 @@ async def _scope_problems(
     session: AsyncSession, workspace: str, revisions: list[tuple[str, ArtifactScope]]
 ) -> list[str]:
     """スコープに挙げたプロジェクトが workspace に属しているか。(名前, scope) ごとの問題を返す。"""
-    wanted: dict[str, uuid.UUID | None] = {}
-    for _, scope in revisions:
-        for p in scope.projects:
-            try:
-                wanted[p] = uuid.UUID(p)
-            except ValueError:
-                wanted[p] = None
+    wanted = {p: _canonical_project_id(p) for _, scope in revisions for p in scope.projects}
     ids = [u for u in wanted.values() if u is not None]
     teams: dict[uuid.UUID, str | None] = {}
     if ids:
@@ -159,6 +153,30 @@ async def _scope_problems(
             if pid is None or teams.get(pid) != workspace:
                 problems.append(f"{name}: プロジェクト {p} はワークスペース {workspace} に属さない")
     return problems
+
+
+def _canonical_project_id(p: str) -> uuid.UUID | None:
+    """正規形（小文字・ハイフン区切り）の UUID 文字列だけを受け付ける。
+
+    `uuid.UUID` は大文字・ハイフン無し・`urn:uuid:`・波括弧も読むので、同じプロジェクトを
+    別の綴りでスコープに書けてしまい、スコープの重なりの判定（文字列比較）をすり抜ける。
+    """
+    try:
+        u = uuid.UUID(p)
+    except ValueError:
+        return None
+    return u if str(u) == p else None
+
+
+def _normalized_projects(scope: ArtifactScope) -> set[str]:
+    """比較用のプロジェクト ID（防御的に正規化する。読めない ID はそのまま）。"""
+    out = set()
+    for p in scope.projects:
+        try:
+            out.add(str(uuid.UUID(p)))
+        except ValueError:
+            out.add(p)
+    return out
 
 
 async def _lock_workspace(session: AsyncSession, workspace: str) -> TeamRepository:
@@ -202,7 +220,7 @@ async def create_draft(
         _DRAFT,
         _target(workspace, revision.artifact_id, 1),
         "created",
-        {"kind": kind, "name": name},
+        {"kind": kind, "name": name, "content_hash": revision.content_hash},
     )
     return revision
 
@@ -212,13 +230,15 @@ async def update_draft(
     *,
     artifact_id: str,
     expected_revision: int,
+    expected_hash: str,
     content: ArtifactContent,
     author: str,
 ) -> ArtifactRevision:
     """下書きを保存する。下書きがあれば置き換え、無ければ最新の改訂の次の番号で作る。
 
-    `expected_revision` は保存する人が前提にした改訂（下書きがあればその番号、無ければ今の
-    最新＝active の番号）。違えば `DraftConflict`（古い画面から他の人の変更を上書きしない）。
+    `expected_revision` / `expected_hash` は保存する人が前提にした改訂の番号と content_hash
+    （下書きがあればその下書き、無ければ今の最新＝active）。違えば `DraftConflict`（古い画面から
+    他の人の変更を後勝ちで上書きしない）。
     """
     aid = _parse_id(artifact_id)
     repo = ArtifactRepository(session)
@@ -235,7 +255,7 @@ async def update_draft(
     data, digest = content.model_dump(mode="json"), content_hash(content)
     draft = await repo.current_draft(aid)
     if draft is not None:
-        if draft.revision != expected_revision:
+        if draft.revision != expected_revision or draft.content_hash != expected_hash:
             raise DraftConflict(f"{artifact_id} の下書きが変わった。読み直してから保存する")
         saved = await repo.update_draft(
             artifact_id=aid, revision=draft.revision, content=data, content_hash=digest
@@ -243,7 +263,11 @@ async def update_draft(
         decision = "updated"
     else:
         latest = await repo.latest(aid)
-        if latest is None or latest.revision != expected_revision:
+        if (
+            latest is None
+            or latest.revision != expected_revision
+            or latest.content_hash != expected_hash
+        ):
             raise DraftConflict(f"{artifact_id} の改訂が変わった。読み直してから保存する")
         saved = await repo.add_draft(
             artifact_id=aid,
@@ -260,7 +284,7 @@ async def update_draft(
         _DRAFT,
         _target(artifact.workspace, artifact_id, saved.revision),
         decision,
-        {"kind": artifact.kind, "name": artifact.name},
+        {"kind": artifact.kind, "name": artifact.name, "content_hash": saved.content_hash},
     )
     return saved
 
@@ -372,7 +396,7 @@ def _requirement_ids(rev: ArtifactRevision) -> set[str]:
 
 
 def _overlaps(a: ArtifactScope, b: ArtifactScope) -> bool:
-    return a.workspace or b.workspace or bool(set(a.projects) & set(b.projects))
+    return a.workspace or b.workspace or bool(_normalized_projects(a) & _normalized_projects(b))
 
 
 def _conflicts(actives: list[ArtifactRevision]) -> list[str]:
@@ -383,7 +407,7 @@ def _conflicts(actives: list[ArtifactRevision]) -> list[str]:
         if c.kind == "instructions":
             groups[f"指示書 {c.target}"].append(rev)
         elif c.kind == "skill":
-            groups[f"スキル名 {_skill_name(rev)}"].append(rev)
+            groups[f"スキル名 {_skill_name(rev).casefold()}"].append(rev)
         else:
             for rid in _requirement_ids(rev):
                 groups[f"要求 ID {rid}"].append(rev)
@@ -447,6 +471,19 @@ async def current_bundle(session: AsyncSession, workspace: str) -> Bundle | None
     return await BundleRepository(session).latest(workspace)
 
 
+async def ensure_bundle(session: AsyncSession, workspace: str) -> Bundle:
+    """今の bundle。まだ無ければ（S62 より前からのワークスペース）ワークスペースのロックの下で作る。
+
+    run の開始（S65）が使う。ロックを取ってから確かめ直すので、同時に呼ばれても 1 つだけ作る。
+    """
+    found = await current_bundle(session, workspace)
+    if found is not None:
+        return found
+    await _lock_workspace(session, workspace)
+    found = await current_bundle(session, workspace)
+    return found if found is not None else await build_bundle(session, workspace)
+
+
 async def get_bundle(session: AsyncSession, workspace: str, generation: int) -> Bundle:
     bundle = await BundleRepository(session).at(workspace, generation)
     if bundle is None:
@@ -477,7 +514,7 @@ async def resolve_for_project(
         if rev is None or rev.content_hash != m.content_hash or rev.workspace != bundle.workspace:
             raise ValueError(f"bundle のメンバー {m.name}@{m.revision} が改訂と合わない")
         scope = rev.content.scope
-        if scope.workspace or project_id in scope.projects:
+        if scope.workspace or str(project.id) in _normalized_projects(scope):
             by_kind[rev.kind].append(rev)
     policy = None
     if bundle.policy_revision is not None:
@@ -552,6 +589,7 @@ __all__ = [
     "create_draft",
     "current_bundle",
     "current_draft",
+    "ensure_bundle",
     "get_bundle",
     "list_artifacts",
     "list_revisions",
