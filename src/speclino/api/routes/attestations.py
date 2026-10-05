@@ -1,6 +1,8 @@
 """人の確定（S70）の API。判断は services/attestations.py。
 
-確定できるのは owner / approver（member は 403、拒否は監査に残る）。メンバーでない・別の
+確定できるのは owner / approver（member は 403、拒否は監査に残る）。対応表・免除・規約の変更
+（KNOWLEDGE-BINDINGS-001）の確定は、PR の作成者と照合できる PR コメントだけで受け付け、ここでは
+403（`bindings_attest_requires_pr_comment`、裁定 35）。メンバーでない・別の
 ワークスペースは 404（存在を漏らさない）。`run_id` を渡すと、その PR の最新の head で再検査の
 run を作る（PR コメントの承認と同じく、確定は次の run のゲートに効く）。
 """
@@ -68,6 +70,8 @@ async def create_attestation(
                 )
     except WorkspaceNotFound as e:
         raise api_error(404, "workspace_not_found", "ワークスペースが無い") from e
+    except svc.BindingsAttestRequiresPrComment as e:
+        raise api_error(403, "bindings_attest_requires_pr_comment", str(e)) from e
     except PermissionError as e:
         raise api_error(403, "not_an_approver", "確定できるのは owner / approver だけ") from e
     except LookupError as e:

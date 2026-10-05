@@ -4,6 +4,8 @@ import {
   canAttest,
   configChangeWarning,
   describeAttestation,
+  prCommentCommand,
+  requiresPrComment,
   recordedAttestation,
 } from './attestation'
 import type { Finding } from '@/types/finding'
@@ -78,6 +80,15 @@ describe('recordedAttestation / describeAttestation', () => {
     expect(configChangeWarning({ ...cfg, self_attested: null })).toContain('照合できない')
     expect(configChangeWarning({ ...cfg, self_attested: false })).toBeNull()
     expect(configChangeWarning(att)).toBeNull()
+  })
+})
+
+describe('requiresPrComment', () => {
+  it('KNOWLEDGE-BINDINGS-001 は PR コメントのコマンドを出す', () => {
+    const target = { fingerprint: `KNOWLEDGE-BINDINGS-001:${HASH}`, contentHash: HASH }
+    expect(requiresPrComment(target)).toBe(true)
+    expect(prCommentCommand(target)).toBe(`/speclino attest KNOWLEDGE-BINDINGS-001:${HASH} ${HASH}`)
+    expect(requiresPrComment({ fingerprint: 'R:i:abc', contentHash: HASH })).toBe(false)
   })
 })
 

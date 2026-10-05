@@ -64,6 +64,18 @@ export function configChangeWarning(a: Pick<Attestation, 'fingerprint' | 'self_a
   return `${who}が判定の前提（対応・契約・免除・規約）の変更を確定しています。別の人によるレビューを推奨します`
 }
 
+/**
+ * 対応表・免除・規約の変更（KNOWLEDGE-BINDINGS-001）の確定は PR コメントだけで受け付ける
+ * （画面の利用者は PR の作成者と照合できないため。API は 403）。画面はボタンの代わりにコマンドを出す。
+ */
+export function requiresPrComment(target: AttestationTarget): boolean {
+  return target.fingerprint.startsWith(`${CONFIG_CHANGE_REQUIREMENT_ID}:`)
+}
+
+export function prCommentCommand(target: AttestationTarget): string {
+  return `/speclino attest ${target.fingerprint} ${target.contentHash}`
+}
+
 export function canAttest(role: WorkspaceRole | null | undefined): boolean {
   return role === 'owner' || role === 'approver'
 }

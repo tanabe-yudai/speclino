@@ -167,6 +167,17 @@ def config_change_warning(fingerprint: str, self_attested: bool | None) -> str |
     )
 
 
+BINDINGS_VIA_PR_COMMENT_REASON = "対応表・免除・規約の変更の確定は PR コメントで行う"
+
+
+class BindingsAttestRequiresPrComment(PermissionError):
+    """KNOWLEDGE-BINDINGS-001 の確定を REST で行おうとした（裁定 35。PR コメントだけ受け付ける）。
+
+    画面の uid は GitHub のアカウントと対応しておらず PR の作成者と照合できない。判定の前提を
+    変える確定は、作成者との照合ができる経路に限る。
+    """
+
+
 # SpecLino の uid → 連携済みの GitHub ユーザー ID（未連携なら None）
 GithubIdOf = Callable[[str], Awaitable[int | None]]
 
@@ -197,7 +208,13 @@ async def attest_as_member(
     role = await role_of(session, workspace, uid)
     if role is None:
         raise WorkspaceNotFound(workspace)
+    reject: Exception | None = None
     if role not in APPROVER_ROLES:
+        reject = PermissionError(f"{uid} は {workspace} の owner / approver ではない")
+    elif fingerprint.startswith(f"{CONFIG_CHANGE_REQUIREMENT_ID}:"):
+        # 裁定 35: 信頼側の設定の変更は、作成者との照合（GitHub の ID）ができる PR コメントだけ
+        reject = BindingsAttestRequiresPrComment(BINDINGS_VIA_PR_COMMENT_REASON)
+    if reject is not None:
         if audit_factory is not None:
             async with audit_factory() as s, s.begin():
                 await AuditRepository(s).record(
@@ -205,13 +222,9 @@ async def attest_as_member(
                     "attestation.record",
                     f"{workspace}:{fingerprint}",
                     "rejected",
-                    {
-                        "content_hash": content_hash,
-                        "via": "api",
-                        "reason": "owner / approver ではない",
-                    },
+                    {"content_hash": content_hash, "via": "api", "reason": str(reject)},
                 )
-        raise PermissionError(f"{uid} は {workspace} の owner / approver ではない")
+        raise reject
     target = await recheck_target(session, workspace, run_id) if run_id is not None else None
     saved = await attest(
         session,
@@ -279,6 +292,8 @@ __all__ = [
     "attestation_target",
     "informational_ids",
     "list_attestations",
+    "BINDINGS_VIA_PR_COMMENT_REASON",
+    "BindingsAttestRequiresPrComment",
     "GithubIdOf",
     "config_change_warning",
     "same_github_user",

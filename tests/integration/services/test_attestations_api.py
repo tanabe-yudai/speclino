@@ -238,17 +238,48 @@ async def test_self_attestation_is_matched_by_github_id(ctx: Ctx, engine: AsyncE
     assert await _attest_via_service(engine, ctx, run_id, "owner1", "R:i:2", linked) is False
     # 未連携は照合不可（null）。黙って false にしない
     assert await _attest_via_service(engine, ctx, run_id, "dev", "R:i:3", linked) is None
-    cfg = f"KNOWLEDGE-BINDINGS-001:{HASH}"
-    assert await _attest_via_service(engine, ctx, run_id, "approver1", cfg, linked) is True
     audit = await _audit_detail(engine, ctx.slug)
     assert [(a, m) for a, m, _ in audit] == [
         ("approver1", True),
         ("owner1", False),
         ("dev", None),
-        ("approver1", True),
     ]
-    # 対応・規約の変更の自己確定は監査に警告（拒否はしない）
-    assert [w is not None for _, _, w in audit] == [False, False, False, True]
+
+
+async def test_bindings_attestation_is_rejected_over_rest(ctx: Ctx, engine: AsyncEngine) -> None:
+    """裁定 35: 対応表・免除・規約の変更の確定は PR コメントだけ。REST は 403、拒否は監査に残る。"""
+    run_id = await _pr_run_by(ctx, DEV_ID)
+    url = f"/api/workspaces/{ctx.slug}/attestations"
+    body = {
+        "fingerprint": f"KNOWLEDGE-BINDINGS-001:{HASH}",
+        "content_hash": HASH,
+        "disposition": "attested",
+        "run_id": run_id,
+    }
+    res = await ctx.c.post(url, json=body, headers=OWNER)
+    assert res.status_code == 403
+    assert res.json()["error"]["code"] == "bindings_attest_requires_pr_comment"
+    assert "PR コメント" in res.json()["error"]["message"]
+    assert await _stored(engine, ctx.slug) == []
+    assert await _audit(engine, ctx.slug) == [("owner1", "rejected")]
+
+
+async def test_bindings_attestation_via_pr_comment_is_accepted(
+    ctx: Ctx, engine: AsyncEngine
+) -> None:
+    await _pr_run_by(ctx, DEV_ID)
+    await set_project_approvers(engine, ctx.repo, ["dev"])
+    fp = f"KNOWLEDGE-BINDINGS-001:{HASH}"
+    payload = comment_payload(ctx.repo, 1, f"/speclino attest {fp} {HASH}", "dev")
+    payload["comment"]["user"]["id"] = DEV_ID
+    payload["issue"]["user"] = {"login": "dev", "id": DEV_ID}
+    raw, headers = signed(payload, "issue_comment")
+    res = (await ctx.c.post("/webhooks/github", content=raw, headers=headers)).json()
+    assert res["commands"][0]["accepted"] is True and res["commands"][0]["self_attested"] is True
+    assert await _stored(engine, ctx.slug) == [(fp, "attested", "github:dev")]
+    # 作成者自身の確定は拒否せず、監査に警告を残す
+    ((actor, mark, warning),) = await _audit_detail(engine, ctx.slug)
+    assert (actor, mark) == ("github:dev", True) and warning is not None
 
 
 async def test_self_attestation_is_null_without_author_id(ctx: Ctx, engine: AsyncEngine) -> None:

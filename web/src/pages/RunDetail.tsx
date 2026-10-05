@@ -17,7 +17,9 @@ import {
   canAttest,
   configChangeWarning,
   describeAttestation,
+  prCommentCommand,
   recordedAttestation,
+  requiresPrComment,
 } from '../services/attestation'
 import { describeGateReason } from '../services/gate'
 import { useMe } from '../hooks/useMe'
@@ -283,15 +285,23 @@ function FindingAttest({ slug, run, finding, mayAttest }: FindingAttestProps) {
           {configChangeWarning(recorded)}
         </p>
       )}
-      {mayAttest && slug && (
-        <AttestButton
-          slug={slug}
-          runId={run.id}
-          target={target}
-          onDone={(recheck) => {
-            if (recheck) navigate(paths.run(recheck))
-          }}
-        />
+      {requiresPrComment(target) ? (
+        <p className="text-sm text-ink-2">
+          対応表・免除・規約の変更の確定は PR コメントで行います（PR の作成者と照合するため）:{' '}
+          <code className="font-mono text-xs break-all">{prCommentCommand(target)}</code>
+        </p>
+      ) : (
+        mayAttest &&
+        slug && (
+          <AttestButton
+            slug={slug}
+            runId={run.id}
+            target={target}
+            onDone={(recheck) => {
+              if (recheck) navigate(paths.run(recheck))
+            }}
+          />
+        )
       )}
     </div>
   )
