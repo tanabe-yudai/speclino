@@ -21,7 +21,6 @@ import する。check_pipeline ← knowledge_registry の循環を避けるた�
 from __future__ import annotations
 
 import hashlib
-import json
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 
@@ -37,9 +36,16 @@ KnowledgeResolver = Callable[[str, str], Awaitable[ResolvedKnowledge]]
 
 
 def bundle_hash(bundle: Bundle) -> str:
-    """manifest に残す bundle のハッシュ（署名を含む正規 JSON の sha256）。"""
-    payload = json.dumps(bundle.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
-    return "sha256:" + hashlib.sha256(payload.encode()).hexdigest()
+    """manifest に残す bundle のハッシュ。
+
+    署名の対象と同じ正規ペイロード（`knowledge_registry.bundle_payload`）に署名を足したものの
+    sha256。署名と別の正規化を持たない（同じ bundle は署名の検証と同じ bytes で同一視する）。
+    """
+    from speclino.services.knowledge_registry import bundle_payload
+
+    digest = hashlib.sha256(bundle_payload(bundle))
+    digest.update(b"\n" + bundle.signature.encode("utf-8", "surrogatepass"))
+    return "sha256:" + digest.hexdigest()
 
 
 def _tail_matches(symbol: str, name: str) -> bool:

@@ -499,8 +499,10 @@ class ConformanceEngine:
             )
         # 回数は成立。引数の一致を Z3 で検査
         conj: list[Any] = []
+        # 引数は名前順（IR の dict のキー順に判定・文言・反例を依らせない。JSONB は順を保たない）
+        args_equal = sorted(req.arguments_equal.items())
         for e in sel.must + sel.may:
-            for name, req_expr in req.arguments_equal.items():
+            for name, req_expr in args_equal:
                 if name not in e.arguments:
                     return _PathResult(
                         "UNKNOWN",
@@ -524,7 +526,7 @@ class ConformanceEngine:
         arg_actual = "; ".join(
             f"{name} = {self._describe_expr(e.arguments[name])}"
             for e in sel.must + sel.may
-            for name in req.arguments_equal
+            for name, _ in args_equal
         )
         return self._violation(
             rule, path, "argument_mismatch", expected, arg_actual, model, channel=channel
