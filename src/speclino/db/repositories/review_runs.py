@@ -35,8 +35,10 @@ class ReviewRunRepository:
         trigger: str,
         budget: dict[str, Any] | None = None,
         parent_run_id: uuid.UUID | None = None,
+        pr_author_id: int | None = None,
     ) -> ReviewRun:
         run = ReviewRun(
+            pr_author_id=pr_author_id,
             project_id=project_id,
             pr_number=pr_number,
             head_sha=head_sha,
@@ -140,6 +142,22 @@ class ReviewRunRepository:
             select(ReviewRun)
             .where(
                 ReviewRun.project_id == project_id,
+                ReviewRun.exec_state.in_(("completed", "awaiting_answer")),
+            )
+            .order_by(ReviewRun.created_at.desc())
+            .limit(1)
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none()
+
+    async def latest_completed_for_pr(
+        self, project_id: uuid.UUID, pr_number: int
+    ) -> ReviewRun | None:
+        """その PR の最新の完了した run（S70: PR コメントの確定の照合先）。"""
+        stmt = (
+            select(ReviewRun)
+            .where(
+                ReviewRun.project_id == project_id,
+                ReviewRun.pr_number == pr_number,
                 ReviewRun.exec_state.in_(("completed", "awaiting_answer")),
             )
             .order_by(ReviewRun.created_at.desc())

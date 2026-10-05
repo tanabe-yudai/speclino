@@ -83,6 +83,50 @@
         "title": "ArtifactScope",
         "type": "object"
       },
+      "AttestRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "content_hash": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Content Hash",
+            "type": "string"
+          },
+          "disposition": {
+            "enum": [
+              "attested",
+              "acknowledged_violation"
+            ],
+            "title": "Disposition",
+            "type": "string"
+          },
+          "fingerprint": {
+            "maxLength": 300,
+            "minLength": 1,
+            "pattern": "^\\S+$",
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          }
+        },
+        "required": [
+          "fingerprint",
+          "content_hash",
+          "disposition"
+        ],
+        "title": "AttestRequest",
+        "type": "object"
+      },
       "AuthorizeRequest": {
         "properties": {
           "repo_full_name": {
@@ -1325,6 +1369,16 @@
           "text": {
             "minLength": 1,
             "title": "Text",
+            "type": "string"
+          },
+          "tier": {
+            "default": "deterministic",
+            "description": "llm_assisted は検査器 llm.checklist（LLM は REVIEW しか出さず、確定は人）",
+            "enum": [
+              "deterministic",
+              "llm_assisted"
+            ],
+            "title": "Tier",
             "type": "string"
           },
           "title": {
@@ -3735,6 +3789,90 @@
         "summary": "List Revisions",
         "tags": [
           "knowledge"
+        ]
+      }
+    },
+    "/api/workspaces/{slug}/attestations": {
+      "post": {
+        "operationId": "create_attestation_api_workspaces__slug__attestations_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Attestation Api Workspaces  Slug  Attestations Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Create Attestation",
+        "tags": [
+          "attestations"
         ]
       }
     },

@@ -115,14 +115,17 @@ async def engine() -> AsyncIterator[AsyncEngine]:
                 f"(SELECT id FROM artifacts WHERE workspace IN ({ws}))"
             )
         )
-        for table in ("artifacts", "bundles", "knowledge_fetches"):
+        for table in ("artifacts", "bundles", "knowledge_fetches", "attestations"):
             await conn.execute(sql_text(f"DELETE FROM {table} WHERE workspace IN ({ws})"))
         await conn.execute(sql_text(f"DELETE FROM sync_tokens WHERE team IN ({ws})"))
         await conn.execute(
             sql_text(
-                "DELETE FROM audit_events WHERE action LIKE 'knowledge.%' AND target LIKE 'e2e-%'"
+                "DELETE FROM audit_events WHERE (action LIKE 'knowledge.%' "
+                "OR action = 'attestation.record') AND target LIKE 'e2e-%'"
             )
         )
+        # LLM 支援の評価の記録（S70）。テストはモデル名を fake- で始める
+        await conn.execute(sql_text("DELETE FROM llm_assessments WHERE key LIKE '%\"fake-%'"))
         for table, col, sub in (
             ("findings", "run_id", rid),
             ("run_events", "run_id", rid),

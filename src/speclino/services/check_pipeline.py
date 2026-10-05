@@ -40,9 +40,10 @@ knowledge が None（CLI のローカル実行・自己検証）なら従来ど�
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from functools import partial
 from pathlib import Path
@@ -71,6 +72,7 @@ from speclino.conformance.obligation import ObligationContext
 from speclino.conformance.semantic_diff import DiffSide, annotate_findings, semantic_diff
 from speclino.conformance.state_check import check_state_machine
 from speclino.conformance.trace_check import check_trace
+from speclino.domain.assessment import Attestation
 from speclino.domain.bindings import Bindings, OperationContract
 from speclino.domain.code_ir import (
     AnalysisLimits,
@@ -90,7 +92,15 @@ from speclino.domain.run import BehaviorAnalysis, RunInputs, RunManifest, RunVer
 from speclino.domain.semantic_diff import SemanticDiff
 from speclino.domain.spec_ir import RuleLevel, SpecIR
 from speclino.reporter.json_out import write_artifacts
+from speclino.services.attestations import (
+    CONFIG_CHANGE_REQUIREMENT_ID,
+    applied_attestations,
+    apply_attestations,
+    informational_ids,
+    self_attested_ids,
+)
 from speclino.services.knowledge_inputs import OperationResolver, SpecUnit, bundle_hash, spec_units
+from speclino.services.llm_policies import CONTENT_HASH_REF, FINGERPRINT_REF
 from speclino.spec import (
     ValidationReport,
     content_hash,
@@ -108,6 +118,7 @@ from speclino.verifiers.ci_required import CiRequiredVerifier
 from speclino.verifiers.error_message_format import ErrorMessageFormatVerifier
 from speclino.verifiers.exceptions import load_policy_exceptions
 from speclino.verifiers.lint_preset import LintPresetVerifier
+from speclino.verifiers.llm_checklist import LlmChecklistVerifier
 from speclino.verifiers.make_targets import MakeTargetsVerifier
 from speclino.verifiers.naming_identifiers import NamingIdentifiersVerifier
 from speclino.verifiers.registry import VerifierRegistry
@@ -166,6 +177,14 @@ class CheckRequest:
     # 確かめられない run として、これらを読まず KNOWLEDGE-BINDINGS-001 を REVIEW にする
     trusted_root: Path | None = None
     trusted_sha: str | None = None
+    # S70: LLM 支援の規約（tier=llm_assisted）の評価結果。ルール ID → Finding（verdict は REVIEW、
+    # 失敗は UNKNOWN）。評価は worker が run_check の前に行う（このモジュールは LLM を呼ばない）。
+    # None なら LLM 支援のルールは「評価していない」UNKNOWN
+    llm_findings: dict[str, list[Finding]] | None = None
+    # S70: 上の評価に使った記録のキー（manifest の llm_assessment_keys。replay が引く）
+    llm_assessment_keys: tuple[str, ...] = ()
+    # S70: ワークスペースの人の確定。指紋と内容の hash が一致する REVIEW をゲートの阻止から外す
+    attestations: tuple[Attestation, ...] = ()
 
     @property
     def resolved_project_dir(self) -> Path:
@@ -187,6 +206,8 @@ class CheckResult:
     # 仕様側に上書きされる・免除が消えるといったずれが起きる。codex レビュー指摘）。
     gate_levels: dict[str, RuleLevel] = field(default_factory=dict)
     waived_finding_ids: frozenset[str] = field(default_factory=frozenset)
+    # 阻止しない REVIEW（S70: LLM 支援の指摘なし・attested の確定）。再ゲートでも同じものを使う
+    cleared_finding_ids: frozenset[str] = field(default_factory=frozenset)
     # 免除の中身（どの例外で・いつまで・どう直すか）。gate.json に残す
     waivers: list[Waiver] = field(default_factory=list)
     artifacts: dict[str, Path] | None = None
@@ -326,7 +347,11 @@ def _run_check(req: CheckRequest, *, is_base: bool) -> CheckResult:
     # 信頼側が無ければ読まない（None）。検査の対象は head
     config_dir: Path | None = req.trusted_root if knowledge is not None else project_dir
     policy_result = _run_policies(
-        project_dir, team_policy, tolerate_errors=knowledge is not None, config_dir=config_dir
+        project_dir,
+        team_policy,
+        tolerate_errors=knowledge is not None,
+        config_dir=config_dir,
+        llm_findings=req.llm_findings,
     )
     knowledge_findings: list[Finding] = []
     by_unit: dict[str, list[Finding]] = {}
@@ -388,7 +413,17 @@ def _run_check(req: CheckRequest, *, is_base: bool) -> CheckResult:
     waived = frozenset(w.finding_id for w in waivers)
     rejected = rejected_exceptions_for(combined, exceptions, today, policy_result.rules_by_id)
     combined = _annotate_rejected_waivers(combined, rejected)
-    gate = aggregate_gate(combined, levels, GatePolicy(fail_on=fail_on, mode=req.mode), waived)
+    # S70: LLM 支援の「指摘なし」と、attested の確定が一致する REVIEW は阻止しない（verdict は
+    # REVIEW のまま。確定は manifest に残す）
+    attestations = list(req.attestations)
+    cleared = informational_ids(combined) | apply_attestations(combined, attestations)
+    gate = replace(
+        aggregate_gate(
+            combined, levels, GatePolicy(fail_on=fail_on, mode=req.mode), waived, cleared
+        ),
+        self_attested_ids=self_attested_ids(combined, attestations, True),
+        self_attest_unverified_ids=self_attested_ids(combined, attestations, None),
+    )
 
     compiled_versions = sorted(
         {u.compiled.parser_version for u in inputs.spec_units if u.compiled is not None}
@@ -429,6 +464,8 @@ def _run_check(req: CheckRequest, *, is_base: bool) -> CheckResult:
         source_roots=list(req.source_roots),
         today=today,
         bindings_patch=dict(req.bindings_patch or {}),
+        llm_assessment_keys=sorted(set(req.llm_assessment_keys)),
+        attestations=applied_attestations(combined, attestations),
     )
 
     return CheckResult(
@@ -441,6 +478,7 @@ def _run_check(req: CheckRequest, *, is_base: bool) -> CheckResult:
         policy_findings=policy_result.findings,
         gate_levels=levels,
         waived_finding_ids=waived,
+        cleared_finding_ids=cleared,
         waivers=waivers,
         domain=inputs.domain,
         bindings=bindings,
@@ -815,7 +853,6 @@ def _unimported_specs_notice(files: list[Path], inputs: _Inputs) -> Finding | No
     )
 
 
-CONFIG_CHANGE_REQUIREMENT_ID = "KNOWLEDGE-BINDINGS-001"
 _TRUSTED_CONFIG = ("bindings.yaml", "contracts", "exceptions.yaml", "policy")
 
 
@@ -863,6 +900,8 @@ def _config_change_notice(head_dir: Path, trusted_dir: Path | None) -> Finding |
     changed = sorted(p for p in {*head, *base} if head.get(p) != base.get(p))
     if not changed:
         return None
+    # S70（判断 28）: 確定は変わったファイルの内容に結びつける。別の変更は確定し直しが要る
+    changed_hash = changed_content_hash(head_dir, changed)
     return Finding(
         id=f"knowledge:{CONFIG_CHANGE_REQUIREMENT_ID}",
         requirement_id=CONFIG_CHANGE_REQUIREMENT_ID,
@@ -876,8 +915,27 @@ def _config_change_notice(head_dir: Path, trusted_dir: Path | None) -> Finding |
         ),
         claim_scope="persisted_state",
         code_refs=[SourceRef(snapshot_id="head", path=p) for p in changed],
-        next_steps=["変更をレビューしてから取り込む（取り込んだ後の run で判定に使われる）"],
+        evidence_refs=[
+            f"{FINGERPRINT_REF}{CONFIG_CHANGE_REQUIREMENT_ID}:{changed_hash}",
+            f"{CONTENT_HASH_REF}{changed_hash}",
+        ],
+        next_steps=[
+            "変更をレビューしてから取り込む（取り込んだ後の run で判定に使われる）",
+            "この変更を認めるなら owner / approver が確定する（PR コメント `/speclino attest "
+            f"{CONFIG_CHANGE_REQUIREMENT_ID}:{changed_hash} {changed_hash}`）",
+        ],
     )
+
+
+def changed_content_hash(head_dir: Path, changed: list[str]) -> str:
+    """変わったファイルの (パス, head の中身) を並べた sha256。消えたファイルは印だけ。"""
+    digest = hashlib.sha256()
+    for rel in sorted(changed):
+        target = head_dir / rel
+        digest.update(rel.encode("utf-8") + b"\0")
+        digest.update(target.read_bytes() if target.is_file() else b"<deleted>")
+        digest.update(b"\0")
+    return "sha256:" + digest.hexdigest()
 
 
 def _fill_expected(
@@ -1221,7 +1279,7 @@ def _with_extra_findings(base: Findings, extra: list[Finding]) -> Findings:
     return base.model_copy(update={"findings": all_findings, "counts": counts})
 
 
-def _policy_registry() -> VerifierRegistry:
+def _policy_registry(llm_findings: dict[str, list[Finding]] | None = None) -> VerifierRegistry:
     registry = VerifierRegistry()
     registry.register(MakeTargetsVerifier())
     registry.register(SpecFormatVerifier())
@@ -1232,6 +1290,8 @@ def _policy_registry() -> VerifierRegistry:
     registry.register(NamingIdentifiersVerifier())
     registry.register(ErrorMessageFormatVerifier())
     registry.register(LintPresetVerifier())
+    # S70: LLM 支援は worker が先に評価した結果を返すだけ（ここでは LLM を呼ばない）
+    registry.register(LlmChecklistVerifier(llm_findings))
     return registry
 
 
@@ -1288,6 +1348,7 @@ def _run_policies(
     *,
     tolerate_errors: bool = False,
     config_dir: Path | None = None,
+    llm_findings: dict[str, list[Finding]] | None = None,
 ) -> _PolicyRunResult:
     """チーム規約（`team_policy.package`）と `.speclino/policy/*.yaml`（プロジェクト固有の
     追加規約）の両方を VerifierRegistry で実行する。
@@ -1321,7 +1382,7 @@ def _run_policies(
         _load_exceptions(config_dir) if config_dir is not None else PolicyExceptions(exceptions=[])
     )
     snapshot = DirectorySnapshot(root=project_dir)
-    registry = _policy_registry()
+    registry = _policy_registry(llm_findings)
 
     findings: list[Finding] = []
     levels: dict[str, RuleLevel] = {}
@@ -1339,13 +1400,7 @@ def _run_policies(
         levels.update(_policy_levels(team_policy.package, team_findings))
         rules_by_id.update({rule.id: rule for rule in team_policy.package.rules})
 
-    policy_dir = (config_dir / ".speclino" / "policy") if config_dir is not None else None
-    policy_files = (
-        sorted({*policy_dir.glob("*.yaml"), *policy_dir.glob("*.yml")})
-        if policy_dir is not None and policy_dir.is_dir()
-        else []
-    )
-    for path in policy_files:
+    for path in _policy_files(config_dir):
         text = path.read_text(encoding="utf-8")
         package = PolicyPackage.model_validate(yaml.safe_load(text))
         overridden = sorted(rule.id for rule in package.rules if rule.id in rules_by_id)
@@ -1365,6 +1420,52 @@ def _run_policies(
         if rule.verifier is not None and rule.on_missing_input != "skipped"
     ]
     return _PolicyRunResult(findings, levels, texts, rules_by_id, team_policy_hash, expected)
+
+
+def _policy_files(config_dir: Path | None) -> list[Path]:
+    policy_dir = (config_dir / ".speclino" / "policy") if config_dir is not None else None
+    if policy_dir is None or not policy_dir.is_dir():
+        return []
+    return sorted({*policy_dir.glob("*.yaml"), *policy_dir.glob("*.yml")})
+
+
+@dataclass(frozen=True)
+class LlmRuleTarget:
+    """この run で評価する LLM 支援の規約 1 つ（S70）。"""
+
+    rule: PolicyRule
+    # 評価のキーに使う規約の改訂番号（プロジェクト固有の規約は改訂番号を持たないので 1）
+    policy_revision: int
+    # 規約の出所。キーのルール部分に入れ、同じ ID・同じ改訂番号の別の規約の記録を取り違えない
+    # （チーム規約は `team:<team>#<改訂>`、プロジェクト固有は `project:<ファイルの内容の hash>`）
+    origin: str
+
+
+def llm_assisted_rules(req: CheckRequest) -> list[LlmRuleTarget]:
+    """この run で適用される LLM 支援の規約（S70）。
+
+    `_run_policies` と同じ優先順（チーム規約が先、同じ ID のプロジェクト固有は無視）と同じ読み先
+    （bundle の run は信頼側、Git の run はプロジェクト）。読めない規約ファイルはここでは飛ばす
+    （run_check がエラーにする）。
+    """
+    knowledge = req.knowledge
+    team_policy = knowledge.policy if knowledge is not None else req.team_policy
+    config_dir = req.trusted_root if knowledge is not None else req.resolved_project_dir
+    rules: dict[str, LlmRuleTarget] = {}
+    if team_policy is not None:
+        origin = f"team:{team_policy.team}#{team_policy.revision}"
+        for rule in team_policy.package.rules:
+            rules[rule.id] = LlmRuleTarget(rule, team_policy.revision, origin)
+    for path in _policy_files(config_dir):
+        try:
+            text = path.read_text(encoding="utf-8")
+            package = PolicyPackage.model_validate(yaml.safe_load(text))
+        except (OSError, ValueError, yaml.YAMLError):
+            continue
+        origin = f"project:{content_hash(text)[7:23]}"
+        for rule in package.rules:
+            rules.setdefault(rule.id, LlmRuleTarget(rule, 1, origin))
+    return [t for t in rules.values() if t.rule.tier == "llm_assisted"]
 
 
 def _policy_error_finding(rule: PolicyRule, error: Exception) -> Finding:
@@ -1403,6 +1504,9 @@ __all__ = [
     "CheckRequest",
     "CheckResult",
     "Mode",
+    "LlmRuleTarget",
+    "changed_content_hash",
+    "llm_assisted_rules",
     "policy_package_hash",
     "rediff",
     "run_check",

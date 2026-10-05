@@ -126,3 +126,32 @@ class LintPresetParams(IRModel):
         if not self.required_rules and self.ci_command_pattern is None:
             raise ValueError("required_rules か ci_command_pattern のどちらかが必要です")
         return self
+
+
+class LlmChecklistItem(IRModel):
+    """LLM 支援の規約のチェック項目 1 つ。id は指紋の一部なので変えると確定が外れる。"""
+
+    id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
+    question: str = Field(min_length=1, max_length=500)
+
+
+class LlmChecklistParams(IRModel):
+    """`llm.checklist`（S70、設計 6.2–6.3）。
+
+    `paths` が空なら規約の `applies_to.paths` を使う。`call_names` は string_literal のときだけ
+    使い、指定すればその名前の呼出しの引数のリテラルだけを評価する（空ならすべての呼出し）。
+    `max_units` を超える単位は評価せず UNKNOWN にする（費用の上限）。
+    """
+
+    items: list[LlmChecklistItem] = Field(min_length=1, max_length=20)
+    unit_kind: Literal["function", "string_literal", "endpoint"]
+    paths: list[str] = Field(default_factory=list)
+    call_names: list[str] = Field(default_factory=list)
+    max_units: int = Field(default=50, ge=1, le=500)
+
+    @model_validator(mode="after")
+    def _unique_item_ids(self) -> LlmChecklistParams:
+        ids = [i.id for i in self.items]
+        if len(ids) != len(set(ids)):
+            raise ValueError("チェック項目の id が重複しています")
+        return self

@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     spec_bot_enabled: bool = True
     spec_bot_model: str | None = None
     demo_rerun_limit_per_day: int = 20
+    # LLM 支援の規約（S70）。tier=llm_assisted のルールを worker が評価する（verdict は REVIEW、
+    # 確定は人）。無効なら LLM 支援のルールは UNKNOWN。費用は daily_cost_limit_usd の枠を共有する
+    llm_policies_enabled: bool = True
+    llm_policies_model: str | None = None  # 未指定なら agent_model
     # A2A の議論役（S59）。web に A2A の入口を出すか。本番は Terraform の環境変数で true
     a2a_enabled: bool = False
     a2a_model: str | None = None  # 未指定なら agent_model

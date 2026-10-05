@@ -5,13 +5,24 @@ import remarkGfm from 'remark-gfm'
 import { getReviewMarkdown, getRun, getRunEvents, getSupplements } from '../api/reviewRuns'
 import { ApiError } from '../api/errors'
 import { ErrorState } from '../components/ErrorState'
+import { AttestButton } from '../components/AttestButton'
 import { FindingCard } from '../components/FindingCard'
 import { LoadingState } from '../components/LoadingState'
 import { RerunButton } from '../components/RerunButton'
 import { ScopeBlock } from '../components/ScopeBlock'
 import { SupplementList } from '../components/SupplementList'
 import { Timeline } from '../components/Timeline'
+import {
+  attestationTarget,
+  canAttest,
+  configChangeWarning,
+  describeAttestation,
+  prCommentCommand,
+  recordedAttestation,
+  requiresPrComment,
+} from '../services/attestation'
 import { describeGateReason } from '../services/gate'
+import { useMe } from '../hooks/useMe'
 import { formatDateTime, shortSha } from '../services/format'
 import { githubChecksUrl, githubPrUrl } from '../services/github'
 import { EXEC_STATE_LABELS, VERDICT_LABELS } from '../services/labels'
@@ -23,6 +34,7 @@ import { paths } from '@/services/paths'
 import { describeLimits, describeSemanticDiff, describeTeamPolicy } from '../services/manifest'
 import { collectScopeAndAssumptions, collectUnresolvedItems, countByVerdict, groupFindingsByVerdict } from '../services/verdict'
 import type { RunEvent } from '../types/events'
+import type { FindingAttestProps } from '../types/components'
 import type { RerunResponse, ReviewRunDetail } from '../types/run'
 import type { Verdict } from '../types/finding'
 import type { AgentSupplement } from '../types/supplement'
@@ -252,7 +264,54 @@ function CountTile({ verdict, count }: { verdict: Verdict; count: number }) {
   )
 }
 
+/**
+ * 確定できる REVIEW に、この run で効いた確定（自己確定の印つき）を出し、owner / approver には
+ * ボタンを出す（S70）。確定の後は再検査の run へ移る。
+ */
+function FindingAttest({ slug, run, finding, mayAttest }: FindingAttestProps) {
+  const navigate = useNavigate()
+  const target = attestationTarget(finding)
+  if (!target) return null
+  const recorded = recordedAttestation(target, run.manifest?.attestations)
+  return (
+    <div className="space-y-2">
+      {recorded && (
+        <p className="text-sm text-ink-2">
+          {describeAttestation(recorded)}（{recorded.actor}）
+        </p>
+      )}
+      {recorded && configChangeWarning(recorded) && (
+        <p role="alert" className="text-sm font-semibold text-bad">
+          {configChangeWarning(recorded)}
+        </p>
+      )}
+      {requiresPrComment(target) ? (
+        <p className="text-sm text-ink-2">
+          対応表・免除・規約の変更の確定は PR コメントで行います（PR の作成者と照合するため）:{' '}
+          <code className="font-mono text-xs break-all">{prCommentCommand(target)}</code>
+        </p>
+      ) : (
+        mayAttest &&
+        slug && (
+          <AttestButton
+            slug={slug}
+            runId={run.id}
+            target={target}
+            onDone={(recheck) => {
+              if (recheck) navigate(paths.run(recheck))
+            }}
+          />
+        )
+      )}
+    </div>
+  )
+}
+
 function FindingsByVerdict({ run, supplements }: { run: ReviewRunDetail; supplements: AgentSupplement[] }) {
+  const { me } = useMe()
+  const slug = run.workspace ?? null
+  const role = slug ? me?.workspaces.find((w) => w.slug === slug)?.role : null
+  const mayAttest = slug !== null && canAttest(role)
   if (run.findings.length === 0) {
     return <p className="text-sm text-ink-3">この検査にはまだ所見がありません（実行中、または未完了の可能性があります）。</p>
   }
@@ -274,6 +333,7 @@ function FindingsByVerdict({ run, supplements }: { run: ReviewRunDetail; supplem
                 {verdict === 'REVIEW' && (
                   <SupplementList supplements={supplements.filter((s) => s.requirement_id === finding.requirement_id)} />
                 )}
+                <FindingAttest slug={slug} run={run} finding={finding} mayAttest={mayAttest} />
               </div>
             ))}
           </div>

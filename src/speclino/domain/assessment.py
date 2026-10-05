@@ -65,6 +65,13 @@ class Attestation(IRModel):
     actor: str = Field(min_length=1)
     workspace: str = Field(min_length=1)
     created_at: datetime
+    self_attested: bool | None = Field(
+        default=None,
+        description=(
+            "PR の作成者が自分で確定したか（GitHub のユーザー ID で照合。拒否はしないが印を残す）。"
+            "None は照合できない（確定者が GitHub 未連携、または PR の作成者の ID が無い run）"
+        ),
+    )
 
 
 __all__ = [

@@ -128,6 +128,9 @@ class ReviewRun(Base):
         UUID(as_uuid=True), ForeignKey("review_runs.id"), nullable=True
     )
     check_run_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # PR の作成者の GitHub ユーザー ID（S70: 自己確定の照合。ログイン名は改名後に他人が取れるので
+    # ID で持つ）。PR 以外・記録前の run は NULL（照合できない）
+    pr_author_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     artifacts_uri: Mapped[str | None] = mapped_column(String, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -662,6 +665,62 @@ class KnowledgeFetchRecord(Base):
         UUID(as_uuid=True), ForeignKey("projects.id"), nullable=True
     )
     artifact_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class LlmAssessmentRecord(Base):
+    """`llm_assessments`: LLM 支援の規約の評価の記録（S70）。キーが同じなら LLM を呼ばない。
+
+    `key` はキーの正規 JSON（`llm_policies.key_str`）、`key_fields` はその各欄。不変で、同じ
+    (workspace, キー) は最初の記録が正本（replay はこれで再評価する）。ワークスペースごとに区切る
+    （未登録のプロジェクトは `project:<id>`）。
+    """
+
+    __tablename__ = "llm_assessments"
+    __table_args__ = (
+        UniqueConstraint("workspace", "key", name="uq_llm_assessments_workspace_key"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace: Mapped[str] = mapped_column(String, nullable=False)
+    key: Mapped[str] = mapped_column(String, nullable=False)
+    key_fields: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    unit_symbol: Mapped[str] = mapped_column(String, nullable=False)
+    items: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AttestationRecord(Base):
+    """`attestations`: 人の確定（S70）。指紋と内容の hash に結びつき、内容が変われば効かない。
+
+    同じ (workspace, fingerprint, content_hash) は最新の処置で上書きする（取り消し・変更は監査に
+    残る）。actor は SpecLino の uid、または PR コメントなら `github:<login>`。
+    """
+
+    __tablename__ = "attestations"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace",
+            "fingerprint",
+            "content_hash",
+            name="uq_attestations_workspace_fingerprint_hash",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace: Mapped[str] = mapped_column(
+        String, ForeignKey("teams.team"), nullable=False, index=True
+    )
+    fingerprint: Mapped[str] = mapped_column(String, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String, nullable=False)
+    disposition: Mapped[str] = mapped_column(String, nullable=False)
+    actor: Mapped[str] = mapped_column(String, nullable=False)
+    # 最初に確定した人（確定し直しても変えない。監査に最初と最新の両方を残すため）
+    first_actor: Mapped[str] = mapped_column(String, nullable=False)
+    # PR の作成者が自分で確定したか（GitHub の ID で照合、拒否はしない）。NULL は照合できない
+    self_attested: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

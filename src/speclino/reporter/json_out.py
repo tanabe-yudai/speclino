@@ -29,7 +29,7 @@ def _gate_dict(gate: GateResult, waivers: list[Waiver] | None = None) -> dict[st
     # ゲートで実際に免除された finding の分だけ（どの例外で・いつまで・どう直すか）を残す
     waived = {f.id for f in gate.waived}
     kept = sorted((w for w in waivers or [] if w.finding_id in waived), key=lambda w: w.finding_id)
-    return {
+    out: dict[str, object] = {
         "status": gate.status,
         "reason": gate.reason,
         "blocking_ids": sorted(f.id for f in gate.blocking),
@@ -48,6 +48,15 @@ def _gate_dict(gate: GateResult, waivers: list[Waiver] | None = None) -> dict[st
             for w in kept
         ],
     }
+    if gate.cleared:
+        # 阻止しない REVIEW（S70: LLM 支援の指摘なし・人の確定）。無い run の gate.json は変えない
+        out["cleared_ids"] = sorted(f.id for f in gate.cleared)
+    if gate.self_attested_ids:
+        out["self_attested_ids"] = sorted(gate.self_attested_ids)
+    if gate.self_attest_unverified_ids:
+        # 確定者と PR の作成者を照合できなかった（作成者との照合不可）
+        out["self_attest_unverified_ids"] = sorted(gate.self_attest_unverified_ids)
+    return out
 
 
 def write_artifacts(
