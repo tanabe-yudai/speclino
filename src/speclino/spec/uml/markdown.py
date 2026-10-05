@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+import unicodedata
+
 from markdown_it import MarkdownIt
 from markdown_it.token import Token as MdToken
 
@@ -81,20 +83,52 @@ def _strip_quote(line: str) -> str:
     return line[i:]
 
 
+def _is_invisible(c: str) -> bool:
+    """行頭から除く文字: 空白・タブ・引用の `>`・Unicode の Zs と Cf。
+
+    Zs は空白類、Cf は BOM・ゼロ幅・方向制御など。
+    """
+    return c in " \t>" or unicodedata.category(c) in ("Zs", "Cf")
+
+
+def _skip_prefix(line: str) -> int:
+    """行頭のコンテナの接頭辞（見えない文字・`>`・リストの記号）の後ろの位置。
+
+    index を進める 1 回の走査（再スライスしない）。
+    """
+    n = len(line)
+    i = 0
+    while i < n:
+        c = line[i]
+        if _is_invisible(c):
+            i += 1
+        elif c in "-*+" and i + 1 < n and line[i + 1] in " \t":
+            i += 2
+        elif c.isdigit():
+            j = i
+            while j < n and j - i < 9 and line[j].isdigit():
+                j += 1
+            if j < n - 1 and line[j] in ".)" and line[j + 1] in " \t":
+                i = j + 2
+            else:
+                return i
+        else:
+            return i
+    return i
+
+
 def _fence_open(line: str) -> tuple[str, int, str] | None:
     """フェンスの開きに見える行か（コンテナの接頭辞・リストの記号を除いて見る）。"""
-    s = _strip_quote(line)
-    while len(s) >= 2 and s[0] in "-*+" and s[1] in " \t":
-        s = _strip_quote(s[2:])
-    if not s or s[0] not in "`~":
+    i = _skip_prefix(line)
+    if i >= len(line) or line[i] not in "`~":
         return None
-    ch = s[0]
-    n = 0
-    while n < len(s) and s[n] == ch:
-        n += 1
-    if n < 3:
+    ch = line[i]
+    j = i
+    while j < len(line) and line[j] == ch:
+        j += 1
+    if j - i < 3:
         return None
-    return ch, n, s[n:].strip()
+    return ch, j - i, line[j:].strip()
 
 
 def _is_mermaid(info: str) -> bool:
@@ -194,39 +228,33 @@ def _precheck(lines: list[str]) -> list[MarkdownError]:
     return errors
 
 
-_INVISIBLE_PREFIX = frozenset(" \t>\ufeff\u200b\u200c\u200d\u2060\u00a0")
-"""事後照合で行頭から除く文字（空白・引用・BOM・ゼロ幅文字・NBSP）。"""
 _CODE_BLOCKS = frozenset({"fence", "code_block", "html_block"})
 
 
-def _strip_invisible(s: str) -> str:
-    i = 0
-    while i < len(s) and s[i] in _INVISIBLE_PREFIX:
-        i += 1
-    return s[i:]
+def _is_mermaid_like(line: str) -> bool:
+    """接頭辞を除いた後が「` か ~ が 3 個以上 → 空白・タブ 0 個以上 → mermaid」か。
 
-
-def _strip_containers(line: str) -> str:
-    """行頭の空白・`>`・リストの記号・BOM・ゼロ幅文字・NBSP を取り除く。
-
-    事後照合で疑わしい行を見つけるためだけに使う。
+    mermaid は大文字小文字を無視する。O(行長)。
     """
-    s = _strip_invisible(line)
-    while True:
-        if len(s) >= 2 and s[0] in "-*+" and s[1] in " \t":
-            s = _strip_invisible(s[2:])
-            continue
-        j = 0
-        while j < len(s) and j < 9 and s[j].isdigit():
-            j += 1
-        if 0 < j < len(s) - 1 and s[j] in ".)" and s[j + 1] in " \t":
-            s = _strip_invisible(s[j + 2 :])
-            continue
-        return s
+    n = len(line)
+    i = _skip_prefix(line)
+    if i >= n or line[i] not in "`~":
+        return False
+    ch = line[i]
+    j = i
+    while j < n and line[j] == ch:
+        j += 1
+    if j - i < 3:
+        return False
+    while j < n and line[j] in " \t":
+        j += 1
+    return line[j : j + 7].lower() == "mermaid"
 
 
-def _is_mermaid_like(s: str) -> bool:
-    return s[:10].lower() in ("```mermaid", "~~~mermaid")
+def _is_header_like(line: str) -> bool:
+    if "|" not in line:
+        return False
+    return _is_req_header(_loose_cells(line[_skip_prefix(line) :]))
 
 
 def _unexplained_lines(lines: list[str], toks: list[MdToken]) -> list[int]:
@@ -239,20 +267,27 @@ def _unexplained_lines(lines: list[str], toks: list[MdToken]) -> list[int]:
     入れ子が深すぎて markdown-it が中身を捨てると、その行はどの葉のブロックにもならない。
     事前の深さの見積りと markdown-it の解釈がずれても、図と要求の表が黙って消えないようにする。
     """
-    in_leaf = bytearray(len(lines))
-    in_code = bytearray(len(lines))
+    n = len(lines)
+    # 被覆は差分配列（[start, end) ごとに +1 / -1 → 累積和）で O(行数 + トークン数)
+    leaf_diff = [0] * (n + 1)
+    code_diff = [0] * (n + 1)
     for t in toks:
         if t.type in _LEAF_BLOCKS and t.map is not None:
-            start, end = t.map
-            in_leaf[start:end] = b"\x01" * (end - start)
+            start, end = max(0, t.map[0]), min(n, t.map[1])
+            leaf_diff[start] += 1
+            leaf_diff[end] -= 1
             if t.type in _CODE_BLOCKS:
-                in_code[start:end] = b"\x01" * (end - start)
+                code_diff[start] += 1
+                code_diff[end] -= 1
     out: list[int] = []
+    leaf = 0
+    code = 0
     for k, line in enumerate(lines):
-        if in_code[k]:
+        leaf += leaf_diff[k]
+        code += code_diff[k]
+        if code > 0:
             continue
-        s = _strip_containers(line)
-        if _is_mermaid_like(s) or (not in_leaf[k] and "|" in s and _is_req_header(_loose_cells(s))):
+        if _is_mermaid_like(line) or (leaf == 0 and _is_header_like(line)):
             out.append(k)
     return out
 
@@ -432,12 +467,13 @@ def split_markdown(text: str) -> MarkdownParts:
         elif t.type == "inline" and i > 0 and toks[i - 1].type == "paragraph_open":
             sc.paragraph(t)
         i += 1
-    for k in _unexplained_lines(lines, toks)[:20]:
-        sc.error(
-            "E_UNSUPPORTED_SYNTAX",
-            "Markdown の構造を解釈できない（入れ子が深すぎる等）。図・要求の表として読めない",
-            k,
-        )
+    unexplained = _unexplained_lines(lines, toks)
+    shown = unexplained[:20]
+    for idx, k in enumerate(shown):
+        msg = "Markdown の構造を解釈できない（入れ子が深すぎる等）。図・要求の表として読めない"
+        if idx == len(shown) - 1 and len(unexplained) > len(shown):
+            msg += f"（ほか {len(unexplained) - len(shown)} 件）"
+        sc.error("E_UNSUPPORTED_SYNTAX", msg, k)
     return MarkdownParts(
         blocks=sc.blocks,
         tables=sc.tables,

@@ -533,3 +533,54 @@ def test_reconciliation_catches_what_precheck_misses(payload: list[str], depth: 
     res = compile_spec(md, domain=None, legacy_ir=[])
     msgs = [d.message for d in res.diagnostics if d.code == "E_UNSUPPORTED_SYNTAX"]
     assert any("解釈できない" in m for m in msgs), res.diagnostics
+
+
+# ---------------------------------------------- fix round 5
+
+
+@pytest.mark.parametrize("opener", ["````mermaid", "``` mermaid", "~~~~mermaid", "~~~\tMermaid"])
+def test_reconciliation_catches_fence_variants_in_deep_nesting(opener: str) -> None:
+    md = _nested_ol(11, [opener, "classDiagram", "class A", opener[:4].strip()])
+    res = compile_spec(md, domain=None, legacy_ir=[])
+    msgs = [d.message for d in res.diagnostics if d.code == "E_UNSUPPORTED_SYNTAX"]
+    assert any("解釈できない" in m for m in msgs), res.diagnostics
+
+
+@pytest.mark.parametrize("prefix", ["　", "­", "‎", "‏", " "])
+def test_unicode_space_and_format_chars_before_fence_are_error(prefix: str) -> None:
+    md = prefix + "\n".join(_FENCE) + "\n\n" + "\n".join(_FENCE).replace("id: c", "id: d") + "\n"
+    res = compile_spec(md, domain=None, legacy_ir=[])
+    assert res.compiled is None
+    assert ("E_UNSUPPORTED_SYNTAX", 1) in [
+        (d.code, d.span.line if d.span else None) for d in res.diagnostics
+    ]
+
+
+def test_unexplained_lines_report_remaining_count() -> None:
+    md = "\n\n".join(" ```mermaid" for _ in range(25)) + "\n"
+    res = compile_spec(md, domain=None, legacy_ir=[])
+    msgs = [d.message for d in res.diagnostics if d.code == "E_UNSUPPORTED_SYNTAX"]
+    assert len(msgs) == 20 and "ほか 5 件" in msgs[-1]
+
+
+def _timed(md: str) -> None:
+    start = time.perf_counter()
+    compile_spec(md, domain=None, legacy_ir=[])
+    assert time.perf_counter() - start < PERF_LIMIT
+
+
+@pytest.mark.parametrize(
+    "md",
+    [
+        ("&" + ">" * 4095 + "\n") * 5000,  # 本文の上限で即座に止まる
+        (">" * 4095 + "\n") * 60,  # 上限内: 引用の記号だけの長い行
+        ("- " * 2000 + "x\n") * 60,  # リストの記号の繰り返し（先頭の除去が線形であること）
+        ("　" * 4000 + "x\n") * 60,  # Zs の繰り返し
+        "a\n\n" * 20000,  # 葉のブロック 20,000 個
+        "a\n---\n" * 20000,  # 段落と区切りの交互
+        "| ID | x |\n\n" * 5000,  # 表の候補の見出し 5,000 個
+    ],
+    ids=["5000-lines", "gt-lines", "list-markers", "zs", "leaves", "para-hr", "headers"],
+)
+def test_markdown_processing_is_linear(md: str) -> None:
+    _timed(md if len(md.encode()) > 256 * 1024 and md.startswith("&") else md[: 250 * 1024])
