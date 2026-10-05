@@ -19,7 +19,7 @@ from a2a.types import Message, Role, SendMessageRequest, Task, TaskState
 from google.protobuf.json_format import MessageToDict
 from pydantic import ValidationError
 
-from speclino import __version__
+from speclino import __version__, cli_sync
 from speclino.adapters.localgit import GitError, export_snapshot, resolve_sha
 from speclino.analysis.limits import DEFAULT_LIMITS, clamp
 from speclino.conformance.engine import EngineInputError
@@ -36,6 +36,7 @@ policy_app = typer.Typer(name="policy", help="チーム規約（改訂・承認�
 app.add_typer(policy_app, name="policy")
 workspace_app = typer.Typer(name="workspace", help="ワークスペース（テナント境界）の管理（S53）")
 app.add_typer(workspace_app, name="workspace")
+app.command("sync")(cli_sync.sync)
 DEFAULT_SCHEMAS_DIR = Path("schemas")
 DEFAULT_POLICY_SEED_SOURCE = Path(".speclino/policy/speclino-core.yaml")
 
