@@ -623,6 +623,10 @@ def find_secrets(text: str, *, python: bool = False) -> list[SecretHit]:
     return hits + _named_value_hits(text)
 
 
+# 関数の単位で値の代わりに置く目印（services/llm_units.redact）と、f-string の差し込み
+_MARKER = regex.compile(r"<(?:str|bytes) len=\d{1,12}>|<num>")
+_MARKER_OR_FIELD = regex.compile(r"<(?:str|bytes) len=\d{1,12}>|<num>|\{[^{}]{0,256}\}")
+
 _QUOTED_NAMED_VALUE = regex.compile(
     r"([A-Za-z_][A-Za-z0-9_\-]{0,63})[\"']?\s{0,3}[:=]\s{0,3}[rbuRBU]{0,2}([\"'])([^\"'\n]{1,256})\2"
 )
@@ -637,7 +641,8 @@ def prompt_secret_kinds(prompt: str) -> list[str]:
     hits = _pattern_hits(prompt) + _value_runs(prompt, allow_identifiers=True)
     try:
         for m in _QUOTED_NAMED_VALUE.finditer(prompt, timeout=TIMEOUT_SECONDS):
-            if sensitive_name(m.group(1)):
+            # 目印と差し込みだけの値（`password = f'<str len=3>{x}'`）は値ではない
+            if sensitive_name(m.group(1)) and _MARKER_OR_FIELD.sub("", m.group(3)).strip():
                 hits.append(SecretHit(NAME_KIND, m.start(3), m.end(3)))
     except TimeoutError:
         hits += _timed_out(prompt)
@@ -647,6 +652,16 @@ def prompt_secret_kinds(prompt: str) -> list[str]:
 def secret_kinds(text: str, *, python: bool = False) -> list[str]:
     """検出した種類（重複なし・決まった順）。値そのものは返さない。"""
     return sorted({h.kind for h in find_secrets(text, python=python)})
+
+
+def redacted_secret_kinds(text: str) -> list[str]:
+    """値を目印（`<str len=N>` など）に置き換えた関数の単位の検出（#114 fix round 3）。
+
+    本文に値は無いので、名前による検出（名前に結びつく値）はしない。目印は値ではない。残る名前・構造の
+    中の、既知のトークンの形と値らしい連なり（識別子は除く）だけを見る。
+    """
+    stripped = _MARKER.sub(" ", text)
+    return sorted({h.kind for h in _pattern_hits(stripped) + _value_runs(stripped)})
 
 
 def mask_secrets(text: str) -> str:
@@ -677,6 +692,7 @@ __all__ = [
     "find_secrets",
     "mask_secrets",
     "prompt_secret_kinds",
+    "redacted_secret_kinds",
     "secret_kinds",
     "secret_like_value",
     "sensitive_name",

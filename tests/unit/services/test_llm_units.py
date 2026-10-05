@@ -282,3 +282,67 @@ def test_string_literal_units_are_only_arguments_of_call_names(tmp_path: Path) -
     assert [u.text for u in got.units] == [
         "在庫が足りないため確定できません。数量を減らしてください。"
     ]
+
+
+# ---------------------------------------------------------------------------
+# #114 fix round 3: 大きな入れ子のファイルで deepcopy と unparse を繰り返さない
+# ---------------------------------------------------------------------------
+
+PERF_LIMIT = 3.0 * float(__import__("os").environ.get("SPECLINO_PERF_FACTOR", "1"))
+"""計算量のテストの時間の上限（秒）。遅い環境では SPECLINO_PERF_FACTOR で倍率を掛ける。"""
+
+
+def _nested(depth: int, assignments: int) -> str:
+    head = [f"{'    ' * i}def f{i}():" for i in range(depth)]
+    indent = "    " * depth
+    body = [f"{indent}v{j} = 'value-{j}'" for j in range(assignments)]
+    return "\n".join(head + body) + "\n"
+
+
+def test_oversized_file_is_unknown_without_parsing(tmp_path: Path) -> None:
+    import time
+
+    from speclino.services.llm_units import FILE_TOO_LARGE_REASON, MAX_FILE_BYTES
+
+    source = _nested(90, 20000)  # 入れ子 90 段＋代入 2 万行
+    assert len(source.encode()) > 2 * 1024 * 1024 > MAX_FILE_BYTES
+    root = _write(tmp_path, source)
+    start = time.perf_counter()
+    got = extract_units(root, _params("function"), ["app/*.py"])
+    assert time.perf_counter() - start < PERF_LIMIT
+    assert got.units == [] and got.problems == [("app/api.py", FILE_TOO_LARGE_REASON)]
+
+
+def test_nested_and_large_functions_are_cut_off_before_unparse(
+    tmp_path: Path, monkeypatch: object
+) -> None:
+    """1MB 未満でも、入れ子・大きすぎる関数は正規形を作らずに UNKNOWN（線形の時間）。"""
+    import time
+
+    import pytest
+
+    from speclino.services import llm_units
+
+    source = _nested(30, 6000)  # 1MB 未満で、入れ子 30 段の一番内側に 6000 行
+    assert 512 * 1024 < len(source.encode()) <= llm_units.MAX_FILE_BYTES
+    calls: list[str] = []
+    real = llm_units.redact
+
+    def counting(node: object) -> object:
+        calls.append(getattr(node, "name", "?"))
+        return real(node)  # type: ignore[arg-type]
+
+    mp = pytest.MonkeyPatch()
+    mp.setattr(llm_units, "redact", counting)
+    try:
+        start = time.perf_counter()
+        got = extract_units(_write(tmp_path, source), _params("function"), ["app/*.py"])
+        elapsed = time.perf_counter() - start
+    finally:
+        mp.undo()
+    assert elapsed < PERF_LIMIT
+    assert calls == []  # 置き換え（deepcopy）も unparse も行わない
+    assert got.units == []
+    reasons = dict(got.problems)
+    assert "単位が大きすぎる（元のソース" in reasons["app/api.py::f0"]
+    assert reasons["app/api.py::f0.f1"] == NESTED_REASON

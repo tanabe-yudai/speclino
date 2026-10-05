@@ -23,6 +23,7 @@ UML の義務・規約の検査器・lock）を同じ run_id・上限・時刻�
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
@@ -245,7 +246,10 @@ async def _recorded_llm_findings(
         model = models.get(rule_key(rule, target.origin))
         if model is None:
             continue
-        units = extract_units(req.repo_root, checklist_params(rule), rule.applies_to.paths)
+        # AST の走査は CPU を使うので、イベントループを止めないよう別のスレッドで行う
+        units = await asyncio.to_thread(
+            extract_units, req.repo_root, checklist_params(rule), rule.applies_to.paths
+        )
         found, rule_keys = await assess(
             rule,
             units.units,

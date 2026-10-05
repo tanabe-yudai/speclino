@@ -60,6 +60,12 @@ NO_CALL_NAMES_REASON = (
     "string_literal の規約に params.call_names が無い（送る文字列を呼出しで限らないと評価しない）"
 )
 TOO_DEEP_REASON = "入れ子が深すぎて正規形を作れない"
+# ファイルの大きさの上限（#114 fix round 3）。超えるファイルは読まずに UNKNOWN
+MAX_FILE_BYTES = 1024 * 1024
+FILE_TOO_LARGE_REASON = f"ファイルが大きすぎる（{MAX_FILE_BYTES} バイト超）"
+# 元のソースの範囲がこれを超える単位は、置き換え・正規形を作らずに UNKNOWN（正規形は上限の
+# MAX_UNIT_TEXT を超えるのが確実なので、deepcopy と unparse の費用を払わない）
+MAX_UNIT_SOURCE = 4 * MAX_UNIT_TEXT
 
 
 @dataclass
@@ -96,9 +102,12 @@ def extract_units(
             out.problems.append((rel, "リポジトリの外を指すファイル"))
             continue
         try:
+            if target.stat().st_size > MAX_FILE_BYTES:
+                out.problems.append((rel, FILE_TOO_LARGE_REASON))
+                continue
             source = target.read_text(encoding="utf-8")
             tree = ast.parse(source)
-        except (SyntaxError, UnicodeDecodeError, ValueError):
+        except (SyntaxError, UnicodeDecodeError, ValueError, OSError):
             out.problems.append((rel, "ファイルを読めない（構文エラーなど）"))
             continue
         except (RecursionError, MemoryError):
@@ -145,13 +154,13 @@ class _Candidate:
 
 
 def _unit_problem(cand: _Candidate, duplicated: set[str]) -> str | None:
-    if cand.problem is not None:
-        return cand.problem
     for _, reason in cand.chain:
         if reason is not None:
             return reason
     if any(qual in duplicated for qual, _ in cand.chain):
         return DUPLICATE_REASON
+    if cand.problem is not None:
+        return cand.problem
     if len(cand.normalized) > MAX_UNIT_TEXT:
         return f"単位が大きすぎる（{len(cand.normalized)} 文字 > {MAX_UNIT_TEXT}）"
     return None
@@ -168,6 +177,11 @@ class _Collector(ast.NodeVisitor):
         self.in_function = 0
         self.defs: list[str] = []
         self.candidates: list[_Candidate] = []
+        self.lines = source.splitlines()
+        # 各行の先頭の文字位置（単位の元のソースの大きさを、切り出さずに求める）
+        self.offsets = [0]
+        for line in self.lines:
+            self.offsets.append(self.offsets[-1] + len(line) + 1)
 
     def _qual(self, name: str | None = None) -> str:
         parts = [*self.scope, name] if name else self.scope
@@ -229,7 +243,26 @@ class _Collector(ast.NodeVisitor):
 
     def _add_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef, qual: str) -> None:
         start = min([d.lineno for d in node.decorator_list] + [node.lineno])
-        raw = "\n".join(self.source.splitlines()[start - 1 : node.end_lineno])
+        end = node.end_lineno or node.lineno
+        span = self.offsets[min(end, len(self.lines))] - self.offsets[start - 1]
+        # 評価しない単位（入れ子・条件つき・元のソースが大きすぎる）は、置き換え・正規形を作らない
+        # （#114 fix round 3: 大きな入れ子のファイルで deepcopy と unparse を繰り返さない）
+        problem = next((r for _, r in self.chain if r is not None), None)
+        if problem is None and span > MAX_UNIT_SOURCE:
+            problem = f"単位が大きすぎる（元のソース {span} 文字 > {MAX_UNIT_SOURCE}）"
+        if problem is not None:
+            self.candidates.append(
+                _Candidate(
+                    symbol=f"{self.rel}::{qual}",
+                    kind="endpoint" if self.params.unit_kind == "endpoint" else "function",
+                    normalized="",
+                    raw="",
+                    chain=list(self.chain),
+                    problem=problem,
+                )
+            )
+            return
+        raw = "\n".join(self.lines[start - 1 : end])
         try:
             normalized, problem = ast.unparse(redact(node)), None
         except (RecursionError, MemoryError):
@@ -323,6 +356,8 @@ __all__ = [
     "NO_CALL_NAMES_REASON",
     "OTHER_LANGUAGE_REASON",
     "redact",
+    "FILE_TOO_LARGE_REASON",
+    "MAX_FILE_BYTES",
     "TOO_DEEP_REASON",
     "ExtractedUnits",
     "extract_units",

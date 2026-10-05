@@ -15,6 +15,7 @@ worker の手順（決定的オーケストレータ）:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import tempfile
 from collections.abc import Awaitable, Callable
@@ -701,7 +702,10 @@ class ReviewRunService:
             rule = target.rule
             try:
                 params = checklist_params(rule)
-                units = extract_units(req.repo_root, params, rule.applies_to.paths)
+                # AST の走査は CPU を使うので、イベントループを止めないよう別のスレッドで行う
+                units = await asyncio.to_thread(
+                    extract_units, req.repo_root, params, rule.applies_to.paths
+                )
                 found, used = await assess(
                     rule,
                     units.units,

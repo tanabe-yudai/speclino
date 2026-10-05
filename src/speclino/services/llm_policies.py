@@ -52,6 +52,7 @@ from speclino.services.secret_scan import (
     UNANALYZABLE_KIND,
     mask_secrets,
     prompt_secret_kinds,
+    redacted_secret_kinds,
     secret_kinds,
 )
 
@@ -443,7 +444,13 @@ async def assess(
         prompt = build_prompt(rule, params, unit)
         kinds = sorted(
             {
-                *secret_kinds(unit.text, python=unit.kind != "string_literal"),
+                # 関数・エンドポイントは値を目印に置き換えた本文（名前による検出はしない）。
+                # 文字列の単位は元の値なので、すべての検出をかける
+                *(
+                    secret_kinds(unit.text)
+                    if unit.kind == "string_literal"
+                    else redacted_secret_kinds(unit.text)
+                ),
                 *prompt_secret_kinds(prompt),
             }
         )

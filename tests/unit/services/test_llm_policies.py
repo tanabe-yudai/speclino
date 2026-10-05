@@ -326,10 +326,12 @@ async def test_quote_from_model_is_masked_before_storing_and_display() -> None:
 
 
 def _function_unit(source: str, symbol: str = "app/api.py::f") -> AssessmentUnit:
-    """抽出器と同じく、本文は ast.unparse の正規形（LLM に送るそのもの）。"""
+    """抽出器と同じく、本文は値を目印に置き換えた ast.unparse の正規形（LLM に送るそのもの）。"""
     import ast
 
-    text = ast.unparse(ast.parse(source))
+    from speclino.services.llm_units import redact
+
+    text = ast.unparse(redact(ast.parse(source)))
     return AssessmentUnit(
         symbol=symbol, kind="function", text=text, unit_hash=normalized_hash(text)
     )
@@ -337,16 +339,27 @@ def _function_unit(source: str, symbol: str = "app/api.py::f") -> AssessmentUnit
 
 @pytest.mark.parametrize("source", EVASIONS)
 async def test_evasions_are_never_sent(source: str) -> None:
-    llm = FakeLlm([_answer(True)])
-    findings, _ = await assess(
+    """関数の単位は値を目印に置き換えて送るので、どの組み立て方でも値はプロンプトに入らない。"""
+    llm = _RecordingLlm([_answer(False, "")])
+    await assess(
         _rule(),
         [_function_unit(source)],
         llm=llm,
         store=InMemoryAssessmentStore(),
         policy_revision=1,
     )
-    assert llm.calls == 0
-    assert all(f.verdict == "UNKNOWN" and "LLM に送らない" in f.message for f in findings)
+    for prompt in llm.prompts:
+        assert TAIL not in prompt and "hunter" not in prompt and "\\x73" not in prompt
+
+
+class _RecordingLlm(FakeLlm):
+    def __init__(self, answers: list[str | Exception]) -> None:
+        super().__init__(answers)
+        self.prompts: list[str] = []
+
+    async def generate_json(self, prompt: str, schema: dict[str, Any]) -> JsonGeneration:
+        self.prompts.append(prompt)
+        return await super().generate_json(prompt, schema)
 
 
 async def test_prompt_gate_blocks_secret_in_symbol() -> None:
@@ -376,11 +389,39 @@ async def test_ordinary_function_is_sent() -> None:
     assert llm.calls == 3 and findings[0].verdict == "REVIEW"
 
 
-async def test_unanalyzable_format_is_unknown_and_not_sent() -> None:
-    llm = FakeLlm([_answer(True)])
+async def test_huge_format_in_function_is_sent_as_markers_only() -> None:
+    """関数の単位は値を組み立てない（目印だけ）ので、大きな書式も資源を使わずに送れる。"""
+    llm = _RecordingLlm([_answer(False, "")])
     unit = _function_unit('def f():\n    return "%99999999s" % ("a",)')
+    await assess(_rule(), [unit], llm=llm, store=InMemoryAssessmentStore(), policy_revision=1)
+    assert llm.calls == 3 and "%99999999s" not in llm.prompts[0]
+    assert "<str len=10> % (<str len=1>,)" in llm.prompts[0]
+
+
+async def test_marker_bound_to_sensitive_name_is_not_a_secret() -> None:
+    """#114 fix round 3: `password = <str len=8>` は値ではない（名前による検出は元の値だけに）。"""
+    llm = _RecordingLlm([_answer(False, "")])
+    source = (
+        "def login(user, password='hunter22'):\n"
+        "    token = f'Bearer {user}'\n"
+        "    headers = {'Authorization': 'x'}\n"
+        "    return client.post(password=password, token=token, headers=headers)\n"
+    )
+    findings, _ = await assess(
+        _rule(),
+        [_function_unit(source)],
+        llm=llm,
+        store=InMemoryAssessmentStore(),
+        policy_revision=1,
+    )
+    assert llm.calls == 3 and findings[0].verdict == "REVIEW"
+    assert "hunter22" not in llm.prompts[0] and "password=<str len=8>" in llm.prompts[0]
+
+
+async def test_string_literal_unit_still_uses_name_and_value_detection() -> None:
+    llm = FakeLlm([_answer(True)])
+    unit = _unit("password=hunter2")
     findings, _ = await assess(
         _rule(), [unit], llm=llm, store=InMemoryAssessmentStore(), policy_revision=1
     )
-    (f,) = findings
-    assert llm.calls == 0 and f.verdict == "UNKNOWN" and "解析できない書式" in f.message
+    assert llm.calls == 0 and findings[0].verdict == "UNKNOWN"
