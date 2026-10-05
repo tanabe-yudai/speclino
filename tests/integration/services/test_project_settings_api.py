@@ -5,9 +5,11 @@
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
@@ -23,6 +25,7 @@ from speclino.adapters.storage.fs import FileSystemBlobStore
 from speclino.api.app import create_app
 from speclino.api.deps import AppState
 from speclino.db.models import AuditEvent
+from speclino.ports.github_users import GitHubUserLookupError
 from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
 from speclino.settings import Settings
 from tests.integration.services.conftest import project_id_of, register_repo
@@ -34,12 +37,34 @@ pytestmark = [
 ]
 
 
+# GitHub のログイン名 → ユーザー ID（`GET /users/{login}` の代わり）
+GITHUB_USERS = {"octo-cat": 583231, "hubot": 9919}
+
+
+@dataclass
+class _FakeUsers:
+    ids: dict[str, int]
+    down: bool = False
+
+    async def user_id(self, login: str) -> int | None:
+        if self.down:
+            raise GitHubUserLookupError("rate limited")
+        return self.ids.get(login)
+
+
 def _as(uid: str) -> dict[str, str]:
     return {"X-Dev-User": uid}
 
 
+@pytest.fixture
+def users() -> _FakeUsers:
+    return _FakeUsers(dict(GITHUB_USERS))
+
+
 @pytest_asyncio.fixture
-async def client(engine: AsyncEngine, tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
+async def client(
+    engine: AsyncEngine, tmp_path: Path, users: _FakeUsers
+) -> AsyncIterator[httpx.AsyncClient]:
     factory = async_sessionmaker(engine, expire_on_commit=False)
     holder: dict[str, ReviewRunService] = {}
     queue = InProcessQueue(lambda rid: holder["svc"].execute(rid), immediate=True)
@@ -48,7 +73,9 @@ async def client(engine: AsyncEngine, tmp_path: Path) -> AsyncIterator[httpx.Asy
     host = LocalCodeHost(repos={})
     service = ReviewRunService(factory, host, queue, blobs, ReviewRunConfig(agent_enabled=False))
     holder["svc"] = service
-    app = create_app(settings, AppState(settings, engine, factory, host, queue, blobs, service))
+    state = AppState(settings, engine, factory, host, queue, blobs, service)
+    state.github_users = users
+    app = create_app(settings, state)
     async with (
         app.router.lifespan_context(app),
         httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c,
@@ -107,6 +134,7 @@ async def test_member_reads_defaults_but_cannot_edit(
         "agent_enabled": True,
         "test_run_enabled": True,
         "approvers": [],
+        "approver_ids": [],
     }
     assert (await client.get(path, headers=_as("appr"))).json()["can_edit"] is True
 
@@ -159,6 +187,7 @@ async def test_approver_updates_other_settings_and_it_is_audited(
         "agent_enabled": False,
         "test_run_enabled": False,
         "approvers": [],
+        "approver_ids": [],
     }
     res = await client.put(path, json=new, headers=_as("appr"))
     assert res.status_code == 200, res.text
@@ -208,12 +237,16 @@ async def test_owner_changes_pr_approvers_and_approver_keeps_them(
     res = await client.put(path, json=with_approvers, headers=_as("own"))
     assert res.status_code == 200, res.text
     assert res.json()["settings"]["approvers"] == ["octo-cat"]
+    # 保存のとき、ログイン名から GitHub のユーザー ID を引いて一緒に保存する（S61）
+    assert res.json()["settings"]["approver_ids"] == [583231]
+    # 画面で確かめられるよう、ログイン名と ID の組で返す（改名後の取り違えに気づくため）
+    assert res.json()["approvers"] == [{"login": "octo-cat", "id": 583231}]
 
     # approver が承認者を据え置いて他を変えるのは通る
     keep = {**with_approvers, "test_run_enabled": False}
     res = await client.put(path, json=keep, headers=_as("appr"))
     assert res.status_code == 200, res.text
-    assert await _stored(engine, pid) == keep
+    assert await _stored(engine, pid) == {**keep, "approver_ids": [583231]}
     # 承認者を消すのも変更なので拒否
     cleared = await client.put(path, json={**keep, "approvers": []}, headers=_as("appr"))
     assert cleared.status_code == 403
@@ -222,6 +255,103 @@ async def test_owner_changes_pr_approvers_and_approver_keeps_them(
         ("appr", "updated"),
         ("appr", "denied"),
     ]
+
+
+async def test_unknown_github_login_is_rejected(
+    client: httpx.AsyncClient, engine: AsyncEngine
+) -> None:
+    """ID を引けなかったログイン名は保存を断る（何も書かない）。"""
+    slug, _, pid = await _workspace(engine)
+    path = f"/api/workspaces/{slug}/projects/{pid}/settings"
+    before = (await client.get(path, headers=_as("own"))).json()["settings"]
+    res = await client.put(
+        path, json={**before, "approvers": ["octo-cat", "ghost-user"]}, headers=_as("own")
+    )
+    assert res.status_code == 422, res.text
+    assert res.json()["error"]["code"] == "unknown_github_login"
+    assert "ghost-user" in res.json()["error"]["message"]
+    assert await _stored(engine, pid) == {}
+
+
+async def test_github_lookup_failure_is_503_and_writes_nothing(
+    client: httpx.AsyncClient, engine: AsyncEngine, users: _FakeUsers
+) -> None:
+    """レート制限・通信の失敗で ID を引けなければ 503（保存しない）。"""
+    slug, _, pid = await _workspace(engine)
+    path = f"/api/workspaces/{slug}/projects/{pid}/settings"
+    before = (await client.get(path, headers=_as("own"))).json()["settings"]
+    users.down = True
+    res = await client.put(path, json={**before, "approvers": ["octo-cat"]}, headers=_as("own"))
+    assert res.status_code == 503, res.text
+    assert res.json()["error"]["code"] == "github_lookup_failed"
+    # 次の失敗を診断できるよう、GitHub 側の理由（応答コードなど）をメッセージに残す
+    assert "rate limited" in res.json()["error"]["message"]
+    assert await _stored(engine, pid) == {}
+
+
+async def test_approver_ids_are_resolved_by_the_server_not_the_client(
+    client: httpx.AsyncClient, engine: AsyncEngine
+) -> None:
+    """送られてきた `approver_ids` は信じない（ログイン名から引き直した値で上書きする）。"""
+    slug, _, pid = await _workspace(engine)
+    path = f"/api/workspaces/{slug}/projects/{pid}/settings"
+    before = (await client.get(path, headers=_as("own"))).json()["settings"]
+    res = await client.put(
+        path,
+        json={**before, "approvers": ["hubot"], "approver_ids": [1]},
+        headers=_as("own"),
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["settings"]["approver_ids"] == [9919]
+
+
+async def test_saving_keeps_known_ids_and_fills_legacy_settings(
+    client: httpx.AsyncClient, engine: AsyncEngine
+) -> None:
+    """既に引いた ID は保ち（改名後に同じログイン名を取った別人の ID にすり替えない）、
+    ID の無い既存の設定は次の保存で ID を補う。"""
+    slug, _, pid = await _workspace(engine)
+    path = f"/api/workspaces/{slug}/projects/{pid}/settings"
+    stored = {
+        "fail_on": ["VIOLATED", "UNKNOWN", "REVIEW"],
+        "agent_enabled": True,
+        "test_run_enabled": True,
+        "approvers": ["octo-cat"],
+        "approver_ids": [111],
+    }
+    await _put_stored(engine, pid, stored)
+    res = await client.put(
+        path, json={**stored, "approvers": ["octo-cat", "hubot"]}, headers=_as("own")
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["settings"]["approver_ids"] == [111, 9919]
+
+    legacy = {k: v for k, v in stored.items() if k != "approver_ids"}
+    await _put_stored(engine, pid, legacy)
+    # ID の無い設定は、画面で保存し直しを促す（ID が無いあいだは誰も承認者にならない）
+    view = (await client.get(path, headers=_as("mem"))).json()
+    assert view["approver_ids_missing"] is True
+    assert view["approvers"] == [{"login": "octo-cat", "id": None}]
+    # approver（owner でない）の保存では ID を補わない。どの GitHub アカウントを承認者として
+    # 結び付けるかは承認者の変更と同じく owner だけが決める（改名後のログイン名の取得者を
+    # owner でない人が結び付けられないように）
+    res = await client.put(path, json={**legacy, "agent_enabled": False}, headers=_as("appr"))
+    assert res.status_code == 200, res.text
+    assert res.json()["settings"].get("approver_ids", []) == []
+    assert res.json()["approver_ids_missing"] is True
+    # owner の保存で補う
+    res = await client.put(path, json=legacy, headers=_as("own"))
+    assert res.status_code == 200, res.text
+    assert res.json()["settings"]["approver_ids"] == [583231]
+    assert res.json()["approver_ids_missing"] is False
+
+
+async def _put_stored(engine: AsyncEngine, pid: uuid.UUID, settings: dict[str, object]) -> None:
+    async with engine.begin() as conn:
+        await conn.execute(
+            sql_text("UPDATE projects SET settings = CAST(:s AS jsonb) WHERE id = :id"),
+            {"s": json.dumps(settings), "id": pid},
+        )
 
 
 @pytest.mark.parametrize(

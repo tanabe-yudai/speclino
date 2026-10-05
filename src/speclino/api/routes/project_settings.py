@@ -2,11 +2,13 @@
 
 メンバーなら読める。設定の変更は owner / approver だけ（それ以外は 403、拒否は監査に残る）。
 PR の承認者（`approvers`）の変更は owner だけ（approver が変えようとすると 403）。
-非メンバー・別ワークスペースの project は 404。
+非メンバー・別ワークスペースの project は 404。承認者の保存では GitHub のユーザー ID も引く
+（引けないログイン名は 422、GitHub に問い合わせられなければ 503。S61）。
 """
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any
 
@@ -19,6 +21,8 @@ from speclino.domain.project_settings import ProjectSettings
 from speclino.domain.workspace import AuthUser
 from speclino.services import project_settings as service
 from speclino.services.workspaces import NotPermitted, WorkspaceNotFound
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api/workspaces/{slug}", tags=["project-settings"], responses=error_responses(401)
@@ -56,7 +60,7 @@ async def get_settings(
     return view.model_dump(mode="json")
 
 
-@router.put("/projects/{project_id}/settings", responses=error_responses(403, 404))
+@router.put("/projects/{project_id}/settings", responses=error_responses(403, 404, 422, 503))
 async def update_settings(
     slug: str,
     project_id: uuid.UUID,
@@ -72,6 +76,7 @@ async def update_settings(
                 uid=user.uid,
                 project_id=project_id,
                 settings=body,
+                users=state.github_users,
                 audit_factory=state.session_factory,
             )
     except WorkspaceNotFound as e:
@@ -82,6 +87,22 @@ async def update_settings(
         ) from e
     except NotPermitted as e:
         raise api_error(403, "not_an_approver", "設定を変更できるのは owner / approver だけ") from e
+    except service.UnknownGitHubLogin as e:
+        raise api_error(
+            422,
+            "unknown_github_login",
+            f"GitHub のユーザーが見つからないログイン名がある: {', '.join(e.logins)}",
+        ) from e
+    except service.GitHubLookupFailed as e:
+        # 次の失敗を診断できるよう、理由（GitHub の応答コードなど。秘密は含まない）を残す
+        logger.warning(
+            "承認者の GitHub ユーザー ID を引けない: project=%s reason=%s", project_id, e
+        )
+        raise api_error(
+            503,
+            "github_lookup_failed",
+            f"GitHub に承認者のユーザー ID を問い合わせられなかった（{e}）",
+        ) from e
     return view.model_dump(mode="json")
 
 

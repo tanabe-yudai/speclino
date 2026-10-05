@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from collections.abc import AsyncIterator, Callable
@@ -28,7 +29,7 @@ from a2a.types import (
     Task,
     TaskState,
 )
-from a2a.utils.errors import A2AError, TaskNotFoundError
+from a2a.utils.errors import A2AError, InvalidParamsError, TaskNotFoundError
 from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
@@ -49,7 +50,7 @@ from speclino.services.run_view import run_view
 from speclino.settings import Settings
 from tests.integration.services.conftest import register_repo, repo_id_of
 from tests.integration.services.test_mcp_flow import _issue
-from tests.integration.services.test_review_run_service import make_demo_repo
+from tests.integration.services.test_review_run_service import git, make_demo_repo
 from tests.unit.agent.consultant.test_spec_review import AMBIGUOUS, CLEAR, REVISION, SPEC_MD
 
 _DATABASE_URL = os.environ.get("SPECLINO_DATABASE_URL")
@@ -183,6 +184,40 @@ async def test_input_required_round_trip_survives_on_db(
             await _send(client, "もう一度", task_id=first.id, context_id=first.context_id)
 
 
+@pytest.mark.parametrize("field", ["context_id", "task_id"])
+async def test_overlong_ids_are_rejected_as_invalid_params(
+    engine: AsyncEngine, tmp_path: Path, field: str
+) -> None:
+    """列（36 文字）より長い ID は DB に届く前に A2A の InvalidParams で断る（500 にしない）。"""
+    long_id = "x" * 37
+    async with _app(engine, tmp_path, handlers={"spec_review": _echo}) as (http, client):
+        with pytest.raises(InvalidParamsError):
+            await _send(client, "---\nskill: spec_review\nrepo: o/r\n---\n本文", **{field: long_id})
+        # 素の JSON-RPC でも HTTP 500 ではなく、JSON-RPC の invalid params（-32602）が返る
+        raw = await http.post(
+            "/a2a",
+            headers={"A2A-Version": "1.0"},
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "SendMessage",
+                "params": {
+                    "message": {
+                        "role": "ROLE_USER",
+                        "messageId": uuid.uuid4().hex,
+                        "parts": [{"text": "本文"}],
+                        "contextId" if field == "context_id" else "taskId": long_id,
+                    }
+                },
+            },
+        )
+        assert raw.status_code != 500, raw.text
+        assert raw.json()["error"]["code"] == -32602, raw.text
+        # 長い ID のタスクは「無い」（参照も DB の失敗にしない）
+        with pytest.raises(TaskNotFoundError):
+            await client.get_task(GetTaskRequest(id=long_id))
+
+
 async def test_task_of_other_workspace_is_not_found(engine: AsyncEngine, tmp_path: Path) -> None:
     handlers: dict[SkillId, SkillHandler] = {"spec_review": _echo}
     async with _app(engine, tmp_path, handlers=handlers, team="e2e-a2a-ws-a") as (_, a):
@@ -262,6 +297,31 @@ async def test_handler_build_error_fails_task_with_reason(
     assert get_message_text(task.status.message) == "処理に失敗しました: RuntimeError"
 
 
+SPEC_MD_PATH = "specs/orders-cancel.md"
+
+
+def _make_repo_with_spec_lines(root: Path) -> tuple[str, int]:
+    """デモのリポジトリの head に、R-CANCEL-04 の仕様の位置（パスと行）を足したコミットを積む。
+
+    共有の examples/orders の Spec IR には位置が無い。足すと Rule のハッシュ（承認の対象）が
+    変わり、他の試験と評価が依存する値が動くので、このテストの一時リポジトリだけで足す。
+    返すのは足したコミットと、見出しの行番号。
+    """
+    _, head, _ = make_demo_repo(root)
+    git(root, "checkout", "-q", head)
+    md_lines = (root / SPEC_MD_PATH).read_text(encoding="utf-8").splitlines()
+    line = next(i for i, s in enumerate(md_lines, 1) if s.strip() == "### R-CANCEL-04")
+    ir_path = root / "specs" / "ir" / "cancel_order.spec-ir.json"
+    data = json.loads(ir_path.read_text(encoding="utf-8"))
+    for rule in data["rules"]:
+        if rule["id"] == "R-CANCEL-04":
+            for ref in rule["source_refs"]:
+                ref.update(path=SPEC_MD_PATH, line_start=line)
+    ir_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    git(root, "commit", "-qam", "head: spec refs with lines")
+    return git(root, "rev-parse", "HEAD"), line
+
+
 def _artifact(task: Task, name: str) -> Artifact:
     found = [a for a in task.artifacts if a.name == name]
     assert found, [a.name for a in task.artifacts]
@@ -280,7 +340,7 @@ async def test_three_skills_end_to_end_with_real_handlers(
     team = f"e2e-a2a-{uuid.uuid4().hex[:8]}"
     repo = f"{team}/orders"
     await register_repo(engine, repo, {"dev": "member"}, team=team)
-    base, head, _ = make_demo_repo(tmp_path / "repo")
+    head, spec_line = _make_repo_with_spec_lines(tmp_path / "repo")
     host = LocalCodeHost(repos={repo: tmp_path / "repo"}, repo_ids={repo: repo_id_of(repo)})
     ScriptedLlm.reset()
     answer = "R-CANCEL-04 は管理者以外で在庫の復元が呼ばれないため違反です（反例を参照）。"
@@ -331,7 +391,10 @@ async def test_three_skills_end_to_end_with_real_handlers(
         assert [f["requirement_id"] for f in violated] == ["R-CANCEL-04"]
         finding = violated[0]
         assert finding["id"] and finding["spec_refs"] and finding["counterexample"], finding
-        assert finding["spec_refs"][0]["requirement_id"] == "R-CANCEL-04"
+        spec_ref = finding["spec_refs"][0]
+        assert spec_ref["requirement_id"] == "R-CANCEL-04"
+        # 根拠の仕様の位置（ファイルと行）まで返す
+        assert (spec_ref["path"], spec_ref["line_start"]) == (SPEC_MD_PATH, spec_line), spec_ref
         run_id = verification["run_id"]
         # 切り詰めず、DB の Finding（payload 全体）と同じものを返している
         stored = await run_view(async_sessionmaker(engine), uuid.UUID(run_id), team, full=True)

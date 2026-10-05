@@ -21,7 +21,12 @@ from speclino.api.deps import AppState
 from speclino.services.attestations import attest_as_member, list_attestations
 from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
 from speclino.settings import Settings
-from tests.integration.services.conftest import register_repo, repo_id_of, set_project_approvers
+from tests.integration.services.conftest import (
+    login_id,
+    register_repo,
+    repo_id_of,
+    set_project_approvers,
+)
 from tests.integration.services.test_api_flow import (
     SECRET,
     comment_payload,
@@ -36,6 +41,9 @@ pytestmark = [
 ]
 
 HASH = "sha256:" + "a" * 64
+# PR コメントの確定の actor は GitHub のユーザー ID（S61 の承認者の照合と同じく、
+# ログイン名は使わない）
+GH_APPROVER = f"github:{login_id('gh-approver')}"
 OWNER = {"X-Dev-User": "owner1"}
 APPROVER = {"X-Dev-User": "approver1"}
 MEMBER = {"X-Dev-User": "member1"}
@@ -201,16 +209,14 @@ async def test_pr_comment_attest_is_recorded_for_approvers(ctx: Ctx, engine: Asy
     res = (await ctx.c.post("/webhooks/github", content=raw, headers=headers)).json()
     assert res["status"] == "queued", res  # 確定の後は再検査の run
     await _seed_targets(engine, res["run_id"], "R:i:2")  # 再検査の run にも同じ指摘
-    assert await _stored(engine, ctx.slug) == [("R:i:2", "attested", "github:gh-approver")]
+    assert await _stored(engine, ctx.slug) == [("R:i:2", "attested", GH_APPROVER)]
 
     raw, headers = signed(
         comment_payload(ctx.repo, 1, f"/speclino attest R:i:2 {HASH} ack", "gh-approver"),
         "issue_comment",
     )
     await ctx.c.post("/webhooks/github", content=raw, headers=headers)
-    assert await _stored(engine, ctx.slug) == [
-        ("R:i:2", "acknowledged_violation", "github:gh-approver")
-    ]
+    assert await _stored(engine, ctx.slug) == [("R:i:2", "acknowledged_violation", GH_APPROVER)]
 
     raw, headers = signed(
         comment_payload(ctx.repo, 1, "/speclino attest R:i:2 not-a-hash", "gh-approver"),
@@ -218,6 +224,23 @@ async def test_pr_comment_attest_is_recorded_for_approvers(ctx: Ctx, engine: Asy
     )
     res = (await ctx.c.post("/webhooks/github", content=raw, headers=headers)).json()
     assert res["commands"][0]["accepted"] is False
+
+
+async def test_pr_comment_attest_never_falls_back_to_login(ctx: Ctx, engine: AsyncEngine) -> None:
+    """承認者と同じログイン名でも ID が違えば確定できない（S61 の ID 照合。名前に戻さない）。"""
+    await _seed_targets(engine, await _pr_run(ctx, ctx.repo), "R:i:2")
+    await set_project_approvers(engine, ctx.repo, ["gh-approver"])
+    payload = comment_payload(
+        ctx.repo, 1, f"/speclino attest R:i:2 {HASH}", "gh-approver", user_id=4242
+    )
+    raw, headers = signed(payload, "issue_comment")
+    res = (await ctx.c.post("/webhooks/github", content=raw, headers=headers)).json()
+    assert res["commands"][0]["accepted"] is False
+    payload["comment"]["user"].pop("id")
+    raw, headers = signed(payload, "issue_comment")
+    res = (await ctx.c.post("/webhooks/github", content=raw, headers=headers)).json()
+    assert res["commands"][0]["accepted"] is False
+    assert await _stored(engine, ctx.slug) == []
 
 
 async def _audit_detail(engine: AsyncEngine, slug: str) -> list[tuple[str, object, object]]:
@@ -232,7 +255,9 @@ async def _audit_detail(engine: AsyncEngine, slug: str) -> list[tuple[str, objec
         return [(r[0], r[1].get("self_attested"), r[1].get("warning")) for r in rows]
 
 
-DEV_ID, OTHER_ID = 1001, 2002
+# 承認者の照合は ID（`set_project_approvers` が `login_id` で保存する）なので、同じ ID を使う
+DEV_ID, OTHER_ID = login_id("dev"), login_id("gh-approver")
+GH_DEV = f"github:{DEV_ID}"
 
 
 async def _pr_run_by(ctx: Ctx, author_id: int | None) -> str:
@@ -310,10 +335,22 @@ async def test_bindings_attestation_via_pr_comment_is_accepted(
     raw, headers = signed(payload, "issue_comment")
     res = (await ctx.c.post("/webhooks/github", content=raw, headers=headers)).json()
     assert res["commands"][0]["accepted"] is True and res["commands"][0]["self_attested"] is True
-    assert await _stored(engine, ctx.slug) == [(fp, "attested", "github:dev")]
+    assert await _stored(engine, ctx.slug) == [(fp, "attested", GH_DEV)]
     # 作成者自身の確定は拒否せず、監査に警告を残す
     ((actor, mark, warning),) = await _audit_detail(engine, ctx.slug)
-    assert (actor, mark) == ("github:dev", True) and warning is not None
+    assert (actor, mark) == (GH_DEV, True) and warning is not None
+    # ログイン名は識別に使わず、監査の詳細に残す
+    async with engine.connect() as conn:
+        login = (
+            await conn.execute(
+                sql_text(
+                    "SELECT detail->>'actor_login' FROM audit_events "
+                    "WHERE action = 'attestation.record' AND target LIKE :t"
+                ),
+                {"t": f"{ctx.slug}:%"},
+            )
+        ).scalar_one()
+    assert login == "dev"
 
 
 async def test_self_attestation_is_null_without_author_id(ctx: Ctx, engine: AsyncEngine) -> None:
@@ -375,7 +412,7 @@ async def test_pr_comment_cannot_attest_another_prs_finding(ctx: Ctx, engine: As
         "reason": "この PR の検査に無い指紋",
     }
     assert await _stored(engine, ctx.slug) == []
-    assert await _audit(engine, ctx.slug) == [("github:dev", "rejected")]
+    assert await _audit(engine, ctx.slug) == [(GH_DEV, "rejected")]
     # 自分の PR #1 へのコメントなら受理される
     payload["issue"] = {"number": 1, "pull_request": {"url": "x"}, "user": {"id": DEV_ID}}
     raw, headers = signed(payload, "issue_comment")

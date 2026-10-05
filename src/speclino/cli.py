@@ -13,10 +13,6 @@ from typing import TYPE_CHECKING, Annotated, get_args
 
 import httpx
 import typer
-from a2a.client import A2ACardResolver, ClientConfig, ClientFactory
-from a2a.helpers import get_artifact_text, get_message_text, new_data_part, new_text_part
-from a2a.types import Message, Role, SendMessageRequest, Task, TaskState
-from google.protobuf.json_format import MessageToDict
 from pydantic import ValidationError
 
 from speclino import __version__, cli_sync
@@ -26,9 +22,10 @@ from speclino.conformance.engine import EngineInputError
 from speclino.domain.code_ir import AnalysisLimits
 from speclino.domain.finding import Verdict
 from speclino.domain.workspace import WorkspaceRole
-from speclino.services import CheckInputError, CheckRequest, run_check, write_result
+from speclino.services.check_pipeline import CheckInputError, CheckRequest, run_check, write_result
 
 if TYPE_CHECKING:
+    from a2a.types import Message, Task
     from sqlalchemy.ext.asyncio import AsyncSession
 
 app = typer.Typer(name="speclino", help="仕様–実装の意味差分レビュー基盤 CLI")
@@ -242,6 +239,10 @@ def _a2a_message(
     text: str, skill: str | None, fields: dict[str, str | None], task_id: str | None
 ) -> Message:
     """送るメッセージ。skill があれば DataPart で指定し、返信（task_id あり）は本文だけ。"""
+    # a2a-sdk は a2a-send でだけ読む（他のコマンドの起動を重くしない）
+    from a2a.helpers import new_data_part, new_text_part
+    from a2a.types import Message, Role
+
     parts = []
     if skill is not None and task_id is None:
         meta = {"skill": skill, **{k: v for k, v in fields.items() if v is not None}}
@@ -253,6 +254,10 @@ def _a2a_message(
 
 def _a2a_render(task: Task) -> list[str]:
     """タスクの状態・最後のエージェントの発言・成果物を表示用の行にする。"""
+    from a2a.helpers import get_artifact_text, get_message_text
+    from a2a.types import TaskState
+    from google.protobuf.json_format import MessageToDict
+
     state = TaskState.Name(task.status.state)
     lines = [
         f"state: {_A2A_STATE_NAMES.get(state, state)}",
@@ -276,6 +281,9 @@ def _a2a_render(task: Task) -> list[str]:
 
 
 async def _a2a_send(http: httpx.AsyncClient, message: Message) -> Task:
+    from a2a.client import A2ACardResolver, ClientConfig, ClientFactory
+    from a2a.types import SendMessageRequest
+
     card = await A2ACardResolver(http, str(http.base_url)).get_agent_card()
     client = ClientFactory(ClientConfig(streaming=False, httpx_client=http)).create(card)
     last = None
@@ -662,14 +670,67 @@ def workspace_set_pr_approvers(
         list[str] | None, typer.Argument(help="承認者の GitHub ログイン名（省略で全員外す）")
     ] = None,
 ) -> None:
-    """PR コメントの `/speclino approve-spec` を受け付ける GitHub ログイン名を置き換える。"""
+    """PR の承認者（GitHub ログイン名）を置き換える。照合に使う GitHub のユーザー ID も保存する。"""
+    from speclino.api.deps import build_github_user_lookup
     from speclino.services import workspace_admin
+    from speclino.settings import Settings
 
     approvers = logins or []
-    _in_transaction(
-        lambda s: workspace_admin.set_pr_approvers(s, repo_full_name=repo, logins=approvers)
+    users = build_github_user_lookup(Settings())
+    _with_github_lookup(
+        lambda: _in_transaction(
+            lambda s: workspace_admin.set_pr_approvers(
+                s, repo_full_name=repo, logins=approvers, users=users
+            )
+        )
     )
     typer.echo(f"{repo} の PR 承認者を {approvers} にした")
+
+
+@workspace_app.command("backfill-approver-ids")
+def workspace_backfill_approver_ids(
+    repo: Annotated[str, typer.Option("--repo", help="対象リポジトリ（owner/repo）")],
+    yes: Annotated[
+        bool, typer.Option("--yes", help="確かめた ID を保存する（省略で表示だけ）")
+    ] = False,
+) -> None:
+    """保存済みの PR 承認者（ログイン名）に GitHub のユーザー ID を補う（S61 の移行）。
+
+    ID の無い承認者は承認できない（ログイン名では照合しない）。`GET /users/{login}` で引く
+    （GitHub App の鍵があれば App の認証で、無ければ認証なしで）。引くのは今そのログイン名を
+    持つ人の ID なので、既定は `login → id` を表示するだけにし、確かめてから `--yes` で保存する。
+    """
+    from speclino.api.deps import build_github_user_lookup
+    from speclino.services import workspace_admin
+    from speclino.settings import Settings
+
+    users = build_github_user_lookup(Settings())
+    pairs = _with_github_lookup(
+        lambda: _in_transaction(
+            lambda s: workspace_admin.backfill_approver_ids(
+                s, repo_full_name=repo, users=users, apply=yes
+            )
+        )
+    )
+    for login, user_id in pairs:
+        typer.echo(f"{login} → {user_id}")
+    if yes:
+        typer.echo(f"{repo} の PR 承認者の GitHub ユーザー ID を保存した")
+    else:
+        typer.echo(
+            "保存していない。ログイン名を他人が取得していないか ID を確かめ、--yes で保存する"
+        )
+
+
+def _with_github_lookup[T](work: Callable[[], T]) -> T:
+    """GitHub への問い合わせの失敗（レート制限・通信）を終了コード 2 とメッセージにする。"""
+    from speclino.services.project_settings import GitHubLookupFailed
+
+    try:
+        return work()
+    except GitHubLookupFailed as e:
+        typer.echo(f"GitHub に問い合わせられない: {e}", err=True)
+        raise typer.Exit(code=2) from e
 
 
 @workspace_app.command("list")

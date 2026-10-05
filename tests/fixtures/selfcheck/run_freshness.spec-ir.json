@@ -5,7 +5,7 @@
       "approver": "tanabe-yudai",
       "evidence_url": null,
       "id": "speclino-self-run-v1",
-      "ir_content_hash": "sha256:bec95508e5019a8b5a50558f084f455a866a775717a861da26d07f0b4a87132b",
+      "ir_content_hash": "sha256:d42c3cd7d374b90915524a85162d065cd36ee425c8ecd02e6c7dd024de01f29d",
       "source": "manual",
       "spec_content_hash": "sha256:87d7af4744271f4eacceb20fb585621880995822afef01a6c3e52caee3c5e39c"
     }
@@ -52,7 +52,9 @@
           "symbol": null
         }
       ],
-      "tests": [],
+      "tests": [
+        "tests/unit/services/test_run_freshness.py::test_superseded_is_never_published"
+      ],
       "title": null
     },
     {
@@ -150,7 +152,9 @@
           "symbol": null
         }
       ],
-      "tests": [],
+      "tests": [
+        "tests/unit/services/test_run_freshness.py::test_not_latest_run_is_not_published"
+      ],
       "title": null
     },
     {
@@ -257,7 +261,10 @@
           "symbol": null
         }
       ],
-      "tests": [],
+      "tests": [
+        "tests/unit/services/test_run_freshness.py::test_latest_run_is_published",
+        "tests/unit/services/test_run_freshness.py::test_unknown_latest_run_is_treated_as_latest"
+      ],
       "title": null
     }
   ],

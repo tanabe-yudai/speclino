@@ -21,6 +21,15 @@ STATUS_FIELD="$(cfg fields.Status.id)"
 items_json() { gh project item-list "$PN" --owner "$OWNER" --limit 200 --format json; }
 
 item_id_of() { # <issue number> -> project item id
+  # item-add 直後は item-list（先頭 200 件）に出ないことがあるので、Issue から直接引く。
+  # 引けなければ（API 失敗を含む）item-list にフォールバックする
+  local id
+  id="$(gh api graphql -F owner="${REPO%%/*}" -F name="${REPO##*/}" -F number="$1" -f query='
+    query($owner:String!,$name:String!,$number:Int!){
+      repository(owner:$owner,name:$name){ issue(number:$number){
+        projectItems(first:20){ nodes{ id project{ id } } } } } }' \
+    --jq ".data.repository.issue.projectItems.nodes[] | select(.project.id==\"$PID\") | .id" 2>/dev/null | grep -m1 "^PVTI_")" || true
+  if [ -n "$id" ]; then echo "$id"; return; fi
   items_json | python3 -c "
 import json,sys
 n=int(sys.argv[1])

@@ -139,8 +139,8 @@ async def _handle_comment(
     # 触れられる）。コメントからは project を作らない: 見つからなければ承認者はいない。
     project = await ProjectRepository(session).get_by_github_id(cm.repo_id)
     # 承認者は project ごとの設定だけ。全体共通の承認者は、どのリポジトリでも承認できて
-    # しまうため持たない（S52）。
-    approvers = set(project.settings.get("approvers", [])) if project is not None else set()
+    # しまうため持たない（S52）。照合はコメントした人の GitHub ユーザー ID で行う（S61）。
+    settings = project.settings if project is not None else {}
     audit = AuditRepository(session)
     latest = (
         await ReviewRunRepository(session).latest_run_for_pr(project.id, cm.issue_number)
@@ -148,7 +148,9 @@ async def _handle_comment(
         else None
     )
     for cmd in commands:
-        decision = authorize_command(cmd, cm.author_login, approvers)
+        decision = authorize_command(
+            cmd, cm.author_login, author_id=cm.author_id, settings=settings
+        )
         await audit.record(
             cm.author_login,
             f"command.{cmd.kind}",
@@ -198,13 +200,19 @@ async def _record_attestation(
 ) -> dict[str, Any]:
     """`/speclino attest <指紋> <sha256:hash> [ack]` を確定として記録する（S70）。
 
-    承認者の照合は `authorize_command` で済んでいる。確定はワークスペースに属するので、
-    ワークスペースに登録されていないリポジトリでは記録しない。actor は `github:<login>`。
+    承認者の照合は `authorize_command`（GitHub のユーザー ID で照合、S61）で済んでいる。確定は
+    ワークスペースに属するので、ワークスペースに登録されていないリポジトリでは記録しない。actor は
+    `github:<ユーザー ID>`（ログイン名は変えられ、別人に再利用されうるので識別に使わない）。
+    ログイン名は監査の詳細に残す。
     確定できるのはこの PR の最新の完了した run の指摘（指紋と hash）だけ。無ければ記録せず、
     監査に拒否を残して応答で知らせる（answer の S52 と同じく、webhook はコメントを書かない）。
     """
     if project is None or project.team is None:
         return {"accepted": False, "reason": "ワークスペースに登録されていないリポジトリ"}
+    if cm.author_id is None:
+        # authorize_command が ID の無いコメントを承認しないので来ないが、ログイン名には戻さない
+        return {"accepted": False, "reason": "コメントした人の GitHub ユーザー ID が無い"}
+    actor = f"github:{cm.author_id}"
     # このコメントの PR の検査に出た指紋だけ（他の PR の指摘をここで確定させない。S52 と同じ考え方）
     if not await in_pr_findings(
         session,
@@ -214,11 +222,12 @@ async def _record_attestation(
         content_hash=args[1],
     ):
         await AuditRepository(session).record(
-            f"github:{cm.author_login}",
+            actor,
             "attestation.record",
             f"{project.team}:{args[0]}",
             "rejected",
             {
+                "actor_login": cm.author_login,
                 "content_hash": args[1],
                 "via": f"pr_comment:{cm.comment_url}",
                 "reason": NOT_IN_PR_REASON,
@@ -231,7 +240,8 @@ async def _record_attestation(
         fingerprint=args[0],
         content_hash=args[1],
         disposition=attest_disposition(args),
-        actor=f"github:{cm.author_login}",
+        actor=actor,
+        actor_login=cm.author_login,
         workspace=project.team,
         via=f"pr_comment:{cm.comment_url}",
         # PR の作成者が自分で確定した（GitHub の ID で照合。拒否はせず印を残す。照合不可は None）

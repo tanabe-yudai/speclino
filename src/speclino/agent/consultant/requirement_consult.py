@@ -32,7 +32,9 @@ from speclino.domain.a2a import CostReservation
 from speclino.services.cost_guard import CostGuard
 
 INSTRUCTION_PATH = Path(__file__).resolve().parents[1] / "instructions" / "consultant_v1.md"
-CONSULT_MAX_OUTPUT_TOKENS = 2048  # 1 回の LLM 呼出しの出力の上限（モデルに渡す）
+# 1 回の LLM 呼出しの出力の上限（モデルに渡す）。Gemini では思考のトークンもこの上限に含まれ、
+# 課金される出力（候補＋思考）はこれを超えない。小さいと思考だけで尽きて答えが空になる
+CONSULT_MAX_OUTPUT_TOKENS = 8192
 MAX_QUESTION_CHARS = 4000  # 質問の本文の上限（費用の最悪値の見積もりを抑える）
 # 待ちを終える検査の状態（要確認が残る検査は awaiting_answer で終わる）
 _DONE_STATES = frozenset({"completed", "awaiting_answer", "failed", "cancelled", "superseded"})
@@ -229,8 +231,8 @@ def worst_case_cost(
     """1 回の相談の最悪の費用。文字数 ≒ トークン数として見積もる。
 
     1 回の LLM 呼出しの入力は 指示 ＋ プロンプト ＋ 道具の結果（1 件 MAX_RESULT_CHARS まで）を
-    上限まで積んだもの、出力は CONSULT_MAX_OUTPUT_TOKENS（モデルに渡す上限）。これを LLM 呼出しの
-    上限の回数ぶん積む。
+    上限まで積んだもの、出力は CONSULT_MAX_OUTPUT_TOKENS（モデルに渡す上限。思考を含むので、
+    課金される出力の真の上限になる）。これを LLM 呼出しの上限の回数ぶん積む。
     """
     input_per_call = len(instruction) + len(prompt) + perms.max_tool_calls * MAX_RESULT_CHARS
     return cost_guard.estimate(

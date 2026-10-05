@@ -15,7 +15,14 @@ from a2a.server.routes import (
     create_jsonrpc_routes,
 )
 from a2a.server.tasks import DatabaseTaskStore, TaskStore
-from a2a.types import ListTasksRequest, ListTasksResponse, Task
+from a2a.types import (
+    InvalidParamsError,
+    ListTasksRequest,
+    ListTasksResponse,
+    Message,
+    SendMessageRequest,
+    Task,
+)
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -28,6 +35,8 @@ from speclino.domain.a2a import SkillId
 from speclino.settings import Settings
 
 A2A_TASKS_TABLE = "a2a_tasks"
+# a2a_tasks.id / context_id の長さ（migrations/versions/0008_a2a.py）。SDK が作る ID は UUID
+A2A_ID_MAX_LENGTH = 36
 
 
 @cache
@@ -68,6 +77,9 @@ class LazyTaskStore(TaskStore):
         await self._store().save(task, context)
 
     async def get(self, task_id: str, context: ServerCallContext) -> Task | None:
+        # 列に入らない ID のタスクは無い（そのまま DB に渡すと失敗する）
+        if len(task_id) > A2A_ID_MAX_LENGTH:
+            return None
         return await self._store().get(task_id, context)
 
     async def list(self, params: ListTasksRequest, context: ServerCallContext) -> ListTasksResponse:
@@ -75,6 +87,24 @@ class LazyTaskStore(TaskStore):
 
     async def delete(self, task_id: str, context: ServerCallContext) -> None:
         await self._store().delete(task_id, context)
+
+
+class SpecLinoRequestHandler(DefaultRequestHandler):
+    """列より長い task_id / context_id のメッセージを、DB に届く前に InvalidParams で断る。
+
+    断らないと INSERT が失敗し、SQL の文面つきの内部エラーになる。ストリーミングは Agent Card で
+    無効にしているので、送信は on_message_send だけを見ればよい。
+    """
+
+    async def on_message_send(
+        self, params: SendMessageRequest, context: ServerCallContext
+    ) -> Message | Task:
+        for name in ("task_id", "context_id"):
+            if len(getattr(params.message, name)) > A2A_ID_MAX_LENGTH:
+                raise InvalidParamsError(f"{name} は {A2A_ID_MAX_LENGTH} 文字以内にしてください")
+        # SDK のデコレータで型が Any になるので戻り値の型を明示する
+        result: Message | Task = await super().on_message_send(params, context)
+        return result
 
 
 class _Handlers:
@@ -100,7 +130,7 @@ def mount_a2a(app: FastAPI, settings: Settings, get_state: Callable[[], AppState
     """静的配信の mount より前に呼ぶ（"/" の mount に `/a2a` を取られないように）。"""
     card = build_agent_card(settings.public_url.rstrip("/"))
     executor = SpecLinoExecutor(_Handlers(get_state), lambda: get_state().session_factory)
-    handler = DefaultRequestHandler(executor, LazyTaskStore(get_state), card)
+    handler = SpecLinoRequestHandler(executor, LazyTaskStore(get_state), card)
     add_a2a_routes_to_fastapi(
         app,
         agent_card_routes=create_agent_card_routes(card),

@@ -1,17 +1,20 @@
 """PR コメントのコマンド（`/speclino approve-spec <hash>` / answer / attest / rerun）。
 
-承認者はサーバ側設定（projects.settings.approvers）だけで検証する（全体共通の承認者は
-持たない）。`author_association` は所属であって承認権限ではないので使わない。
+承認者はサーバ側設定（projects.settings の approvers / approver_ids）だけで検証する（全体共通の
+承認者は持たない）。照合は GitHub のユーザー ID で行う（`services/approvers.py`、S61）。
+`author_association` は所属であって承認権限ではないので使わない。
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
 
 from speclino.domain.spec_ir import ApprovalRecord
+from speclino.services.approvers import is_approver
 
 CommandKind = Literal["approve-spec", "answer", "attest", "rerun"]
 _CMD_RE = re.compile(
@@ -42,10 +45,18 @@ def parse_commands(body: str) -> list[Command]:
     return out
 
 
-def authorize_command(cmd: Command, author_login: str, approvers: set[str]) -> CommandDecision:
+def authorize_command(
+    cmd: Command,
+    author_login: str,
+    *,
+    author_id: int | None,
+    settings: Mapping[str, object],
+) -> CommandDecision:
+    """`settings` は project の設定の保存値。承認者は `is_approver` で GitHub のユーザー ID だけで
+    照合する（ID の無い設定では誰も承認者にならない）。"""
     if cmd.kind == "rerun":
         return CommandDecision(True, "再実行はコメント権限があれば誰でも可", cmd)
-    if author_login not in approvers:
+    if not is_approver(settings, user_id=author_id, login=author_login):
         return CommandDecision(False, f"{author_login} は承認者ではない（監査に記録）", cmd)
     if cmd.kind == "approve-spec" and (len(cmd.args) != 1 or not _HASH_RE.match(cmd.args[0])):
         return CommandDecision(

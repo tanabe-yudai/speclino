@@ -34,6 +34,11 @@ def test_speclino_core_package_is_valid() -> None:
         "SPEC-TEST-001",
         "CI-001",
         "API-ERR-001",
+        "ARCH-001",
+        "ARCH-002",
+        "ARCH-003",
+        "ARCH-004",
+        "VERDICT-001",
     }
 
 

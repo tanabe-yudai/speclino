@@ -696,7 +696,7 @@ class AttestationRecord(Base):
     """`attestations`: 人の確定（S70）。指紋と内容の hash に結びつき、内容が変われば効かない。
 
     同じ (workspace, fingerprint, content_hash) は最新の処置で上書きする（取り消し・変更は監査に
-    残る）。actor は SpecLino の uid、または PR コメントなら `github:<login>`。
+    残る）。actor は SpecLino の uid、または PR コメントなら `github:<GitHub ユーザー ID>`。
     """
 
     __tablename__ = "attestations"

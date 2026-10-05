@@ -85,7 +85,7 @@ from speclino.services.llm_policies import (
     unknown_finding,
 )
 from speclino.services.llm_units import extract_units
-from speclino.services.obligation_diff import effective_spec
+from speclino.services.obligation_diff import UNKNOWN_SPEC_HASH, effective_spec
 from speclino.services.project_settings import parse_stored
 from speclino.services.replay_service import DETERMINISTIC_FINDINGS
 from speclino.services.run_freshness import should_publish
@@ -297,7 +297,7 @@ class ReviewRunService:
                     approver=a.approver,
                     approved_at=a.created_at,
                     source="pr_comment",
-                    spec_content_hash=a.content_hash or "sha256:unknown",
+                    spec_content_hash=a.content_hash or UNKNOWN_SPEC_HASH,
                     ir_content_hash=a.target,
                     evidence_url=a.comment_url,
                 )

@@ -229,7 +229,18 @@ async def test_seed_from_package_loads_speclino_core_as_revision_1(session: Asyn
     # SPEC-TEST-001 は本タスクと無関係な別ストーリー（S49、#59）で speclino-core.yaml に
     # 追加された規約。ここでの変更ではないが、既存アサーションが古いままだと本タスクの
     # 統合テストが赤くなるため、実際の内容に合わせる。
-    assert rule_ids == {"MAKE-001", "SPEC-FMT-001", "SPEC-TEST-001", "CI-001", "API-ERR-001"}
+    assert rule_ids == {
+        "MAKE-001",
+        "SPEC-FMT-001",
+        "SPEC-TEST-001",
+        "CI-001",
+        "API-ERR-001",
+        "ARCH-001",
+        "ARCH-002",
+        "ARCH-003",
+        "ARCH-004",
+        "VERDICT-001",
+    }
 
     repo = PolicyRevisionRepository(session)
     active = await repo.active_revision("acme")

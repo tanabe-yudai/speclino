@@ -19,11 +19,16 @@ output "artifact_registry" {
 }
 
 output "wif_provider" {
-  description = "GitHub Actions の google-github-actions/auth@v2 に渡す workload_identity_provider"
+  description = "GitHub Actions の google-github-actions/auth に渡す workload_identity_provider"
   value       = google_iam_workload_identity_pool_provider.github.name
 }
 
 output "deployer_sa" {
   description = "GitHub Actions の service_account に渡す deployer SA のメールアドレス"
   value       = google_service_account.this["deployer"].email
+}
+
+output "planner_sa" {
+  description = "terraform-plan.yml の service_account に渡す読み取り専用 SA のメールアドレス（secret GCP_PLANNER_SA）"
+  value       = google_service_account.this["planner"].email
 }

@@ -1474,12 +1474,20 @@
       },
       "ProjectSettings": {
         "additionalProperties": false,
-        "description": "`projects.settings` の型。API はこの型で検証してから保存する。\n\n- `fail_on`: ゲートを失敗にする判定。違反・未検証・要確認のどれも外せない（弱められない）\n- `agent_enabled` / `test_run_enabled`: 証拠を集める機能の project ごとの有効・無効。\n  サーバ全体の設定（環境変数）で無効なら、ここで有効にしても動かない（AND で効く）\n- `approvers`: PR コメントの `/speclino approve-spec` を受け付ける GitHub ログイン名",
+        "description": "`projects.settings` の型。API はこの型で検証してから保存する。\n\n- `fail_on`: ゲートを失敗にする判定。違反・未検証・要確認のどれも外せない（弱められない）\n- `agent_enabled` / `test_run_enabled`: 証拠を集める機能の project ごとの有効・無効。\n  サーバ全体の設定（環境変数）で無効なら、ここで有効にしても動かない（AND で効く）\n- `approvers`: PR コメントの `/speclino approve-spec` を受け付ける GitHub ログイン名（表示用）\n- `approver_ids`: `approvers` と同じ順の GitHub ユーザー ID。照合はこちらで行う（ログイン名は\n  改名後に他人が取得できる）。サーバが保存のときに引いて埋める（送られてきた値は使わない）。\n  空・足りない（ID を保存する前の設定）なら、ID の無い承認者は承認できない（S61）",
         "properties": {
           "agent_enabled": {
             "default": true,
             "title": "Agent Enabled",
             "type": "boolean"
+          },
+          "approver_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 50,
+            "title": "Approver Ids",
+            "type": "array"
           },
           "approvers": {
             "items": {
@@ -2315,6 +2323,21 @@
           "level"
         ],
         "title": "TraceObligation",
+        "type": "object"
+      },
+      "UserIdRequest": {
+        "properties": {
+          "login": {
+            "maxLength": 39,
+            "minLength": 1,
+            "title": "Login",
+            "type": "string"
+          }
+        },
+        "required": [
+          "login"
+        ],
+        "title": "UserIdRequest",
         "type": "object"
       },
       "speclino__api__routes__knowledge__ApproveRequest": {
@@ -5433,6 +5456,16 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "summary": "Update Settings",
@@ -6056,6 +6089,68 @@
           }
         },
         "summary": "Health"
+      }
+    },
+    "/internal/github/user-id": {
+      "post": {
+        "operationId": "github_user_id_internal_github_user_id_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserIdRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "title": "Response Github User Id Internal Github User Id Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Github User Id",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/mcp/context": {

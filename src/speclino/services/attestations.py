@@ -101,6 +101,7 @@ async def attest(
     workspace: str,
     via: str = "api",
     self_attested: bool | None = None,
+    actor_login: str | None = None,
     now: datetime | None = None,
 ) -> Attestation:
     """確定を記録し（同じ指紋・hash は最新の処置で上書き）、監査に残す。
@@ -109,6 +110,8 @@ async def attest(
     （仕様の自己承認と同じ）のため拒否はしないが、監査・gate.json・manifest に印を残す。None は
     「作成者との照合不可」で、false と区別して残す。対応・規約の変更（KNOWLEDGE-BINDINGS-001）の
     確定で true / None のときは監査に警告を足す（裁定 34: 拒否はしない）。
+    `actor_login`: PR コメントの確定で actor（`github:<ユーザー ID>`）に添えて監査に残す
+    ログイン名。
     """
     # 入力の形を先に確かめる（hash の形式違反を DB に入れない）
     Attestation(
@@ -138,6 +141,8 @@ async def attest(
         "first_actor": first_actor,
         "latest_actor": actor,
     }
+    if actor_login is not None:
+        detail["actor_login"] = actor_login
     warning = config_change_warning(fingerprint, self_attested)
     if warning is not None:
         detail["warning"] = warning

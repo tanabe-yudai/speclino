@@ -16,7 +16,9 @@ from pathlib import Path
 import httpx
 
 from speclino.adapters.github.app_auth import GitHubAppAuth
+from speclino.adapters.github.user_lookup import parse_user_response, validate_login
 from speclino.domain.run import GIT_REF_PATTERN
+from speclino.ports.github_users import GitHubUserLookupError
 
 _MAX_RETRIES = 3
 _RETRY_BASE_DELAY_SECONDS = 0.5
@@ -207,6 +209,35 @@ class GitHubClient:
         if len(top_levels) != 1:
             raise ValueError(f"tarball の最上位ディレクトリが一意ではない: {sorted(top_levels)}")
         return dest_dir / next(iter(top_levels))
+
+    async def user_id(self, login: str) -> int | None:
+        """`GitHubUserLookup` の実装（S61）。`GET /users/{login}` を installation token で引く。
+
+        認証なしの公開 API は Cloud Run の共有 IP でレート制限に当たるので、App の認証で引く。
+        ユーザー情報はリポジトリに紐付かないので、インストールは App のどれでもよい。
+        """
+        validate_login(login)
+        try:
+            installation_id = self.installation_id or await self.auth.any_installation_id(
+                self.http, self.base_url
+            )
+            token = await self.auth.installation_token(installation_id, self.http, self.base_url)
+            response = await self.http.get(
+                f"{self.base_url}/users/{login}",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/vnd.github+json",
+                },
+            )
+        except httpx.HTTPStatusError as e:
+            raise GitHubUserLookupError(
+                f"GitHub App の認証の応答が {e.response.status_code}"
+            ) from e
+        except httpx.HTTPError as e:
+            raise GitHubUserLookupError(f"GitHub に問い合わせられない（{type(e).__name__}）") from e
+        except LookupError as e:
+            raise GitHubUserLookupError(str(e)) from e
+        return parse_user_response(response)
 
 
 __all__ = ["GitHubClient"]

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from speclino.adapters.github.app_auth import GitHubAppAuth
 from speclino.adapters.github.client import GitHubClient
+from speclino.adapters.github.user_lookup import PublicGitHubUserLookup
 from speclino.adapters.github.user_oauth import GitHubUserOAuth
 from speclino.adapters.llm.gemini_json import GeminiJsonLlm
 from speclino.adapters.localgit.local_code_host import LocalCodeHost
@@ -31,6 +32,7 @@ from speclino.db.session import make_engine, make_session_factory
 from speclino.domain.policy import PolicyRevision
 from speclino.ports.blob_store import BlobStore
 from speclino.ports.code_host import CodeHost
+from speclino.ports.github_users import GitHubUserLookup
 from speclino.ports.mcp_context import McpContextSource
 from speclino.ports.sandbox import Sandbox
 from speclino.ports.task_queue import TaskQueue
@@ -64,6 +66,8 @@ class AppState:
     a2a_handlers: dict[SkillId, SkillHandler] | None = None
     # AI の書き換え提案（S67）の LLM。None なら初回に Gemini を作る。テストで台本に差し替える
     spec_suggest_llm: TextLlm | None = None
+    # 承認者のログイン名 → GitHub ユーザー ID（S61）。引き先は `build_github_user_lookup`
+    github_users: GitHubUserLookup = field(default_factory=PublicGitHubUserLookup)
 
 
 class _SessionLedger:
@@ -106,21 +110,45 @@ def make_team_policy_resolver(
     return resolve
 
 
-def build_code_host(settings: Settings, installation_id: int | None = None) -> CodeHost:
-    if settings.code_host_kind == "local":
-        return LocalCodeHost(repos={k: Path(v) for k, v in settings.local_repos.items()})
+def _github_app_auth(settings: Settings) -> GitHubAppAuth | None:
+    """GitHub App の認証。App ID か秘密鍵が無ければ None。"""
     pem = settings.github_private_key
     if pem is None and settings.github_private_key_path is not None:
         pem = settings.github_private_key_path.read_text(encoding="utf-8")
     if settings.github_app_id is None or pem is None:
+        return None
+    return GitHubAppAuth(settings.github_app_id, pem)
+
+
+def build_code_host(settings: Settings, installation_id: int | None = None) -> CodeHost:
+    if settings.code_host_kind == "local":
+        return LocalCodeHost(repos={k: Path(v) for k, v in settings.local_repos.items()})
+    auth = _github_app_auth(settings)
+    if auth is None:
         raise RuntimeError("GitHub App の設定（SPECLINO_GITHUB_APP_ID / PRIVATE_KEY）が無い")
-    auth = GitHubAppAuth(settings.github_app_id, pem)
     return GitHubClient(
         auth,
         installation_id or 0,
         httpx.AsyncClient(timeout=30.0),
         base_url=settings.github_api_base,
     )
+
+
+def build_github_user_lookup(settings: Settings) -> GitHubUserLookup:
+    """承認者のログイン名 → GitHub ユーザー ID の引き先（S61）。
+
+    web の本番は秘密鍵を持つ worker に任せる。鍵があれば（worker、admin ジョブの CLI）App の
+    認証で引く。どちらも無いローカルだけ、認証なしの公開 API で引く（共有 IP ではレート制限に
+    当たるので本番では使わない）。
+    """
+    if settings.role == "web" and settings.cloud_tasks_worker_url:
+        from speclino.adapters.worker.github_user_client import WorkerGitHubUserLookup
+
+        return WorkerGitHubUserLookup(settings.cloud_tasks_worker_url)
+    auth = _github_app_auth(settings)
+    if auth is None:
+        return PublicGitHubUserLookup(api_base=settings.github_api_base)
+    return GitHubClient(auth, 0, httpx.AsyncClient(timeout=30.0), base_url=settings.github_api_base)
 
 
 def build_sandbox(settings: Settings) -> Sandbox:
@@ -280,7 +308,16 @@ def build_state(settings: Settings) -> AppState:
         else None
     )
     return AppState(
-        settings, engine, factory, code_host, queue, blobs, service, context_source, user_oauth
+        settings,
+        engine,
+        factory,
+        code_host,
+        queue,
+        blobs,
+        service,
+        context_source,
+        user_oauth,
+        github_users=build_github_user_lookup(settings),
     )
 
 

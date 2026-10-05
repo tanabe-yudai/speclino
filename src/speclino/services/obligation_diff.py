@@ -20,6 +20,8 @@ from speclino.spec.spec_validator import rule_content_hash
 ChangeStatus = Literal["added", "changed", "removed", "unchanged"]
 BASE_APPROVAL_ID = "base-trusted"
 BASE_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+# サーバ側の承認の記録に本文のハッシュが無いときの値（review_run_service が入れる）
+UNKNOWN_SPEC_HASH = "sha256:unknown"
 
 
 @dataclass(frozen=True)
@@ -67,6 +69,14 @@ def effective_spec(
       head ファイル内の承認記録は PR で改ざんできるので使わない。
     - removed: `removed:<base_hash>` の承認が無ければ REVIEW: stale_approval。
     """
+    # サーバ側の承認（コメント）は本文のハッシュを持たない。承認の対象は要求の解釈（IR の
+    # ハッシュ）なので、head の本文のハッシュで補う。補わないと検証器が E_SPEC_HASH_MISMATCH にする
+    approvals = [
+        a.model_copy(update={"spec_content_hash": head.spec_content_hash})
+        if a.spec_content_hash == UNKNOWN_SPEC_HASH and head.spec_content_hash
+        else a
+        for a in approvals
+    ]
     hashes = approved_hashes(approvals)
     if base is None:
         hashes |= approved_hashes(head.approvals)
