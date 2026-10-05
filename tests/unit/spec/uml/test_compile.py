@@ -442,3 +442,94 @@ def test_rejects_emphasized_requirement_header() -> None:
 def test_thematic_break_is_not_nesting() -> None:
     md = "- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -\n\n" + _CLS_A
     assert _compiled(md).classes
+
+
+# ---------------------------------------------- fix round 4: 事後照合（消えた図と表）
+
+_FENCE = ["```mermaid", "%%@ id: c", "classDiagram", "class A {", "  +m()", "}", "```"]
+_TABLE = [
+    "| ID | level | 要求 | 形式化 |",
+    "| --- | --- | --- | --- |",
+    "| R1 | mandatory | x | - |",
+]
+
+
+def _nested_ol(n: int, payload: list[str]) -> str:
+    """順序つきリストを字下げで n 段入れ子にする。
+
+    事前の深さの見積りは通るが、markdown-it は深い段の中身を捨てる。
+    """
+    out = []
+    ind = 0
+    for _ in range(n):
+        out.append(" " * ind + "1. a")
+        ind += 3
+    return "\n".join(out + [" " * ind + line for line in payload]) + "\n"
+
+
+def _quote_list(n: int, payload: list[str], hr: bool = False) -> str:
+    out = []
+    pre = ""
+    for _ in range(n):
+        out.append(pre + "> a")
+        pre += "> "
+        out.append(pre + "- b")
+        pre += "  "
+        if hr:
+            out.append(pre + "- - -")
+    return "\n".join(out + [pre + line for line in payload]) + "\n"
+
+
+@pytest.mark.parametrize("payload", [_FENCE, _TABLE], ids=["mermaid", "table"])
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda p: _nested_ol(10, p),
+        lambda p: _nested_ol(11, p),
+        lambda p: _quote_list(6, p),
+        lambda p: _quote_list(6, p, hr=True),
+        lambda p: "> - " * 100 + p[0] + "\n" + "\n".join(p[1:]) + "\n",
+    ],
+    ids=["ol10", "ol11", "quote-list", "quote-list-hr", "q-l-100"],
+)
+def test_nested_content_dropped_by_parser_is_error(build, payload: list[str]) -> None:  # type: ignore[no-untyped-def]
+    md = build(payload)
+    start = time.perf_counter()
+    res = compile_spec(md, domain=None, legacy_ir=[])
+    assert time.perf_counter() - start < PERF_LIMIT
+    assert res.compiled is None
+    codes = {d.code for d in res.diagnostics}
+    assert codes & {"E_UNSUPPORTED_SYNTAX", "E_NESTING_TOO_DEEP", "E_REQ_TABLE"}, codes
+    assert all(d.span is not None for d in res.diagnostics)
+
+
+def test_deep_nesting_reconciliation_is_fast() -> None:
+    md = "".join(_nested_ol(11, _FENCE) for _ in range(300))
+    start = time.perf_counter()
+    res = compile_spec(md[: 250 * 1024], domain=None, legacy_ir=[])
+    assert time.perf_counter() - start < PERF_LIMIT
+    assert res.compiled is None
+
+
+@pytest.mark.parametrize("prefix", ["﻿﻿", " ", "​", "⁠"])
+def test_invisible_prefix_before_mermaid_fence_is_error(prefix: str) -> None:
+    md = prefix + "\n".join(_FENCE) + "\n\n" + "\n".join(_FENCE).replace("id: c", "id: d") + "\n"
+    res = compile_spec(md, domain=None, legacy_ir=[])
+    assert res.compiled is None
+    assert [(d.code, d.span.line if d.span else None) for d in res.diagnostics][0] == (
+        "E_UNSUPPORTED_SYNTAX",
+        1,
+    )
+
+
+@pytest.mark.parametrize("payload", [_FENCE, _TABLE], ids=["mermaid", "table"])
+@pytest.mark.parametrize("depth", [10, 11])
+def test_reconciliation_catches_what_precheck_misses(payload: list[str], depth: int) -> None:
+    """事前の深さの見積りは通るが markdown-it が中身を捨てる入れ子 → 事後照合のエラー。"""
+    from speclino.spec.uml.markdown import _precheck
+
+    md = _nested_ol(depth, payload)
+    assert _precheck(md.split("\n")) == []  # 事前検査では止まらない
+    res = compile_spec(md, domain=None, legacy_ir=[])
+    msgs = [d.message for d in res.diagnostics if d.code == "E_UNSUPPORTED_SYNTAX"]
+    assert any("解釈できない" in m for m in msgs), res.diagnostics

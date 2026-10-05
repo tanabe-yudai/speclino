@@ -27,13 +27,19 @@ from speclino.spec.uml.types import (
 
 REQ_HEADER = ("ID", "level", "要求", "形式化")
 _CANONICAL_FENCE = "```mermaid"
-_MD_NESTING = 4 * MAX_CONTAINER_DEPTH + 8
-"""markdown-it の入れ子の上限。これを超えた内容は黙って捨てられるので、コンテナの深さを先に数えて
-`MAX_CONTAINER_DEPTH` で止め、ここには十分な余裕を持たせる。"""
+_LEAF_BLOCKS = frozenset(
+    {"fence", "code_block", "html_block", "table_open", "paragraph_open", "heading_open"}
+)
+"""行を説明できる葉のブロック。
+
+コンテナ（引用・リスト）の map は中で捨てられた内容まで覆うので使わない。
+"""
 
 
 def _parser() -> MarkdownIt:
-    md = MarkdownIt("commonmark", {"maxNesting": _MD_NESTING}).enable("table")
+    # maxNesting は既定のまま。超えた入れ子の中身は markdown-it が黙って捨てるが、
+    # 事後照合（_unexplained_lines）で図と要求の表が消えていないことを確かめる
+    md = MarkdownIt("commonmark").enable("table")
     md.disable(["inline", "text_join"])  # ブロックだけを解析する
     return md
 
@@ -186,6 +192,69 @@ def _precheck(lines: list[str]) -> list[MarkdownError]:
         msg = f"文書の `|` は {MAX_TOTAL_PIPES} 個まで（表のセルの総数の上限）"
         errors.append(MarkdownError("E_TOO_LARGE", msg, 1))
     return errors
+
+
+_INVISIBLE_PREFIX = frozenset(" \t>\ufeff\u200b\u200c\u200d\u2060\u00a0")
+"""事後照合で行頭から除く文字（空白・引用・BOM・ゼロ幅文字・NBSP）。"""
+_CODE_BLOCKS = frozenset({"fence", "code_block", "html_block"})
+
+
+def _strip_invisible(s: str) -> str:
+    i = 0
+    while i < len(s) and s[i] in _INVISIBLE_PREFIX:
+        i += 1
+    return s[i:]
+
+
+def _strip_containers(line: str) -> str:
+    """行頭の空白・`>`・リストの記号・BOM・ゼロ幅文字・NBSP を取り除く。
+
+    事後照合で疑わしい行を見つけるためだけに使う。
+    """
+    s = _strip_invisible(line)
+    while True:
+        if len(s) >= 2 and s[0] in "-*+" and s[1] in " \t":
+            s = _strip_invisible(s[2:])
+            continue
+        j = 0
+        while j < len(s) and j < 9 and s[j].isdigit():
+            j += 1
+        if 0 < j < len(s) - 1 and s[j] in ".)" and s[j + 1] in " \t":
+            s = _strip_invisible(s[j + 2 :])
+            continue
+        return s
+
+
+def _is_mermaid_like(s: str) -> bool:
+    return s[:10].lower() in ("```mermaid", "~~~mermaid")
+
+
+def _unexplained_lines(lines: list[str], toks: list[MdToken]) -> list[int]:
+    """図の開き・要求の表の見出しに見えるのに、それとして説明できない行（0 始まり）。O(行数)。
+
+    - 図の開きに見える行は、フェンス（受理・エラー・閉じたコードの中）・字下げのコード・HTML の
+      map の中でなければならない。段落になっている（NBSP・ゼロ幅文字・2 つ目の BOM の後ろ）
+      なら、読み手には図に見えないが書き手の意図は図なので知らせる
+    - 要求の表の見出しに見える行は、どれかの葉のブロック（表・段落を含む）の map の中に必要
+    入れ子が深すぎて markdown-it が中身を捨てると、その行はどの葉のブロックにもならない。
+    事前の深さの見積りと markdown-it の解釈がずれても、図と要求の表が黙って消えないようにする。
+    """
+    in_leaf = bytearray(len(lines))
+    in_code = bytearray(len(lines))
+    for t in toks:
+        if t.type in _LEAF_BLOCKS and t.map is not None:
+            start, end = t.map
+            in_leaf[start:end] = b"\x01" * (end - start)
+            if t.type in _CODE_BLOCKS:
+                in_code[start:end] = b"\x01" * (end - start)
+    out: list[int] = []
+    for k, line in enumerate(lines):
+        if in_code[k]:
+            continue
+        s = _strip_containers(line)
+        if _is_mermaid_like(s) or (not in_leaf[k] and "|" in s and _is_req_header(_loose_cells(s))):
+            out.append(k)
+    return out
 
 
 class _Scanner:
@@ -363,6 +432,12 @@ def split_markdown(text: str) -> MarkdownParts:
         elif t.type == "inline" and i > 0 and toks[i - 1].type == "paragraph_open":
             sc.paragraph(t)
         i += 1
+    for k in _unexplained_lines(lines, toks)[:20]:
+        sc.error(
+            "E_UNSUPPORTED_SYNTAX",
+            "Markdown の構造を解釈できない（入れ子が深すぎる等）。図・要求の表として読めない",
+            k,
+        )
     return MarkdownParts(
         blocks=sc.blocks,
         tables=sc.tables,
