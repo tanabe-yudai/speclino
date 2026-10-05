@@ -160,6 +160,12 @@ class CheckRequest:
     github_repo_id: int | None = None
     # run の時刻（manifest の created_at と lock の期限の判定）。replay は記録の時刻を渡す
     now: datetime | None = None
+    # S65: bundle の run の信頼側（対応・契約・免除・プロジェクト固有の規約を読む）。worker が
+    # code_host からデフォルトブランチの先端を自分で取って渡す。base_sha（リクエスト・webhook・
+    # 前の run から来る値）は意味差分にだけ使い、信頼側には使わない。None なら信頼側を
+    # 確かめられない run として、これらを読まず KNOWLEDGE-BINDINGS-001 を REVIEW にする
+    trusted_root: Path | None = None
+    trusted_sha: str | None = None
 
     @property
     def resolved_project_dir(self) -> Path:
@@ -204,6 +210,8 @@ class _LegacyUnit:
     spec: SpecIR
     domain: DomainSpec
     domain_hash: str
+    # bundle の spec の artifact 名（期待 ID の照合を spec ごとに行う）。Git は None
+    unit_name: str | None = None
 
 
 @dataclass
@@ -314,25 +322,31 @@ def _run_check(req: CheckRequest, *, is_base: bool) -> CheckResult:
     levels: dict[str, RuleLevel] = {rule.id: rule.level for spec in spec_irs for rule in spec.rules}
 
     team_policy = knowledge.policy if knowledge is not None else req.team_policy
-    # bundle の run は規約の定義・免除を信頼側（PR なら base）から読む。検査の対象は head
-    config_dir = _trusted_dir(req) if knowledge is not None else project_dir
+    # bundle の run は規約の定義・免除を信頼側（worker が取ったデフォルトブランチ）から読む。
+    # 信頼側が無ければ読まない（None）。検査の対象は head
+    config_dir: Path | None = req.trusted_root if knowledge is not None else project_dir
     policy_result = _run_policies(
         project_dir, team_policy, tolerate_errors=knowledge is not None, config_dir=config_dir
     )
     knowledge_findings: list[Finding] = []
+    by_unit: dict[str, list[Finding]] = {}
+    for unit, part in zip(inputs.units, findings_parts, strict=True):
+        if unit.unit_name is not None:
+            by_unit.setdefault(unit.unit_name, []).extend(part.findings)
     if knowledge is not None:
         codes = {
             (unit.spec.behavior_id, unit.domain_hash): code
             for unit, code in zip(inputs.units, code_irs, strict=True)
         }
-        uml_findings, uml_levels = _uml_findings(
-            req, inputs, limits, snapshot, engine_config, codes
-        )
-        knowledge_findings.extend(uml_findings)
+        uml_by_unit, uml_levels = _uml_findings(req, inputs, limits, snapshot, engine_config, codes)
+        for name, found in uml_by_unit.items():
+            knowledge_findings.extend(found)
+            by_unit.setdefault(name, []).extend(found)
         levels.update(uml_levels)
         if not is_base:
             knowledge_findings.append(_lock_finding(req, knowledge, created_at))
-            notice = _git_specs_notice([project_dir, config_dir], inputs)
+            dirs = [project_dir] if config_dir is None else [project_dir, config_dir]
+            notice = _git_specs_notice(dirs, inputs)
             if notice is not None:
                 knowledge_findings.append(notice)
             changed = _config_change_notice(project_dir, config_dir)
@@ -345,7 +359,9 @@ def _run_check(req: CheckRequest, *, is_base: bool) -> CheckResult:
 
     expected: list[str] = []
     if knowledge is not None:
-        combined, expected = _fill_expected(combined, inputs, policy_result, levels, is_base)
+        combined, expected = _fill_expected(
+            combined, inputs, policy_result, levels, is_base, by_unit
+        )
 
     # S28: base の判定と Finding 同士を突き合わせる（head を base 仕様に照合しない）
     diff: SemanticDiff | None = None
@@ -364,7 +380,9 @@ def _run_check(req: CheckRequest, *, is_base: bool) -> CheckResult:
     # 例外（免除）: 有効期限内で対象が一致する VIOLATED だけ。適合には書き換えず別記する（AC-009）。
     # exceptions_allowed=False のルール（チーム規約 + プロジェクト固有の規約の両方）は
     # policy_result.rules_by_id に載っているので、対象・期限が一致していても免除しない。
-    exceptions = _load_exceptions(config_dir)
+    exceptions = (
+        _load_exceptions(config_dir) if config_dir is not None else PolicyExceptions(exceptions=[])
+    )
     today = req.today or date.today()
     waivers = waivers_for(combined, exceptions, today, policy_result.rules_by_id)
     waived = frozenset(w.finding_id for w in waivers)
@@ -407,6 +425,10 @@ def _run_check(req: CheckRequest, *, is_base: bool) -> CheckResult:
         bundle_hash=bundle_hash(knowledge.bundle) if knowledge is not None else None,
         uml_parser_version=",".join(compiled_versions) or None,
         expected_requirement_ids=expected,
+        trusted_commit=req.trusted_sha if knowledge is not None and req.trusted_root else None,
+        source_roots=list(req.source_roots),
+        today=today,
+        bindings_patch=dict(req.bindings_patch or {}),
     )
 
     return CheckResult(
@@ -488,19 +510,6 @@ def _canonical(data: object) -> str:
     return json.dumps(data, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
 
 
-def _trusted_dir(req: CheckRequest) -> Path:
-    """bundle の run で、対応・契約・免除・プロジェクト固有の規約を読む場所（base-trusted）。
-
-    PR の head は攻撃者が書き換えられる。図の操作とコードの対応（bindings.yaml）や契約・免除・規約を
-    head から読むと、PR だけで「呼んでいる」ことにしたり違反を免除したりできる。base（デフォルト
-    ブランチ）があればそこから読み、head の変更はマージ後の run で効く。base が無い run（push・
-    CLI）は head がそのまま信頼側。
-    """
-    if req.base_root is not None:
-        return req.base_project_dir if req.base_project_dir is not None else req.base_root
-    return req.resolved_project_dir
-
-
 def _read_bindings(config_dir: Path) -> tuple[str | None, Bindings]:
     path = config_dir / ".speclino" / "bindings.yaml"
     if not path.is_file():
@@ -511,14 +520,23 @@ def _read_bindings(config_dir: Path) -> tuple[str | None, Bindings]:
 def _bundle_inputs(req: CheckRequest, project_dir: Path, knowledge: ResolvedKnowledge) -> _Inputs:
     """bundle の入力: 仕様は spec の改訂の compiled と domain、対応・契約はリポジトリから（D9）。
 
-    `specs/` は読まない。対応・契約は信頼側（`_trusted_dir`、PR なら base）から読む。
+    `specs/` は読まない。対応・契約は信頼側（`req.trusted_root`）から読む。PR の head は攻撃者が
+    書き換えられるので、head の bindings.yaml を読むと PR だけで「呼んでいる」ことにできる。
+    信頼側が無ければ対応・契約を空にし、旧形式の仕様も判定しない（欠けた要求は UNKNOWN で補う）。
     bindings.yaml が無ければ空（図の要素はどれも対応なし → UNKNOWN）。
     """
-    config_dir = _trusted_dir(req)
-    bindings_text, bindings = _read_bindings(config_dir)
-    bindings = _patched_bindings(bindings, req.bindings_patch)
-    contracts_dir = config_dir / ".speclino" / "contracts"
-    contracts = load_contracts(contracts_dir) if contracts_dir.is_dir() else {}
+    config_dir = req.trusted_root
+    if config_dir is not None:
+        bindings_text, bindings = _read_bindings(config_dir)
+        bindings = _patched_bindings(bindings, req.bindings_patch)
+        contracts_dir: Path | None = config_dir / ".speclino" / "contracts"
+    else:
+        bindings_text, bindings, contracts_dir = None, Bindings(), None
+    contracts = (
+        load_contracts(contracts_dir)
+        if contracts_dir is not None and contracts_dir.is_dir()
+        else {}
+    )
 
     units = spec_units(knowledge)
     inputs = _Inputs(
@@ -526,7 +544,9 @@ def _bundle_inputs(req: CheckRequest, project_dir: Path, knowledge: ResolvedKnow
         bindings=bindings,
         bindings_hash=content_hash(bindings_text) if bindings_text is not None else None,
         contracts=contracts,
-        contracts_hash=_combined_hash(_contract_texts(contracts_dir)),
+        contracts_hash=(
+            _combined_hash(_contract_texts(contracts_dir)) if contracts_dir is not None else None
+        ),
         domain=None,
         domain_hash=None,
         spec_units=units,
@@ -541,8 +561,10 @@ def _bundle_inputs(req: CheckRequest, project_dir: Path, knowledge: ResolvedKnow
         domain_hash = content_hash(domain_text)
         domain_texts[domain_text] = domain
         inputs.spec_ir_texts.append(_canonical(unit.compiled.model_dump(mode="json")))
+        if config_dir is None:
+            continue  # 信頼できる対応が無いので旧形式は判定しない（_fill_expected が UNKNOWN）
         for spec in unit.compiled.legacy:
-            inputs.units.append(_LegacyUnit(spec, domain, domain_hash))
+            inputs.units.append(_LegacyUnit(spec, domain, domain_hash, unit.name))
             inputs.validations.append(validate_spec_ir(spec, domain, bindings, unit.markdown))
     if domain_texts:
         inputs.domain_hash = _combined_hash(list(domain_texts))
@@ -559,16 +581,17 @@ def _uml_findings(
     snapshot: SnapshotRef,
     config: EngineConfig,
     codes: dict[tuple[str, str], CodeIR],
-) -> tuple[list[Finding], dict[str, RuleLevel]]:
-    """UML の義務（構造・順序・包含・遷移）を S64 の検査に通す。
+) -> tuple[dict[str, list[Finding]], dict[str, RuleLevel]]:
+    """UML の義務（構造・順序・包含・遷移）を S64 の検査に通す。戻り値は spec（artifact 名）ごと。
 
     - 順序・包含: 入口の操作 → behavior（`OperationResolver.behavior`）。無ければ UNKNOWN
-    - 遷移: 入口を持たないので bindings の全 behavior の Code IR で検査する（behavior ごとに 1 つ）
+    - 遷移: 入口を持たないので bindings の全 behavior の Code IR で検査する（behavior ごと）。
+      属性への代入が無い behavior の VERIFIED は数えない。どの behavior にも代入が無ければ UNKNOWN
     - Code IR は (behavior, domain) ごとに 1 回だけ作る。解析の例外はその義務を UNKNOWN にする
     - 検査器の例外も UNKNOWN（黙って落とさない。偽の VERIFIED にしない）
     """
     resolver = OperationResolver(inputs.bindings)
-    findings: list[Finding] = []
+    by_unit: dict[str, list[Finding]] = {}
     levels: dict[str, RuleLevel] = {}
     failures: dict[tuple[str, str], str] = {}
 
@@ -602,6 +625,7 @@ def _uml_findings(
             return [ctx.unknown(f"検査器の例外で判定できない（{type(e).__name__}: {e}）")]
 
     for unit in inputs.spec_units:
+        findings = by_unit.setdefault(unit.name, [])
         compiled = unit.compiled
         if compiled is None:
             ctx = ObligationContext(
@@ -655,19 +679,37 @@ def _uml_findings(
                 )
             )
         for sm in compiled.state_machines:
+            writers = 0
             for behavior_id in sorted(inputs.bindings.behaviors):
                 ctx = ObligationContext(sm.id, behavior_id, sm.level, "memory_state")
                 code = code_for(behavior_id, domain, domain_hash)
                 if isinstance(code, str):
                     findings.append(ctx.unknown(f"振る舞い {behavior_id} を解析できない（{code}）"))
                     continue
-                findings.extend(
-                    guarded(
-                        ctx,
-                        partial(check_state_machine, sm, code, config, domain=domain),
+                result = guarded(ctx, partial(check_state_machine, sm, code, config, domain=domain))
+                if _writes_attribute(code, sm.attribute):
+                    writers += 1
+                else:
+                    # 代入しない behavior の「成立」は遷移の判定にならない（空の主張）
+                    result = [f for f in result if f.verdict != "VERIFIED_IN_SCOPE"]
+                findings.extend(result)
+            if writers == 0:
+                ctx = ObligationContext(sm.id, sm.id, sm.level, "memory_state")
+                findings.append(
+                    ctx.unknown(
+                        f"図の遷移を行うコードが対応に無い（bindings のどの振る舞いの解析経路にも"
+                        f" {sm.attribute} への代入が無い）",
+                        ["状態を変える処理を bindings.yaml の behaviors に対応づける"],
                     )
                 )
-    return findings, levels
+    return by_unit, levels
+
+
+def _writes_attribute(code: CodeIR, attribute: str) -> bool:
+    """解析経路のどこかに attribute への代入（write イベントか state_updates）があるか。"""
+    return any(
+        (e.kind == "write" and e.target == attribute) for path in code.paths for e in path.events
+    ) or any(su.target == attribute for path in code.paths for su in path.state_updates)
 
 
 def _lock_finding(req: CheckRequest, knowledge: ResolvedKnowledge, now: datetime) -> Finding:
@@ -709,12 +751,16 @@ def _git_specs_notice(dirs: list[Path], inputs: _Inputs) -> Finding | None:
     bundle の run は `specs/` を読まない。取り込み前のリポジトリで仕様が黙って外れないようにする。
     """
     # head だけを見ると、PR で specs/ を消せばこの通知も消せる。信頼側（base）も見る
-    has_git_specs = any(
-        (d / "specs" / "ir").is_dir() and any((d / "specs" / "ir").glob("*.spec-ir.json"))
+    files = [
+        f
         for d in dirs
-    )
-    if inputs.spec_units or not has_git_specs:
+        if (d / "specs" / "ir").is_dir()
+        for f in sorted((d / "specs" / "ir").glob("*.spec-ir.json"))
+    ]
+    if not files:
         return None
+    if inputs.spec_units:
+        return _unimported_specs_notice(files, inputs)
     return Finding(
         id=f"knowledge:{GIT_SPECS_REQUIREMENT_ID}",
         requirement_id=GIT_SPECS_REQUIREMENT_ID,
@@ -729,6 +775,43 @@ def _git_specs_notice(dirs: list[Path], inputs: _Inputs) -> Finding | None:
         claim_scope="command_invocation",
         code_refs=[SourceRef(snapshot_id="specs", path="specs/ir")],
         next_steps=["speclino import-specs で取り込み、承認する"],
+    )
+
+
+def _unimported_specs_notice(files: list[Path], inputs: _Inputs) -> Finding | None:
+    """bundle に仕様があっても、リポジトリの specs/ir に bundle に無い要求があれば REVIEW。"""
+    known: set[str] = set()
+    for unit in inputs.spec_units:
+        if unit.compiled is None:
+            continue
+        known.update(r.id for r in unit.compiled.requirements)
+        known.update(rule.id for spec in unit.compiled.legacy for rule in spec.rules)
+    missing: set[str] = set()
+    unreadable: list[str] = []
+    for f in files:
+        try:
+            spec = load_spec_ir(f)
+        except (OSError, ValueError) as e:
+            unreadable.append(f"{f.name}（{type(e).__name__}）")
+            continue
+        missing.update(rule.id for rule in spec.rules if rule.id not in known)
+    if not missing and not unreadable:
+        return None
+    detail = ", ".join([*sorted(missing), *unreadable])
+    return Finding(
+        id=f"knowledge:{GIT_SPECS_REQUIREMENT_ID}",
+        requirement_id=GIT_SPECS_REQUIREMENT_ID,
+        behavior_id="knowledge:specs",
+        verdict="REVIEW",
+        category="stale_approval",
+        severity="high",
+        message=(
+            "リポジトリの specs/ir に、ワークスペースの承認済みの仕様に取り込まれていない仕様がある"
+            f"（この run は検査していない）: {detail}"
+        ),
+        claim_scope="command_invocation",
+        code_refs=[SourceRef(snapshot_id="specs", path="specs/ir")],
+        next_steps=["speclino import-specs で取り込み、承認する（不要なら specs/ir から消す）"],
     )
 
 
@@ -752,12 +835,28 @@ def _config_fingerprint(root: Path) -> dict[str, str]:
     return out
 
 
-def _config_change_notice(head_dir: Path, trusted_dir: Path) -> Finding | None:
-    """PR が対応・契約・免除・規約を変えていれば REVIEW（その変更は判定に使っていない）。
+def _config_change_notice(head_dir: Path, trusted_dir: Path | None) -> Finding | None:
+    """対応・契約・免除・規約が信頼側と違えば REVIEW（その違いは判定に使っていない）。
 
-    bundle の run はそれらを信頼側（base）から読むので、head の変更はこの run の判定に効かない。
-    黙って無視せず、人が見て取り込むべき変更として必須の REVIEW にする（ゲートは止まる）。
+    bundle の run はそれらを信頼側（デフォルトブランチの先端）から読むので、head の変更はこの run
+    の判定に効かない。黙って無視せず、人が見て取り込むべき変更として必須の REVIEW にする。
+    信頼側を確かめられない（None）なら無条件に REVIEW（フェイルクローズ）。
     """
+    if trusted_dir is None:
+        return Finding(
+            id=f"knowledge:{CONFIG_CHANGE_REQUIREMENT_ID}",
+            requirement_id=CONFIG_CHANGE_REQUIREMENT_ID,
+            behavior_id="knowledge:config",
+            verdict="REVIEW",
+            category="unsupported_analysis",
+            severity="high",
+            message=(
+                "信頼できる基準（デフォルトブランチ）を確かめられないため、対応・契約・免除・"
+                "規約を読まずに判定した（対応の要る要求は UNKNOWN）"
+            ),
+            claim_scope="persisted_state",
+            next_steps=["SpecLino のサーバ（GitHub 連携）で検査し直す"],
+        )
     if head_dir == trusted_dir:
         return None
     head, base = _config_fingerprint(head_dir), _config_fingerprint(trusted_dir)
@@ -772,8 +871,8 @@ def _config_change_notice(head_dir: Path, trusted_dir: Path) -> Finding | None:
         category="stale_approval",
         severity="high",
         message=(
-            "PR が対応・契約・免除・規約のファイルを変えている。判定は base の内容で行い、"
-            "この変更はマージ後の run で効く: " + ", ".join(changed)
+            "対応・契約・免除・規約のファイルがデフォルトブランチと違う。判定はデフォルトブランチの"
+            "内容で行い、この違いはマージ後の run で効く: " + ", ".join(changed)
         ),
         claim_scope="persisted_state",
         code_refs=[SourceRef(snapshot_id="head", path=p) for p in changed],
@@ -787,8 +886,12 @@ def _fill_expected(
     policy_result: _PolicyRunResult,
     levels: dict[str, RuleLevel],
     is_base: bool,
+    by_unit: dict[str, list[Finding]],
 ) -> tuple[Findings, list[str]]:
     """出るべき要求 ID を列挙し、Finding が欠けたものを UNKNOWN で補う（設計 5.2）。
+
+    仕様の ID は spec（artifact）ごとに、その spec の検査が出した Finding だけと照合する（2 つの
+    spec が同じ図 ID・要素 ID を持っても、片方の Finding で他方の欠落が隠れない）。
 
     規約の Finding は `<rule>:<path>` でも出るので、その接頭辞があれば出たとみなす。補った規約の
     ID は levels にルールの level を入れる（無いと mandatory 扱い）。
@@ -801,7 +904,9 @@ def _fill_expected(
             continue
         spec_ids = expected_ids(unit.compiled, [])
         expected.extend(spec_ids)
-        findings = fill_missing(findings, spec_ids, f"spec:{unit.name}")
+        own = Findings(findings=by_unit.get(unit.name, []))
+        added = fill_missing(own, spec_ids, f"spec:{unit.name}").findings[len(own.findings) :]
+        findings = _with_extra_findings(findings, added)
     present = [f.requirement_id for f in findings.findings]
     missing_policy = [
         rid
@@ -898,6 +1003,8 @@ def _run_base(req: CheckRequest, run_id: str) -> tuple[CheckResult | None, str |
         knowledge=req.knowledge,
         github_repo_id=req.github_repo_id,
         now=req.now,
+        trusted_root=req.trusted_root,
+        trusted_sha=req.trusted_sha,
     )
     try:
         return _run_check(base_req, is_base=True), None
@@ -1206,9 +1313,13 @@ def _run_policies(
                 out.append(_policy_error_finding(rule, e))
         return out
 
-    # 規約の定義と免除は config_dir（bundle の run では信頼側）から、検査の対象は project_dir
-    config_dir = config_dir if config_dir is not None else project_dir
-    exceptions = _load_exceptions(config_dir)
+    # 規約の定義と免除は config_dir（bundle の run では信頼側）から、検査の対象は project_dir。
+    # tolerate_errors（bundle の run）で config_dir が None なら、信頼側が無いので読まない
+    if config_dir is None and not tolerate_errors:
+        config_dir = project_dir
+    exceptions = (
+        _load_exceptions(config_dir) if config_dir is not None else PolicyExceptions(exceptions=[])
+    )
     snapshot = DirectorySnapshot(root=project_dir)
     registry = _policy_registry()
 
@@ -1228,10 +1339,10 @@ def _run_policies(
         levels.update(_policy_levels(team_policy.package, team_findings))
         rules_by_id.update({rule.id: rule for rule in team_policy.package.rules})
 
-    policy_dir = config_dir / ".speclino" / "policy"
+    policy_dir = (config_dir / ".speclino" / "policy") if config_dir is not None else None
     policy_files = (
         sorted({*policy_dir.glob("*.yaml"), *policy_dir.glob("*.yml")})
-        if policy_dir.is_dir()
+        if policy_dir is not None and policy_dir.is_dir()
         else []
     )
     for path in policy_files:

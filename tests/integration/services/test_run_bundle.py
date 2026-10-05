@@ -23,7 +23,7 @@ from speclino.services.review_run_service import ReviewRunConfig, ReviewRunServi
 from speclino.services.spec_import import import_specs
 from tests.integration.services.conftest import project_id_of, register_repo, repo_id_of
 from tests.integration.services.test_review_run_service import make_demo_repo
-from tests.unit.services.test_check_pipeline_bundle import UML, make_repo
+from tests.unit.services.test_check_pipeline_bundle import DOMAIN, UML, make_repo
 
 pytestmark = [
     pytest.mark.integration,
@@ -140,3 +140,148 @@ async def test_resolver_only_resolves_the_projects_own_workspace(
     async with f() as s:
         with pytest.raises(ValueError, match="署名"):
             await kr.resolve_for_project(s, tampered, pid_b)
+
+
+# ---------------------------------------------------------------- 信頼側（fix round 1）
+
+
+class _TipHost(LocalCodeHost):
+    """branch_head の答えを差し替えられる LocalCodeHost（None は取得失敗）。"""
+
+    tip: str | None = None
+    fail: bool = False
+
+    async def branch_head(self, repo: str, branch: str) -> str | None:
+        if self.fail:
+            raise RuntimeError("GitHub に届かない")
+        return self.tip if self.tip is not None else await super().branch_head(repo, branch)
+
+
+def _git(root: Path, *args: str) -> str:
+    import subprocess
+
+    return subprocess.run(
+        ["git", "-C", str(root), *args], capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+async def _attack_setup(engine: AsyncEngine, tmp_path: Path) -> tuple[str, str, str, str, Path]:
+    """main = 正しい実装、attack ブランチ = 呼出しを消して bindings で偽装した PR。"""
+    from tests.unit.services.test_check_pipeline_bundle import _fake_call_head
+
+    slug = f"e2e-tr-{uuid.uuid4().hex[:8]}"
+    repo = f"e2e/{slug}-orders"
+    await register_repo(engine, repo, {"owner1": "owner"}, team=slug)
+    pid = str(await project_id_of(engine, repo))
+    f = async_sessionmaker(engine, expire_on_commit=False)
+    async with f() as s, s.begin():
+        rev = await kr.create_draft(
+            s,
+            workspace=slug,
+            kind="spec",
+            name="orders-uml",
+            content=SpecContent(
+                kind="spec", markdown=UML, domain=DOMAIN, scope=ArtifactScope(projects=[pid])
+            ),
+            author="owner1",
+        )
+    await _approve(f, rev.artifact_id)
+    root = make_repo(tmp_path / "repo")
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "t")
+    _git(root, "config", "commit.gpgsign", "false")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "default")
+    good = _git(root, "rev-parse", "HEAD")
+    _git(root, "checkout", "-q", "-b", "attack")
+    _fake_call_head(root)
+    _git(root, "commit", "-qam", "attack")
+    attack = _git(root, "rev-parse", "HEAD")
+    _git(root, "checkout", "-q", "main")
+    return repo, pid, good, attack, root
+
+
+async def _run(
+    engine: AsyncEngine, tmp_path: Path, host: LocalCodeHost, pid: str, **kw: object
+) -> tuple[dict[str, object], dict[str, object]]:
+    f = async_sessionmaker(engine, expire_on_commit=False)
+    holder: dict[str, ReviewRunService] = {}
+    svc = ReviewRunService(
+        session_factory=f,
+        code_host=host,
+        queue=InProcessQueue(lambda run_id: holder["svc"].execute(run_id), immediate=True),
+        blobs=FileSystemBlobStore(tmp_path / f"blobs-{uuid.uuid4().hex[:6]}"),
+        config=ReviewRunConfig(agent_enabled=False, resolve_knowledge=make_knowledge_resolver(f)),
+    )
+    holder["svc"] = svc
+    run_id = await svc.create_run(project_id=uuid.UUID(pid), **kw)  # type: ignore[arg-type]
+    async with f() as s:
+        run = await ReviewRunRepository(s).get(run_id)
+        assert run is not None and run.exec_state == "completed", run
+        rows = await FindingRepository(s).list_for_run(run_id)
+    found = {x.requirement_id: x.verdict for x in rows}
+    assert run.manifest is not None
+    return dict(run.manifest), dict(found)
+
+
+TRACE = "cancel#OrderService.cancel_order"
+
+
+async def test_worker_trusts_only_the_default_branch_tip(
+    engine: AsyncEngine, tmp_path: Path
+) -> None:
+    repo, pid, good, attack, root = await _attack_setup(engine, tmp_path)
+    host = _TipHost(repos={repo: root}, repo_ids={repo: repo_id_of(repo)})
+    # (a) base_sha に PR の head 自身を渡しても、信頼側は main の先端
+    manifest, found = await _run(
+        engine,
+        tmp_path,
+        host,
+        pid,
+        head_sha=attack,
+        base_sha=attack,
+        pr_number=1,
+        trigger="pull_request",
+    )
+    assert found[TRACE] == "VIOLATED" and found["KNOWLEDGE-BINDINGS-001"] == "REVIEW"
+    assert manifest["trusted_commit"] == good
+    # (b) check_suite の rerequest（base_sha なし）も同じ
+    manifest, found = await _run(
+        engine,
+        tmp_path,
+        host,
+        pid,
+        head_sha=attack,
+        base_sha=None,
+        pr_number=1,
+        trigger="rerequested",
+    )
+    assert found[TRACE] == "VIOLATED" and found["KNOWLEDGE-BINDINGS-001"] == "REVIEW"
+    # (c) code_host の先端が base_sha と違えば、先端の方を信頼側にする
+    host.tip = good
+    manifest, found = await _run(
+        engine,
+        tmp_path,
+        host,
+        pid,
+        head_sha=attack,
+        base_sha=attack,
+        pr_number=2,
+        trigger="pull_request",
+    )
+    assert manifest["trusted_commit"] == good and found[TRACE] == "VIOLATED"
+    # (d) 先端を取れなければ対応を読まず、偽の成立にしない
+    host.fail = True
+    manifest, found = await _run(
+        engine,
+        tmp_path,
+        host,
+        pid,
+        head_sha=attack,
+        base_sha=attack,
+        pr_number=3,
+        trigger="pull_request",
+    )
+    assert manifest["trusted_commit"] is None
+    assert found[TRACE] != "VERIFIED_IN_SCOPE" and found["KNOWLEDGE-BINDINGS-001"] == "REVIEW"

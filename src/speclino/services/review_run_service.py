@@ -75,6 +75,7 @@ from speclino.services.investigation import InvestigationResult, investigate
 from speclino.services.knowledge_inputs import KnowledgeResolver
 from speclino.services.obligation_diff import effective_spec
 from speclino.services.project_settings import parse_stored
+from speclino.services.replay_service import DETERMINISTIC_FINDINGS
 from speclino.services.run_freshness import should_publish
 from speclino.services.spec_pr_bot import (
     SPEC_BOT_EVENT,
@@ -122,6 +123,30 @@ class ReviewRunService:
     blobs: BlobStore
     config: ReviewRunConfig = field(default_factory=ReviewRunConfig)
     cost_guard: CostGuard | None = None
+
+    async def _trusted_side(
+        self,
+        repo: str,
+        default_branch: str,
+        base_sha: str | None,
+        base_root: Path | None,
+        tmpdir: Path,
+    ) -> tuple[str | None, Path | None]:
+        """bundle の run の信頼側: code_host から取ったデフォルトブランチの先端（S65）。
+
+        リクエスト・webhook・前の run から来た base_sha は信頼側に使わない（PR の作者が選べる）。
+        先端が base_sha と同じときだけ、取得済みの base のスナップショットを使い回す。取れなければ
+        (None, None) で、run は対応・契約・免除・規約を読まずに REVIEW になる（フェイルクローズ）。
+        """
+        try:
+            sha = await self.code_host.branch_head(repo, default_branch)
+            if sha is None:
+                return None, None
+            if base_root is not None and sha == base_sha:
+                return sha, base_root
+            return sha, await self.code_host.fetch_snapshot(repo, sha, tmpdir / "trusted")
+        except Exception:  # noqa: BLE001 - 取れなければ信頼側なし（REVIEW）にする
+            return None, None
 
     # ------------------------------------------------------------ create
     async def create_run(
@@ -232,6 +257,7 @@ class ReviewRunService:
             repo_full_name = project.repo_full_name
             project_id = project.id
             github_repo_id = project.github_repo_id
+            default_branch = project.default_branch
             # チーム規約は登録先ワークスペースのもの。未登録（None）なら当てない（S53）
             team = project.team
             # S47: project の設定は証拠集めを止める方向にだけ効く（サーバ全体の設定と AND）。
@@ -320,8 +346,13 @@ class ReviewRunService:
                 # S65: bundle を固定する（この run の中では再解決しない）。仕様の正本は bundle に
                 # あるので、Git の仕様の承認の付け替え（_reconcile_specs）は行わない
                 knowledge: ResolvedKnowledge | None = None
+                trusted_root: Path | None = None
+                trusted_sha: str | None = None
                 if self.config.resolve_knowledge is not None and team is not None:
                     knowledge = await self.config.resolve_knowledge(team, str(project_id))
+                    trusted_sha, trusted_root = await self._trusted_side(
+                        repo_full_name, default_branch, base_sha, base_root, tmpdir
+                    )
                 overrides: dict[str, SpecIR] | None = None
                 extra: list[Finding] = []
                 team_policy: PolicyRevision | None = None
@@ -344,6 +375,8 @@ class ReviewRunService:
                     team_policy=team_policy,
                     knowledge=knowledge,
                     github_repo_id=github_repo_id,
+                    trusted_root=trusted_root,
+                    trusted_sha=trusted_sha,
                 )
                 with span("speclino.check", head=head_sha):
                     result = run_check(req)
@@ -421,6 +454,10 @@ class ReviewRunService:
                     waivers=result.waivers,
                 )
                 paths = write_result(final, out_dir)
+                # エージェントの調査前の決定的な Findings（replay はこれと比べる。S65）
+                deterministic = out_dir / DETERMINISTIC_FINDINGS
+                deterministic.write_text(result.findings.model_dump_json(indent=2))
+                paths[DETERMINISTIC_FINDINGS] = deterministic
                 (out_dir / "agent-events.json").write_text(
                     json.dumps(agent_events, ensure_ascii=False, indent=2, default=str)
                 )

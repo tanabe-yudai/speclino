@@ -122,6 +122,8 @@ async def test_legacy_spec_same_findings_as_before(engine: AsyncEngine, tmp_path
                 run_id="r",
                 knowledge=knowledge,
                 now=NOW,
+                trusted_root=root,
+                trusted_sha="default-tip",
             )
         )
         spec_findings = [

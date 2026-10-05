@@ -180,6 +180,9 @@ class LazyCodeHost:
     async def repository_id(self, repo: str) -> int | None:
         return await self.inner.repository_id(repo)
 
+    async def branch_head(self, repo: str, branch: str) -> str | None:
+        return await self.inner.branch_head(repo, branch)
+
 
 def build_state(settings: Settings) -> AppState:
     if settings.role in ("web", "worker", "all"):

@@ -420,6 +420,49 @@
       },
       "title": "Llm Assessment Keys",
       "type": "array"
+    },
+    "trusted_commit": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "bundle の run（S65）で対応・契約・免除・規約を読んだ信頼側のコミット（worker が取ったデフォルトブランチの先端）。None は信頼側を確かめられなかった run",
+      "title": "Trusted Commit"
+    },
+    "source_roots": {
+      "description": "解析した source_roots（空は既定。replay で使う）",
+      "items": {
+        "type": "string"
+      },
+      "title": "Source Roots",
+      "type": "array"
+    },
+    "today": {
+      "anyOf": [
+        {
+          "format": "date",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "例外の期限判定に使った日付",
+      "title": "Today"
+    },
+    "bindings_patch": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "人の回答による run 限定の操作束縛（S32）",
+      "title": "Bindings Patch",
+      "type": "object"
     }
   },
   "required": [

@@ -186,6 +186,7 @@ def knowledge(
 
 
 def request(root: Path, k: ResolvedKnowledge | None, **kw: Any) -> CheckRequest:
+    """既定の信頼側は root 自身（デフォルトブランチの先端を検査する run と同じ）。"""
     base: dict[str, Any] = {
         "repo_root": root,
         "head_sha": "WORKTREE",
@@ -193,6 +194,8 @@ def request(root: Path, k: ResolvedKnowledge | None, **kw: Any) -> CheckRequest:
         "knowledge": k,
         "now": NOW,
         "run_id": "r1",
+        "trusted_root": root,
+        "trusted_sha": "trusted",
     }
     base.update(kw)
     return CheckRequest(**base)
@@ -432,7 +435,7 @@ def test_selfcheck_still_reads_frozen_copy(tmp_path: Path) -> None:
     assert not any(f.behavior_id.startswith("knowledge:") for f in res.findings.findings)
 
 
-# ---------------------------------------------------------------- セキュリティ（base-trusted）
+# ---------------------------------------------------------------- セキュリティ（信頼側）
 
 
 def _fake_call_head(root: Path) -> None:
@@ -450,34 +453,68 @@ def _fake_call_head(root: Path) -> None:
     path.write_text(yaml.safe_dump(data, allow_unicode=True))
 
 
+TRACE = "cancel#OrderService.cancel_order"
+
+
 def test_pr_bindings_cannot_fake_a_call(tmp_path: Path) -> None:
-    """PR の bindings.yaml は判定に使わない（base の対応で判定し、変更は REVIEW）。"""
-    base = make_repo(tmp_path / "base")
+    """PR の bindings.yaml は判定に使わない。信頼側はデフォルトブランチの先端だけ。"""
+    default = make_repo(tmp_path / "default")
     head = make_repo(tmp_path / "head")
     _fake_call_head(head)
     k = knowledge(spec_revision("u", UML))
-    # base が無ければ head が信頼側になり、書き換えた対応で偽の成立になりうる（攻撃の再現）
-    naive = by_req(run_check(request(head, k)).findings.findings)
-    assert naive["cancel#OrderService.cancel_order"].verdict == "VERIFIED_IN_SCOPE"
+    # 攻撃の再現: head を信頼側にすると、書き換えた対応で偽の成立になる
+    naive = by_req(run_check(request(head, k, trusted_root=head)).findings.findings)
+    assert naive[TRACE].verdict == "VERIFIED_IN_SCOPE"
 
-    res = run_check(request(head, k, base_root=base, base_sha="BASE"))
+    cases = {
+        # (a) base_sha に改ざんした head（意味差分にだけ使い、信頼側にはしない）
+        "base=head": request(head, k, base_root=head, base_sha="HEAD", trusted_root=default),
+        # (b) base 省略（push・rerequest）でも信頼側はデフォルトブランチ
+        "no-base": request(head, k, trusted_root=default),
+        # (c) 信頼側を確かめられない → 対応を読まず UNKNOWN、REVIEW
+        "no-trusted": request(head, k, trusted_root=None, base_root=head, base_sha="HEAD"),
+    }
+    for name, req in cases.items():
+        res = run_check(req)
+        f = by_req(res.findings.findings)
+        assert f[TRACE].verdict != "VERIFIED_IN_SCOPE", name
+        assert f["KNOWLEDGE-BINDINGS-001"].verdict == "REVIEW", name
+        assert res.gate.status == "fail", name
+    assert by_req(run_check(cases["no-base"]).findings.findings)[TRACE].verdict == "VIOLATED"
+
+
+def test_untrusted_run_reads_no_config_and_records_it(tmp_path: Path) -> None:
+    head = make_repo(tmp_path / "head")
+    legacy = [load_spec_ir(head / "specs" / "ir" / "cancel_order.spec-ir.json")]
+    rev = spec_revision(
+        "orders-cancel", (head / "specs" / "orders-cancel.md").read_text(), legacy=legacy
+    )
+    res = run_check(request(head, knowledge(rev), trusted_root=None))
     f = by_req(res.findings.findings)
-    assert f["cancel#OrderService.cancel_order"].verdict == "VIOLATED"
-    notice = f["KNOWLEDGE-BINDINGS-001"]
-    assert notice.verdict == "REVIEW" and ".speclino/bindings.yaml" in notice.message
-    assert res.gate.status == "fail"
+    assert "信頼できる基準" in f["KNOWLEDGE-BINDINGS-001"].message
+    # 旧形式の要求は判定せず、欠落の UNKNOWN で補う（偽の成立にしない）
+    assert (f["R-CANCEL-04"].verdict, f["R-CANCEL-04"].category) == ("UNKNOWN", "missing_finding")
+    assert res.manifest.trusted_commit is None
+    assert run_check(request(head, knowledge(rev))).manifest.trusted_commit == "trusted"
+
+
+def test_same_config_as_trusted_side_has_no_review(tmp_path: Path) -> None:
+    default = make_repo(tmp_path / "default")
+    head = make_repo(tmp_path / "head", admin_only_restore=True)
+    res = run_check(request(head, knowledge(spec_revision("u", UML)), trusted_root=default))
+    assert "KNOWLEDGE-BINDINGS-001" not in by_req(res.findings.findings)
 
 
 def test_pr_cannot_drop_project_policy_or_add_exception(tmp_path: Path) -> None:
-    """プロジェクト固有の規約と免除は base から読む（PR で消す・足すことはできない）。"""
-    base = make_repo(tmp_path / "base")
+    """プロジェクト固有の規約と免除は信頼側から読む（PR で消す・足すことはできない）。"""
+    default = make_repo(tmp_path / "default")
     head = make_repo(tmp_path / "head")
     team = _policy(on_missing="violation")
     from tests.unit.services.test_check_pipeline import _write_project_exceptions
 
     _write_project_exceptions(head)
     k = knowledge(policy=team)
-    res = run_check(request(head, k, base_root=base, base_sha="BASE", today=NOW.date()))
+    res = run_check(request(head, k, trusted_root=default, today=NOW.date()))
     make = [x for x in res.findings.findings if x.requirement_id.startswith("MAKE-001")]
     assert make and all(x.verdict == "VIOLATED" for x in make)
     assert res.waivers == []
@@ -485,16 +522,79 @@ def test_pr_cannot_drop_project_policy_or_add_exception(tmp_path: Path) -> None:
         ".speclino/exceptions.yaml"
         in by_req(res.findings.findings)["KNOWLEDGE-BINDINGS-001"].message
     )
-    # 同じ例外が base にあれば効く（取り込んだ後）
-    _write_project_exceptions(base)
-    merged = run_check(request(head, k, base_root=base, base_sha="BASE", today=NOW.date()))
+    # 同じ例外がデフォルトブランチにあれば効く（取り込んだ後）
+    _write_project_exceptions(default)
+    merged = run_check(request(head, k, trusted_root=default, today=NOW.date()))
     assert merged.waivers and "KNOWLEDGE-BINDINGS-001" not in by_req(merged.findings.findings)
 
 
-def test_git_specs_notice_also_looks_at_base(tmp_path: Path) -> None:
+def test_git_specs_notice_also_looks_at_trusted_side(tmp_path: Path) -> None:
     """PR で specs/ を消しても、取り込み待ちの通知は消えない。"""
-    base = make_repo(tmp_path / "base")
+    default = make_repo(tmp_path / "default")
     head = make_repo(tmp_path / "head")
     shutil.rmtree(head / "specs")
-    res = run_check(request(head, knowledge(), base_root=base, base_sha="BASE"))
+    res = run_check(request(head, knowledge(), trusted_root=default))
     assert by_req(res.findings.findings)["KNOWLEDGE-SPEC-001"].verdict == "UNKNOWN"
+
+
+# ---------------------------------------------------------------- fix round 1
+
+
+def test_state_machine_without_any_write_is_unknown(tmp_path: Path) -> None:
+    """どの behavior も状態を代入しないなら、空の成立ではなく UNKNOWN。"""
+    root = make_repo(tmp_path / "r")
+    svc = root / "examples" / "orders" / "app" / "service.py"
+    svc.write_text(svc.read_text().replace("    order.status = OrderStatus.CANCELLED\n", ""))
+    res = run_check(request(root, knowledge(spec_revision("u", UML))))
+    status = [f for f in res.findings.findings if f.requirement_id == "status"]
+    assert [f.verdict for f in status] == ["UNKNOWN"], [f.message for f in status]
+    assert "代入が無い" in status[0].message
+
+
+def test_missing_obligation_is_checked_per_spec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2 つの spec が同じ義務 ID を持っても、片方の Finding で他方の欠落を隠さない。"""
+    real = check_pipeline.check_structure
+    calls: list[str] = []
+
+    def first_call_drops(ob: Any, *a: Any, **k: Any) -> list[Any]:
+        calls.append(ob.id)
+        return [] if len(calls) == 1 else real(ob, *a, **k)
+
+    monkeypatch.setattr(check_pipeline, "check_structure", first_call_drops)
+    res = run_check(
+        request(
+            make_repo(tmp_path / "r"), knowledge(spec_revision("a", UML), spec_revision("b", UML))
+        )
+    )
+    missing = [f for f in res.findings.findings if f.category == "missing_finding"]
+    assert [(f.requirement_id, f.behavior_id) for f in missing] == [
+        ("vocab#OrderService", "spec:a")
+    ]
+
+
+def test_unimported_git_specs_are_review(tmp_path: Path) -> None:
+    """bundle に仕様があっても、取り込まれていない specs/ir の要求があれば REVIEW。"""
+    res = run_check(request(make_repo(tmp_path / "r"), knowledge(spec_revision("u", UML))))
+    f = by_req(res.findings.findings)["KNOWLEDGE-SPEC-001"]
+    assert f.verdict == "REVIEW" and "R-CANCEL-01" in f.message
+    root = make_repo(tmp_path / "r2")
+    legacy = [load_spec_ir(root / "specs" / "ir" / "cancel_order.spec-ir.json")]
+    rev = spec_revision("c", (root / "specs" / "orders-cancel.md").read_text(), legacy=legacy)
+    done = run_check(request(root, knowledge(rev)))
+    assert "KNOWLEDGE-SPEC-001" not in by_req(done.findings.findings)
+
+
+def test_manifest_records_replay_inputs(tmp_path: Path) -> None:
+    res = run_check(
+        request(
+            make_repo(tmp_path / "r"),
+            knowledge(),
+            today=NOW.date(),
+            bindings_patch={"Audit.record": "examples.orders.app.audit.record"},
+        )
+    )
+    m = res.manifest
+    assert m.source_roots == ["."] and m.today == NOW.date()
+    assert m.bindings_patch == {"Audit.record": "examples.orders.app.audit.record"}

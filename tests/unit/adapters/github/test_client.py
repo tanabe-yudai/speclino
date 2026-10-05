@@ -327,3 +327,22 @@ async def test_explicit_installation_is_used_without_resolving() -> None:
     )
     await client.create_check("o/r", "sha", "n", None, None)
     assert auth.resolved == [] and auth.used == [42]
+
+
+# ---------------------------------------------------------------- branch_head（S65）
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_branch_head_returns_the_tip_sha() -> None:
+    sha = "a" * 40
+    respx.get(f"{BASE_URL}/repos/acme/widgets/branches/main").mock(
+        return_value=httpx.Response(200, json={"name": "main", "commit": {"sha": sha}})
+    )
+    respx.get(f"{BASE_URL}/repos/acme/widgets/branches/gone").mock(
+        return_value=httpx.Response(404, json={})
+    )
+    client = _client()
+    assert await client.branch_head("acme/widgets", "main") == sha
+    assert await client.branch_head("acme/widgets", "gone") is None
+    assert await client.branch_head("acme/widgets", "../x") is None
