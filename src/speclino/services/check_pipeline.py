@@ -110,20 +110,11 @@ from speclino.spec import (
     rules_content_hash,
     validate_spec_ir,
 )
-from speclino.verifiers.api_conventions import ApiConventionsVerifier
-from speclino.verifiers.api_error_format import ApiErrorFormatVerifier
 from speclino.verifiers.base import Snapshot
-from speclino.verifiers.ci_required import CiRequiredVerifier
-from speclino.verifiers.error_message_format import ErrorMessageFormatVerifier
+from speclino.verifiers.catalog import policy_registry
 from speclino.verifiers.exceptions import load_policy_exceptions
-from speclino.verifiers.lint_preset import LintPresetVerifier
-from speclino.verifiers.llm_checklist import LlmChecklistVerifier
-from speclino.verifiers.make_targets import MakeTargetsVerifier
-from speclino.verifiers.naming_identifiers import NamingIdentifiersVerifier
 from speclino.verifiers.registry import VerifierRegistry
 from speclino.verifiers.snapshot import DirectorySnapshot
-from speclino.verifiers.spec_format import SpecFormatVerifier
-from speclino.verifiers.spec_tests import SpecTestsVerifier
 
 Mode = Literal["advisory", "blocking"]
 
@@ -1279,19 +1270,8 @@ def _with_extra_findings(base: Findings, extra: list[Finding]) -> Findings:
 
 
 def _policy_registry(llm_findings: dict[str, list[Finding]] | None = None) -> VerifierRegistry:
-    registry = VerifierRegistry()
-    registry.register(MakeTargetsVerifier())
-    registry.register(SpecFormatVerifier())
-    registry.register(SpecTestsVerifier())
-    registry.register(CiRequiredVerifier())
-    registry.register(ApiErrorFormatVerifier())
-    registry.register(ApiConventionsVerifier())
-    registry.register(NamingIdentifiersVerifier())
-    registry.register(ErrorMessageFormatVerifier())
-    registry.register(LintPresetVerifier())
-    # S70: LLM 支援は worker が先に評価した結果を返すだけ（ここでは LLM を呼ばない）
-    registry.register(LlmChecklistVerifier(llm_findings))
-    return registry
+    # 検査器の一覧は verifiers/catalog.py が唯一の出所（承認時の検証と同じ集合）
+    return policy_registry(llm_findings)
 
 
 def _policy_levels(package: PolicyPackage, findings: list[Finding]) -> dict[str, RuleLevel]:

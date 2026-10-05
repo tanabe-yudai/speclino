@@ -133,3 +133,52 @@ def test_policy_registry_registers_s69_verifiers() -> None:
         "lint.preset",
     ):
         assert registry.get(verifier_id) is not None
+
+
+def test_executable_and_approvable_verifiers_are_the_same_set() -> None:
+    """#114: 実行の登録と承認時の検証は verifiers/catalog.py の 1 つの一覧から作る。"""
+    from speclino.services import policy_governance as gov
+    from speclino.services.check_pipeline import _policy_registry
+    from speclino.verifiers.catalog import KNOWN_VERIFIERS
+
+    executable = _policy_registry().versions()
+    assert executable == KNOWN_VERIFIERS == gov.KNOWN_VERIFIERS
+    for verifier_id in (
+        "makefile.required_targets",
+        "api.conventions",
+        "naming.identifiers",
+        "error_message.format",
+        "lint.preset",
+        "llm.checklist",
+    ):
+        assert verifier_id in KNOWN_VERIFIERS, verifier_id
+
+
+def test_every_executable_verifier_passes_approval_validation() -> None:
+    from speclino.domain.policy import PolicyApplicability, PolicyVerifierRef
+    from speclino.services import policy_governance as gov
+    from speclino.services.check_pipeline import _policy_registry
+
+    for verifier_id, version in _policy_registry().versions().items():
+        llm = verifier_id == "llm.checklist"
+        rule = PolicyRule(
+            id="R-1",
+            version="1",
+            level="advisory",
+            title="t",
+            text="t",
+            applies_to=PolicyApplicability(paths=["**/*.py"]),
+            verifier=PolicyVerifierRef(id=verifier_id, version=version, params={}),
+            on_missing_input="unknown",
+            tier="llm_assisted" if llm else "deterministic",
+        )
+        gov._validate(_package(rule))  # 例外にならない
+    # 登録の無い検証器・違う版は承認できない
+    unknown = rule.model_copy(
+        update={
+            "verifier": PolicyVerifierRef(id="no.such", version="1", params={}),
+            "tier": "deterministic",
+        }
+    )
+    with pytest.raises(gov.InvalidPackage):
+        gov._validate(_package(unknown))

@@ -19,27 +19,9 @@ from speclino.db.repositories.policy_revisions import PolicyRevisionRepository
 from speclino.db.repositories.teams import TeamRepository
 from speclino.domain.policy import PolicyPackage, PolicyRevision
 from speclino.services.check_pipeline import policy_package_hash
-from speclino.verifiers.api_error_format import VERIFIER_ID as _API_ID
-from speclino.verifiers.api_error_format import VERIFIER_VERSION as _API_V
-from speclino.verifiers.ci_required import VERIFIER_ID as _CI_ID
-from speclino.verifiers.ci_required import VERIFIER_VERSION as _CI_V
-from speclino.verifiers.make_targets import VERIFIER_ID as _MAKE_ID
-from speclino.verifiers.make_targets import VERIFIER_VERSION as _MAKE_V
-from speclino.verifiers.spec_format import VERIFIER_ID as _SPEC_ID
-from speclino.verifiers.spec_format import VERIFIER_VERSION as _SPEC_V
-from speclino.verifiers.spec_tests import VERIFIER_ID as _TESTS_ID
-from speclino.verifiers.spec_tests import VERIFIER_VERSION as _TESTS_V
+from speclino.verifiers.catalog import KNOWN_VERIFIERS
 
 SEED_ACTOR = "seed"
-
-# 画面から選べる検証器（services/check_pipeline.py の _policy_registry と同じ集合）
-KNOWN_VERIFIERS: dict[str, str] = {
-    _MAKE_ID: _MAKE_V,
-    _SPEC_ID: _SPEC_V,
-    _TESTS_ID: _TESTS_V,
-    _CI_ID: _CI_V,
-    _API_ID: _API_V,
-}
 
 
 class InvalidPackage(ValueError):

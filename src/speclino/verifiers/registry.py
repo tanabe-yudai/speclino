@@ -51,6 +51,10 @@ class VerifierRegistry:
     def get(self, verifier_id: str) -> Verifier | None:
         return self._verifiers.get(verifier_id)
 
+    def versions(self) -> dict[str, str]:
+        """登録した検証器 ID → 版。"""
+        return {vid: v.version for vid, v in self._verifiers.items()}
+
     def run_package(
         self,
         package: PolicyPackage,
