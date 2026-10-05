@@ -94,13 +94,27 @@ def test_reference_to_unknown_element_is_error() -> None:
     assert [d.code for d in res.diagnostics] == ["E_REF_UNKNOWN"]
 
 
+def test_rejects_partial_advisory_downgrade() -> None:
+    """一部の要素だけを advisory の行で参照しても、義務は mandatory のまま。"""
+    c = compile_spec(FULL, domain=None, legacy_ir=[]).compiled
+    assert c is not None
+    # FULL の R2 は cancel-flow#r だけを advisory で参照している
+    levels = {t.id: t.level for t in c.traces}
+    assert levels["cancel-flow#OrderService.cancel"] == "mandatory"
+    every = ", ".join(f"cancel-flow#{e}" for e in ["a", "d", "r", "z", "e1", "e2", "e3", "e4"])
+    md = FULL.replace("| cancel-flow#r |", f"| {every} |")
+    c2 = compile_spec(md, domain=None, legacy_ir=[]).compiled
+    assert c2 is not None
+    assert {t.id: t.level for t in c2.traces}["cancel-flow#OrderService.cancel"] == "advisory"
+
+
 def test_level_from_requirement_rows() -> None:
     c = compile_spec(FULL, domain=None, legacy_ir=[]).compiled
     assert c is not None
     levels = {t.id: t.level for t in c.traces}
     assert levels == {
         "checkout#OrderService.checkout": "mandatory",
-        "cancel-flow#OrderService.cancel": "advisory",
+        "cancel-flow#OrderService.cancel": "mandatory",
     }
     assert {s.id: s.level for s in c.structure}["vocab#OrderService"] == "mandatory"
     assert c.state_machines[0].level == "mandatory"

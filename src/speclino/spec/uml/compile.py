@@ -374,11 +374,17 @@ def _level_index(rows: list[RequirementRow]) -> dict[str, set[RuleLevel]]:
 
 
 def _level(element_ids: set[str], diagram_id: str, index: dict[str, set[RuleLevel]]) -> RuleLevel:
-    """参照する行が 1 つ以上あり、すべて advisory なら advisory（grammar.md 8 章）。"""
-    levels: set[RuleLevel] = set()
+    """義務を構成する要素がすべて、advisory の行だけから参照されているときだけ advisory。
+
+    参照の無い要素が 1 つでもあれば mandatory（grammar.md 8 章。一部の要素だけを advisory の行で
+    参照して、義務全体を黙って advisory に落とさないため）。
+    """
+    if not element_ids:
+        return "mandatory"
     for e in element_ids:
-        levels |= index.get(f"{diagram_id}#{e}", set())
-    return "advisory" if levels == {"advisory"} else "mandatory"
+        if index.get(f"{diagram_id}#{e}", set()) != {"advisory"}:
+            return "mandatory"
+    return "advisory"
 
 
 def compile_with_coverage(
