@@ -593,6 +593,36 @@ def import_specs(
         typer.echo(f"{rev.name}: 下書き {rev.revision} を作成した（{rev.content_hash}）")
 
 
+@app.command("cutover-status")
+def cutover_status(
+    workspace: Annotated[
+        str | None, typer.Option("--workspace", help="対象のワークスペース（省略で全部）")
+    ] = None,
+) -> None:
+    """知識レジストリへの切り替えの進み具合をプロジェクトごとに出す（読み取りだけ、#114）。
+
+    承認済みの仕様・sync トークン・lock の一致した最新の検査がそろったプロジェクトを ready とする。
+    手順は docs/runbooks/knowledge-registry-cutover.md。
+    """
+    from speclino.services.cutover_status import cutover_status as _status
+
+    rows = _in_transaction(lambda s: _status(s, workspace))
+    if not rows:
+        typer.echo("ワークスペースに登録されたプロジェクトが無い")
+        return
+    for r in rows:
+        mark = "ready" if r.ready else "TODO "
+        specs = ",".join(r.approved_specs) or ("-" if r.bundle_problem is None else "!")
+        typer.echo(
+            f"{mark} {r.workspace} {r.repo_full_name} "
+            f"bundle={r.bundle_generation or '-'} specs={specs} "
+            f"sync_tokens={r.active_sync_tokens} lock={r.lock_verdict or '-'}"
+            + (f" problem={r.bundle_problem}" if r.bundle_problem else "")
+        )
+    done = sum(1 for r in rows if r.ready)
+    typer.echo(f"{done}/{len(rows)} プロジェクトが切り替え済み")
+
+
 @app.command("signing-key-id")
 def signing_key_id() -> None:
     """今の bundle の署名鍵（`SPECLINO_BUNDLE_SIGNING_KEY`）の ID を出す（鍵そのものは出さない）。
