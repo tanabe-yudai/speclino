@@ -78,6 +78,17 @@ def _validate(package: PolicyPackage) -> None:
     for r in package.rules:
         if r.verifier is not None and r.verifier.id not in KNOWN_VERIFIERS:
             raise InvalidPackage(f"{r.id}: 未登録の検証器 {r.verifier.id}")
+        if (
+            r.verifier is not None
+            and r.verifier.id == "llm.checklist"
+            and r.verifier.params.get("unit_kind") == "string_literal"
+            and not r.verifier.params.get("call_names")
+        ):
+            # #114 裁定 37: LLM に送る文字列は、指定した呼出しに渡されたリテラルだけに限る
+            raise InvalidPackage(
+                f"{r.id}: unit_kind=string_literal の LLM 支援の規約には params.call_names が要る"
+                "（例: OrderError、HTTPException、api_error）"
+            )
         if r.verifier is not None and r.verifier.version != KNOWN_VERIFIERS[r.verifier.id]:
             raise InvalidPackage(
                 f"{r.id}: 検証器 {r.verifier.id} の版 {r.verifier.version} は使えない"

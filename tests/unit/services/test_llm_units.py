@@ -11,8 +11,10 @@ from speclino.services.llm_units import (
     DUPLICATE_REASON,
     MAX_UNIT_TEXT,
     NESTED_REASON,
+    NO_CALL_NAMES_REASON,
     OTHER_LANGUAGE_REASON,
     extract_units,
+    normalized_hash,
 )
 from tests.unit.services.test_llm_policies import _rule
 
@@ -58,7 +60,8 @@ def test_functions_are_units_with_qualified_symbols(tmp_path: Path) -> None:
         "app/api.py::helper",
     ]
     # LLM に渡す本文は正規形（hash の元と同じ）。生のソースは表示用に別に持つ
-    assert got.units[1].text.startswith("@router.post('/orders')")
+    # 文字列の値は目印に置き換える（#114 裁定 37）
+    assert got.units[1].text.startswith("@router.post(<str len=7>)")
     assert got.sources["app/api.py::create_order"].startswith('@router.post("/orders")')
 
 
@@ -94,8 +97,11 @@ def test_string_literals_of_the_named_calls(tmp_path: Path) -> None:
     assert got.units[0].symbol == (
         'app/api.py::Orders.cancel::"注文が見つかりません。注文番号を確かめてください"'
     )
-    everything = extract_units(root, _params("string_literal"), ["app/*.py"])
-    assert "debug only" in [u.text for u in everything.units]
+    # call_names の呼出し以外のリテラル（log("debug only")）は送らない
+    assert "debug only" not in [u.text for u in got.units]
+    # call_names の無い string_literal の規約は評価しない（UNKNOWN）
+    missing = extract_units(root, _params("string_literal"), ["app/*.py"])
+    assert missing.units == [] and missing.problems == [("params.call_names", NO_CALL_NAMES_REASON)]
 
 
 def test_unparseable_files_are_reported_not_skipped(tmp_path: Path) -> None:
@@ -159,14 +165,14 @@ def test_ambiguous_definitions_are_problems(tmp_path: Path) -> None:
 def test_literals_in_ambiguous_functions_are_problems(tmp_path: Path) -> None:
     src = "def f():\n    raise E('a')\n\ndef f():\n    raise E('b')\n\ndef g():\n    raise E('c')\n"
     (tmp_path / "m.py").write_text(src, encoding="utf-8")
-    got = extract_units(tmp_path, _params("string_literal"), ["m.py"])
+    got = extract_units(tmp_path, _params("string_literal", call_names=["E"]), ["m.py"])
     assert [u.text for u in got.units] == ["c"]
     assert {reason for _, reason in got.problems} == {DUPLICATE_REASON}
 
 
 def test_oversized_unit_is_not_truncated_but_unknown(tmp_path: Path) -> None:
-    body = "x" * (MAX_UNIT_TEXT + 10)
-    (tmp_path / "m.py").write_text(f"def big():\n    return '{body}'\n", encoding="utf-8")
+    lines = "".join(f"    v{i} = call{i}(a, b, c)\n" for i in range(MAX_UNIT_TEXT // 20 + 10))
+    (tmp_path / "m.py").write_text(f"def big():\n{lines}", encoding="utf-8")
     got = extract_units(tmp_path, _params("function"), ["m.py"])
     assert got.units == []
     ((symbol, reason),) = got.problems
@@ -214,3 +220,65 @@ def test_unparse_recursion_marks_only_that_unit(tmp_path: Path, monkeypatch: obj
         mp.undo()
     assert ("app/api.py::Orders.cancel", TOO_DEEP_REASON) in got.problems
     assert {u.symbol for u in got.units} == {"app/api.py::create_order", "app/api.py::helper"}
+
+
+# ---------------------------------------------------------------------------
+# #114 裁定 37: 関数の単位は値を送らない。文字列の単位は call_names の呼出しだけ
+# ---------------------------------------------------------------------------
+
+_SECRETY = """
+API_KEY_FALLBACK = 1
+
+
+def connect(user, password="hunter2-very-secret"):
+    \"\"\"接続する。初期のパスワードは sk-proj-docstring-secret-value。\"\"\"
+    token = "ghp_" + "abcdefghijklmnopqrstuvwxyz0123456789"
+    url = f"postgres://admin:{password}@db.internal/app?key=AKIAABCDEFGHIJ234567"
+    raw = b"\\x00binary-secret"
+    return client.login(user, token, url, raw, 12345678901, 42)
+"""
+
+
+def test_function_units_never_contain_literal_values(tmp_path: Path) -> None:
+    from speclino.services.llm_policies import build_prompt
+
+    root = _write(tmp_path, _SECRETY)
+    params = _params("function")
+    (unit,) = extract_units(root, params, ["app/*.py"]).units
+    prompt = build_prompt(_rule(), params, unit)
+    for value in (
+        "hunter2",
+        "sk-proj",
+        "docstring",
+        "ghp_",
+        "abcdefghij",
+        "postgres",
+        "AKIA",
+        "binary-secret",
+        "12345678901",
+    ):
+        assert value not in unit.text and value not in prompt, value
+    assert "password=<str len=19>" in unit.text
+    assert "<bytes len=" in unit.text and "<num>" in unit.text and ", 42)" in unit.text
+    # 名前・構造・呼出しは残る
+    assert "def connect(user, password=" in unit.text and "client.login(" in unit.text
+    # キャッシュのキー（単位の hash）は置き換えた正規形から作る（送る本文と同じ）
+    assert unit.unit_hash == normalized_hash(unit.text)
+    # 秘密の値だけを変えても（長さが同じなら）送る本文と hash は変わらない
+    swapped = _SECRETY.replace("hunter2-very-secret", "XXXXXXX-XXXX-XXXXXX")
+    (again,) = extract_units(_write(tmp_path, swapped), params, ["app/*.py"]).units
+    assert (again.text, again.unit_hash) == (unit.text, unit.unit_hash)
+
+
+def test_string_literal_units_are_only_arguments_of_call_names(tmp_path: Path) -> None:
+    src = (
+        "def f(x):\n"
+        "    log('debug ' + x)\n"
+        "    secret = 'not-an-argument'\n"
+        "    raise OrderError('在庫が足りないため確定できません。数量を減らしてください。')\n"
+    )
+    root = _write(tmp_path, src)
+    got = extract_units(root, _params("string_literal", call_names=["OrderError"]), ["app/*.py"])
+    assert [u.text for u in got.units] == [
+        "在庫が足りないため確定できません。数量を減らしてください。"
+    ]

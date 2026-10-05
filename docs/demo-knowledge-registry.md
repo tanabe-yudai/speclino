@@ -23,8 +23,9 @@ uv run python scripts/seed_demo.py --repo-dir build/shop-repo
 
 seed は main を検査したあと、main の LLM 支援の「指摘なし」を owner が確定した状態にしてから main を
 検査し直す（必須の LLM 支援の規約は「指摘なし」でも人の確定までゲートを止めるため。チームが main の評価を
-一度確かめた、という前提）。確定は単位の内容に結びつくので、PR で変わっていない関数にはそのまま効き、
-PR で変わった関数は確定し直すまで要確認に残る。
+一度確かめた、という前提）。LLM 支援の規約 `SHOP-ERR-001` の単位は `OrderError` に渡したメッセージ
+（`unit_kind: string_literal`、`call_names: [OrderError]`）。確定は単位の内容に結びつくので、PR で変わって
+いないメッセージにはそのまま効き、PR で変わったメッセージは確定し直すまで要確認に残る。
 
 `seed_demo.py` は LLM を呼ばない。LLM 支援の規約は「コードの文字列だけで答える決定的な偽物」
 （`examples/shop/seed.py` の `ScriptedChecklistLlm`、モデル名 `scripted-checklist`）で評価し、その記録を DB に残す。
@@ -84,7 +85,7 @@ seed が検査済みなので、プロジェクトの画面か `/runs/<id>`（se
 | #1 | 決済を呼ばない | `place#OrderService.place_order` が VIOLATED（反例つき） |
 | #2 | 未決済でも出荷する | `status`（ship_order）が VIOLATED（PENDING → SHIPPED は図に無い） |
 | #3 | 取消で返金も呼ぶ | `cancel#OrderService.cancel_order` が VIOLATED（閉じたアクティビティ図に無い呼出し） |
-| #4 | 確保と決済の間に通知を挟む | 仕様の判定は変化なし（シーケンス図は「この順で含む」。図に無い呼出しは許す）。変えた関数の LLM の「指摘なし」は確定待ち |
+| #4 | 確保と決済の間に通知を挟む | 変化なし（シーケンス図は「この順で含む」。図に無い呼出しは許す） |
 | #5 | `getattr` で決済を呼ぶ | `place#…` と `status`（place_order）が UNKNOWN（解析できないものを成立にしない） |
 | #6 | PR で bindings の決済を通知に向ける | `KNOWLEDGE-BINDINGS-001` が REVIEW（判定は main の bindings で行う） |
 | #7 | 例外のメッセージを短くする | LLM 支援の規約 `SHOP-ERR-001` が REVIEW（LLM の指摘あり、人の確定待ち） |

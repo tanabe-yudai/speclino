@@ -124,7 +124,9 @@ gcloud run jobs logs read speclino-admin --project=$P --region=$REGION --limit=5
 ### LLM 支援の規約を使うプロジェクト
 
 LLM 支援の規約（`tier: llm_assisted`）は、`params.paths` に一致する Python の単位を外部のモデル
-（Vertex AI の Gemini）に送る。秘密情報・個人情報らしい値を含む単位は送らないが、**検出は完全ではない**。
+（Vertex AI の Gemini）に送る。関数・エンドポイントの単位は文字列・bytes の値を目印に置き換えて送り
+（値は送らない）、文字列の単位は `params.call_names` の呼出しに渡したリテラルだけを送る（`call_names` の
+無い string_literal の規約は承認できない）。秘密情報・個人情報らしい値の検出は補助の防御で、**完全ではない**。
 規約を承認する前に、`params.paths` が送ってよいディレクトリだけを指していることを確かめる（無指定や
 `**/*` のような広いパターンは、承認の画面に警告が出る）。止めるときは `SPECLINO_LLM_POLICIES_ENABLED=false`。
 

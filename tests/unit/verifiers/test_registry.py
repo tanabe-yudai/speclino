@@ -217,3 +217,28 @@ def test_llm_scope_warnings_for_missing_or_broad_paths() -> None:
     both = gov.llm_scope_warnings(_package(llm_rule("BOTH", ["**/*.py"], None)))
     assert len(both) == 2
     gov._validate(_package(llm_rule("BOTH", ["**/*.py"], None)))  # 拒否はしない
+
+
+def test_string_literal_llm_rule_requires_call_names() -> None:
+    """#114 裁定 37: 文字列の単位を送る規約は、送るリテラルを呼出しで限る。無ければ承認しない。"""
+    from speclino.domain.policy import PolicyApplicability, PolicyVerifierRef
+    from speclino.services import policy_governance as gov
+
+    def rule(params: dict[str, object]) -> PolicyRule:
+        return PolicyRule(
+            id="MSG",
+            version="1",
+            level="mandatory",
+            title="t",
+            text="t",
+            applies_to=PolicyApplicability(paths=["app/api/*.py"]),
+            verifier=PolicyVerifierRef(id="llm.checklist", version="1", params=params),
+            on_missing_input="unknown",
+            tier="llm_assisted",
+        )
+
+    base = {"items": [{"id": "i", "question": "q"}], "unit_kind": "string_literal"}
+    with pytest.raises(gov.InvalidPackage, match="call_names"):
+        gov._validate(_package(rule(base)))
+    gov._validate(_package(rule({**base, "call_names": ["HTTPException"]})))
+    gov._validate(_package(rule({**base, "unit_kind": "function"})))

@@ -464,13 +464,21 @@ PR コメントの承認者は GitHub のユーザー ID で照合する（ロ�
 #### LLM に送るもの（データの扱い）
 
 - **送るのは、`tier: llm_assisted` のルールを定義したときだけ**（opt-in）。そのルールの `applies_to` /
-  `params.paths` に一致する Python ファイルから取り出した単位（関数・文字列リテラル・エンドポイント）の
-  正規形（`ast.unparse`。コメントは落ちる）と、ルールの題・本文・チェック項目。リポジトリ全体や差分、
-  PR の本文・コメントは送らない
+  `params.paths` に一致する Python ファイルから取り出した単位と、ルールの題・本文・チェック項目。
+  リポジトリ全体や差分、PR の本文・コメントは送らない
+- **値は構造で送らない**（主の防御）:
+  - 関数・エンドポイントの単位（`unit_kind: function` / `endpoint`）は、正規形（`ast.unparse`。コメントは
+    落ちる）の中のすべての str / bytes の定数（docstring・f-string の定数部分を含む）を `<str len=N>` /
+    `<bytes len=N>` に、6 桁を超える数値を `<num>` に置き換えてから送る。LLM は名前・構造・呼出しだけで
+    判定する。単位の hash（記録のキー）も置き換えた後の正規形から作る
+  - 文言を見るチェック項目（エラーメッセージの書き方など）は `unit_kind: string_literal` で評価する。
+    `params.call_names`（例 `OrderError`・`HTTPException`・`api_error`）が必須で、その呼出しに渡された
+    リテラルだけを送る。`call_names` の無い string_literal の規約は承認できず、既存のものは UNKNOWN になる
 - 送り先は worker が呼ぶ Gemini（本番は Vertex AI。`GOOGLE_CLOUD_PROJECT` のプロジェクト、
   `SPECLINO_LLM_POLICIES_MODEL`、未指定なら `SPECLINO_AGENT_MODEL`）。費用は `SPECLINO_DAILY_COST_LIMIT_USD`
   の枠を共有する
-- **秘密情報・個人情報らしい値を含む単位は送らない**。検出は 3 段:
+- **秘密情報・個人情報らしい値を含む単位は送らない**（補助の防御。送る前の単位と、組み立てたプロンプト
+  全体の両方にかける）。検出は 3 段:
   - 形: 秘密鍵のヘッダー、AWS / GCP / GitHub / Slack / `sk-` 形式のトークン、JWT、認証情報つきの URL、
     メールアドレス（`example.com` などの例示用ドメインを除く）
   - 名前: 代入先・キーワード引数・引数の既定値・dict のキー・属性名・比較の相手が秘密らしい名前

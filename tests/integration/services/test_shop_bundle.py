@@ -28,12 +28,14 @@ pytestmark = [
 LLM_RULE = "SHOP-ERR-001"
 # PR ごとの、確定が効いていない LLM 支援の Finding の区分（変わった単位だけ）
 PENDING_LLM: dict[str, list[str]] = {
-    "01-missing-charge": ["no_issue"],
+    # 規約の単位は OrderError に渡したメッセージ（string_literal）。メッセージを変えない PR は
+    # main で確定した単位のまま。#2・#7 は新しいメッセージ（指摘なし・指摘あり）で確定待ち
+    "01-missing-charge": [],
     "02-ship-from-pending": ["no_issue"],
-    "03-refund-on-cancel": ["no_issue"],
-    "04-notify-between": ["no_issue"],
-    "05-dynamic-charge": ["no_issue"],
-    "06-rebind-charge": [],  # bindings だけを変える（コードの単位は同じ）
+    "03-refund-on-cancel": [],
+    "04-notify-between": [],
+    "05-dynamic-charge": [],
+    "06-rebind-charge": [],
     "07-terse-error": ["issue"],
 }
 
@@ -156,11 +158,11 @@ async def test_run_api_returns_the_cleared_ids(engine: AsyncEngine, tmp_path: Pa
         httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c,
     ):
         # cleared は人が確定した REVIEW だけ（seed が main で確定した「指摘なし」）。PR で変わった
-        # 単位は確定し直すまで cleared に入らない（#114）
+        # メッセージは確定し直すまで cleared に入らない（#114）
         for branch, expected in (
             ("main", 4),
             ("pr/07-terse-error", 3),
-            ("pr/01-missing-charge", 3),
+            ("pr/01-missing-charge", 4),
         ):
             body = (await c.get(f"/api/review-runs/{result.runs[branch]}", headers=judge)).json()
             by_id = {x["id"]: x for x in body["findings"]}

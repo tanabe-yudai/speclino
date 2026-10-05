@@ -3,8 +3,11 @@
 対象リポジトリのコードは import も実行もしない（`ast.parse` で読むだけ）。
 
 LLM に渡す本文と単位の hash は同じ正規形から作る（キャッシュの汚染を防ぐ。同じ hash なら
-LLM が見た本文も同じ）: 関数・エンドポイントは `ast.unparse`（コメントと空白の差を除く。
-デコレーターと docstring は本文の一部として残す）、文字列リテラルは値そのもの。
+LLM が見た本文も同じ）: 関数・エンドポイントは、すべての str / bytes の定数（docstring・f-string の
+定数部分を含む）を `<str len=N>` / `<bytes len=N>` の目印に、6 桁を超える数値を `<num>` に置き換えた
+AST の `ast.unparse`（コメントと空白の差を除く。#114 裁定 37: 値は送らず、名前・構造・呼出しだけで
+判定させる）。文字列リテラルの単位は値そのもので、規約の `call_names` の呼出しに渡されたものだけ
+（`call_names` の無い string_literal の規約は評価しない）。
 `AssessmentUnit.text` にはこの正規形を入れ、表示用の生のソースは `ExtractedUnits.sources` に
 別に持つ（LLM には渡さない）。
 
@@ -16,6 +19,7 @@ LLM が見た本文も同じ）: 関数・エンドポイントは `ast.unparse`
 from __future__ import annotations
 
 import ast
+import copy
 import json
 from collections import Counter
 from dataclasses import dataclass, field
@@ -52,6 +56,9 @@ DUPLICATE_REASON = "同名の定義が複数あり一意に決まらない"
 CONDITIONAL_REASON = "条件つきの定義（if / try などの中）で一意に決まらない"
 NESTED_REASON = "関数の中の定義で一意に決まらない"
 OTHER_LANGUAGE_REASON = "対象外の言語（LLM 支援の単位は Python だけ）"
+NO_CALL_NAMES_REASON = (
+    "string_literal の規約に params.call_names が無い（送る文字列を呼出しで限らないと評価しない）"
+)
 TOO_DEEP_REASON = "入れ子が深すぎて正規形を作れない"
 
 
@@ -72,6 +79,8 @@ def extract_units(
     root: Path, params: LlmChecklistParams, default_paths: list[str]
 ) -> ExtractedUnits:
     """`params.paths`（空なら `default_paths`）に一致するファイルから単位を取り出す。順は決定的。"""
+    if params.unit_kind == "string_literal" and not params.call_names:
+        return ExtractedUnits(problems=[("params.call_names", NO_CALL_NAMES_REASON)])
     snapshot = DirectorySnapshot(root=root)
     patterns = params.paths or default_paths
     files = sorted({p for pattern in patterns for p in snapshot.glob(pattern)})
@@ -211,7 +220,7 @@ class _Collector(ast.NodeVisitor):
     def visit_Call(self, node: ast.Call) -> None:
         if self.params.unit_kind == "string_literal":
             name = _call_name(node.func)
-            if not self.params.call_names or name in self.params.call_names:
+            if name in self.params.call_names:
                 args = [*node.args, *(k.value for k in node.keywords)]
                 for arg in args:
                     if isinstance(arg, ast.Constant) and isinstance(arg.value, str) and arg.value:
@@ -222,7 +231,7 @@ class _Collector(ast.NodeVisitor):
         start = min([d.lineno for d in node.decorator_list] + [node.lineno])
         raw = "\n".join(self.source.splitlines()[start - 1 : node.end_lineno])
         try:
-            normalized, problem = ast.unparse(node), None
+            normalized, problem = ast.unparse(redact(node)), None
         except (RecursionError, MemoryError):
             # 正規形を作れない単位は送らず UNKNOWN（run は落とさない）
             normalized, problem = "", TOO_DEEP_REASON
@@ -253,6 +262,42 @@ class _Collector(ast.NodeVisitor):
         )
 
 
+MAX_PLAIN_DIGITS = 6
+
+
+class _Redactor(ast.NodeTransformer):
+    """str / bytes の定数を長さだけの目印に、大きな数値を `<num>` に置き換える。"""
+
+    def visit_JoinedStr(self, node: ast.JoinedStr) -> ast.AST:
+        # f-string の定数部分は Constant のまま目印の文字列にする（unparse できる形）
+        values: list[ast.expr] = []
+        for v in node.values:
+            if isinstance(v, ast.Constant) and isinstance(v.value, str):
+                values.append(ast.Constant(value=f"<str len={len(v.value)}>"))
+            else:
+                values.append(self.visit(v))
+        node.values = values
+        return node
+
+    def visit_Constant(self, node: ast.Constant) -> ast.AST:
+        value = node.value
+        if isinstance(value, str):
+            return ast.Name(id=f"<str len={len(value)}>", ctx=ast.Load())
+        if isinstance(value, bytes):
+            return ast.Name(id=f"<bytes len={len(value)}>", ctx=ast.Load())
+        if isinstance(value, (int, float, complex)) and not isinstance(value, bool):
+            digits = sum(c.isdigit() for c in repr(value))
+            if digits > MAX_PLAIN_DIGITS:
+                return ast.Name(id="<num>", ctx=ast.Load())
+        return node
+
+
+def redact(node: ast.AST) -> ast.AST:
+    """LLM に送る前に値を目印へ置き換えた写し（元の木は変えない）。"""
+    redacted: ast.AST = _Redactor().visit(copy.deepcopy(node))
+    return redacted
+
+
 def _call_name(func: ast.expr) -> str | None:
     if isinstance(func, ast.Name):
         return func.id
@@ -275,7 +320,9 @@ __all__ = [
     "DUPLICATE_REASON",
     "MAX_UNIT_TEXT",
     "NESTED_REASON",
+    "NO_CALL_NAMES_REASON",
     "OTHER_LANGUAGE_REASON",
+    "redact",
     "TOO_DEEP_REASON",
     "ExtractedUnits",
     "extract_units",

@@ -129,7 +129,10 @@ def _policy_package(workspace: str) -> PolicyPackage:
                         ),
                     }
                 ],
-                "unit_kind": "function",
+                # 文言を評価するので文字列の単位。送るのは OrderError に渡したリテラルだけ
+                # （関数の単位は値を目印に置き換えて送るため、文言の規約には使えない。#114 裁定 37）
+                "unit_kind": "string_literal",
+                "call_names": ["OrderError"],
             },
         ),
         on_missing_input="unknown",
@@ -140,7 +143,7 @@ def _policy_package(workspace: str) -> PolicyPackage:
     )
 
 
-_RAISE = re.compile(r"""raise OrderError\((['"])(.*?)\1\)""")
+_UNIT_BODY = re.compile(r"```\n(.*)\n```", re.DOTALL)
 _ITEM = re.compile(r"^- ([A-Za-z0-9_-]+): ", re.MULTILINE)
 
 
@@ -148,7 +151,7 @@ _ITEM = re.compile(r"^- ([A-Za-z0-9_-]+): ", re.MULTILINE)
 class ScriptedChecklistLlm:
     """LLM 支援の規約の評価を、コードの文字列だけで決める偽物（実際の LLM を呼ばない）。
 
-    単位のコードに「。」で終わらない `raise OrderError("…")` があれば該当（引用はそのメッセージ）。
+    単位（OrderError に渡したメッセージ）が「。」で終わらなければ該当（引用はそのメッセージ）。
     """
 
     model: str = SEED_LLM_MODEL
@@ -158,7 +161,9 @@ class ScriptedChecklistLlm:
     async def generate_json(self, prompt: str, schema: dict[str, Any]) -> JsonGeneration:
         self.calls += 1
         head, _, code = prompt.partition("評価の単位")
-        bare = [m for _, m in _RAISE.findall(code) if not m.endswith("。")]
+        body = _UNIT_BODY.search(code)
+        message = body.group(1) if body else ""
+        bare = [message] if message and not message.endswith("。") else []
         items = [
             {"item_id": item, "applies": bool(bare), "quote": bare[0] if bare else ""}
             for item in _ITEM.findall(head.partition("チェック項目")[2])
