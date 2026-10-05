@@ -11,6 +11,10 @@
   （`services/mcp_context.py`）
 - Streamable HTTP を FastAPI に `/mcp` としてマウントする（`mount_mcp`）。
   stateless / JSON 応答にして Cloud Run の複数インスタンスでも動くようにする
+- S68: sync トークン（`slsync_`、`services/sync_tokens.py`）も受ける。sync トークンは読み取り専用で
+  1 つのプロジェクトに限る（`verification_start` は拒否、他のプロジェクトは「無い」と同じ応答）。
+  チームの知識を読む `sync_status` / `spec_get` / `skill_get` は承認済みの今の bundle から答え、
+  取得を `knowledge_fetches` に残す
 - `instructions`（2KB 以内）と `speclino_guide` prompt（Claude Code 以外のクライアント向けに
   SKILL.md 本文を返す）は、どちらも `plugins/speclino/skills/speclino-spec-authoring/SKILL.md`
   （S57、Claude Code プラグインが配る Skill と同じファイル）から読む。二重に書かず正本を 1 つに保つ
@@ -22,6 +26,7 @@ import re
 import uuid
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -37,8 +42,16 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from speclino.api.deps import AppState
 from speclino.db.models import Project
 from speclino.db.repositories import ProjectRepository
+from speclino.db.repositories.review_runs import ReviewRunRepository
+from speclino.db.repositories.sync_tokens import KnowledgeFetchRepository
+from speclino.domain.knowledge import (
+    ArtifactRevision,
+    ResolvedKnowledge,
+    SkillContent,
+    SpecContent,
+)
 from speclino.domain.run import GitRef
-from speclino.services import mcp_tokens
+from speclino.services import knowledge_registry, knowledge_sync, mcp_tokens, sync_tokens
 from speclino.services.mcp_context import ContextUnavailable, InProcessContextSource
 from speclino.services.run_view import run_view
 
@@ -46,6 +59,22 @@ StateGetter = Callable[[], AppState]
 MCP_PATH = "/mcp"
 # BearerAuth がリクエストに載せる、トークンのワークスペース（slug）の置き場所
 WORKSPACE_STATE_KEY = "mcp_workspace"
+# 同じく、トークンの身元（`Principal`）の置き場所
+PRINCIPAL_STATE_KEY = "mcp_principal"
+
+
+@dataclass(frozen=True)
+class Principal:
+    """MCP の呼び出し元。`sync_project` があれば sync トークン（読み取り専用）。"""
+
+    workspace: str
+    token_id: uuid.UUID
+    sync_project: uuid.UUID | None = None
+
+    @property
+    def channel(self) -> str:
+        return "sync" if self.sync_project is not None else "mcp"
+
 
 # instructions / prompt の正本（プラグインが配る Skill と同じファイル。S57）
 SKILL_PATH = (
@@ -100,7 +129,7 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
         """
         state = get_state()
         workspace = _workspace(ctx)
-        project = await _workspace_project(state, workspace, repo_full_name)
+        project = await _workspace_project(state, _principal(ctx), repo_full_name)
         source = state.context_source or InProcessContextSource(
             state.session_factory, state.code_host, state.service.config.resolve_team_policy
         )
@@ -119,7 +148,10 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
     ) -> dict[str, str]:
         """head_sha の検証を開始し run_id を返す。結果は verification_get で読む。"""
         state = get_state()
-        project = await _workspace_project(state, _workspace(ctx), repo_full_name)
+        principal = _principal(ctx)
+        if principal.sync_project is not None:
+            raise ToolError("sync トークンは読み取り専用で、検証を開始できない")
+        project = await _workspace_project(state, principal, repo_full_name)
         run_id = await state.service.create_run(
             project_id=project.id,
             head_sha=head_sha,
@@ -133,43 +165,183 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
     async def verification_get(run_id: str, ctx: Context) -> dict[str, Any]:
         """run の状態・ゲート結果・Finding（要求 ID / 判定 / 分類 / 説明 / 次にできること）。"""
         state = get_state()
-        workspace = _workspace(ctx)
+        principal = _principal(ctx)
         rid = uuid.UUID(run_id)
-        view = await run_view(state.session_factory, rid, workspace)
+        if principal.sync_project is not None and not await _run_in_project(
+            state, rid, principal.sync_project
+        ):
+            return {"error": "run_not_found", "run_id": run_id}
+        view = await run_view(state.session_factory, rid, principal.workspace)
         # トークンのワークスペースの run でなければ、無い場合と同じ応答にする
         if view is None:
             return {"error": "run_not_found", "run_id": run_id}
         return {**view, "run_id": run_id}
 
+    @mcp.tool()
+    async def sync_status(repo_full_name: str, lock_json: str, ctx: Context) -> dict[str, Any]:
+        """手元の `.speclino/lock.json`（本文）が今の承認済みの知識と比べて古いか。
+
+        `stale` が true なら `speclino sync` で最新にする（期限切れ・署名不一致・別のリポジトリの
+        lock も stale）。`changed` は lock と今の間で変わった知識。判定はゲートと同じ。
+        """
+        principal = _principal(ctx)
+        project, resolved = await _resolve(get_state(), principal, repo_full_name)
+        return _sync_status(project, resolved, lock_json)
+
+    @mcp.tool()
+    async def spec_get(repo_full_name: str, name: str, ctx: Context) -> dict[str, Any]:
+        """このリポジトリに当たる、承認済みの仕様（Markdown）を名前で返す。"""
+        state = get_state()
+        principal = _principal(ctx)
+        project, resolved = await _resolve(state, principal, repo_full_name)
+        rev = _pick(resolved.specs, name)
+        assert isinstance(rev.content, SpecContent)
+        await _record_fetch(state, principal, project, resolved, rev)
+        return {
+            **_rev_view(resolved, rev),
+            "markdown": rev.content.markdown,
+        }
+
+    @mcp.tool()
+    async def skill_get(repo_full_name: str, name: str, ctx: Context) -> dict[str, Any]:
+        """このリポジトリに当たる、承認済みのスキル（SKILL.md と付属ファイル）を名前で返す。"""
+        state = get_state()
+        principal = _principal(ctx)
+        project, resolved = await _resolve(state, principal, repo_full_name)
+        rev = _pick(resolved.skills, name)
+        assert isinstance(rev.content, SkillContent)
+        await _record_fetch(state, principal, project, resolved, rev)
+        return {
+            **_rev_view(resolved, rev),
+            "skill_md": rev.content.skill_md,
+            "files": dict(rev.content.files),
+        }
+
     return mcp
 
 
-def _workspace(ctx: Context) -> str:
-    """トークンのワークスペース。`BearerAuth` を通っていないリクエストは拒否する。"""
+def _rev_view(resolved: ResolvedKnowledge, rev: ArtifactRevision) -> dict[str, Any]:
+    return {
+        "name": rev.name,
+        "revision": rev.revision,
+        "content_hash": rev.content_hash,
+        "bundle_generation": resolved.bundle.generation,
+    }
+
+
+def _pick(revs: list[ArtifactRevision], name: str) -> ArtifactRevision:
+    for rev in revs:
+        if rev.name == name:
+            return rev
+    raise ToolError(f"{name} はこのリポジトリに当たる承認済みの知識に無い")
+
+
+async def _resolve(
+    state: AppState, principal: Principal, repo_full_name: str
+) -> tuple[Project, ResolvedKnowledge]:
+    """リポジトリに当たる今の bundle（無ければ作る）の内容。"""
+    project = await _workspace_project(state, principal, repo_full_name)
+    try:
+        async with state.session_factory() as session, session.begin():
+            bundle = await knowledge_registry.ensure_bundle(session, principal.workspace)
+            resolved = await knowledge_registry.resolve_for_project(
+                session, bundle, str(project.id)
+            )
+    except LookupError as e:
+        raise ToolError(f"{repo_full_name} はこのワークスペースに登録されていない") from e
+    except ValueError as e:
+        raise ToolError(f"知識を読めない: {e}") from e
+    return project, resolved
+
+
+async def _record_fetch(
+    state: AppState,
+    principal: Principal,
+    project: Project,
+    resolved: ResolvedKnowledge,
+    rev: ArtifactRevision,
+) -> None:
+    async with state.session_factory() as session, session.begin():
+        await KnowledgeFetchRepository(session).record(
+            workspace=principal.workspace,
+            channel=principal.channel,
+            token_id=principal.token_id,
+            bundle_generation=resolved.bundle.generation,
+            project_id=project.id,
+            artifact_ids=[rev.artifact_id],
+        )
+
+
+def _sync_status(project: Project, resolved: ResolvedKnowledge, lock_json: str) -> dict[str, Any]:
+    """ゲート（`KNOWLEDGE-LOCK-001`）と同じ `assess_lock` で判定する（ファイルの照合は除く）。"""
+    generation = resolved.bundle.generation
+    if project.github_repo_id is None:
+        return {
+            "current_generation": generation,
+            "lock_generation": None,
+            "stale": True,
+            "verdict": "UNKNOWN",
+            "reason": "リポジトリ ID が未登録のため照合できない",
+            "changed": [],
+        }
+    a = knowledge_sync.assess_lock(
+        lock_json,
+        current=resolved.bundle,
+        current_members=knowledge_sync.project_members(resolved),
+        github_repo_id=project.github_repo_id,
+    )
+    return {
+        "current_generation": generation,
+        "lock_generation": a.lock.bundle_generation if a.lock is not None else None,
+        "stale": a.verdict != "VERIFIED_IN_SCOPE",
+        "verdict": a.verdict,
+        "reason": a.message,
+        "changed": a.changed,
+    }
+
+
+def _principal(ctx: Context) -> Principal:
+    """トークンの身元。`BearerAuth` を通っていないリクエストは拒否する。"""
     request = ctx.request_context.request
-    workspace = getattr(request.state, WORKSPACE_STATE_KEY, None) if request is not None else None
-    if not isinstance(workspace, str):
+    principal = getattr(request.state, PRINCIPAL_STATE_KEY, None) if request is not None else None
+    if not isinstance(principal, Principal):
         raise ToolError("MCP トークンが無い")
-    return workspace
+    return principal
 
 
-async def _workspace_project(state: AppState, workspace: str, repo_full_name: str) -> Project:
+def _workspace(ctx: Context) -> str:
+    """トークンのワークスペース。"""
+    return _principal(ctx).workspace
+
+
+async def _workspace_project(state: AppState, principal: Principal, repo_full_name: str) -> Project:
     """トークンのワークスペースに登録されたリポジトリの project。それ以外は拒否する。
 
-    未登録・他のワークスペース・存在しないを区別しない（存在を漏らさない）。
+    sync トークンはそのプロジェクトだけ。未登録・他のワークスペース・他のプロジェクト・存在しないを
+    区別しない（存在を漏らさない）。
     """
     async with state.session_factory() as session:
         project = await ProjectRepository(session).get_by_repo(repo_full_name)
-    if project is None or project.team != workspace:
+    if (
+        project is None
+        or project.team != principal.workspace
+        or (principal.sync_project is not None and project.id != principal.sync_project)
+    ):
         raise ToolError(f"{repo_full_name} はこのワークスペースに登録されていない")
     return project
 
 
-class BearerAuth:
-    """ワークスペース単位の MCP トークンで `/mcp` を守る ASGI ミドルウェア（S54）。
+async def _run_in_project(state: AppState, run_id: uuid.UUID, project_id: uuid.UUID) -> bool:
+    async with state.session_factory() as session:
+        run = await ReviewRunRepository(session).get(run_id)
+    return run is not None and run.project_id == project_id
 
-    有効なトークンなら、そのワークスペースを `scope["state"]` に載せて通す。無い・不正・失効済みは
-    区別せず 401。
+
+class BearerAuth:
+    """MCP トークン（S54）か sync トークン（S68）で `/mcp` を守る ASGI ミドルウェア。
+
+    有効なトークンなら、その身元とワークスペースを `scope["state"]` に載せて通す。無い・不正・
+    失効済みは区別せず 401。
     """
 
     def __init__(self, app: ASGIApp, get_state: StateGetter) -> None:
@@ -180,22 +352,30 @@ class BearerAuth:
         if scope["type"] == "http":
             auth = Request(scope, receive).headers.get("authorization", "")
             token = auth.removeprefix("Bearer ").strip() if auth.startswith("Bearer ") else ""
-            workspace = await self._authenticate(token) if token else None
-            if workspace is None:
+            principal = await self._authenticate(token) if token else None
+            if principal is None:
                 response = JSONResponse(
                     {"error": {"code": "unauthenticated", "message": "MCP トークンが必要"}},
                     status_code=401,
                 )
                 await response(scope, receive, send)
                 return
-            scope.setdefault("state", {})[WORKSPACE_STATE_KEY] = workspace
+            state = scope.setdefault("state", {})
+            state[WORKSPACE_STATE_KEY] = principal.workspace
+            state[PRINCIPAL_STATE_KEY] = principal
         await self.app(scope, receive, send)
 
-    async def _authenticate(self, token: str) -> str | None:
+    async def _authenticate(self, token: str) -> Principal | None:
         # 形式の違う値は authenticate が DB を引く前に拒否する
         # （セッションは最初の照会まで接続しない）
         async with self.get_state().session_factory() as session, session.begin():
-            return await mcp_tokens.authenticate(session, token)
+            if token.startswith(sync_tokens.TOKEN_PREFIX):
+                sync = await sync_tokens.authenticate(session, token)
+                if sync is None:
+                    return None
+                return Principal(sync.workspace, sync.token_id, sync.project_id)
+            identity = await mcp_tokens.authenticate_identity(session, token)
+            return Principal(identity.team, identity.token_id) if identity else None
 
 
 def allowed_hosts(public_url: str) -> list[str]:
@@ -224,6 +404,7 @@ def mount_mcp(
 __all__ = [
     "MCP_PATH",
     "BearerAuth",
+    "Principal",
     "allowed_hosts",
     "build_mcp",
     "mount_mcp",

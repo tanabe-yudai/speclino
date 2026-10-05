@@ -13,7 +13,7 @@ from typing import Any, cast
 from sqlalchemy import CursorResult, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from speclino.db.models import KnowledgeFetchRecord, SyncTokenRecord
+from speclino.db.models import KnowledgeFetchRecord, Project, SyncTokenRecord
 
 _TOUCH_INTERVAL = timedelta(minutes=1)
 
@@ -38,6 +38,16 @@ class SyncTokenRepository:
         await self._session.flush()
         await self._session.refresh(record)
         return record
+
+    async def list_for_team(self, team: str) -> list[tuple[SyncTokenRecord, str]]:
+        """team のトークンと、その対象リポジトリの名前（新しい順）。"""
+        stmt = (
+            select(SyncTokenRecord, Project.repo_full_name)
+            .join(Project, Project.id == SyncTokenRecord.project_id)
+            .where(SyncTokenRecord.team == team)
+            .order_by(SyncTokenRecord.created_at.desc())
+        )
+        return [(r, name) for r, name in (await self._session.execute(stmt)).tuples()]
 
     async def find_active(self, token_hash: str) -> SyncTokenRecord | None:
         stmt = select(SyncTokenRecord).where(

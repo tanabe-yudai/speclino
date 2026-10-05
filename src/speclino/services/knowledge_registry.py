@@ -376,7 +376,7 @@ def _compile(name: str, content: ArtifactContent, compiler: SpecCompiler) -> Art
     return SpecContent.model_validate(data)
 
 
-def _skill_name(rev: ArtifactRevision) -> str:
+def skill_dir_name(rev: ArtifactRevision) -> str:
     """書き出し先のスキル名: SKILL.md の frontmatter の `name`、無ければ artifact 名。"""
     assert isinstance(rev.content, SkillContent)
     fm = _FRONTMATTER.match(rev.content.skill_md)
@@ -407,7 +407,7 @@ def _conflicts(actives: list[ArtifactRevision]) -> list[str]:
         if c.kind == "instructions":
             groups[f"指示書 {c.target}"].append(rev)
         elif c.kind == "skill":
-            groups[f"スキル名 {_skill_name(rev).casefold()}"].append(rev)
+            groups[f"スキル名 {skill_dir_name(rev).casefold()}"].append(rev)
         else:
             for rid in _requirement_ids(rev):
                 groups[f"要求 ID {rid}"].append(rev)
@@ -596,6 +596,7 @@ __all__ = [
     "require_artifact",
     "resolve_for_project",
     "revision_at",
+    "skill_dir_name",
     "update_draft",
     "verify_bundle",
 ]
