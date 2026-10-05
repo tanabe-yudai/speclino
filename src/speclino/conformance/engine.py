@@ -32,7 +32,7 @@ from speclino.conformance.typing import (
 )
 from speclino.domain.code_ir import CodeIR, Event, Path, UnknownCause
 from speclino.domain.domain_spec import DomainSpec
-from speclino.domain.expr import BOOL_TYPE, Binary, Const, Expr, Ref, const, refs_in
+from speclino.domain.expr import BOOL_TYPE, Binary, Const, Expr, Ref, const, describe_expr, refs_in
 from speclino.domain.finding import (
     Category,
     Counterexample,
@@ -358,22 +358,7 @@ class ConformanceEngine:
         return steps
 
     def _post_state(self, path: Path) -> list[Any]:
-        """経路の終了状態: after.x = 最後の更新値（無ければ before.x）、outcome。"""
-        cs: list[Any] = []
-        updated: dict[str, Expr] = {}
-        for su in path.state_updates:
-            updated[su.target] = su.value
-        for var, ty in self.domain.variables.items():
-            after = self.ctx.variable(f"after.{var}", ty)
-            if var in updated:
-                cs.append(after == self.ctx.encode(updated[var]))
-            else:
-                cs.append(after == self.ctx.variable(f"before.{var}", ty))
-        kind_var = self.ctx.variable("outcome.kind", OUTCOME_KIND_ENUM)
-        cs.append(kind_var == self.ctx.const(const(OUTCOME_KIND_ENUM, path.outcome.kind)))
-        if path.outcome.status is not None:
-            cs.append(self.ctx.variable("outcome.status", "integer") == path.outcome.status)
-        return cs
+        return post_state_constraints(self.ctx, self.domain, path)
 
     def _select(self, req: EventRequirement, path: Path) -> _Selection:
         must: list[Event] = []
@@ -621,23 +606,7 @@ class ConformanceEngine:
         )
 
     def _counterexample(self, path: Path, model: Any, actual: str) -> Counterexample:
-        assignments: dict[str, bool | int | str] = {}
-        if model is not None:
-            for name in sorted(self.ctx.variables):
-                if name.startswith("before."):
-                    v = self.ctx.value_of(model, name)
-                    if v is not None:
-                        assignments[name] = v
-        else:
-            # 構造的な違反（回数）: 経路条件そのものが反例の条件
-            assignments = {}
-        cond = self._describe_expr(path.guard)
-        return Counterexample(
-            kind="symbolic",
-            path_id=path.path_id,
-            assignments=assignments,
-            description=f"条件: {cond}; 実装: {actual}",
-        )
+        return symbolic_counterexample(self.ctx, path, model, actual)
 
     # -- pretty -------------------------------------------------------------
     def _describe_expr(self, expr: Expr) -> str:
@@ -665,6 +634,42 @@ class ConformanceEngine:
                 return "(" + joiner.join(self._describe_expr(a) for a in expr.args) + ")"
 
 
+def post_state_constraints(ctx: Z3Context, domain: DomainSpec, path: Path) -> list[Any]:
+    """経路の終了状態: after.x = 最後の更新値（無ければ before.x）、outcome。"""
+    cs: list[Any] = []
+    updated: dict[str, Expr] = {}
+    for su in path.state_updates:
+        updated[su.target] = su.value
+    for var, ty in domain.variables.items():
+        after = ctx.variable(f"after.{var}", ty)
+        if var in updated:
+            cs.append(after == ctx.encode(updated[var]))
+        else:
+            cs.append(after == ctx.variable(f"before.{var}", ty))
+    kind_var = ctx.variable("outcome.kind", OUTCOME_KIND_ENUM)
+    cs.append(kind_var == ctx.const(const(OUTCOME_KIND_ENUM, path.outcome.kind)))
+    if path.outcome.status is not None:
+        cs.append(ctx.variable("outcome.status", "integer") == path.outcome.status)
+    return cs
+
+
+def symbolic_counterexample(ctx: Z3Context, path: Path, model: Any, actual: str) -> Counterexample:
+    """モデルの before.* を反例の割当てにする（model が None なら経路条件だけ）。"""
+    assignments: dict[str, bool | int | str] = {}
+    if model is not None:
+        for name in sorted(ctx.variables):
+            if name.startswith("before."):
+                v = ctx.value_of(model, name)
+                if v is not None:
+                    assignments[name] = v
+    return Counterexample(
+        kind="symbolic",
+        path_id=path.path_id,
+        assignments=assignments,
+        description=f"条件: {describe_expr(path.guard)}; 実装: {actual}",
+    )
+
+
 def evaluate(
     spec: SpecIR,
     code: CodeIR,
@@ -685,4 +690,6 @@ __all__ = [
     "EngineConfig",
     "EngineInputError",
     "evaluate",
+    "post_state_constraints",
+    "symbolic_counterexample",
 ]
