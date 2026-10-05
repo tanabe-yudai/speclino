@@ -474,7 +474,8 @@ def policy_seed(
     """
     import yaml
 
-    from speclino.domain.policy import PolicyPackage
+    from speclino.domain.policy import PolicyPackage, PolicyRevision
+    from speclino.services.knowledge_registry import BundleConflict
     from speclino.services.policy_governance import seed_from_package
 
     try:
@@ -484,8 +485,15 @@ def policy_seed(
         typer.echo(f"入力不正: {e}", err=True)
         raise typer.Exit(code=2) from e
 
+    async def seed(s: AsyncSession) -> PolicyRevision:
+        try:
+            return await seed_from_package(s, team=team, package=package)
+        except BundleConflict as e:
+            # 規約の有効化は知識の bundle を作り直す（S62）。作れなければ規約も有効にしない
+            raise ValueError(f"規約を有効にすると知識の bundle を作れない: {e}") from e
+
     # 既に改訂があるチームへの seed は ValueError で拒否される（seed_from_package）
-    revision = _in_transaction(lambda s: seed_from_package(s, team=team, package=package))
+    revision = _in_transaction(seed)
     typer.echo(
         f"{team}@{revision.revision} を {revision.status} として取り込んだ"
         f"（rules={len(revision.package.rules)}）"

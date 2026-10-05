@@ -23,7 +23,9 @@ from speclino.services import knowledge_registry as kr
 from speclino.services.policy_governance import DraftConflict
 from speclino.services.workspaces import WorkspaceNotFound, require_member
 
-router = APIRouter(prefix="/api/w/{slug}", tags=["knowledge"], responses=error_responses(401, 404))
+router = APIRouter(
+    prefix="/api/workspaces/{slug}", tags=["knowledge"], responses=error_responses(401, 404)
+)
 
 
 class CreateArtifactRequest(BaseModel):

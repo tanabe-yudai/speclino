@@ -3149,9 +3149,9 @@
         ]
       }
     },
-    "/api/w/{slug}/artifacts": {
+    "/api/workspaces/{slug}/artifacts": {
       "get": {
-        "operationId": "list_artifacts_api_w__slug__artifacts_get",
+        "operationId": "list_artifacts_api_workspaces__slug__artifacts_get",
         "parameters": [
           {
             "in": "path",
@@ -3172,7 +3172,7 @@
                     "additionalProperties": true,
                     "type": "object"
                   },
-                  "title": "Response List Artifacts Api W  Slug  Artifacts Get",
+                  "title": "Response List Artifacts Api Workspaces  Slug  Artifacts Get",
                   "type": "array"
                 }
               }
@@ -3216,7 +3216,7 @@
         ]
       },
       "post": {
-        "operationId": "create_artifact_api_w__slug__artifacts_post",
+        "operationId": "create_artifact_api_workspaces__slug__artifacts_post",
         "parameters": [
           {
             "in": "path",
@@ -3244,7 +3244,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Create Artifact Api W  Slug  Artifacts Post",
+                  "title": "Response Create Artifact Api Workspaces  Slug  Artifacts Post",
                   "type": "object"
                 }
               }
@@ -3298,9 +3298,9 @@
         ]
       }
     },
-    "/api/w/{slug}/artifacts/{artifact_id}/approve": {
+    "/api/workspaces/{slug}/artifacts/{artifact_id}/approve": {
       "post": {
-        "operationId": "approve_api_w__slug__artifacts__artifact_id__approve_post",
+        "operationId": "approve_api_workspaces__slug__artifacts__artifact_id__approve_post",
         "parameters": [
           {
             "in": "path",
@@ -3337,7 +3337,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Approve Api W  Slug  Artifacts  Artifact Id  Approve Post",
+                  "title": "Response Approve Api Workspaces  Slug  Artifacts  Artifact Id  Approve Post",
                   "type": "object"
                 }
               }
@@ -3401,9 +3401,9 @@
         ]
       }
     },
-    "/api/w/{slug}/artifacts/{artifact_id}/draft": {
+    "/api/workspaces/{slug}/artifacts/{artifact_id}/draft": {
       "get": {
-        "operationId": "get_draft_api_w__slug__artifacts__artifact_id__draft_get",
+        "operationId": "get_draft_api_workspaces__slug__artifacts__artifact_id__draft_get",
         "parameters": [
           {
             "in": "path",
@@ -3430,7 +3430,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Get Draft Api W  Slug  Artifacts  Artifact Id  Draft Get",
+                  "title": "Response Get Draft Api Workspaces  Slug  Artifacts  Artifact Id  Draft Get",
                   "type": "object"
                 }
               }
@@ -3474,7 +3474,7 @@
         ]
       },
       "put": {
-        "operationId": "put_draft_api_w__slug__artifacts__artifact_id__draft_put",
+        "operationId": "put_draft_api_workspaces__slug__artifacts__artifact_id__draft_put",
         "parameters": [
           {
             "in": "path",
@@ -3511,7 +3511,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Put Draft Api W  Slug  Artifacts  Artifact Id  Draft Put",
+                  "title": "Response Put Draft Api Workspaces  Slug  Artifacts  Artifact Id  Draft Put",
                   "type": "object"
                 }
               }
@@ -3565,9 +3565,9 @@
         ]
       }
     },
-    "/api/w/{slug}/artifacts/{artifact_id}/revisions": {
+    "/api/workspaces/{slug}/artifacts/{artifact_id}/revisions": {
       "get": {
-        "operationId": "list_revisions_api_w__slug__artifacts__artifact_id__revisions_get",
+        "operationId": "list_revisions_api_workspaces__slug__artifacts__artifact_id__revisions_get",
         "parameters": [
           {
             "in": "path",
@@ -3597,7 +3597,7 @@
                     "additionalProperties": true,
                     "type": "object"
                   },
-                  "title": "Response List Revisions Api W  Slug  Artifacts  Artifact Id  Revisions Get",
+                  "title": "Response List Revisions Api Workspaces  Slug  Artifacts  Artifact Id  Revisions Get",
                   "type": "array"
                 }
               }
@@ -3641,9 +3641,9 @@
         ]
       }
     },
-    "/api/w/{slug}/bundles/current": {
+    "/api/workspaces/{slug}/bundles/current": {
       "get": {
-        "operationId": "current_bundle_api_w__slug__bundles_current_get",
+        "operationId": "current_bundle_api_workspaces__slug__bundles_current_get",
         "parameters": [
           {
             "in": "path",
@@ -3661,7 +3661,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Current Bundle Api W  Slug  Bundles Current Get",
+                  "title": "Response Current Bundle Api Workspaces  Slug  Bundles Current Get",
                   "type": "object"
                 }
               }
