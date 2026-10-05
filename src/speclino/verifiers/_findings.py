@@ -80,22 +80,30 @@ def unknown_finding(
     )
 
 
+def missing_input_outcome(rule: PolicyRule) -> tuple[Verdict, Category] | None:
+    """`on_missing_input` から、対象が無いときの (verdict, category) を決める。skipped は None。"""
+    if rule.on_missing_input == "skipped":
+        return None
+    if rule.on_missing_input == "violation":
+        return "VIOLATED", "missing_effect"
+    return "UNKNOWN", "unsupported_analysis"
+
+
 def missing_input_finding(
     rule: PolicyRule, snapshot: Snapshot, path: str, what: str
 ) -> Finding | None:
     """検査対象（ファイル）が無いときの Finding。`rule.on_missing_input` に従う。"""
-    if rule.on_missing_input == "skipped":
+    outcome = missing_input_outcome(rule)
+    if outcome is None:
         return None
-    message = f"{path}: {what}が無いため確認できません"
-    if rule.on_missing_input == "violation":
-        return make_finding(
-            rule,
-            snapshot,
-            path,
-            "VIOLATED",
-            "missing_effect",
-            message,
-            expected=f"{what}が存在すること",
-            actual="対象なし",
-        )
-    return unknown_finding(rule, snapshot, path, message, "対象なし")
+    verdict, category = outcome
+    return make_finding(
+        rule,
+        snapshot,
+        path,
+        verdict,
+        category,
+        f"{path}: {what}が無いため確認できません",
+        expected=f"{what}が存在すること",
+        actual="対象なし",
+    )

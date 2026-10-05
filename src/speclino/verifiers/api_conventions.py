@@ -21,11 +21,11 @@
 ``app`` / ``api`` / ``router`` で終わるものに限る（``@cache.get("k")`` のような無関係な呼び出しを
 ルートと誤認しないため）。
 
-UNKNOWN になるもの: パスが文字列リテラルでないデコレーター、受け手が同じファイルの
-``FastAPI()`` 由来の変数でないデコレーターの ``version_prefix``（APIRouter は接頭辞が変わり得る）、
-OpenAPI の解析不能・形式不正（paths が無い）、構文エラー。OpenAPI が無い・対象が 0 件のときは
-``on_missing_input`` に従う。確定できる違反があれば
-VIOLATED を優先する。
+UNKNOWN になるもの: パスが文字列リテラルでないデコレーター、``version_prefix`` を指定したときの
+AST 側のルート（``include_router(prefix=)`` や ``mount`` はファイルをまたぐため解析しない。
+版の接頭辞は OpenAPI 側だけで判定する）、OpenAPI の解析不能・形式不正（paths が無い）、
+構文エラー。OpenAPI が無い・対象が 0 件のときは ``on_missing_input`` に従う。確定できる違反が
+あれば VIOLATED を優先する。
 
 Finding は OpenAPI で 1 件、``api_glob`` の各ファイルで 1 件。requirement_id は
 ``<rule.id>:<path>``。
@@ -136,17 +136,6 @@ def _receiver_name(node: ast.expr) -> str | None:
 
 def _check_source(tree: ast.Module, params: ApiConventionsParams) -> _Outcome:
     outcome = _Outcome()
-    # 版の接頭辞を判定できるのは、同じファイルで ``FastAPI()`` から作った変数が受け手のときだけ。
-    # APIRouter などは ``prefix=`` や ``include_router(prefix=)`` で接頭辞が変わるため判定しない。
-    fastapi_apps = {
-        target.id
-        for stmt in ast.walk(tree)
-        if isinstance(stmt, ast.Assign)
-        and isinstance(stmt.value, ast.Call)
-        and _receiver_name(stmt.value.func) == "FastAPI"
-        for target in stmt.targets
-        if isinstance(target, ast.Name)
-    }
     for node in ast.walk(tree):
         if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             continue
@@ -173,14 +162,12 @@ def _check_source(tree: ast.Module, params: ApiConventionsParams) -> _Outcome:
                     path_node.value,
                     method,
                     deco.lineno,
-                    check_prefix=isinstance(deco.func.value, ast.Name)
-                    and deco.func.value.id in fastapi_apps,
+                    check_prefix=False,
                 )
-                if params.version_prefix is not None and not (
-                    isinstance(deco.func.value, ast.Name) and deco.func.value.id in fastapi_apps
-                ):
+                if params.version_prefix is not None:
                     outcome.unknowns.append(
-                        f"{label}: FastAPI() 由来でない受け手のため版の接頭辞を判定できません"
+                        f"{label}: ファイルをまたぐ include_router / mount を解析しないため"
+                        "版の接頭辞を判定できません（OpenAPI で判定してください）"
                     )
             else:
                 outcome.unknowns.append(f"{label}: パスが文字列リテラルでないため判定できません")

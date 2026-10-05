@@ -76,7 +76,8 @@ def test_conforming_openapi_and_decorators_are_verified(
         "API-CONV-001:openapi.json",
         "API-CONV-001:api/routes.py",
     ]
-    assert {f.verdict for f in findings} == {"VERIFIED_IN_SCOPE"}
+    # OpenAPI は確定、AST 側は版の接頭辞を判定しないので UNKNOWN
+    assert [f.verdict for f in findings] == ["VERIFIED_IN_SCOPE", "UNKNOWN"]
 
 
 def test_openapi_violations(tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles) -> None:
@@ -157,27 +158,25 @@ def test_non_literal_path_is_unknown(
     assert findings[0].category == "unsupported_analysis"
 
 
-def test_version_prefix_only_judged_for_fastapi_apps(
+def test_version_prefix_is_never_judged_from_ast(
     tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
 ) -> None:
     params = {**BASE, "openapi_path": None}
-    router_src = (
+    # include_router / mount はファイルをまたぐので、FastAPI() 直下でも判定しない
+    for src in (
+        "app = FastAPI()\n@app.get('/things', response_model=dict)\ndef a(): ...\n",
         "router = APIRouter(prefix='/v1')\n"
-        "@router.get('/things', response_model=dict)\n"
-        "def a(): ...\n"
-    )
-    findings = _run(tmp_path, make_rule, write_files, {"api/x.py": router_src}, params)
-    assert findings[0].verdict == "UNKNOWN"
-    app_src = "app = FastAPI()\n@app.get('/things', response_model=dict)\ndef a(): ...\n"
-    findings = _run(tmp_path, make_rule, write_files, {"api/x.py": app_src}, params)
-    assert findings[0].verdict == "VIOLATED"
-    assert "/v1 で始まっていません" in (findings[0].actual or "")
-    # 接頭辞を求めない設定なら、APIRouter でも他の検査は確定する
+        "@router.get('/things', response_model=dict)\ndef a(): ...\n",
+    ):
+        findings = _run(tmp_path, make_rule, write_files, {"api/x.py": src}, params)
+        assert findings[0].verdict == "UNKNOWN"
+        assert "OpenAPI で判定" in (findings[0].actual or "")
+    # 接頭辞を求めない設定なら、他の検査は確定する
     findings = _run(
         tmp_path,
         make_rule,
         write_files,
-        {"api/x.py": router_src},
+        {"api/x.py": src},
         {**params, "version_prefix": None},
     )
     assert findings[0].verdict == "VERIFIED_IN_SCOPE"

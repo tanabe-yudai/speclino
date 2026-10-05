@@ -141,6 +141,15 @@ def test_fstring_ja_without_japanese_constants_is_unknown(
         {"language": "ja"},
     )
     assert findings[0].verdict == "VERIFIED_IN_SCOPE"
+    # en は定数部分が ASCII のみなら、埋め込み式が非 ASCII かもしれず判定できない
+    findings = _run(
+        tmp_path,
+        make_rule,
+        write_files,
+        "api_error(1, code='a', message=f'{x} saved')\n",
+        {"language": "en"},
+    )
+    assert findings[0].verdict == "UNKNOWN"
     # en は定数部分の非 ASCII で違反が確定する
     findings = _run(
         tmp_path,

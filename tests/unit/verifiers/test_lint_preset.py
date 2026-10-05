@@ -171,7 +171,7 @@ def test_ci_variants(tmp_path: Path, make_rule: MakeRule, write_files: WriteFile
         for old in (tmp_path / ".github").glob("**/*.yml"):
             old.unlink()
         files = {"pyproject.toml": RUFF_OK, ".github/workflows/ci.yml": content, **(extra or {})}
-        return _run(tmp_path, make_rule, write_files, files, params)[1]
+        return _run(tmp_path, make_rule, write_files, files, params)[0]
 
     assert ci("jobs:\n  a:\n    steps:\n      - run: make test\n").verdict == "VIOLATED"
     cond = "jobs:\n  a:\n    steps:\n      - if: github.ref == 'x'\n        run: ruff check .\n"
@@ -267,23 +267,60 @@ def test_ruff_all_has_lowest_specificity(
     assert f.verdict == "VERIFIED_IN_SCOPE"
 
 
-def test_ruff_extend_makes_unselected_rules_unknown(
+def test_ruff_extend_only_explicit_disable_is_violated(
     tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
 ) -> None:
     base = 'extend = "../base.toml"\n[lint]\nextend-select = ["I"]\nignore = ["E501"]\n'
+    # 子で明示的に select していても、親の ignore の引き継ぎを解析しないので UNKNOWN
     for required, verdict in (
-        ("I001", "VERIFIED_IN_SCOPE"),
+        ("I001", "UNKNOWN"),
         ("B006", "UNKNOWN"),
         ("E501", "VIOLATED"),
+        ("F401", "UNKNOWN"),
     ):
         params = {"tool": "ruff", "config_path": "ruff.toml", "required_rules": [required]}
         findings = _run(tmp_path, make_rule, write_files, {"ruff.toml": base}, params)
-        # E501 は select に無いが明示的に ignore されている
         assert findings[0].verdict == verdict, required
-    # 継承があると select 省略時の既定は仮定しない
-    params = {"tool": "ruff", "config_path": "ruff.toml", "required_rules": ["F401"]}
-    findings = _run(tmp_path, make_rule, write_files, {"ruff.toml": base}, params)
-    assert findings[0].verdict == "UNKNOWN"
+
+
+def test_ruff_redirected_names_match_both_ways(
+    tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
+) -> None:
+    f = _ruff(tmp_path, make_rule, write_files, '[tool.ruff.lint]\nselect = ["TCH"]\n', ["TC001"])
+    assert f.verdict == "VERIFIED_IN_SCOPE"
+    f = _ruff(tmp_path, make_rule, write_files, '[tool.ruff.lint]\nselect = ["TC"]\n', ["TCH001"])
+    assert f.verdict == "VERIFIED_IN_SCOPE"
+    f = _ruff(
+        tmp_path,
+        make_rule,
+        write_files,
+        '[tool.ruff.lint]\nselect = ["TCH"]\nignore = ["TC001"]\n',
+        ["TCH001"],
+    )
+    assert f.verdict == "VIOLATED"
+
+
+def test_no_required_rules_emits_no_config_finding(
+    tmp_path: Path, make_rule: MakeRule, write_files: WriteFiles
+) -> None:
+    params = {**RUFF_PARAMS, "required_rules": []}
+    findings = _run(
+        tmp_path,
+        make_rule,
+        write_files,
+        {"pyproject.toml": RUFF_OK, ".github/workflows/ci.yml": CI_OK},
+        params,
+    )
+    assert [f.requirement_id for f in findings] == ["LINT-001:.github/workflows/*.yml"]
+    # 設定ファイルが無くても、必須規則が無ければ設定の Finding は出ない
+    findings = _run(
+        tmp_path / "x",
+        make_rule,
+        write_files,
+        {".github/workflows/ci.yml": CI_OK},
+        params,
+    )
+    assert [f.verdict for f in findings] == ["VERIFIED_IN_SCOPE"]
 
 
 def test_eslint_extends_makes_unlisted_rules_unknown(
@@ -313,7 +350,7 @@ def test_two_ci_timeouts_stop_after_first(
         {"pyproject.toml": RUFF_OK, ".github/workflows/ci.yml": ci},
         params,
     )
-    assert findings[1].verdict == "UNKNOWN"
+    assert findings[0].verdict == "UNKNOWN"
 
 
 def test_catastrophic_ci_pattern_times_out_to_unknown(
@@ -328,5 +365,5 @@ def test_catastrophic_ci_pattern_times_out_to_unknown(
         {"pyproject.toml": RUFF_OK, ".github/workflows/ci.yml": ci},
         params,
     )
-    assert findings[1].verdict == "UNKNOWN"
-    assert "タイムアウト" in findings[1].message
+    assert findings[0].verdict == "UNKNOWN"
+    assert "タイムアウト" in findings[0].message

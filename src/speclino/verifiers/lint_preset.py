@@ -24,8 +24,12 @@ YAML のどこかの ``run:`` ステップが ``ci_command_pattern``（``search`
 付いたステップ（またはジョブ）だけが一致する場合は実行条件を静的に判定できないので UNKNOWN。
 YAML が解析できないファイルがあり、他に一致が無い場合、照合がタイムアウトした場合も UNKNOWN。
 
-継承: ruff の ``extend``、ESLint の ``extends`` がある設定では、必須の規則が設定内で明示的に
-有効でなければ UNKNOWN（継承元は解析しない）。明示的に無効（ignore / off）なら VIOLATED。
+``required_rules`` が空なら設定ファイルの Finding は出さない（CI の Finding だけ）。
+
+継承: ruff の ``extend`` がある設定では、必須の規則が設定内で明示的に無効（ignore）なら
+VIOLATED、それ以外は UNKNOWN（親の ignore の引き継ぎを解析しない）。ESLint の ``extends`` では、
+設定内で明示的に有効なら有効、明示的に off なら VIOLATED、記載が無ければ UNKNOWN。
+ruff の旧名（``TCH`` -> ``TC``）は新名にそろえて照合する。
 ``ruff`` の ``select`` 省略時の既定は、継承が無い場合だけ仮定する。
 
 設定ファイル・CI ファイルが無い場合は ``rule.on_missing_input`` に従う（``violation`` は VIOLATED、
@@ -90,6 +94,18 @@ def _ruff_lint_table(doc: dict[str, Any], config_path: str) -> dict[str, Any]:
     return merged
 
 
+# ruff のリンター接頭辞の改名（旧 -> 新）。ruff のドキュメントで確認できたものだけを置く。
+# 設定と必須規則のどちらが旧名でも一致するよう、照合前に新名へそろえる。
+_RUFF_REDIRECTS = {"TCH": "TC"}
+
+
+def _ruff_canonical(code: str) -> str:
+    for old, new in _RUFF_REDIRECTS.items():
+        if code.startswith(old):
+            return new + code[len(old) :]
+    return code
+
+
 def _ruff_matches(entry: str, code: str) -> bool:
     """ruff の選択子 ``entry`` が規則コード ``code`` を含むか。
 
@@ -97,6 +113,7 @@ def _ruff_matches(entry: str, code: str) -> bool:
     ``FBT001`` を含まない。別のリンターの接頭辞だから）。例外として ``PL`` は ``PLC`` ``PLE``
     ``PLR`` ``PLW`` を含む（Pylint の子リンター）。
     """
+    entry, code = _ruff_canonical(entry), _ruff_canonical(code)
     if entry == "ALL" or entry == code:
         return True
     if not code.startswith(entry) or len(code) == len(entry):
@@ -131,13 +148,11 @@ def _ruff_check(text: str, config_path: str, required: list[str]) -> tuple[list[
     for code in required:
         selected = specificity(select, code)
         ignored = specificity(ignore, code)
-        if selected >= 0 and ignored < selected:
-            continue
-        if ignored >= 0:
-            missing.append(code)  # 明示的に無効
-        elif inherits:
-            undetermined.append(code)  # 継承元で有効かもしれない
-        else:
+        disabled = ignored >= 0 and ignored >= selected
+        if inherits:
+            # 親の ignore の引き継ぎを解析しないため、明示的な無効以外は確定できない
+            (missing if disabled else undetermined).append(code)
+        elif disabled or selected < 0:
             missing.append(code)
     return missing, undetermined
 
@@ -224,9 +239,10 @@ class LintPresetVerifier:
             return [invalid_params_finding(rule, e)]
         ci_pattern = compile_param(params.ci_command_pattern) if params.ci_command_pattern else None
         findings: list[Finding] = []
-        config = self._check_config(rule, snapshot, params)
-        if config is not None:
-            findings.append(config)
+        if params.required_rules:  # 必須規則が無ければ設定ファイルに検査することが無い
+            config = self._check_config(rule, snapshot, params)
+            if config is not None:
+                findings.append(config)
         if params.ci_glob is not None and ci_pattern is not None:
             ci = self._check_ci(rule, snapshot, params.ci_glob, ci_pattern)
             if ci is not None:

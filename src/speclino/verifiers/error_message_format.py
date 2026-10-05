@@ -21,7 +21,7 @@ params:
 - 埋め込み式の無い f 文字列: 文字列リテラルと同じ。
 - 埋め込み式のある f 文字列: 定数部分だけで検査する。``pattern`` は判定不能。文末が埋め込み式なら
   文末は判定不能。``ja`` は定数部分に日本語があれば確定、無ければ判定不能（埋め込み式が日本語かも
-  しれない）。``en`` は定数部分に ASCII 以外があれば違反。
+  しれない）。``en`` は定数部分に ASCII 以外があれば違反、ASCII のみなら判定不能。
 - それ以外（変数・呼び出し・連結）: その呼び出しは判定不能。
 
 確定した違反があれば VIOLATED を優先し、無ければ判定不能が 1 つでもあれば UNKNOWN。
@@ -229,5 +229,8 @@ def _check_joined(
     if params.language == "ja" and not _JAPANESE_RE.search(text):
         # 定数部分に日本語があれば確定。無ければ埋め込み式が日本語かもしれず判定できない
         unknowns.append(f"{label}: 定数部分に日本語が無く、埋め込み式の内容を判定できません")
-    if params.language == "en" and not text.isascii():
-        bad.append(f"{label}: メッセージの定数部分に ASCII 以外の文字が含まれています")
+    if params.language == "en":
+        if not text.isascii():
+            bad.append(f"{label}: メッセージの定数部分に ASCII 以外の文字が含まれています")
+        else:
+            unknowns.append(f"{label}: 埋め込み式の内容が ASCII か判定できません")

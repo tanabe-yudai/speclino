@@ -6,8 +6,9 @@
 
 from __future__ import annotations
 
-from speclino.domain.finding import Category, Finding, Verdict
+from speclino.domain.finding import Finding
 from speclino.domain.policy import PolicyExceptions, PolicyPackage, PolicyRule
+from speclino.verifiers._findings import missing_input_outcome
 from speclino.verifiers.base import Snapshot, Verifier
 
 
@@ -16,10 +17,10 @@ def _has_any_match(paths: list[str], snapshot: Snapshot) -> bool:
 
 
 def _missing_input_finding(rule: PolicyRule, snapshot: Snapshot) -> Finding | None:
-    if rule.on_missing_input == "skipped":
+    outcome = missing_input_outcome(rule)
+    if outcome is None:
         return None
-    verdict: Verdict = "VIOLATED" if rule.on_missing_input == "violation" else "UNKNOWN"
-    category: Category = "missing_effect" if verdict == "VIOLATED" else "unsupported_analysis"
+    verdict, category = outcome
     patterns = ", ".join(rule.applies_to.paths) or "(未指定)"
     return Finding(
         id=f"policy:{rule.id}:missing_input",
