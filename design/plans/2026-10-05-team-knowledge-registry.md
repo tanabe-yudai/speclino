@@ -90,7 +90,13 @@ import pytest
 from pydantic import ValidationError
 
 from speclino.domain.knowledge import (
-    ArtifactScope, Bundle, BundleMember, InstructionsContent, KnowledgeLock, SkillContent, SpecContent,
+    ArtifactScope,
+    Bundle,
+    BundleMember,
+    InstructionsContent,
+    KnowledgeLock,
+    SkillContent,
+    SpecContent,
 )
 
 
@@ -109,28 +115,56 @@ def test_spec_scope_must_name_projects() -> None:
 
 
 def test_skill_file_paths_are_relative_and_inside() -> None:
-    ok = SkillContent(kind="skill", skill_md="---\nname: a\ndescription: b\n---\n", files={"ref/x.md": "y"},
-                      scope=ArtifactScope(workspace=True))
+    ok = SkillContent(
+        kind="skill",
+        skill_md="---\nname: a\ndescription: b\n---\n",
+        files={"ref/x.md": "y"},
+        scope=ArtifactScope(workspace=True),
+    )
     assert "ref/x.md" in ok.files
     for bad in ["../x", "/etc/passwd", "a/../../b", "a\\b", ""]:
         with pytest.raises(ValidationError):
-            SkillContent(kind="skill", skill_md="---\nname: a\ndescription: b\n---\n", files={bad: "y"},
-                         scope=ArtifactScope(workspace=True))
+            SkillContent(
+                kind="skill",
+                skill_md="---\nname: a\ndescription: b\n---\n",
+                files={bad: "y"},
+                scope=ArtifactScope(workspace=True),
+            )
 
 
 def test_managed_marker_is_rejected_in_bodies() -> None:
     with pytest.raises(ValidationError):
-        InstructionsContent(kind="instructions", target="agents_md", body="x <!-- speclino:end --> y",
-                            scope=ArtifactScope(workspace=True))
+        InstructionsContent(
+            kind="instructions",
+            target="agents_md",
+            body="x <!-- speclino:end --> y",
+            scope=ArtifactScope(workspace=True),
+        )
 
 
 def test_bundle_and_lock_roundtrip() -> None:
-    m = BundleMember(artifact_id="a1", kind="skill", name="deploy", revision=2, content_hash="sha256:" + "0" * 64)
-    b = Bundle(workspace="w", generation=3, policy_revision=5, policy_hash=None, members=[m],
-               scope_hash="sha256:" + "1" * 64, signature="sig")
-    lock = KnowledgeLock(workspace="w", github_repo_id=1, bundle_generation=3, members=[m],
-                         files={"AGENTS.md": "sha256:" + "2" * 64}, issued_at=b.created_at,
-                         expires_at=b.created_at, signature="sig")
+    m = BundleMember(
+        artifact_id="a1", kind="skill", name="deploy", revision=2, content_hash="sha256:" + "0" * 64
+    )
+    b = Bundle(
+        workspace="w",
+        generation=3,
+        policy_revision=5,
+        policy_hash=None,
+        members=[m],
+        scope_hash="sha256:" + "1" * 64,
+        signature="sig",
+    )
+    lock = KnowledgeLock(
+        workspace="w",
+        github_repo_id=1,
+        bundle_generation=3,
+        members=[m],
+        files={"AGENTS.md": "sha256:" + "2" * 64},
+        issued_at=b.created_at,
+        expires_at=b.created_at,
+        signature="sig",
+    )
     assert KnowledgeLock.model_validate_json(lock.model_dump_json()) == lock
 ```
 
@@ -143,9 +177,16 @@ from speclino.domain.uml import Automaton, AutomatonTransition, CallLabel, Trace
 
 
 def _auto() -> Automaton:
-    return Automaton(states=["s0", "s1"], initial="s0", accepting=["s1"],
-                     transitions=[AutomatonTransition(id="m1", source="s0", target="s1",
-                                                      label=CallLabel(operation="Inventory.reserve"))])
+    return Automaton(
+        states=["s0", "s1"],
+        initial="s0",
+        accepting=["s1"],
+        transitions=[
+            AutomatonTransition(
+                id="m1", source="s0", target="s1", label=CallLabel(operation="Inventory.reserve")
+            )
+        ],
+    )
 
 
 def test_automaton_rejects_unknown_states() -> None:
@@ -155,8 +196,16 @@ def test_automaton_rejects_unknown_states() -> None:
 
 def test_closed_only_for_activity() -> None:
     with pytest.raises(ValidationError):
-        TraceObligation(id="seq1#placeOrder", diagram_kind="sequence", entry_operation="Order.place",
-                        mode="contains_subsequence", closed=True, automaton=_auto(), level="mandatory", spans=[])
+        TraceObligation(
+            id="seq1#placeOrder",
+            diagram_kind="sequence",
+            entry_operation="Order.place",
+            mode="contains_subsequence",
+            closed=True,
+            automaton=_auto(),
+            level="mandatory",
+            spans=[],
+        )
 ```
 
 ```python
@@ -166,8 +215,13 @@ from speclino.domain.finding import Finding
 
 
 def test_key_is_stable_string() -> None:
-    k = AssessmentKey(policy_revision=3, rule_id="ERRMSG-002", unit_hash="sha256:" + "a" * 64,
-                      model="m", prompt_version="1")
+    k = AssessmentKey(
+        policy_revision=3,
+        rule_id="ERRMSG-002",
+        unit_hash="sha256:" + "a" * 64,
+        model="m",
+        prompt_version="1",
+    )
     assert k.as_str() == AssessmentKey.model_validate(k.model_dump()).as_str()
 
 
@@ -234,7 +288,9 @@ class ArtifactScope(IRModel):
 class SkillContent(IRModel):
     kind: Literal["skill"]
     skill_md: str = Field(min_length=1)
-    files: dict[str, str] = Field(default_factory=dict, description="相対パス → 本文（テキストのみ）")
+    files: dict[str, str] = Field(
+        default_factory=dict, description="相対パス → 本文（テキストのみ）"
+    )
     scope: ArtifactScope
 
     @field_validator("files")
@@ -243,8 +299,14 @@ class SkillContent(IRModel):
         total = 0
         for path, body in v.items():
             norm = posixpath.normpath(path) if path else ""
-            if (not path or "\\" in path or path.startswith("/") or norm.startswith("..")
-                    or norm != path or path == "SKILL.md"):
+            if (
+                not path
+                or "\\" in path
+                or path.startswith("/")
+                or norm.startswith("..")
+                or norm != path
+                or path == "SKILL.md"
+            ):
                 raise ValueError(f"付属ファイルのパスが不正: {path!r}")
             size = len(body.encode())
             if size > SKILL_FILE_MAX_BYTES:
@@ -276,8 +338,12 @@ class InstructionsContent(IRModel):
 class SpecContent(IRModel):
     kind: Literal["spec"]
     markdown: str = Field(min_length=1)
-    domain: DomainSpec | None = Field(default=None, description="入口の仮定・不透明 ID・観測の境界など（旧 domain.yaml）")
-    legacy_ir: list[SpecIR] = Field(default_factory=list, description="旧形式の入口（承認済み JSON をそのまま）")
+    domain: DomainSpec | None = Field(
+        default=None, description="入口の仮定・不透明 ID・観測の境界など（旧 domain.yaml）"
+    )
+    legacy_ir: list[SpecIR] = Field(
+        default_factory=list, description="旧形式の入口（承認済み JSON をそのまま）"
+    )
     scope: ArtifactScope
     compiled: CompiledSpec | None = Field(default=None, description="承認時に固定した変換結果")
 
@@ -288,7 +354,9 @@ class SpecContent(IRModel):
         return self
 
 
-ArtifactContent = Annotated[SkillContent | InstructionsContent | SpecContent, Field(discriminator="kind")]
+ArtifactContent = Annotated[
+    SkillContent | InstructionsContent | SpecContent, Field(discriminator="kind")
+]
 
 
 class ArtifactRevision(IRModel):
@@ -325,7 +393,9 @@ class Bundle(IRModel):
     policy_hash: str | None = None
     members: list[BundleMember] = Field(default_factory=list)
     scope_hash: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
-    signature: str = Field(min_length=1, description="サーバ鍵による HMAC。対象は signature 以外の正規 JSON")
+    signature: str = Field(
+        min_length=1, description="サーバ鍵による HMAC。対象は signature 以外の正規 JSON"
+    )
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -363,9 +433,22 @@ class Suggestion(IRModel):
 
 
 __all__ = [
-    "MANAGED_BEGIN", "MANAGED_END", "ArtifactContent", "ResolvedKnowledge", "Suggestion", "ArtifactKind", "ArtifactRevision", "ArtifactScope",
-    "ArtifactStatus", "Bundle", "BundleMember", "InstructionsContent", "InstructionsTarget", "KnowledgeLock",
-    "SkillContent", "SpecContent",
+    "MANAGED_BEGIN",
+    "MANAGED_END",
+    "ArtifactContent",
+    "ResolvedKnowledge",
+    "Suggestion",
+    "ArtifactKind",
+    "ArtifactRevision",
+    "ArtifactScope",
+    "ArtifactStatus",
+    "Bundle",
+    "BundleMember",
+    "InstructionsContent",
+    "InstructionsTarget",
+    "KnowledgeLock",
+    "SkillContent",
+    "SpecContent",
 ]
 ```
 
@@ -451,7 +534,11 @@ class Automaton(IRModel):
     @model_validator(mode="after")
     def _closed_states(self) -> Automaton:
         known = set(self.states)
-        refs = {self.initial, *self.accepting} | {t.source for t in self.transitions} | {t.target for t in self.transitions}
+        refs = (
+            {self.initial, *self.accepting}
+            | {t.source for t in self.transitions}
+            | {t.target for t in self.transitions}
+        )
         if not refs <= known:
             raise ValueError(f"未宣言の状態: {sorted(refs - known)}")
         return self
@@ -506,7 +593,9 @@ class RequirementRow(IRModel):
     id: str = Field(min_length=1)
     level: RuleLevel
     text: str = Field(min_length=1)
-    formalized_by: list[str] = Field(default_factory=list, description="`図ID#要素ID` か `ir:要求ID`")
+    formalized_by: list[str] = Field(
+        default_factory=list, description="`図ID#要素ID` か `ir:要求ID`"
+    )
 
 
 class CompiledSpec(IRModel):
@@ -534,9 +623,25 @@ class ParseResult(IRModel):
 
 
 __all__ = [
-    "AttrType", "Automaton", "AutomatonTransition", "CallLabel", "ClassAttribute", "ClassDef", "ClassOperation",
-    "CompiledSpec", "DiagramKind", "EpsilonLabel", "ParseResult", "RequirementRow", "SourceSpan", "SpecDiagnostic",
-    "StateMachine", "StateTransition", "StructureObligation", "TraceObligation", "TransitionLabel",
+    "AttrType",
+    "Automaton",
+    "AutomatonTransition",
+    "CallLabel",
+    "ClassAttribute",
+    "ClassDef",
+    "ClassOperation",
+    "CompiledSpec",
+    "DiagramKind",
+    "EpsilonLabel",
+    "ParseResult",
+    "RequirementRow",
+    "SourceSpan",
+    "SpecDiagnostic",
+    "StateMachine",
+    "StateTransition",
+    "StructureObligation",
+    "TraceObligation",
+    "TransitionLabel",
 ]
 ```
 
@@ -585,10 +690,14 @@ class AssessmentRecord(IRModel):
 class AssessmentUnit(IRModel):
     """LLM 支援で評価する単位（関数・文字列リテラル・エンドポイント）。"""
 
-    symbol: str = Field(min_length=1, description="例 src/app/api.py::create_order または ...::L42:'msg'")
+    symbol: str = Field(
+        min_length=1, description="例 src/app/api.py::create_order または ...::L42:'msg'"
+    )
     kind: Literal["function", "string_literal", "endpoint"]
     text: str = Field(min_length=1, description="正規化前の本文（根拠の引用に使う）")
-    unit_hash: str = Field(pattern=r"^sha256:[0-9a-f]{64}$", description="空白とコメントを除いた本文の hash")
+    unit_hash: str = Field(
+        pattern=r"^sha256:[0-9a-f]{64}$", description="空白とコメントを除いた本文の hash"
+    )
 
 
 class Attestation(IRModel):
@@ -600,7 +709,15 @@ class Attestation(IRModel):
     created_at: datetime
 
 
-__all__ = ["AssessmentKey", "AssessmentOutcome", "AssessmentUnit", "AssessmentRecord", "Attestation", "Disposition", "ItemVerdict"]
+__all__ = [
+    "AssessmentKey",
+    "AssessmentOutcome",
+    "AssessmentUnit",
+    "AssessmentRecord",
+    "Attestation",
+    "Disposition",
+    "ItemVerdict",
+]
 ```
 
 `domain/finding.py` の `Finding` に次を足し、`Category` の Literal に `"missing_finding"` を足す:
@@ -614,11 +731,13 @@ __all__ = ["AssessmentKey", "AssessmentOutcome", "AssessmentUnit", "AssessmentRe
 `domain/run.py` の `RunManifest` に次を足す:
 
 ```python
-    bundle_generation: int | None = Field(default=None, description="run の開始時に固定した bundle")
-    bundle_hash: str | None = None
-    uml_parser_version: str | None = None
-    expected_requirement_ids: list[str] = Field(default_factory=list, description="出るべき要求 ID（欠けたら UNKNOWN）")
-    llm_assessment_keys: list[str] = Field(default_factory=list)
+bundle_generation: int | None = Field(default=None, description="run の開始時に固定した bundle")
+bundle_hash: str | None = None
+uml_parser_version: str | None = None
+expected_requirement_ids: list[str] = Field(
+    default_factory=list, description="出るべき要求 ID（欠けたら UNKNOWN）"
+)
+llm_assessment_keys: list[str] = Field(default_factory=list)
 ```
 
 - [ ] **Step 4: 通ることを確かめる**
