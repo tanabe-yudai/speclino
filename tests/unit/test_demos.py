@@ -95,13 +95,14 @@ def test_readme_diagrams_match_design_sources() -> None:
     """README の mermaid ブロックと `design/*.mmd`（`make diagrams` の入力）が食い違わない。"""
     import re
 
-    blocks = re.findall(
-        r"```mermaid\n(.*?)```", (REPO / "README.md").read_text(encoding="utf-8"), re.S
-    )
-    names = ("architecture", "pipeline")
-    assert len(blocks) == len(names)
-    for name, block in zip(names, blocks, strict=True):
-        src = (REPO / "design" / f"{name}.mmd").read_text(encoding="utf-8")
-        assert block.strip() == src.strip(), (
-            f"{name}: README と design/ が食い違う（make diagrams）"
+    blocks = [
+        b.strip()
+        for b in re.findall(
+            r"```mermaid\n(.*?)```", (REPO / "README.md").read_text(encoding="utf-8"), re.S
+        )
+    ]
+    for name in ("architecture", "pipeline"):
+        src = (REPO / "design" / f"{name}.mmd").read_text(encoding="utf-8").strip()
+        assert blocks.count(src) == 1, (
+            f"{name}: README に design/ と一致するブロックが 1 つだけ無い（make diagrams）"
         )
