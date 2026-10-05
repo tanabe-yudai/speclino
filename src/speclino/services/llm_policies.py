@@ -16,6 +16,10 @@
 
 LLM の失敗（例外・時間切れ・形式違反）と費用枠の超過は、その単位の UNKNOWN にする
 （VERIFIED にも VIOLATED にもしない）。失敗した評価は記録しない（次の run で評価し直す）。
+
+秘密情報・個人情報らしい値を含む単位は LLM に送らず UNKNOWN にする（`services/secret_scan.py`、
+#114）。記録を使うときも同じ（記録の有無で送るかどうかが変わらないように、先に確かめる）。
+モデルが返した引用は保存・表示の前に同じ検出器で伏せる。
 """
 
 from __future__ import annotations
@@ -43,6 +47,7 @@ from speclino.domain.policy import PolicyRule
 from speclino.domain.policy_params import LlmChecklistItem, LlmChecklistParams
 from speclino.ports.text_llm import TextLlm
 from speclino.services.cost_guard import CostGuard
+from speclino.services.secret_scan import SECRET_REASON, mask_secrets, secret_kinds
 
 PROMPT_VERSION = "llm-checklist-v1"
 TRIALS = 3
@@ -277,6 +282,8 @@ async def _evaluate(
     for item in params.items:
         votes = [t[item.id][0] for t in trials]
         quote = next((t[item.id][1] for t in trials if t[item.id][0] and t[item.id][1]), None)
+        # モデルの引用に秘密情報らしい値があれば伏せてから記録する（#114）
+        quote = mask_secrets(quote) if quote is not None else None
         items.append(
             ItemVerdict(item_id=item.id, outcome=outcome_of(votes), votes=votes, quote=quote)
         )
@@ -325,7 +332,8 @@ def _item_finding(
         severity=severity,
         message=message,
         expected=item.question,
-        actual=verdict.quote,
+        # 記録が伏せる前のもの（#114 より前）でも、表示の前に伏せる
+        actual=mask_secrets(verdict.quote) if verdict.quote is not None else None,
         evidence_refs=[
             f"{FINGERPRINT_REF}{fp}",
             f"{CONTENT_HASH_REF}{unit.unit_hash}",
@@ -423,6 +431,12 @@ async def assess(
         )
     by_id = {i.id: i for i in params.items}
     for unit in ordered:
+        kinds = secret_kinds(unit.text, python=unit.kind != "string_literal")
+        if kinds:
+            findings.append(
+                _unit_unknown(rule, unit, f"{SECRET_REASON}（{'・'.join(kinds)}）", "secret")
+            )
+            continue
         if model_name is None:
             findings.append(_unit_unknown(rule, unit, "モデルが分からない"))
             continue

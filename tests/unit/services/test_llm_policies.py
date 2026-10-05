@@ -293,3 +293,32 @@ async def test_keys_are_json_and_include_the_rule_origin() -> None:
     assert key is not None and key.rule_id == "ERRMSG-NEXT@team:w#1"
     assert parse_key(project[0]) is not None and team != project
     assert key_str(key) == team[0]
+
+
+# ---------------------------------------------------------------------------
+# 秘密情報・個人情報を LLM に送らない（#114）
+# ---------------------------------------------------------------------------
+
+
+async def test_unit_with_secret_is_unknown_and_never_sent() -> None:
+    token = "gh" + "p_" + "A1b2C3d4E5" * 4
+    llm = FakeLlm([_answer(True)])
+    store = InMemoryAssessmentStore()
+    findings, keys = await assess(
+        _rule(), [_unit(f"token {token}")], llm=llm, store=store, policy_revision=1
+    )
+    (f,) = findings
+    assert f.verdict == "UNKNOWN" and "秘密情報らしい値を含むため LLM に送らない" in f.message
+    assert token not in f.message  # 値そのものは出さない
+    assert llm.calls == 0 and keys == []
+
+
+async def test_quote_from_model_is_masked_before_storing_and_display() -> None:
+    email = "taro.yamada@acme-corp.co.jp"
+    llm = FakeLlm([_answer(True, f"連絡先 {email}")])
+    store = InMemoryAssessmentStore()
+    findings, keys = await assess(_rule(), [_unit()], llm=llm, store=store, policy_revision=1)
+    (f,) = findings
+    assert f.actual is not None and email not in f.actual and "伏せた" in f.actual
+    record = await store.get(parse_key(keys[0]))
+    assert record is not None and all(email not in (i.quote or "") for i in record.items)

@@ -461,6 +461,23 @@ PR コメントの承認者は GitHub のユーザー ID で照合する（ロ�
 `KNOWLEDGE-BINDINGS-001` の確定は ID で照合できる PR コメントからだけ受け付ける。PR の作成者自身の確定は
 自己確定として gate.json・manifest・画面に残る。
 
+#### LLM に送るもの（データの扱い）
+
+- **送るのは、`tier: llm_assisted` のルールを定義したときだけ**（opt-in）。そのルールの `applies_to` /
+  `params.paths` に一致する Python ファイルから取り出した単位（関数・文字列リテラル・エンドポイント）の
+  正規形（`ast.unparse`。コメントは落ちる）と、ルールの題・本文・チェック項目。リポジトリ全体や差分、
+  PR の本文・コメントは送らない
+- 送り先は worker が呼ぶ Gemini（本番は Vertex AI。`GOOGLE_CLOUD_PROJECT` のプロジェクト、
+  `SPECLINO_LLM_POLICIES_MODEL`、未指定なら `SPECLINO_AGENT_MODEL`）。費用は `SPECLINO_DAILY_COST_LIMIT_USD`
+  の枠を共有する
+- **秘密情報・個人情報らしい値を含む単位は送らない**: 秘密鍵のヘッダー、AWS / GCP / GitHub / Slack /
+  `sk-` 形式のトークン、JWT、認証情報つきの URL、メールアドレス（`example.com` などの例示用ドメインを除く）、
+  文字列リテラルの中の 32 文字以上の高エントロピーな文字列。その単位は UNKNOWN（「秘密情報らしい値を含むため
+  LLM に送らない」）になり、必須の規約ならゲートを止める。モデルが返した引用も同じ検出器で伏せてから保存・表示する
+- 評価の結果（区分・票・伏せた引用）は `llm_assessments` にワークスペースごとに残し、同じ内容の単位は
+  呼び直さない
+- 全体で止めるには `SPECLINO_LLM_POLICIES_ENABLED=false`（LLM 支援のルールはすべて UNKNOWN になる）
+
 ## 可観測性
 
 上部の「可観測性」（`/w/<slug>/observability`）。表示はサーバの集計 1 つから作り、画面ごとに数え直さない。
