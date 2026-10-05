@@ -725,3 +725,83 @@ def test_rollback_continues_after_a_restore_failure(
     monkeypatch.undo()
     assert calls["restore"] >= 2  # 1 つ目の復元に失敗しても残りを続けた
     assert any("元に戻せなかった" in n for n in getattr(info.value, "__notes__", []))
+
+
+# ---------------------------------------------------------------------------
+# 規約の鮮度（#114）: 規約の有効化でも bundle の世代は進む
+# ---------------------------------------------------------------------------
+
+POLICY_A = "sha256:" + "a" * 64
+POLICY_B = "sha256:" + "b" * 64
+
+
+def _with_policy(bundle: Bundle, revision: int | None, policy_hash: str | None) -> Bundle:
+    unsigned = bundle.model_copy(update={"policy_revision": revision, "policy_hash": policy_hash})
+    return unsigned.model_copy(
+        update={"signature": bundle_signing.sign(kr.bundle_payload(unsigned))}
+    )
+
+
+def _synced_with_policy(tmp_path: Path, revision: int | None, policy_hash: str | None) -> str:
+    resolved = _resolved(BASE)
+    resolved = resolved.model_copy(
+        update={"bundle": _with_policy(resolved.bundle, revision, policy_hash)}
+    )
+    files = ks.render_files(resolved)
+    lock = ks.issue_lock(resolved, github_repo_id=42, files=files, now=NOW)
+    ks.write_bundle(tmp_path, files, lock)
+    return (tmp_path / ks.LOCK_PATH).read_text()
+
+
+def test_lock_records_policy_and_signs_it(tmp_path: Path) -> None:
+    lock_json = _synced_with_policy(tmp_path, 3, POLICY_A)
+    lock = KnowledgeLock.model_validate_json(lock_json)
+    assert (lock.policy_revision, lock.policy_hash) == (3, POLICY_A)
+    assert ks.verify_lock(lock)
+    # 規約を書き換えた lock は署名が合わない
+    forged = lock.model_copy(update={"policy_hash": POLICY_B})
+    assert not ks.verify_lock(forged)
+
+
+def test_lock_with_older_policy_is_review(tmp_path: Path) -> None:
+    lock_json = _synced_with_policy(tmp_path, 3, POLICY_A)
+    # メンバーは同じで、規約だけが有効化し直された（世代 2）
+    current = _with_policy(_bundle(BASE, generation=2), 4, POLICY_B)
+    f = _check(tmp_path, lock_json, current=current)
+    assert f.verdict == "REVIEW"
+    a = ks.assess_lock(
+        lock_json, current=current, current_members=current.members, github_repo_id=42, now=NOW
+    )
+    assert {"name": "team-policy", "kind": "policy", "lock_revision": 3, "current_revision": 4} in (
+        a.changed
+    )
+
+
+def test_lock_with_same_generation_but_other_policy_is_unknown(tmp_path: Path) -> None:
+    lock_json = _synced_with_policy(tmp_path, 3, POLICY_A)
+    current = _with_policy(_bundle(BASE, generation=1), 4, POLICY_B)
+    assert _check(tmp_path, lock_json, current=current).verdict == "UNKNOWN"
+
+
+def test_lock_with_same_policy_is_verified(tmp_path: Path) -> None:
+    lock_json = _synced_with_policy(tmp_path, 3, POLICY_A)
+    current = _with_policy(_bundle(BASE, generation=2), 3, POLICY_A)
+    assert _check(tmp_path, lock_json, current=current).verdict == "VERIFIED_IN_SCOPE"
+
+
+def test_old_lock_without_policy_fields_still_verifies_and_parses(tmp_path: Path) -> None:
+    """欄の無い古い lock: 読めて署名も合う。今の bundle に規約があれば古い扱い。"""
+    lock_json, bundle = _synced(tmp_path)
+    data = json.loads(lock_json)
+    data.pop("policy_revision")
+    data.pop("policy_hash")
+    old_json = json.dumps(data)
+    old = KnowledgeLock.model_validate_json(old_json)
+    assert old.policy_hash is None and ks.verify_lock(old)
+    # 規約が無いまま → 一致
+    assert _check(tmp_path, old_json, current=bundle).verdict == "VERIFIED_IN_SCOPE"
+    # 今は規約がある: 世代が古ければ REVIEW、同じ世代なら UNKNOWN
+    newer = _with_policy(_bundle(BASE, generation=2), 1, POLICY_A)
+    assert _check(tmp_path, old_json, current=newer).verdict == "REVIEW"
+    same = _with_policy(_bundle(BASE, generation=1), 1, POLICY_A)
+    assert _check(tmp_path, old_json, current=same).verdict == "UNKNOWN"

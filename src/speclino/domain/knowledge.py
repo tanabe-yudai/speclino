@@ -205,6 +205,10 @@ class KnowledgeLock(IRModel):
     workspace: str = Field(min_length=1)
     github_repo_id: int
     bundle_generation: int = Field(ge=1)
+    # bundle の規約（#114）。規約の有効化でも bundle の世代は進むので、鮮度の照合に使う。
+    # 欄の無い古い lock も読めるよう既定は None（署名の対象からも None の欄は外す）
+    policy_revision: int | None = None
+    policy_hash: str | None = None
     members: list[BundleMember]
     files: dict[str, str] = Field(description="書き出したファイルの相対パス → sha256")
     issued_at: datetime

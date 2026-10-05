@@ -103,9 +103,17 @@ def file_hash(text: str) -> str:
     return content_hash(text.replace("\r\n", "\n").replace("\r", "\n"))
 
 
+# 後から足した欄。None のときは署名の対象に含めない（欄の無い古い lock の署名を保つ）
+_OPTIONAL_LOCK_FIELDS = ("policy_revision", "policy_hash")
+
+
 def lock_payload(lock: KnowledgeLock) -> bytes:
-    """lock の署名の対象（`signature` 以外の正規 JSON）。"""
-    return kr.canonical_json(lock.model_dump(mode="json", exclude={"signature"}))
+    """lock の署名の対象（`signature` 以外の正規 JSON。後から足した欄は値があるときだけ）。"""
+    data = lock.model_dump(mode="json", exclude={"signature"})
+    for name in _OPTIONAL_LOCK_FIELDS:
+        if data.get(name) is None:
+            data.pop(name, None)
+    return kr.canonical_json(data)
 
 
 def verify_lock(lock: KnowledgeLock) -> bool:
@@ -240,6 +248,8 @@ def issue_lock(
         workspace=resolved.bundle.workspace,
         github_repo_id=github_repo_id,
         bundle_generation=resolved.bundle.generation,
+        policy_revision=resolved.bundle.policy_revision,
+        policy_hash=resolved.bundle.policy_hash,
         members=project_members(resolved),
         files={p: file_hash(body) for p, body in sorted(files.items())},
         issued_at=issued,
@@ -691,8 +701,8 @@ def assess_lock(
 
     - UNKNOWN: lock が無い・読めない・署名不一致・別のワークスペース/リポジトリ・期限切れ・lock の
       世代が今より新しい・ファイルの改変や欠落・同期したスキルに未登録のファイル・同じ世代なのに
-      このプロジェクトのメンバーと違う（他のプロジェクトの lock の持ち込み）
-    - REVIEW: lock の世代が古く、このプロジェクトのメンバーが違う
+      このプロジェクトのメンバーか規約と違う（他のプロジェクトの lock の持ち込み）
+    - REVIEW: lock の世代が古く、このプロジェクトのメンバーか規約（`policy_hash`）が違う
     - VERIFIED_IN_SCOPE: それ以外
 
     `current_members` は current をこのプロジェクトに当てたメンバー（`resolve_for_project`）。
@@ -749,10 +759,21 @@ def assess_lock(
                 lock=lock,
             )
     changed = changed_members(lock.members, current_members)
+    # 規約もこの bundle の一部（規約の有効化でも世代が進む）。lock に規約が無く今はある場合も変化
+    if lock.policy_hash != current.policy_hash:
+        changed.append(
+            {
+                "name": "team-policy",
+                "kind": "policy",
+                "lock_revision": lock.policy_revision,
+                "current_revision": current.policy_revision,
+            }
+        )
     if changed and lock.bundle_generation == current.generation:
         return LockAssessment(
             "UNKNOWN",
-            f"{LOCK_PATH} のメンバーがこのプロジェクトと合いません（他のプロジェクトの lock）",
+            f"{LOCK_PATH} のメンバーか規約がこのプロジェクトの bundle と合いません"
+            "（他のプロジェクトの lock か改変）",
             lock=lock,
             changed=changed,
         )
