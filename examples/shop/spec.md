@@ -96,8 +96,8 @@ flowchart TD
     check{PENDING か}
     notify[Mailer.notify]
     done((end))
-    start -->|[e1]| check
-    check -->|[e2] before.order.status == OrderStatus.PENDING| notify
-    check -->|[e3] before.order.status != OrderStatus.PENDING| done
-    notify -->|[e4]| done
+    start -->|"[e1]"| check
+    check -->|"[e2] before.order.status == OrderStatus.PENDING"| notify
+    check -->|"[e3] before.order.status != OrderStatus.PENDING"| done
+    notify -->|"[e4]"| done
 ```

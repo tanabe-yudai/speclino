@@ -248,6 +248,24 @@ def test_activity_diagram() -> None:
     assert a.transitions[1].guard == ref("before.order.paid")
 
 
+def test_activity_quoted_edge_labels_are_the_same_ir() -> None:
+    """`|"[ID] guard"|` は Mermaid が描ける形。引用符の有無で IR は変わらない（S72）。"""
+    quoted = ACTIVITY
+    for old, new in (
+        ("|[e1]|", '|"[e1]"|'),
+        ("|[e2] before.order.paid|", '|"[e2] before.order.paid"|'),
+        ("|[e3] not before.order.paid|", '|"[e3] not before.order.paid"|'),
+        ("|[e4]|", '|"[e4]"|'),
+    ):
+        assert old in quoted
+        quoted = quoted.replace(old, new)
+    plain, q = _ok(CLASSES + ACTIVITY), _ok(CLASSES + quoted)
+    assert q.ir_hash == plain.ir_hash
+    assert "E_UNEXPECTED_TOKEN" in _codes(CLASSES + quoted.replace('|"[e4]"|', '|"[e4]|'))
+    # 開きの無い引用符はガードの誤り（文字列はガードに書けない）
+    assert "E_GUARD_SYNTAX" in _codes(CLASSES + quoted.replace('|"[e4]"|', '|[e4]"|'))
+
+
 def test_activity_closed_defaults_false() -> None:
     c = _ok(CLASSES + ACTIVITY.replace("%%@ closed: true\n", ""))
     assert c.traces[0].closed is False
