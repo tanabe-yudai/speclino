@@ -102,6 +102,10 @@ def lock_payload(lock: KnowledgeLock) -> bytes:
     return kr.canonical_json(lock.model_dump(mode="json", exclude={"signature"}))
 
 
+def verify_lock(lock: KnowledgeLock) -> bool:
+    return bundle_signing.verify(lock_payload(lock), lock.signature)
+
+
 def split_managed(text: str) -> tuple[str, str, str] | None:
     """(区画の前, 区画の中身, 区画の後)。区画が無ければ None、壊れていれば `ManagedBlockError`。
 
@@ -687,5 +691,6 @@ __all__ = [
     "render_files",
     "split_managed",
     "validate_rel_path",
+    "verify_lock",
     "write_bundle",
 ]
