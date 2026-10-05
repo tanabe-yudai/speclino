@@ -46,6 +46,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from speclino.domain.finding import Verdict
+from speclino.domain.knowledge import ArtifactKind, ArtifactStatus
 from speclino.domain.policy import PolicyRevisionStatus
 from speclino.domain.run import ExecState, GateStatus
 from speclino.domain.workspace import WorkspaceRole
@@ -519,6 +520,148 @@ class AgentSupplementRecord(Base):
         UUID(as_uuid=True), ForeignKey("mcp_tokens.id"), nullable=True
     )
     a2a_task_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class ArtifactRecord(Base):
+    """`artifacts`: ワークスペースの知識（skill / instructions / spec）の 1 つ（S62）。
+
+    中身は改訂（`artifact_revisions`）が持つ。名前は (workspace, kind) の中で一意。
+    """
+
+    __tablename__ = "artifacts"
+    __table_args__ = (
+        UniqueConstraint("workspace", "kind", "name", name="uq_artifacts_workspace_kind_name"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace: Mapped[str] = mapped_column(
+        String, ForeignKey("teams.team"), nullable=False, index=True
+    )
+    kind: Mapped[ArtifactKind] = mapped_column(
+        SAEnum(*get_args(ArtifactKind), name="artifact_kind", native_enum=True), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class ArtifactRevisionRecord(Base):
+    """`artifact_revisions`: 知識の 1 改訂（S62）。draft は可変、active / superseded は不変。
+
+    `content` は kind ごとの pydantic モデル（`domain/knowledge.py`）を JSONB に入れる
+    （`policy_revisions.package` と同じ理由）。artifact ごとに active・draft はそれぞれ最大 1 つ。
+    """
+
+    __tablename__ = "artifact_revisions"
+    __table_args__ = (
+        UniqueConstraint("artifact_id", "revision", name="uq_artifact_revisions_artifact_revision"),
+        Index(
+            "uq_artifact_revisions_artifact_active",
+            "artifact_id",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+        ),
+        Index(
+            "uq_artifact_revisions_artifact_draft",
+            "artifact_id",
+            unique=True,
+            postgresql_where=text("status = 'draft'"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    artifact_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("artifacts.id"), nullable=False, index=True
+    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[ArtifactStatus] = mapped_column(
+        SAEnum(*get_args(ArtifactStatus), name="artifact_status", native_enum=True),
+        nullable=False,
+    )
+    content: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String, nullable=False)
+    author: Mapped[str] = mapped_column(String, nullable=False)
+    approver: Mapped[str | None] = mapped_column(String, nullable=True)
+    self_approved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    note: Mapped[str] = mapped_column(String, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class BundleRecord(Base):
+    """`bundles`: ある時点の active な改訂の集合（S62）。ワークスペースごとの連番で不変。
+
+    `members` は `BundleMember` の一覧（JSONB）。`created_at` は署名の対象なので、DB の既定値
+    ではなく作った側の値をそのまま入れる。
+    """
+
+    __tablename__ = "bundles"
+    __table_args__ = (
+        UniqueConstraint("workspace", "generation", name="uq_bundles_workspace_generation"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace: Mapped[str] = mapped_column(String, ForeignKey("teams.team"), nullable=False)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    policy_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    policy_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+    members: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    scope_hash: Mapped[str] = mapped_column(String, nullable=False)
+    signature: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SyncTokenRecord(Base):
+    """`sync_tokens`: `speclino sync` 専用のトークン（S62 で表だけ、使うのは S68）。
+
+    読み取り専用で、1 つのワークスペースの 1 つのプロジェクト（リポジトリ）に限る。平文は
+    発行時に 1 回だけ返し、保存は SHA-256 だけ。失効は `revoked_at`（`mcp_tokens` と同じ作り）。
+    """
+
+    __tablename__ = "sync_tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    team: Mapped[str] = mapped_column(String, ForeignKey("teams.team"), nullable=False, index=True)
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    token_hash: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class KnowledgeFetchRecord(Base):
+    """`knowledge_fetches`: sync・MCP からの知識の取得の記録（S62 で表だけ、書くのは S68）。
+
+    `token_id` は `channel` が sync なら `sync_tokens`、mcp なら `mcp_tokens` の ID（どちらの表も
+    指しうるので外部キーにしない）。画面からの取得などトークンの無いものは NULL で `uid` を入れる。
+    """
+
+    __tablename__ = "knowledge_fetches"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace: Mapped[str] = mapped_column(
+        String, ForeignKey("teams.team"), nullable=False, index=True
+    )
+    channel: Mapped[str] = mapped_column(String, nullable=False)
+    token_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    uid: Mapped[str | None] = mapped_column(String, nullable=True)
+    bundle_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id"), nullable=True
+    )
+    artifact_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

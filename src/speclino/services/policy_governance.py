@@ -251,6 +251,11 @@ async def _approve(
         team=team, revision=revision, approver=approver
     )
     self_approved = approver == approved.author or approver in editors
+    # S62: 規約が変わったら同じトランザクションで知識の bundle を作り直す（run が固定する単位）。
+    # knowledge_registry はこのモジュールの DraftConflict を使うので、循環を避けて関数内で import
+    from speclino.services.knowledge_registry import build_bundle
+
+    await build_bundle(session, team)
     await AuditRepository(session).record(
         actor=approver,
         action="policy.approve",

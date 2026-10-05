@@ -19,6 +19,7 @@ from speclino.db.repositories.policy_revisions import PolicyRevisionRepository
 from speclino.domain.policy import PolicyPackage
 from speclino.domain.workspace import AuthUser
 from speclino.services import policy_governance as gov
+from speclino.services.knowledge_registry import BundleConflict
 from speclino.services.team_policies import load_policies
 from speclino.services.workspaces import WorkspaceNotFound, require_member
 
@@ -110,6 +111,9 @@ async def approve_draft(
         raise api_error(403, "not_an_approver", "承認できるのは owner / approver だけ") from e
     except gov.DraftConflict as e:
         raise api_error(409, "draft_changed", "下書きが変わった。読み直してから承認する") from e
+    except BundleConflict as e:
+        # 規約の有効化は知識の bundle を作り直す（S62）。作れなければ承認ごと取り消す
+        raise api_error(409, "bundle_conflict", str(e)) from e
     return active.model_dump(mode="json")
 
 

@@ -65,3 +65,7 @@ class Settings(BaseSettings):
     # 認証（S13）
     auth_kind: Literal["dev", "identity_platform"] = "dev"
     firebase_project_id: str | None = None
+
+    # 知識の bundle の署名鍵（S62、HMAC-SHA256）。本番は Secret Manager から環境変数へ。
+    # 未設定なら env=local は固定の開発鍵、env=prod は起動時にエラー（services/bundle_signing.py）
+    bundle_signing_key: str | None = None
