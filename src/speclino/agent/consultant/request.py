@@ -18,7 +18,8 @@ from speclino.domain.a2a import SkillRequest
 
 _FRONT_MATTER_RE = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
 _EXPLAIN = (
-    "スキルを指定してください（spec_review / requirement_consult / run_clarification）。"
+    "スキルを指定してください"
+    "（spec_review / requirement_consult / run_clarification / spec_suggest）。"
     "書き方は Agent Card の examples を見てください"
 )
 

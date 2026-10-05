@@ -159,6 +159,7 @@ async def test_card_is_public_and_rpc_requires_token(engine: AsyncEngine, tmp_pa
             "spec_review",
             "requirement_consult",
             "run_clarification",
+            "spec_suggest",
         }
         denied = await http.post("/a2a", json={}, headers={"Authorization": "Bearer slmcp_bad"})
         assert denied.status_code == 401

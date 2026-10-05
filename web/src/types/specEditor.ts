@@ -56,6 +56,8 @@ export interface SpecPaneProps extends ContentEditorProps<Extract<ArtifactConten
   preview: SpecPreview | null
   previewError: string | null
   previewPending: boolean
+  /** 下書きを保存中（AI の提案を求められない） */
+  saving: boolean
 }
 
 export interface ApprovalPanelProps {

@@ -34,6 +34,7 @@ from speclino.ports.code_host import CodeHost
 from speclino.ports.mcp_context import McpContextSource
 from speclino.ports.sandbox import Sandbox
 from speclino.ports.task_queue import TaskQueue
+from speclino.ports.text_llm import TextLlm
 from speclino.services import bundle_signing
 from speclino.services.cost_guard import CostGuard, CostLedger
 from speclino.services.knowledge_inputs import make_knowledge_resolver
@@ -61,6 +62,8 @@ class AppState:
     github_user_oauth: GitHubUserOAuth | None = None
     # A2A のスキルの処理（S59）。None なら state から本物を組み立てる。テストで差し替える
     a2a_handlers: dict[SkillId, SkillHandler] | None = None
+    # AI の書き換え提案（S67）の LLM。None なら初回に Gemini を作る。テストで台本に差し替える
+    spec_suggest_llm: TextLlm | None = None
 
 
 class _SessionLedger:

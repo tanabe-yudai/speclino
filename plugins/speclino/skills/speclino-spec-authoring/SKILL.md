@@ -94,6 +94,9 @@ run_id: 00000000-0000-0000-0000-000000000000
   比べて `stale`・`verdict`・`changed`（変わった知識）を返す（判定はゲートと同じ）。
   `spec_get` / `skill_get(repo_full_name, name)` は承認済みの本文を返す。sync 用トークンでも
   呼べるが、検証の開始（`verification_start`）はできない
+- **MCP**: `spec_suggest(markdown, repo_full_name?)` は仕様の本文の書き換えの提案（本文の位置と置換・
+  理由・当てた後の診断）を返す。IR は返さない（IR は SpecLino の parser が本文から作る）。提案は人に
+  見せて 1 件ずつ採否を決め、勝手に当てない。sync 用トークンでは呼べない
 
 ## 0. チーム規約を読む（仕様を書く前にも、実装する前にも）
 

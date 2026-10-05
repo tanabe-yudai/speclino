@@ -13,7 +13,7 @@ from speclino.domain.common import IRModel
 from speclino.domain.domain_spec import DomainSpec
 from speclino.domain.policy import PolicyRevision
 from speclino.domain.spec_ir import SpecIR
-from speclino.domain.uml import CompiledSpec
+from speclino.domain.uml import CompiledSpec, SpecDiagnostic
 
 ArtifactKind = Literal["skill", "instructions", "spec"]
 ArtifactStatus = Literal["draft", "active", "superseded"]
@@ -240,6 +240,28 @@ class Suggestion(IRModel):
     reason: str = Field(min_length=1)
 
 
+class SuggestionOutcome(IRModel):
+    """提案を写しの本文に当てて `compile_spec` を通し直した結果（S67）。IR は持たない。"""
+
+    errors_before: int = Field(ge=0, description="提案を当てる前の本文のエラー数")
+    errors_after: int = Field(ge=0, description="提案を当てた後の本文のエラー数")
+    compiles: bool = Field(description="当てた後の本文がエラーなしで変換できるか")
+    diagnostics_after: list[SpecDiagnostic] = Field(default_factory=list)
+
+
+class SuggestionResult(Suggestion):
+    """提案と、それを当てた後の検証の結果（S67、`services.spec_suggest.suggest` が返す）。"""
+
+    after: SuggestionOutcome
+
+
+class SpecSuggestions(IRModel):
+    """REST の `POST /specs/suggest` の応答（S67）。提案と、今の本文のエラー数。"""
+
+    errors_before: int = Field(ge=0)
+    suggestions: list[SuggestionResult] = Field(default_factory=list)
+
+
 __all__ = [
     "BODY_MAX_BYTES",
     "MANAGED_BEGIN",
@@ -247,6 +269,8 @@ __all__ = [
     "ArtifactContent",
     "ResolvedKnowledge",
     "Suggestion",
+    "SuggestionOutcome",
+    "SuggestionResult",
     "ArtifactKind",
     "ArtifactRevision",
     "ArtifactScope",
@@ -258,4 +282,5 @@ __all__ = [
     "KnowledgeLock",
     "SkillContent",
     "SpecContent",
+    "SpecSuggestions",
 ]

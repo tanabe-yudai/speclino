@@ -15,6 +15,9 @@
   1 つのプロジェクトに限る（`verification_start` は拒否、他のプロジェクトは「無い」と同じ応答）。
   チームの知識を読む `sync_status` / `spec_get` / `skill_get` は承認済みの今の bundle から答え、
   取得を `knowledge_fetches` に残す
+- S67: `spec_suggest`（AI の書き換え提案）。ワークスペースの MCP トークンだけが呼べる
+  （sync トークンは読み取り専用なので拒否。LLM の費用を使うため）。
+  返すのは本文の置換の提案と検証の要約だけで、IR は返さない
 - `instructions`（2KB 以内）と `speclino_guide` prompt（Claude Code 以外のクライアント向けに
   SKILL.md 本文を返す）は、どちらも `plugins/speclino/skills/speclino-spec-authoring/SKILL.md`
   （S57、Claude Code プラグインが配る Skill と同じファイル）から読む。二重に書かず正本を 1 つに保つ
@@ -40,6 +43,7 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from speclino.api.deps import AppState
+from speclino.api.routes.spec_suggest import run_suggest
 from speclino.db.models import Project
 from speclino.db.repositories import ProjectRepository
 from speclino.db.repositories.review_runs import ReviewRunRepository
@@ -54,6 +58,7 @@ from speclino.domain.run import GitRef
 from speclino.services import knowledge_registry, knowledge_sync, mcp_tokens, sync_tokens
 from speclino.services.mcp_context import ContextUnavailable, InProcessContextSource
 from speclino.services.run_view import run_view
+from speclino.services.spec_suggest import SuggestRefused
 
 StateGetter = Callable[[], AppState]
 MCP_PATH = "/mcp"
@@ -216,6 +221,31 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
             "skill_md": rev.content.skill_md,
             "files": dict(rev.content.files),
         }
+
+    @mcp.tool()
+    async def spec_suggest(
+        markdown: str, ctx: Context, repo_full_name: str | None = None
+    ) -> dict[str, Any]:
+        """仕様の本文（Markdown と Mermaid の図）の書き換えの提案を返す（最大 10 件）。
+
+        各提案は `start` / `end`（本文の文字オフセット、code point）を `replacement` に
+        置き換える案と `reason`、当てた後に SpecLino の決定的な parser で検証し直した結果
+        （`after`: 前後のエラー数・当てた後の診断）。提案は人が 1 件ずつ確かめて採否を決める。
+        自動で当てない・保存しない。
+        IR は返さない（本文から IR を作るのは parser だけ）。`repo_full_name` を渡すと、その
+        リポジトリがこのワークスペースに登録されているかだけを確かめる。
+        """
+        state = get_state()
+        principal = _principal(ctx)
+        if principal.sync_project is not None:
+            raise ToolError("sync トークンは読み取り専用で、AI の提案を使えない")
+        if repo_full_name is not None:
+            await _workspace_project(state, principal, repo_full_name)
+        try:
+            result = await run_suggest(state, markdown)
+        except SuggestRefused as e:
+            raise ToolError(str(e)) from e
+        return result.model_dump(mode="json")
 
     return mcp
 
