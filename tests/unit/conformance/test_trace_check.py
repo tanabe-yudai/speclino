@@ -373,3 +373,98 @@ def test_epsilon_only_cycle_from_opt_in_loop() -> None:
     f = _one(ob, _code(missing))
     assert f.verdict == "VIOLATED"
     assert "Mailer.notify" in f.message
+
+
+# ---------------------------------------------------------------- レビュー fix round 1
+def _express_only_activity(closed: bool) -> TraceObligation:
+    # express のときだけの道筋しか無いアクティビティ図
+    return TraceObligation(
+        id="act-ship#OrderService.place",
+        diagram_kind="activity",
+        entry_operation="OrderService.place",
+        mode="included_in",
+        closed=closed,
+        automaton=Automaton(
+            states=["s0", "s1", "s2"],
+            initial="s0",
+            accepting=["s2"],
+            transitions=[
+                _t("d1", "s0", "s1", guard=EXPRESS),
+                _t("a", "s1", "s2", "Shipping.express"),
+            ],
+        ),
+        level="mandatory",
+    )
+
+
+OUTSIDE = [
+    _path("p1", EXPRESS, ["Shipping.express"]),
+    _path("p2", NORMAL, ["Evil.delete"]),
+]
+
+
+def test_closed_activity_path_outside_diagram_range_is_violated() -> None:
+    # プローブ G: 図のどの道筋のガードにも入らない経路も、closed なら違反
+    f = _one(_express_only_activity(True), _code(*OUTSIDE))
+    assert f.verdict == "VIOLATED", f.message
+    assert f.counterexample is not None and f.counterexample.path_id == "p2"
+    assert f.counterexample.assignments["before.order.express"] is False
+
+
+def test_open_activity_path_outside_diagram_range_is_review() -> None:
+    # プローブ F: closed でなければ REVIEW
+    f = _one(_express_only_activity(False), _code(*OUTSIDE))
+    assert (f.verdict, f.category) == ("REVIEW", "undocumented_behavior")
+
+
+def test_known_operations_mismatch_is_unknown() -> None:
+    # プローブ D: 恒等の対応で、Code IR に無い名前を「呼んでいない」と VIOLATED にしない
+    lower = [
+        _path("p1", EXPRESS, ["inventory.reserve", "shipping.express", "mailer.notify"]),
+        _path("p2", NORMAL, ["inventory.reserve", "shipping.normal", "mailer.notify"]),
+    ]
+    known = frozenset(e.operation or "" for p in lower for e in p.events)
+    f = _one(SEQ, _code(*lower), known_operations=known)
+    assert (f.verdict, f.category) == ("UNKNOWN", "unsupported_analysis")
+    assert "対応する操作が見つからない" in f.message
+
+
+def test_entry_operation_later_in_diagram_is_required() -> None:
+    # プローブ J: 初期状態を出る入口の辺だけが ε。途中の再帰呼出しは要求として残る
+    ob = _seq(
+        [
+            _t("m0", "s0", "s1", "OrderService.place"),
+            _t("m1", "s1", "s2", "A.a"),
+            _t("m2", "s2", "s3", "OrderService.place"),
+        ],
+        ["s3"],
+    )
+    f = _one(ob, _code(_path("p1", TRUE, ["A.a"])))
+    assert f.verdict == "VIOLATED"
+    assert "OrderService.place" in f.message
+
+
+def test_cause_touching_guard_variable_is_unknown() -> None:
+    cause = UnknownCause(
+        code="unresolved_attribute", detail="express の更新", may_affect=["write:order.express"]
+    )
+    p2 = _path(
+        "p2", NORMAL, ["Inventory.reserve", "Shipping.normal", "Mailer.notify"], causes=[cause]
+    )
+    assert _one(SEQ, _code(GOOD_EXPRESS, p2)).verdict == "UNKNOWN"
+
+
+def test_many_guarded_opts_hit_config_limit_as_unknown() -> None:
+    # プローブ L: 独立したガードつき opt の並び → 構成数の上限で UNKNOWN（図の規模の制約）
+    ts: list[AutomatonTransition] = []
+    for i in range(14):
+        g = Binary(op="gt", left=ref("before.order.qty"), right=const("integer", i))
+        ts += [
+            _t(f"g{i}", f"s{i}", f"t{i}", guard=g),
+            _t(f"m{i}", f"t{i}", f"s{i + 1}", f"X.op{i}"),
+            _t(f"e{i}", f"s{i}", f"s{i + 1}"),
+        ]
+    ob = _seq(ts, ["s14"])
+    f = _one(ob, _code(_path("p1", TRUE, [f"X.op{i}" for i in range(14)])))
+    assert f.verdict == "UNKNOWN"
+    assert "上限" in f.message

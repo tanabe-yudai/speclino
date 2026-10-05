@@ -3,6 +3,9 @@
 構成は (状態, 通ったガードつき辺の集合)。ガードの集合は有限なので、ε 閉包は
 有限集合の不動点として停止し、
 `loop` の戻り辺があっても呼出しを消費する遷移は経路の長さで抑えられる。
+
+図の規模の制約: 構成の数はガードつきの枝（opt / alt）の組合せで指数的に増え得る（独立したガードつき
+opt が十数個並ぶと上限 MAX_CONFIGS に達する）。上限を超えたら判定せず UNKNOWN にする。
 LLM・adapters に依存しない。
 """
 
@@ -71,18 +74,26 @@ def normalize(
     automaton: Automaton,
     resolve_operation: Callable[[str], str | None],
     entry_operation: str,
+    known_operations: frozenset[str] | None = None,
 ) -> tuple[NormalizedAutomaton, list[str]]:
     """呼出しラベルを Code IR の操作 ID に写す。戻り値の 2 つ目は対応が見つからない操作。
 
-    入口の操作そのものへの呼出し辺は経路の開始なので ε として扱う。
+    初期状態を出る入口の操作そのものへの呼出し辺は経路の開始なので ε として扱う（図の途中の
+    再帰呼出しは要求として残す）。known_operations を渡すと、写した先がその集合に無い操作も
+    対応なしとみなす（名前の取り違えで「呼んでいない」を VIOLATED にしない）。
     """
     edges: list[Edge] = []
     unbound: list[str] = []
     for t in automaton.transitions:
         op: str | None = None
-        if isinstance(t.label, CallLabel) and t.label.operation != entry_operation:
+        is_entry = (
+            isinstance(t.label, CallLabel)
+            and t.label.operation == entry_operation
+            and t.source == automaton.initial
+        )
+        if isinstance(t.label, CallLabel) and not is_entry:
             op = resolve_operation(t.label.operation)
-            if op is None:
+            if op is None or (known_operations is not None and op not in known_operations):
                 unbound.append(t.label.operation)
         edges.append(Edge(t.id, t.source, t.target, op, t.guard))
     return (

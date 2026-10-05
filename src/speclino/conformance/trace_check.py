@@ -28,11 +28,17 @@ from speclino.conformance.automaton import (
     normalize,
     run_word,
 )
-from speclino.conformance.engine import ConformanceEngine, EngineConfig
+from speclino.conformance.engine import (
+    ConformanceEngine,
+    EngineConfig,
+    post_state_constraints,
+    symbolic_counterexample,
+)
 from speclino.conformance.obligation import (
     ObligationContext,
     ObligationResult,
     blocking_causes,
+    guard_channels,
     inexact_reason,
     scope_text,
     solver_limit,
@@ -64,13 +70,17 @@ class _TraceChecker:
         self.code = code
         self.config = config
         self.a = a
+        self.domain = domain
         self.engine = ConformanceEngine(domain, config)
         self.ctx = self.engine.ctx
         self.subsequence = ob.mode == "contains_subsequence"
         self.involved = a.operations
+        self.guard_channels = guard_channels(a.guards.values())
 
-    # 観測: 順序は図の呼出しだけ、包含は経路のすべての呼出し
+    # 観測: 順序は図の呼出しだけ、包含は経路のすべての呼出し。ガードが参照する変数・終了結果も
     def touches(self, channel: str) -> bool:
+        if channel in self.guard_channels:
+            return True
         if not channel.startswith("call:"):
             return False
         return not self.subsequence or channel[len("call:") :] in self.involved
@@ -79,19 +89,30 @@ class _TraceChecker:
         return GuardOracle(self.ctx, base, self.a.guards, self.config.solver_timeout_ms)
 
     def check_path(self, path: Path) -> ObligationResult | None:
-        """経路 1 本の結果。図のガードと両立しない経路は None（対象外）。"""
+        """経路 1 本の結果。対象外の経路は None。
+
+        順序: 図のガードと両立しない経路は対象外（図はその入力に何も要求しない）。
+        包含: 図の範囲外（どの道筋のガードにも入らない）の経路も対象。closed なら違反になり得る。
+        """
         timeout = self.config.solver_timeout_ms
         base = [
             *self.engine.assumptions,
             self.ctx.encode_bool(path.guard),
-            *self.engine._post_state(path),
+            *post_state_constraints(self.ctx, self.domain, path),
         ]
+        s0 = self.ctx.solver(timeout)
+        s0.add(*base)
+        r0 = s0.check()
+        if r0 == z3.unknown:
+            return solver_limit(f"経路 {path.path_id} の条件", timeout)
+        if r0 == z3.unsat:
+            return None
         oracle = self.oracle(base)
         try:
             cov = accepting_guard_sets(self.a, oracle)
         except SolverLimit:
             return solver_limit(f"経路 {path.path_id} と図のガード", timeout)
-        if not cov:
+        if self.subsequence and not cov:
             return None
         blocked = inexact_reason(path, blocking_causes(path.unknown_causes, self.touches))
         if blocked is not None:
@@ -112,7 +133,9 @@ class _TraceChecker:
         except SolverLimit:
             return solver_limit(f"経路 {path.path_id} の模擬", timeout)
         s = self.ctx.solver(timeout)
-        s.add(*base, disjunction(oracle, cov), z3.Not(disjunction(oracle, ok)))
+        s.add(*base, z3.Not(disjunction(oracle, ok)))
+        if self.subsequence:
+            s.add(disjunction(oracle, cov))
         r = s.check()
         if r == z3.unknown:
             return solver_limit(f"経路 {path.path_id}", timeout)
@@ -128,7 +151,8 @@ class _TraceChecker:
         actual = "呼出し列: " + (" → ".join(word) if word else "（呼出しなし）")
         if self.subsequence:
             return self._sequence_violation(path, word, true_guards, model, expected, actual)
-        return self._activity_mismatch(path, calls, dead, model, expected, actual)
+        in_range = z3.is_true(model.eval(disjunction(oracle, cov), model_completion=True))
+        return self._activity_mismatch(path, calls, dead, in_range, model, expected, actual)
 
     def _expected_text(self) -> str:
         if self.subsequence:
@@ -148,7 +172,7 @@ class _TraceChecker:
         want = " か ".join(nexts) or "図の終了"
         where = f"{last} の後に" if last else "最初に"
         detail = f"{where} {want} の呼出しを期待したが、経路はそれを呼ばずに終わる"
-        cex = self.engine._counterexample(path, model, f"{actual}（{detail}）")
+        cex = symbolic_counterexample(self.ctx, path, model, f"{actual}（{detail}）")
         return ObligationResult(
             "VIOLATED",
             "missing_effect",
@@ -163,6 +187,7 @@ class _TraceChecker:
         path: Path,
         calls: list[Any],
         dead: int | None,
+        in_range: bool,
         model: Any,
         expected: str,
         actual: str,
@@ -172,10 +197,13 @@ class _TraceChecker:
             e = calls[dead]
             detail = f"seq {e.sequence} の呼出し {e.operation} は図のどの道筋にも無い"
             category = "forbidden_effect" if self.ob.closed else "undocumented_behavior"
+        elif not in_range:
+            detail = "この入力は図のどの道筋のガードにも入らない（図の範囲外の処理）"
+            category = "forbidden_effect" if self.ob.closed else "undocumented_behavior"
         else:
             detail = "経路の呼出し列が、この入力で図の道筋に沿って終了に達しない"
             category = "missing_effect" if self.ob.closed else "potential_violation"
-        cex = self.engine._counterexample(path, model, f"{actual}（{detail}）")
+        cex = symbolic_counterexample(self.ctx, path, model, f"{actual}（{detail}）")
         if self.ob.closed:
             return ObligationResult(
                 "VIOLATED",
@@ -204,11 +232,14 @@ def check_trace(
     *,
     domain: DomainSpec | None = None,
     resolve_operation: ResolveOperation = _identity,
+    known_operations: frozenset[str] | None = None,
 ) -> list[Finding]:
     """順序・包含の義務 1 つを Code IR（入口の振る舞い 1 つ）で検査し、Finding を 1 つ返す。
 
     domain はガードと経路条件の型環境（既定は空 → 変数を参照するガードは UNKNOWN）。
     resolve_operation は図の `<Class>.<method>` を Code IR の業務操作 ID に写す（None は対応なし）。
+    known_operations を渡すと、写した先がその集合（Code IR / contracts に現れる操作 ID）に無いものも
+    対応なし → UNKNOWN にする。
     """
     ctx = ObligationContext(
         requirement_id=ob.id,
@@ -218,7 +249,7 @@ def check_trace(
         analysis_scope=scope_text(code),
         spec_refs=tuple(spans_to_refs(ob.spans, ob.id)),
     )
-    a, unbound = normalize(ob.automaton, resolve_operation, ob.entry_operation)
+    a, unbound = normalize(ob.automaton, resolve_operation, ob.entry_operation, known_operations)
     if unbound:
         return [
             ctx.unknown(

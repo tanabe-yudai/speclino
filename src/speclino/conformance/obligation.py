@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from speclino.conformance.reasons import category_rank, finding_id, worst
 from speclino.domain.code_ir import CodeIR, Path, UnknownCause
 from speclino.domain.common import ClaimScope, SourceRef
+from speclino.domain.expr import Expr, refs_in
 from speclino.domain.finding import Category, Counterexample, Finding, Severity, Verdict
 from speclino.domain.spec_ir import RuleLevel
 from speclino.domain.uml import SourceSpan
@@ -67,6 +68,15 @@ def blocking_causes(
             continue
         if u.may_affect is None or any(touches(ch) for ch in u.may_affect):
             out.append(u)
+    return out
+
+
+def guard_channels(guards: Iterable[Expr]) -> set[str]:
+    """ガードが参照する観測（before./after.x → write:x、outcome.* → outcome）。"""
+    out: set[str] = set()
+    for g in guards:
+        for r in refs_in(g):
+            out.add("outcome" if r.namespace == "outcome" else f"write:{r.variable}")
     return out
 
 
