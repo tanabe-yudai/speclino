@@ -144,6 +144,7 @@ async def test_rest_attest_rechecks_the_pr_head(ctx: Ctx) -> None:
     detail = (await ctx.c.get(f"/api/review-runs/{recheck}", headers=OWNER)).json()
     assert detail["trigger"] == "attestation" and detail["head_sha"] == ctx.head
     assert detail["exec_state"] == "completed"
+    assert detail["workspace"] == ctx.slug  # 画面が確定の宛先を決める
     # 別のワークスペースの run は 404（確定も巻き戻る）
     res = await ctx.c.post(url, json={**body, "run_id": other_run}, headers=OWNER)
     assert res.status_code == 404

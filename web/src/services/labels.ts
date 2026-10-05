@@ -1,6 +1,13 @@
 /** 判定・状態を日本語ラベルへ変換する定数群。コンポーネントには埋め込まない。 */
 
-import type { BaseHeadStatus, Category, Severity, TestObservation, Verdict } from '../types/finding'
+import type {
+  AssessmentOutcome,
+  BaseHeadStatus,
+  Category,
+  Severity,
+  TestObservation,
+  Verdict,
+} from '../types/finding'
 import type { OnMissingInput, PolicyRevision } from '../types/policy'
 import type { ApprovalState, NextActionKind, PolicyLevel, RequirementFilter } from '../types/project'
 import type { ExecState, GateStatus } from '../types/run'
@@ -171,4 +178,17 @@ export function auditLabel(action: string, decision: string): string {
   if (action === 'policy.draft') return decision === 'updated' ? '下書きを更新' : '下書きを作成'
   if (action === 'policy.approve') return decision === 'denied' ? '承認を拒否（承認者ではない）' : '承認して有効にした'
   return `${action} ${decision}`
+}
+
+/** LLM 支援の規約の区分（S70）。指摘なしは機械検証ではないことを明記する独自の区分。 */
+export const ASSESSMENT_OUTCOME_LABELS: Record<AssessmentOutcome, string> = {
+  issue: 'LLM の指摘あり（人の確定待ち）',
+  split: 'LLM の評価が割れた（人の確定待ち）',
+  no_issue: 'LLM で確認、指摘なし（機械検証ではない）',
+}
+
+export const ASSESSMENT_OUTCOME_TONE: Record<AssessmentOutcome, VerdictTone> = {
+  issue: 'rev',
+  split: 'rev',
+  no_issue: 'exempt',
 }

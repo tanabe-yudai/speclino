@@ -99,6 +99,8 @@ export interface ReviewRunSummary {
 /** `GET /api/review-runs/{id}` は findings を追加で持つ。 */
 export interface ReviewRunDetail extends ReviewRunSummary {
   findings: Finding[]
+  /** run のプロジェクトのワークスペース（S70: 確定の宛先）。未登録なら null */
+  workspace?: string | null
 }
 
 /** `POST /api/review-runs/{id}/rerun`（デモ再実行、S39）の応答。 */

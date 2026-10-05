@@ -114,6 +114,8 @@ async def get_run(
         findings = await FindingRepository(session).list_for_run(run_id)
         return {
             **_run_view(run, project.repo_full_name),
+            # S70: 画面が確定（attestations）の権限と API の宛先を決めるのに使う
+            "workspace": project.team,
             "findings": [f.payload for f in findings],
         }
 

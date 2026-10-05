@@ -1,5 +1,6 @@
 /** 再利用コンポーネントの props 型。コンポーネント本体には型を書かず、ここに集約する。 */
 
+import type { AttestationTarget } from './attestation'
 import type { Counterexample, Finding } from './finding'
 import type { RunEvent } from './events'
 import type { RerunResponse } from './run'
@@ -40,6 +41,14 @@ export interface ScopeBlockProps {
 
 export interface TimelineProps {
   events: RunEvent[]
+}
+
+export interface AttestButtonProps {
+  slug: string
+  runId: string
+  target: AttestationTarget
+  /** 確定の後に呼ぶ（再検査の run があればその ID）。 */
+  onDone: (recheckRunId: string | null) => void
 }
 
 export interface RerunButtonProps {
