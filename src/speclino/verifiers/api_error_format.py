@@ -15,6 +15,12 @@ AST として構文的に読むだけで判定する。
     raise（既定 ``api_error``）は許可する。違反があれば VIOLATED（forbidden_effect、code_refs に
     path と行）。ファイルごとに Finding 1件。
 
+(a') 追加（1.1.0）: ``success_envelope_schema`` を指定すると、全 operation の 2xx で
+    ``application/json`` の content を持つ応答が
+    ``#/components/schemas/<success_envelope_schema>`` を ``$ref`` する
+    （または ``allOf`` の先頭要素が参照する）こと。違反は (a) と同じ openapi の Finding に
+    合流させる（requirement_id が衝突しないよう別 Finding は作らない）。指定が無ければ従来どおり。
+
 requirement_id は ``<rule.id>:<path>``（(a) は openapi_path、(b) は各ファイルパス）。
 """
 
@@ -29,14 +35,15 @@ from typing import Any
 from speclino.domain.common import SourceRef
 from speclino.domain.finding import Finding, Severity
 from speclino.domain.policy import PolicyRule
+from speclino.domain.policy_params import ApiErrorFormatParams
+from speclino.verifiers._findings import parse_params
 from speclino.verifiers.base import Snapshot
 
 VERIFIER_ID = "api.error_format"
-VERIFIER_VERSION = "1.0.0"
+VERIFIER_VERSION = "1.1.0"
 
-_DEFAULT_ERROR_SCHEMA = "ErrorResponse"
-_DEFAULT_HELPER_SYMBOL = "api_error"
 _ERROR_STATUS_RE = re.compile(r"^[45]\d{2}$")
+_SUCCESS_STATUS_RE = re.compile(r"^2\d{2}$")
 _HTTP_METHODS = {"get", "put", "post", "delete", "options", "head", "patch", "trace"}
 
 
@@ -94,6 +101,51 @@ def _check_openapi_error_refs(spec: dict[str, Any], error_schema: str) -> list[_
     return issues
 
 
+def _envelope_ref_ok(response: Any, expected_ref: str) -> bool:
+    if _schema_ref(response) == expected_ref:
+        return True
+    try:
+        schema = response["content"]["application/json"]["schema"]
+        first = schema["allOf"][0]
+    except (KeyError, IndexError, TypeError):
+        return False
+    return isinstance(first, dict) and first.get("$ref") == expected_ref
+
+
+def _check_openapi_success_envelope(spec: dict[str, Any], envelope_schema: str) -> list[_RefIssue]:
+    expected_ref = f"#/components/schemas/{envelope_schema}"
+    issues: list[_RefIssue] = []
+    paths = spec.get("paths")
+    if not isinstance(paths, dict):
+        return issues
+    for path in sorted(paths):
+        operations = paths[path]
+        if not isinstance(operations, dict):
+            continue
+        for method in sorted(operations):
+            operation = operations[method]
+            if method not in _HTTP_METHODS or not isinstance(operation, dict):
+                continue
+            responses = operation.get("responses")
+            if not isinstance(responses, dict):
+                continue
+            for status in sorted(str(s) for s in responses):
+                if not _SUCCESS_STATUS_RE.match(status):
+                    continue
+                response = responses[status]
+                content = response.get("content") if isinstance(response, dict) else None
+                if not isinstance(content, dict) or "application/json" not in content:
+                    continue  # 204 など本文なしは対象外
+                if not _envelope_ref_ok(response, expected_ref):
+                    issues.append(
+                        _RefIssue(
+                            f"{method.upper()} {path} {status}: "
+                            f"成功時の包み方が {expected_ref} でない"
+                        )
+                    )
+    return issues
+
+
 def _direct_http_exception_raises(text: str, path: str) -> list[int] | None:
     """None は構文解析に失敗したことを示す。"""
     try:
@@ -120,22 +172,31 @@ class ApiErrorFormatVerifier:
     version = VERIFIER_VERSION
 
     def run(self, rule: PolicyRule, snapshot: Snapshot) -> list[Finding]:
-        params = rule.verifier_ref.params
-        openapi_path: str = params.get("openapi_path", "openapi.json")
-        error_schema: str = params.get("error_schema", _DEFAULT_ERROR_SCHEMA)
-        api_glob: str = params.get("api_glob", "src/speclino/api/**/*.py")
-        helper_symbol: str = params.get("helper_symbol", _DEFAULT_HELPER_SYMBOL)
+        params = parse_params(ApiErrorFormatParams, rule)
 
-        findings = [self._check_openapi(rule, snapshot, openapi_path, error_schema)]
-        for path in snapshot.glob(api_glob):
-            findings.append(self._check_file(rule, snapshot, path, helper_symbol))
+        findings = [
+            self._check_openapi(
+                rule,
+                snapshot,
+                params.openapi_path,
+                params.error_schema,
+                params.success_envelope_schema,
+            )
+        ]
+        for path in snapshot.glob(params.api_glob):
+            findings.append(self._check_file(rule, snapshot, path, params.helper_symbol))
         return findings
 
     def _severity(self, rule: PolicyRule) -> Severity:
         return "high" if rule.level == "mandatory" else "medium"
 
     def _check_openapi(
-        self, rule: PolicyRule, snapshot: Snapshot, openapi_path: str, error_schema: str
+        self,
+        rule: PolicyRule,
+        snapshot: Snapshot,
+        openapi_path: str,
+        error_schema: str,
+        envelope_schema: str | None = None,
     ) -> Finding:
         requirement_id = f"{rule.id}:{openapi_path}"
         severity = self._severity(rule)
@@ -182,6 +243,10 @@ class ApiErrorFormatVerifier:
         expected_ref = f"#/components/schemas/{error_schema}"
         expected = f"4xx/5xx の responses が {expected_ref} を参照すること"
         issues = _check_openapi_error_refs(spec, error_schema)
+        if envelope_schema is not None:
+            envelope_ref = f"#/components/schemas/{envelope_schema}"
+            expected += f"、2xx の application/json 応答が {envelope_ref} で包まれること"
+            issues += _check_openapi_success_envelope(spec, envelope_schema)
         if issues:
             return Finding(
                 id=f"policy:{requirement_id}",
@@ -193,6 +258,9 @@ class ApiErrorFormatVerifier:
                 message=(
                     f"{openapi_path}: 4xx/5xx の responses が "
                     f"{expected_ref} を参照していない operation があります"
+                    if envelope_schema is None
+                    else f"{openapi_path}: エラー応答の参照または成功時の包み方が規約に合わない "
+                    "operation があります"
                 ),
                 expected=expected,
                 actual="\n".join(i.detail for i in issues),
@@ -207,6 +275,8 @@ class ApiErrorFormatVerifier:
             severity=severity,
             message=(
                 f"{openapi_path}: 4xx/5xx の responses はすべて {error_schema} を参照しています"
+                if envelope_schema is None
+                else f"{openapi_path}: エラー応答の参照と成功時の包み方がすべて規約に合っています"
             ),
             expected=expected,
             actual="違反なし",
