@@ -3,7 +3,10 @@
 クラスが `source_roots` に一意に定義され、各操作がメソッドとして存在し、引数名
 （self / cls を除く）と数が順に一致するか。
 図に無いクラスやメソッドがあっても問題にしない（open-world）。
+モジュール直下のクラス定義だけを数える。
 「無い／合わない」を確定できないとき（構文エラーのファイル、同名クラスの重複、ソースに無い基底、
+関数内など直下でない定義だけがある、
+クラス本体の複合文（if / try / for / while / with / match）・exec・setattr、
 `__getattr__`・クラス属性への代入・クラスデコレータ・メタクラス、`*args` / `**kwargs`）は UNKNOWN。
 """
 
@@ -36,6 +39,9 @@ class _Index:
     sources: list[_Source] = field(default_factory=list)
     parse_errors: list[str] = field(default_factory=list)
     classes: dict[str, list[tuple[_Source, ast.ClassDef]]] = field(default_factory=dict)
+    nested: dict[str, list[str]] = field(default_factory=dict)  # モジュール直下でないクラス定義
+    setattr_targets: dict[str, list[str]] = field(default_factory=dict)  # setattr(名前, ...) の対象
+    exec_files: set[str] = field(default_factory=set)
     other_bindings: dict[str, list[str]] = field(default_factory=dict)
 
 
@@ -74,9 +80,18 @@ def _index(repo_root: Path, source_roots: tuple[str, ...]) -> _Index:
             continue
         src = _Source(rel, tree)
         idx.sources.append(src)
+        top = {id(n) for n in tree.body if isinstance(n, ast.ClassDef)}
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef):
-                idx.classes.setdefault(node.name, []).append((src, node))
+                if id(node) in top:
+                    idx.classes.setdefault(node.name, []).append((src, node))
+                else:
+                    idx.nested.setdefault(node.name, []).append(f"{rel}:{node.lineno}")
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                if node.func.id == "exec":
+                    idx.exec_files.add(rel)
+                elif node.func.id == "setattr" and node.args and isinstance(node.args[0], ast.Name):
+                    idx.setattr_targets.setdefault(node.args[0].id, []).append(rel)
             elif isinstance(node, ast.Assign | ast.AnnAssign):
                 targets = node.targets if isinstance(node, ast.Assign) else [node.target]
                 for t in targets:
@@ -118,8 +133,30 @@ def _params(fn: _FuncDef) -> list[str]:
     return [n for n in names if n not in _SELF_NAMES]
 
 
-def _dynamic_reasons(cls: ast.ClassDef, name: str) -> list[str]:
+_COMPOUND = (
+    ast.If,
+    ast.Try,
+    ast.TryStar,
+    ast.For,
+    ast.AsyncFor,
+    ast.While,
+    ast.With,
+    ast.AsyncWith,
+    ast.Match,
+)
+
+
+def _dynamic_reasons(idx: _Index, src: _Source, cls: ast.ClassDef, name: str) -> list[str]:
+    """メソッドが直下に無いとき、「無い」と確定できない理由（動的に定義され得る）。"""
     reasons: list[str] = []
+    if any(isinstance(s, _COMPOUND) for s in cls.body):
+        reasons.append("クラス本体の条件・繰返し・例外処理などの複合文")
+    if cls.name in idx.setattr_targets:
+        reasons.append(
+            f"setattr({cls.name}, ...)（{', '.join(sorted(set(idx.setattr_targets[cls.name])))}）"
+        )
+    if src.rel in idx.exec_files:
+        reasons.append(f"exec（{src.rel}）")
     if cls.decorator_list:
         reasons.append("クラスデコレータ")
     if cls.keywords:
@@ -135,7 +172,7 @@ def _dynamic_reasons(cls: ast.ClassDef, name: str) -> list[str]:
 
 
 def _find_method(
-    idx: _Index, cls: ast.ClassDef, name: str, seen: set[int]
+    idx: _Index, src: _Source, cls: ast.ClassDef, name: str, seen: set[int]
 ) -> tuple[_FuncDef | None, list[str]]:
     """メソッドを基底までたどって探す。戻り値の 2 つ目は「無い」と確定できない理由。"""
     seen.add(id(cls))
@@ -145,25 +182,27 @@ def _find_method(
             found = s  # 後の定義が勝つ
     if found is not None:
         return found, []
-    reasons = _dynamic_reasons(cls, name)
+    reasons = _dynamic_reasons(idx, src, cls, name)
     for b in cls.bases:
         if isinstance(b, ast.Name) and b.id == "object":
             continue
         if not isinstance(b, ast.Name) or len(idx.classes.get(b.id, [])) != 1:
             reasons.append(f"基底 {ast.unparse(b)} がソース内で一意に定まらない")
             continue
-        base = idx.classes[b.id][0][1]
+        base_src, base = idx.classes[b.id][0]
         if id(base) in seen:
             continue
-        m, rs = _find_method(idx, base, name, seen)
+        m, rs = _find_method(idx, base_src, base, name, seen)
         if m is not None:
             return m, []
         reasons += rs
     return None, reasons
 
 
-def _check_operation(idx: _Index, cls: ast.ClassDef, op: ClassOperation, cname: str) -> _Check:
-    fn, reasons = _find_method(idx, cls, op.name, set())
+def _check_operation(
+    idx: _Index, src: _Source, cls: ast.ClassDef, op: ClassOperation, cname: str
+) -> _Check:
+    fn, reasons = _find_method(idx, src, cls, op.name, set())
     qual = f"{cname}.{op.name}"
     if fn is None:
         if reasons:
@@ -210,6 +249,9 @@ def check_structure(
         reasons = []
         if idx.parse_errors:
             reasons.append(f"構文エラーで読めないファイル: {', '.join(idx.parse_errors)}")
+        if ob.class_name in idx.nested:
+            where = ", ".join(idx.nested[ob.class_name])
+            reasons.append(f"モジュール直下でない定義（関数内など）だけがある: {where}")
         if ob.class_name in idx.other_bindings:
             files = sorted(set(idx.other_bindings[ob.class_name]))
             reasons.append(
@@ -235,7 +277,7 @@ def check_structure(
         return [ctx.unknown(f"クラス {ob.class_name} が複数ある（{where}）。どれか確定できない")]
     src, cls = found[0]
     code_refs = [_ref(src, cls, ob.class_name)]
-    checks = [_check_operation(idx, cls, op, ob.class_name) for op in ob.operations]
+    checks = [_check_operation(idx, src, cls, op, ob.class_name) for op in ob.operations]
     expected = f"クラス {ob.class_name}" + (
         "（" + ", ".join(f"{o.name}({', '.join(_spec_params(o))})" for o in ob.operations) + "）"
         if ob.operations

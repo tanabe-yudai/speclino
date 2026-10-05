@@ -119,3 +119,39 @@ def test_does_not_import_target_code(tmp_path: Path) -> None:
     boom = "raise SystemExit('imported!')\n\nclass Boom:\n    def go(self):\n        ...\n"
     root = _repo(tmp_path, {"src/app/boom.py": boom})
     assert _one(_ob(("go", []), cls="Boom"), root).verdict == "VERIFIED_IN_SCOPE"
+
+
+# ---------------------------------------------------------------- レビュー fix round 1
+def test_compound_statement_in_class_body_makes_missing_method_unknown(tmp_path: Path) -> None:
+    body = (
+        "import sys\n\nclass Svc:\n    if sys.version_info >= (3, 12):\n"
+        "        def run(self, order):\n            ...\n"
+        "    def stop(self):\n        ...\n"
+    )
+    root = _repo(tmp_path, {"src/app/svc.py": body})
+    assert _one(_ob(("run", ["order"]), cls="Svc"), root).verdict == "UNKNOWN"
+    # 直下に見つかるメソッドは今までどおり判定する
+    assert _one(_ob(("stop", ["x"]), cls="Svc"), root).verdict == "VIOLATED"
+
+
+def test_setattr_and_exec_make_missing_method_unknown(tmp_path: Path) -> None:
+    root = _repo(
+        tmp_path,
+        {
+            "src/app/a.py": "class A:\n    pass\n",
+            "src/app/patch.py": "from app.a import A\n\nsetattr(A, 'run', lambda self: 1)\n",
+            "src/app/b.py": "class B:\n    pass\n\nexec('B.run = lambda self: 1')\n",
+        },
+    )
+    assert _one(_ob(("run", []), cls="A"), root).verdict == "UNKNOWN"
+    assert _one(_ob(("run", []), cls="B"), root).verdict == "UNKNOWN"
+
+
+def test_class_defined_only_inside_function_is_unknown(tmp_path: Path) -> None:
+    body = (
+        "def make():\n    class Local:\n        def run(self):\n            ...\n    return Local\n"
+    )
+    root = _repo(tmp_path, {"src/app/f.py": body})
+    f = _one(_ob(("run", []), cls="Local"), root)
+    assert f.verdict == "UNKNOWN"
+    assert "直下でない" in f.message
