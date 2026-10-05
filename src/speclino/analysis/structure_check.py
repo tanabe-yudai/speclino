@@ -42,6 +42,7 @@ class _Index:
     nested: dict[str, list[str]] = field(default_factory=dict)  # モジュール直下でないクラス定義
     setattr_targets: dict[str, list[str]] = field(default_factory=dict)  # setattr(名前, ...) の対象
     exec_files: set[str] = field(default_factory=set)
+    patched: dict[tuple[str, str], list[str]] = field(default_factory=dict)  # クラス名.属性 = ...
     other_bindings: dict[str, list[str]] = field(default_factory=dict)
 
 
@@ -97,6 +98,8 @@ def _index(repo_root: Path, source_roots: tuple[str, ...]) -> _Index:
                 for t in targets:
                     if isinstance(t, ast.Name):
                         idx.other_bindings.setdefault(t.id, []).append(rel)
+                    elif isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name):
+                        idx.patched.setdefault((t.value.id, t.attr), []).append(rel)
             elif isinstance(node, ast.Import | ast.ImportFrom):
                 for a in node.names:
                     name = (a.asname or a.name).split(".")[0]
@@ -155,6 +158,9 @@ def _dynamic_reasons(idx: _Index, src: _Source, cls: ast.ClassDef, name: str) ->
         reasons.append(
             f"setattr({cls.name}, ...)（{', '.join(sorted(set(idx.setattr_targets[cls.name])))}）"
         )
+    if (cls.name, name) in idx.patched:
+        files = ", ".join(sorted(set(idx.patched[(cls.name, name)])))
+        reasons.append(f"{cls.name}.{name} への代入（{files}）")
     if src.rel in idx.exec_files:
         reasons.append(f"exec（{src.rel}）")
     if cls.decorator_list:
@@ -186,7 +192,7 @@ def _find_method(
     for b in cls.bases:
         if isinstance(b, ast.Name) and b.id == "object":
             continue
-        if not isinstance(b, ast.Name) or len(idx.classes.get(b.id, [])) != 1:
+        if not isinstance(b, ast.Name) or len(idx.classes.get(b.id, [])) != 1 or b.id in idx.nested:
             reasons.append(f"基底 {ast.unparse(b)} がソース内で一意に定まらない")
             continue
         base_src, base = idx.classes[b.id][0]
@@ -275,6 +281,17 @@ def check_structure(
     if len(found) > 1:
         where = ", ".join(f"{s.rel}:{c.lineno}" for s, c in found)
         return [ctx.unknown(f"クラス {ob.class_name} が複数ある（{where}）。どれか確定できない")]
+    if ob.class_name in idx.nested:
+        where = (
+            ", ".join(f"{s.rel}:{c.lineno}" for s, c in found)
+            + ", "
+            + ", ".join(idx.nested[ob.class_name])
+        )
+        return [
+            ctx.unknown(
+                f"クラス {ob.class_name} に条件付き・入れ子の定義があり一意に決まらない（{where}）"
+            )
+        ]
     src, cls = found[0]
     code_refs = [_ref(src, cls, ob.class_name)]
     checks = [_check_operation(idx, src, cls, op, ob.class_name) for op in ob.operations]

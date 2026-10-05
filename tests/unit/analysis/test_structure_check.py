@@ -155,3 +155,51 @@ def test_class_defined_only_inside_function_is_unknown(tmp_path: Path) -> None:
     f = _one(_ob(("run", []), cls="Local"), root)
     assert f.verdict == "UNKNOWN"
     assert "直下でない" in f.message
+
+
+# ---------------------------------------------------------------- レビュー fix round 2
+def test_conditional_definition_elsewhere_makes_unknown(tmp_path: Path) -> None:
+    # プローブ S5: 直下の A があっても、別の場所に条件付きの A があれば一意に決まらない
+    root = _repo(
+        tmp_path,
+        {
+            "src/app/a.py": "class A:\n    pass\n",
+            "src/app/b.py": (
+                "import sys\nif sys.version_info > (3,):\n"
+                "    class A:\n        def run(self): ...\n"
+            ),
+        },
+    )
+    f = _one(_ob(("run", []), cls="A"), root)
+    assert f.verdict == "UNKNOWN"
+    assert "一意に決まらない" in f.message
+
+
+def test_nested_class_with_same_name_makes_unknown(tmp_path: Path) -> None:
+    # プローブ S2: 直下の A と入れ子の Holder.A
+    body = "class A:\n    pass\n\nclass Holder:\n    class A:\n        def run(self): ...\n"
+    root = _repo(tmp_path, {"src/app/a.py": body})
+    assert _one(_ob(("run", []), cls="A"), root).verdict == "UNKNOWN"
+
+
+def test_attribute_monkeypatch_makes_missing_method_unknown(tmp_path: Path) -> None:
+    # プローブ S1: A.run = f
+    root = _repo(
+        tmp_path,
+        {
+            "src/app/a.py": "class A:\n    pass\n",
+            "src/app/p.py": "from app.a import A\n\ndef f(self):\n    return 1\n\nA.run = f\n",
+        },
+    )
+    f = _one(_ob(("run", []), cls="A"), root)
+    assert f.verdict == "UNKNOWN"
+    assert "A.run への代入" in f.message
+
+
+def test_base_with_conditional_definition_is_unknown(tmp_path: Path) -> None:
+    body = (
+        "import sys\n\nclass Base:\n    pass\n\nif sys.version_info > (3,):\n"
+        "    class Base:\n        def run(self): ...\n\nclass C(Base):\n    pass\n"
+    )
+    root = _repo(tmp_path, {"src/app/c.py": body})
+    assert _one(_ob(("run", []), cls="C"), root).verdict == "UNKNOWN"
