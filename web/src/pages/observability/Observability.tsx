@@ -15,6 +15,7 @@ import {
   RULE_TIER_LABELS,
   UNMEASURED,
   fetchLabel,
+  fetchLag,
   formatRatio,
   lagLabel,
   lagTone,
@@ -100,7 +101,9 @@ function ProjectsPanel({ slug, projects }: { slug: string; projects: ProjectHeal
               <tr>
                 <th scope="col" className={th}>リポジトリ</th>
                 <th scope="col" className={th}>形式化率</th>
-                <th scope="col" className={th}>対応率</th>
+                <th scope="col" className={th}>
+                  対応率<span className="block font-normal">（UNKNOWN の理由の分類にもとづく推定）</span>
+                </th>
                 <th scope="col" className={th}>UNKNOWN の内訳</th>
                 <th scope="col" className={th}>最新の検査</th>
                 <th scope="col" className={th}>検査の bundle</th>
@@ -197,7 +200,7 @@ function FetchesPanel({ fetches, days }: { fetches: FetchHealth[]; days: number 
                     )}
                   </td>
                   <td className={td}>
-                    <ToneBadge tone={lagTone(f.behind_by)}>{lagLabel(f.behind_by)}</ToneBadge>
+                    <ToneBadge tone={fetchLag(f).tone}>{fetchLag(f).label}</ToneBadge>
                   </td>
                 </tr>
               ))}
@@ -247,7 +250,7 @@ function RulesPanel({ runs, rules }: { runs: TrendRun[]; rules: RuleTrend[] }) {
     <Panel className="space-y-3">
       <PanelTitle>規約ごとの推移</PanelTitle>
       <p className="text-xs text-ink-3">
-        直近 {runs.length} 回の完了した検査（左が古い）。棒の色は VIOLATED・REVIEW・UNKNOWN・VERIFIED の割合、灰色の短い線は結果なし。
+        ワークスペース全体の直近 {runs.length} 回の完了した検査（最大 10 回、左が古い）。棒の色は VIOLATED・REVIEW・UNKNOWN・VERIFIED の割合、灰色の短い線は結果なし。
       </p>
       {rules.length === 0 ? (
         <p className="text-sm text-ink-2">規約も規約の検査結果もありません。</p>
@@ -311,6 +314,8 @@ function LlmPanel({ llm }: { llm: LlmStability | null }) {
       {!llm ? (
         <p className="text-sm text-ink-2">{UNMEASURED}（LLM 支援の規約の検査結果がまだありません）</p>
       ) : (
+        <>
+        <p className="text-xs text-ink-3">指摘・split の件数はワークスペース全体の直近 10 回の完了した検査から。</p>
         <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-5">
           <Stat label="指摘あり" value={String(llm.issue)} />
           <Stat label="指摘なし（機械検証ではない）" value={String(llm.no_issue)} />
@@ -318,6 +323,7 @@ function LlmPanel({ llm }: { llm: LlmStability | null }) {
           <Stat label="キャッシュの当たり率" value={percent(llm.cache_hit_rate)} />
           <Stat label="人の確定" value={llm.attestations === null ? UNMEASURED : String(llm.attestations)} />
         </dl>
+        </>
       )}
     </Panel>
   )

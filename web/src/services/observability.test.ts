@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fetchLabel, formatRatio, lagLabel, lagTone, unknownEntries } from './observability'
+import { fetchLabel, fetchLag, formatRatio, lagLabel, lagTone, unknownEntries } from './observability'
 
 describe('formatRatio', () => {
   it('測っていないものは「未計測」で、0% にしない', () => {
@@ -30,9 +30,17 @@ describe('unknownEntries', () => {
 
 describe('fetchLabel', () => {
   it('トークン名、無ければメンバー', () => {
-    const base = { channel: 'sync', token_id: null, uid: null, member_email: null, project_id: null, repo_full_name: null, last_fetched_at: null, last_generation: null, behind_by: null }
+    const base = { revoked: false, channel: 'sync', token_id: null, uid: null, member_email: null, project_id: null, repo_full_name: null, last_fetched_at: null, last_generation: null, behind_by: null }
     expect(fetchLabel({ ...base, token_name: 'ci' })).toBe('ci')
     expect(fetchLabel({ ...base, token_name: null, uid: 'u1', member_email: 'a@example.com' })).toBe('a@example.com')
     expect(fetchLabel({ ...base, token_name: null, uid: 'u1' })).toBe('u1')
+  })
+})
+
+describe('fetchLag', () => {
+  it('失効済みは遅れに数えず「失効済み」', () => {
+    const base = { channel: 'sync', token_id: 't', token_name: 'old', uid: null, member_email: null, project_id: null, repo_full_name: null, last_fetched_at: '2026-10-01T00:00:00Z', last_generation: 1 }
+    expect(fetchLag({ ...base, revoked: true, behind_by: null })).toEqual({ label: '失効済み', tone: 'exempt' })
+    expect(fetchLag({ ...base, revoked: false, behind_by: 1 })).toEqual({ label: '1 世代遅れ', tone: 'rev' })
   })
 })

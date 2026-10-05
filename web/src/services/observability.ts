@@ -44,6 +44,12 @@ export function unknownEntries(b: UnknownBreakdown): { reason: UnknownReason; la
     .sort((a, b) => b.count - a.count)
 }
 
+/** 取得の遅れの表示。失効済みのトークンは遅れではなく「失効済み」。 */
+export function fetchLag(f: FetchHealth): { label: string; tone: VerdictTone } {
+  if (f.revoked) return { label: '失効済み', tone: 'exempt' }
+  return { label: lagLabel(f.behind_by), tone: lagTone(f.behind_by) }
+}
+
 export function fetchLabel(f: FetchHealth): string {
   return f.token_name ?? f.member_email ?? f.uid ?? '-'
 }

@@ -46,6 +46,8 @@ export interface FetchHealth {
   channel: string
   token_id: string | null
   token_name: string | null
+  /** 失効済みのトークン（遅れに数えない。behind_by は null） */
+  revoked: boolean
   uid: string | null
   member_email: string | null
   project_id: string | null
