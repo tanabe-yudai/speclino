@@ -137,6 +137,7 @@ class ArtifactRepository:
         content: dict[str, Any],
         content_hash: str,
         author: str,
+        note: str = "",
     ) -> ArtifactRevision:
         row = ArtifactRevisionRecord(
             artifact_id=artifact_id,
@@ -146,7 +147,7 @@ class ArtifactRepository:
             content_hash=content_hash,
             author=author,
             self_approved=False,
-            note="",
+            note=note,
         )
         self._session.add(row)
         await self._session.flush()
@@ -156,9 +157,15 @@ class ArtifactRepository:
         return _to_domain(artifact, row)
 
     async def update_draft(
-        self, *, artifact_id: uuid.UUID, revision: int, content: dict[str, Any], content_hash: str
+        self,
+        *,
+        artifact_id: uuid.UUID,
+        revision: int,
+        content: dict[str, Any],
+        content_hash: str,
+        note: str = "",
     ) -> ArtifactRevision | None:
-        """下書きの中身を置き換える。draft でなくなっていれば None。"""
+        """下書きの中身と改訂の説明（note）を置き換える。draft でなくなっていれば None。"""
         stmt = (
             update(ArtifactRevisionRecord)
             .where(
@@ -166,7 +173,7 @@ class ArtifactRepository:
                 ArtifactRevisionRecord.revision == revision,
                 ArtifactRevisionRecord.status == "draft",
             )
-            .values(content=content, content_hash=content_hash)
+            .values(content=content, content_hash=content_hash, note=note)
             .returning(ArtifactRevisionRecord)
         )
         row = (await self._session.execute(stmt)).scalar_one_or_none()

@@ -734,6 +734,21 @@
             "pattern": "^[a-z0-9][a-z0-9-]*$",
             "title": "Name",
             "type": "string"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Note",
+            "type": "string"
+          },
+          "note_source": {
+            "default": "manual",
+            "enum": [
+              "manual",
+              "chat_summary"
+            ],
+            "title": "Note Source",
+            "type": "string"
           }
         },
         "required": [
@@ -2391,6 +2406,21 @@
             "minimum": 1.0,
             "title": "Expected Revision",
             "type": "integer"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Note",
+            "type": "string"
+          },
+          "note_source": {
+            "default": "manual",
+            "enum": [
+              "manual",
+              "chat_summary"
+            ],
+            "title": "Note Source",
+            "type": "string"
           }
         },
         "required": [
@@ -2452,6 +2482,15 @@
             "default": "",
             "maxLength": 500,
             "title": "Note",
+            "type": "string"
+          },
+          "note_source": {
+            "default": "manual",
+            "enum": [
+              "manual",
+              "chat_summary"
+            ],
+            "title": "Note Source",
             "type": "string"
           },
           "package": {

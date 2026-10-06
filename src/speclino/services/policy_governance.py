@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from speclino.db.repositories.audit import AuditRepository
 from speclino.db.repositories.policy_revisions import PolicyRevisionRepository
 from speclino.db.repositories.teams import TeamRepository
+from speclino.domain.knowledge_chat import NoteSource
 from speclino.domain.policy import PolicyPackage, PolicyRevision
 from speclino.services.check_pipeline import policy_package_hash
 from speclino.verifiers.catalog import KNOWN_VERIFIERS
@@ -106,6 +107,7 @@ async def save_draft(
     note: str,
     expected_revision: int | None,
     expected_hash: str | None,
+    note_source: NoteSource = "manual",
 ) -> PolicyRevision:
     """下書きを保存する（S43）。無ければ作り、あれば同じ下書きを更新する（下書きは同時に 1 つ）。
 
@@ -124,7 +126,9 @@ async def save_draft(
     if not seen:
         raise DraftConflict(f"{team} の下書きが変わった。読み直してから保存する")
     if current is None:
-        return await create_draft(session, team=team, package=package, author=author, note=note)
+        return await create_draft(
+            session, team=team, package=package, author=author, note=note, note_source=note_source
+        )
     updated = await revisions.update_draft(
         team=team, revision=current.revision, package=package, note=note
     )
@@ -133,7 +137,7 @@ async def save_draft(
         action="policy.draft",
         target=f"{team}@{current.revision}",
         decision="updated",
-        detail={"note": note, "rule_count": len(package.rules)},
+        detail={"note": note, "rule_count": len(package.rules), "note_source": note_source},
     )
     return updated
 
@@ -189,6 +193,7 @@ async def create_draft(
     package: PolicyPackage,
     author: str,
     note: str = "",
+    note_source: NoteSource = "manual",
 ) -> PolicyRevision:
     """draft 改訂を作り、`audit_events` に `policy.draft` を残す。
 
@@ -215,7 +220,7 @@ async def create_draft(
         action="policy.draft",
         target=f"{team}@{revision.revision}",
         decision="created",
-        detail={"note": note, "rule_count": len(package.rules)},
+        detail={"note": note, "rule_count": len(package.rules), "note_source": note_source},
     )
     return revision
 

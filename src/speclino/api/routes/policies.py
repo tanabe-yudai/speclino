@@ -16,6 +16,7 @@ from speclino.api.deps import AppState, get_state
 from speclino.api.errors import api_error, error_responses
 from speclino.db.repositories.audit import AuditRepository
 from speclino.db.repositories.policy_revisions import PolicyRevisionRepository
+from speclino.domain.knowledge_chat import NoteSource
 from speclino.domain.policy import PolicyPackage
 from speclino.domain.workspace import AuthUser
 from speclino.services import policy_governance as gov
@@ -33,6 +34,8 @@ HISTORY_LIMIT = 50
 class DraftRequest(BaseModel):
     package: PolicyPackage
     note: str = Field(default="", max_length=500)
+    # 本人の申告（S73: 会話の要約から入れたか）。監査に残すだけ
+    note_source: NoteSource = "manual"
     # 保存する人が前提にした下書き（無ければ両方 null）。今の下書きと違えば 409
     expected_revision: int | None = Field(default=None, ge=1)
     expected_hash: str | None = Field(default=None, max_length=200)
@@ -75,6 +78,7 @@ async def put_draft(
                 package=body.package,
                 author=user.uid,
                 note=body.note,
+                note_source=body.note_source,
                 expected_revision=body.expected_revision,
                 expected_hash=body.expected_hash,
             )
