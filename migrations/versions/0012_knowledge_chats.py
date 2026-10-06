@@ -8,6 +8,7 @@ Create Date: 2026-10-07 10:00:00.000000
 `knowledge_chats` は知識を AI と作る会話（持ち主だけが読む）。kind は専用の型
 `knowledge_chat_kind`（既存の `artifact_kind` は広げない）。`cost_ledger` には会話の費用を
 ユーザー・ワークスペースごとに数える NULL 可の列（workspace / uid / purpose）を足す。
+`artifact_revisions.note_source` は改訂の説明の由来（本人の申告。`chat_summary` / `manual`）。
 """
 
 from collections.abc import Sequence
@@ -71,6 +72,7 @@ def upgrade() -> None:
         "knowledge_chats",
         ["workspace", "owner_uid", "updated_at"],
     )
+    op.add_column("artifact_revisions", sa.Column("note_source", sa.String(), nullable=True))
     op.add_column("cost_ledger", sa.Column("workspace", sa.String(), nullable=True))
     op.add_column("cost_ledger", sa.Column("uid", sa.String(), nullable=True))
     op.add_column("cost_ledger", sa.Column("purpose", sa.String(), nullable=True))
@@ -81,6 +83,7 @@ def downgrade() -> None:
     op.drop_column("cost_ledger", "purpose")
     op.drop_column("cost_ledger", "uid")
     op.drop_column("cost_ledger", "workspace")
+    op.drop_column("artifact_revisions", "note_source")
     op.drop_index("ix_knowledge_chats_workspace_owner_updated", table_name="knowledge_chats")
     op.drop_table("knowledge_chats")
     _KIND.drop(op.get_bind(), checkfirst=True)

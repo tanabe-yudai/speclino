@@ -598,6 +598,8 @@ class ArtifactRevisionRecord(Base):
     approver: Mapped[str | None] = mapped_column(String, nullable=True)
     self_approved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     note: Mapped[str] = mapped_column(String, nullable=False, default="")
+    # S73: note の由来（本人の申告。会話の要約から入れたか）。note が空なら NULL
+    note_source: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

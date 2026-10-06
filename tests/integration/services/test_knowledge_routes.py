@@ -370,7 +370,7 @@ async def test_note_is_saved_with_the_draft(ctx: Ctx, engine: AsyncEngine) -> No
     )
     assert res.status_code == 200, res.text
     rev = res.json()
-    assert rev["note"] == "何を: 最初の版"
+    assert rev["note"] == "何を: 最初の版" and rev["note_source"] == "chat_summary"
     aid = rev["artifact_id"]
     res = await c.put(
         f"/api/workspaces/{slug}/artifacts/{aid}/draft",
@@ -386,7 +386,7 @@ async def test_note_is_saved_with_the_draft(ctx: Ctx, engine: AsyncEngine) -> No
     revisions = (
         await c.get(f"/api/workspaces/{slug}/artifacts/{aid}/revisions", headers=MEMBER)
     ).json()
-    assert revisions[0]["note"] == "手で書いた説明"
+    assert revisions[0]["note"] == "手で書いた説明" and revisions[0]["note_source"] == "manual"
     # 照合に外れた保存では note も変わらない
     stale = await c.put(
         f"/api/workspaces/{slug}/artifacts/{aid}/draft",

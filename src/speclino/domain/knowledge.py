@@ -11,6 +11,7 @@ from pydantic import Field, field_validator, model_validator
 
 from speclino.domain.common import IRModel
 from speclino.domain.domain_spec import DomainSpec
+from speclino.domain.knowledge_chat import NoteSource
 from speclino.domain.policy import PolicyRevision
 from speclino.domain.spec_ir import SpecIR
 from speclino.domain.uml import CompiledSpec, SpecDiagnostic
@@ -162,6 +163,8 @@ class ArtifactRevision(IRModel):
     approver: str | None = None
     self_approved: bool = False
     note: str = ""
+    # 改訂の説明の由来（S73）。本人の申告で、サーバは由来を証明しない。note が空なら None
+    note_source: NoteSource | None = None
     created_at: datetime
     approved_at: datetime | None = None
 

@@ -34,6 +34,7 @@ def _to_domain(artifact: ArtifactRecord, row: ArtifactRevisionRecord) -> Artifac
         approver=row.approver,
         self_approved=row.self_approved,
         note=row.note,
+        note_source=row.note_source,
         created_at=row.created_at,
         approved_at=row.approved_at,
     )
@@ -138,6 +139,7 @@ class ArtifactRepository:
         content_hash: str,
         author: str,
         note: str = "",
+        note_source: str | None = None,
     ) -> ArtifactRevision:
         row = ArtifactRevisionRecord(
             artifact_id=artifact_id,
@@ -148,6 +150,7 @@ class ArtifactRepository:
             author=author,
             self_approved=False,
             note=note,
+            note_source=note_source if note else None,
         )
         self._session.add(row)
         await self._session.flush()
@@ -164,6 +167,7 @@ class ArtifactRepository:
         content: dict[str, Any],
         content_hash: str,
         note: str = "",
+        note_source: str | None = None,
     ) -> ArtifactRevision | None:
         """下書きの中身と改訂の説明（note）を置き換える。draft でなくなっていれば None。"""
         stmt = (
@@ -173,7 +177,12 @@ class ArtifactRepository:
                 ArtifactRevisionRecord.revision == revision,
                 ArtifactRevisionRecord.status == "draft",
             )
-            .values(content=content, content_hash=content_hash, note=note)
+            .values(
+                content=content,
+                content_hash=content_hash,
+                note=note,
+                note_source=note_source if note else None,
+            )
             .returning(ArtifactRevisionRecord)
         )
         row = (await self._session.execute(stmt)).scalar_one_or_none()

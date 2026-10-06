@@ -234,6 +234,7 @@ async def create_draft(
         content_hash=content_hash(content),
         author=author,
         note=note,
+        note_source=note_source,
     )
     await AuditRepository(session).record(
         author,
@@ -287,7 +288,12 @@ async def update_draft(
         if draft.revision != expected_revision or draft.content_hash != expected_hash:
             raise DraftConflict(f"{artifact_id} の下書きが変わった。読み直してから保存する")
         saved = await repo.update_draft(
-            artifact_id=aid, revision=draft.revision, content=data, content_hash=digest, note=note
+            artifact_id=aid,
+            revision=draft.revision,
+            content=data,
+            content_hash=digest,
+            note=note,
+            note_source=note_source,
         )
         decision = "updated"
     else:
@@ -305,6 +311,7 @@ async def update_draft(
             content_hash=digest,
             author=author,
             note=note,
+            note_source=note_source,
         )
         decision = "created"
     if saved is None:
