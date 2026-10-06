@@ -12,6 +12,7 @@ import { useMe } from '@/hooks/useMe'
 import { paths } from '@/services/paths'
 import { pickSettingsTab, visibleSettingsTabs } from '@/services/settingsTabs'
 import type { SettingsTab } from '@/types/command'
+import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 
 const TAB_LABELS: Record<SettingsTab, string> = {
   projects: 'プロジェクト',
@@ -26,6 +27,7 @@ export function Settings() {
   const { slug } = useParams<{ slug: string }>()
   const { me, reload } = useMe()
   const [params, setParams] = useSearchParams()
+  useDocumentTitle('設定')
   if (!slug) return <ErrorState message="ワークスペースが指定されていません" />
   if (!me) return <LoadingState />
   const membership = me.workspaces.find((w) => w.slug === slug) ?? null

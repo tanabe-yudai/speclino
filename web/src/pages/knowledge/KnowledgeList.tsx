@@ -14,6 +14,7 @@ import { formatDateTime } from '@/services/format'
 import { KIND_LABELS, parseSection } from '@/services/knowledge'
 import { paths } from '@/services/paths'
 import type { ArtifactKind, ArtifactSummary, Bundle } from '@/types/knowledge'
+import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 
 /** `/w/:slug/knowledge` は仕様の一覧へ。 */
 export function KnowledgeIndex() {
@@ -26,6 +27,7 @@ export function KnowledgeList() {
   const { section } = useParams<{ section: string }>()
   const workspace = useCurrentWorkspace()
   const kind = parseSection(section)
+  useDocumentTitle(kind ? KIND_LABELS[kind] : '知識')
   if (!workspace) return <NotFoundPanel title="このワークスペースは見つかりません" />
   if (!kind) return <NotFoundPanel title="この種類の知識はありません" />
   return <ListBody key={workspace.slug} slug={workspace.slug} name={workspace.name ?? workspace.slug} kind={kind} />

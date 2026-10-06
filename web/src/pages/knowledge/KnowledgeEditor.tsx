@@ -42,6 +42,7 @@ import { paths } from '@/services/paths'
 import { countErrors } from '@/services/specPreview'
 import type { ArtifactContent, ArtifactKind, ArtifactRevision, SpecPreviewRequest } from '@/types/knowledge'
 import type { NoteState, RawProposal } from '@/types/knowledgeChat'
+import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 
 const NAME_RE = /^[a-z0-9][a-z0-9-]*$/
 
@@ -50,6 +51,7 @@ export function KnowledgeEditor() {
   const { section, id } = useParams<{ section: string; id?: string }>()
   const workspace = useCurrentWorkspace()
   const kind = parseSection(section)
+  useDocumentTitle(kind ? (id ? `${KIND_LABELS[kind]}の編集` : `新しい${KIND_LABELS[kind]}`) : '知識')
   if (!workspace) return <NotFoundPanel title="このワークスペースは見つかりません" />
   if (!kind) return <NotFoundPanel title="この種類の知識はありません" />
   return <EditorLoader key={`${workspace.slug}/${kind}/${id ?? ''}`} slug={workspace.slug} kind={kind} id={id ?? null} />

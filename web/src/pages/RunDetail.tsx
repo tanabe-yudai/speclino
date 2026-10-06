@@ -46,6 +46,8 @@ import type { FindingAttestProps } from '../types/components'
 import type { RerunResponse, ReviewRunDetail } from '../types/run'
 import type { Verdict } from '../types/finding'
 import type { AgentSupplement } from '../types/supplement'
+import { useDocumentTitle } from '@/hooks/useDocumentTitle'
+import { runPageTitle } from '@/services/documentTitle'
 
 type Tab = 'timeline' | 'markdown'
 
@@ -66,6 +68,7 @@ export function RunDetail() {
 
 function RunDetailView({ id }: { id: string }) {
   const [run, setRun] = useState<ReviewRunDetail | null>(null)
+  useDocumentTitle(run ? runPageTitle(run.repo_full_name, run.pr_number) : undefined)
   const [events, setEvents] = useState<RunEvent[] | null>(null)
   const [supplements, setSupplements] = useState<AgentSupplement[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)

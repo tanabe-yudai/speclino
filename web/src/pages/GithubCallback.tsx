@@ -7,10 +7,12 @@ import { LoadingState } from '../components/LoadingState'
 import { Panel } from '@/components/app/Panel'
 import { paths } from '@/services/paths'
 import type { RegistrationResult } from '../types/repository'
+import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 
 /** GitHub の認可から戻ってきたところ。code と state をサーバーに渡して登録を終える（S55）。 */
 export function GithubCallback() {
   const [params] = useSearchParams()
+  useDocumentTitle('GitHub の連携')
   const [result, setResult] = useState<RegistrationResult | null>(null)
   const [apiError, setApiError] = useState<string | null>(null)
   // StrictMode で effect が 2 回走っても 1 回だけ送る（state は 1 回しか使えない）

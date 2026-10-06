@@ -16,6 +16,7 @@ import { paths } from '@/services/paths'
 import { pickWorkspace } from '@/services/workspaces'
 import type { ProjectSummary } from '@/types/project'
 import type { ReviewRunSummary } from '@/types/run'
+import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 
 /** 1 つのプロジェクトのカード（健康状態・違反などの件数・最新のゲート）。 */
 function ProjectCard({ slug, project }: { slug: string; project: ProjectSummary }) {
@@ -52,6 +53,7 @@ export function Home() {
   const { slug: urlSlug } = useParams<{ slug?: string }>()
   const workspace = pickWorkspace(me?.workspaces ?? [], urlSlug)
   const slug = workspace?.slug
+  useDocumentTitle(workspace ? (workspace.name ?? workspace.slug) : undefined)
   const { projects, error: projectsError, retry: retryProjects } = useWorkspaceProjects(slug)
   // 最近の検査は API 側でこのワークスペースに絞る。slug が変わった直後は前の一覧を出さない
   const [loaded, setLoaded] = useState<{ slug: string; runs: ReviewRunSummary[] | null; error: string | null } | null>(

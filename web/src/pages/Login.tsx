@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { BrandMark } from '@/components/shell/BrandMark'
+import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 
 interface LocationState {
   from?: LoginFrom
@@ -17,6 +18,7 @@ interface LocationState {
 export function Login() {
   const { mode, user, error, signInWithPassword, enterDevMode } = useAuth()
   const location = useLocation()
+  useDocumentTitle('ログイン')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
