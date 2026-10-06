@@ -66,6 +66,8 @@ class AppState:
     a2a_handlers: dict[SkillId, SkillHandler] | None = None
     # AI の書き換え提案（S67）の LLM。None なら初回に Gemini を作る。テストで台本に差し替える
     spec_suggest_llm: TextLlm | None = None
+    # 対話による知識の作成（S73）の LLM。None なら初回に設定から作る。テストで台本に差し替える
+    knowledge_chat_llm: TextLlm | None = None
     # 承認者のログイン名 → GitHub ユーザー ID（S61）。引き先は `build_github_user_lookup`
     github_users: GitHubUserLookup = field(default_factory=PublicGitHubUserLookup)
 

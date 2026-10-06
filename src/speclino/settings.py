@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     # A2A の議論役（S59）。web に A2A の入口を出すか。本番は Terraform の環境変数で true
     a2a_enabled: bool = False
     a2a_model: str | None = None  # 未指定なら agent_model
+    # 対話による知識の作成（S73）。gemini は Vertex AI / Gemini、scripted は開発と E2E 用の台本
+    # （ネットワークを使わない決定的な応答）。env=prod では scripted を使えない
+    chat_llm: Literal["gemini", "scripted"] = "gemini"
+    chat_model: str | None = None  # 未指定なら a2a_model、それも無ければ agent_model
 
     # 認証（S13）
     auth_kind: Literal["dev", "identity_platform"] = "dev"
@@ -86,4 +90,6 @@ class Settings(BaseSettings):
         # ローカルのコードホストは手元の git をそのまま信じる（GitHub の認証も ID の照合も無い）
         if self.env == "prod" and self.code_host_kind == "local":
             raise ValueError("env=prod では code_host_kind=local を使えない")
+        if self.env == "prod" and self.chat_llm == "scripted":
+            raise ValueError("env=prod では chat_llm=scripted を使えない")
         return self
