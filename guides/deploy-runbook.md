@@ -387,7 +387,7 @@ web には GitHub App の秘密鍵を渡さない（`LazyCodeHost` により web
 ```sh
 cd "$REPO"
 # Cloud SQL Auth Proxy でローカルから流す
-cloud-sql-proxy $P:$REGION:speclino-db &
+cloud-sql-proxy ${P}:${REGION}:speclino-db &
 SPECLINO_DATABASE_URL="postgresql+asyncpg://speclino:<pw>@localhost:5432/speclino" \
   uv run alembic upgrade head
 

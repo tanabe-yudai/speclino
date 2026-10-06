@@ -103,7 +103,7 @@ gcloud run jobs logs read speclino-admin --project=$P --region=$REGION --limit=5
    Cloud SQL Auth Proxy）:
 
    ```sh
-   cloud-sql-proxy $P:$REGION:speclino-db &
+   cloud-sql-proxy ${P}:${REGION}:speclino-db &
    SPECLINO_DATABASE_URL="postgresql+asyncpg://speclino:<pw>@localhost:5432/speclino" \
      uv run speclino import-specs --workspace <slug> --project-id <project ID> \
        --author <自分の uid> --repo <checkout のパス>
