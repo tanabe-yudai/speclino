@@ -11,6 +11,7 @@ import { WORKSPACE_ROLE_LABELS } from '@/services/labels'
 import { acceptBlocker, tokenFromHash } from '@/services/members'
 import { paths } from '@/services/paths'
 import type { InvitationPreview } from '@/types/member'
+import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 
 type Loaded = { token: string; preview: InvitationPreview | null; error: string | null }
 
@@ -32,6 +33,7 @@ export function AcceptInvite() {
   const navigate = useNavigate()
   const { me, reload } = useMe()
   const token = tokenFromHash(hash)
+  useDocumentTitle('招待')
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [accepting, setAccepting] = useState(false)
   const [acceptError, setAcceptError] = useState<string | null>(null)

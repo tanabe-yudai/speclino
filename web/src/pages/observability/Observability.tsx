@@ -24,6 +24,7 @@ import {
 } from '@/services/observability'
 import { paths } from '@/services/paths'
 import type { FetchHealth, LlmStability, ProjectHealth, RulePoint, RuleTrend, TrendRun, WorkspaceHealth } from '@/types/observability'
+import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 
 const th = 'py-1.5 pr-3 font-medium whitespace-nowrap'
 const td = 'py-2 pr-3 align-top'
@@ -31,6 +32,7 @@ const td = 'py-2 pr-3 align-top'
 /** 可観測性（設計 9 章）。知識が使われ、守られているか。表示はサーバの集計 1 つだけから作る。 */
 export function Observability() {
   const workspace = useCurrentWorkspace()
+  useDocumentTitle('可観測性')
   if (!workspace) return <NotFoundPanel title="このワークスペースは見つかりません" />
   return <Body key={workspace.slug} slug={workspace.slug} name={workspace.name ?? workspace.slug} />
 }

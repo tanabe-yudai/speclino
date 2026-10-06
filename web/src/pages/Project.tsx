@@ -16,11 +16,13 @@ import { nextActions } from '@/services/nextActions'
 import { paths } from '@/services/paths'
 import type { Finding } from '@/types/finding'
 import type { ProjectOverview, ProjectSummary } from '@/types/project'
+import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 
 /** プロジェクト画面（S45、design 5 章）。URL のリポジトリを一覧から引き、中身は project ごとに作り直す。 */
 export function Project() {
   const { slug, owner, repo } = useParams<{ slug: string; owner: string; repo: string }>()
   const fullName = `${owner}/${repo}`
+  useDocumentTitle(repo)
   const { projects, error: listError, retry: retryList } = useWorkspaceProjects(slug)
   const project = projects?.find((p) => p.repo_full_name === fullName) ?? null
 

@@ -15,6 +15,7 @@ import { useCurrentWorkspace } from '@/hooks/useCurrentWorkspace'
 import { paths } from '@/services/paths'
 import { baseForDraft, removeRule, upsertRule } from '@/services/policyDraft'
 import type { AuditEntry, PoliciesView, PolicyRule, RevisionSummary } from '@/types/policy'
+import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 
 interface Loaded {
   view: PoliciesView
@@ -25,6 +26,7 @@ interface Loaded {
 /** チーム規約（S43、design 6 章）。左に下書きの帯とルール、右に改訂の履歴と監査ログ。 */
 export function Policies() {
   const workspace = useCurrentWorkspace()
+  useDocumentTitle('チーム規約')
   if (!workspace) {
     return (
       <Panel className="mx-auto max-w-xl text-center">
