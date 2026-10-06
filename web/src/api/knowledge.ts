@@ -78,11 +78,12 @@ export function approveArtifact(
   id: string,
   expectedRevision: number,
   expectedHash: string,
+  expectedNoteHash?: string,
 ): Promise<ApproveResult> {
   return apiFetch<ApproveResult>(`${art(slug, id)}/approve`, {
     method: 'POST',
     headers: json,
-    body: JSON.stringify({ expected_revision: expectedRevision, expected_hash: expectedHash }),
+    body: JSON.stringify({ expected_revision: expectedRevision, expected_hash: expectedHash, expected_note_hash: expectedNoteHash }),
   })
 }
 

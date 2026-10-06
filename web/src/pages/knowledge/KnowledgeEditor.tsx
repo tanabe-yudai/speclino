@@ -209,7 +209,7 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
         <ChatPanel
           chat={chat}
           editorText={editorText(content)}
-          currentFieldText={currentFieldText(content)}
+          beforeText={() => currentFieldText(content)}
           afterText={(raw) => proposalText(raw, content)}
           onApply={applyChatProposal}
         />

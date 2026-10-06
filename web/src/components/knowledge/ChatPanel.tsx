@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { formatDateTime } from '@/services/format'
-import { CHAT_NOTICE, MESSAGE_MAX_CHARS, errorCount, textHash } from '@/services/knowledgeChat'
+import { CHAT_NOTICE, MESSAGE_MAX_BYTES, errorCount, messageBytesLeft, textHash } from '@/services/knowledgeChat'
 import type { ChatMessage, ChatPanelProps, ChatProposal, RawProposal } from '@/types/knowledgeChat'
 
 /** 今の編集欄の本文のハッシュ（提案の土台と比べて、古い提案を反映させない）。計算中は null。 */
@@ -26,13 +26,13 @@ function useTextHash(text: string): string | null {
 function ProposalView({
   proposal,
   currentHash,
-  currentFieldText,
+  beforeText,
   afterText,
   onApply,
 }: {
   proposal: ChatProposal
   currentHash: string | null
-  currentFieldText: string
+  beforeText: (raw: RawProposal) => string
   afterText: (raw: RawProposal) => string
   onApply: (raw: RawProposal) => void
 }) {
@@ -68,7 +68,7 @@ function ProposalView({
           ))}
         </ul>
       )}
-      {showDiff && <DiffView label="提案の差分" before={currentFieldText} after={afterText(proposal.raw_proposal)} />}
+      {showDiff && <DiffView label="提案の差分" before={beforeText(proposal.raw_proposal)} after={afterText(proposal.raw_proposal)} />}
     </div>
   )
 }
@@ -94,16 +94,18 @@ function Message({ m, children }: { m: ChatMessage; children?: ReactNode }) {
  * 「エディタに反映」は編集欄だけを変える（保存・承認は人）。提案は送ったときの編集欄の本文に
  * 結び付き、本文が変わった後の古い提案は反映できない。
  */
-export function ChatPanel({ chat, editorText, currentFieldText, afterText, onApply }: ChatPanelProps) {
+export function ChatPanel({ chat, editorText, beforeText, afterText, onApply }: ChatPanelProps) {
   const [text, setText] = useState('')
   const currentHash = useTextHash(editorText)
   const current = chat.current
+  const left = messageBytesLeft(text.trim())
 
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const body = text.trim()
-    if (!body || chat.sending) return
-    chat.send(body, editorText).then(() => setText(''))
+    if (!body || chat.sending || messageBytesLeft(body) < 0) return
+    // 失敗したら本文を残す（同じ本文の再送は同じ冪等キーで送る）
+    chat.send(body, editorText).then((ok) => ok && setText(''))
   }
 
   return (
@@ -155,7 +157,7 @@ export function ChatPanel({ chat, editorText, currentFieldText, afterText, onApp
             <ol className="max-h-[36rem] space-y-2 overflow-auto" aria-label="会話" aria-live="polite">
               {current.messages.map((m) => (
                 <Message key={m.id} m={m}>
-                  {m.proposal && <ProposalView proposal={m.proposal} currentHash={currentHash} currentFieldText={currentFieldText} afterText={afterText} onApply={onApply} />}
+                  {m.proposal && <ProposalView proposal={m.proposal} currentHash={currentHash} beforeText={beforeText} afterText={afterText} onApply={onApply} />}
                 </Message>
               ))}
             </ol>
@@ -171,14 +173,18 @@ export function ChatPanel({ chat, editorText, currentFieldText, afterText, onApp
               value={text}
               onChange={(e) => setText(e.target.value)}
               rows={3}
-              maxLength={MESSAGE_MAX_CHARS}
+              aria-describedby="chat-input-left"
+              aria-invalid={left < 0 || undefined}
               placeholder="AI への発言（今の編集欄の本文も一緒に送ります）"
               disabled={chat.sending}
             />
             <div className="flex flex-wrap items-center gap-3">
-              <Button type="submit" size="sm" disabled={chat.sending || !text.trim()}>
+              <Button type="submit" size="sm" disabled={chat.sending || !text.trim() || left < 0}>
                 {chat.sending ? '返答を待っています…' : '送る'}
               </Button>
+              <span id="chat-input-left" className={cn('text-xs', left < 0 ? 'text-bad' : 'text-ink-3')}>
+                {left < 0 ? `${-left} バイト超えています（${MESSAGE_MAX_BYTES} バイトまで）` : `残り ${left} バイト`}
+              </span>
               {chat.error && (
                 <p role="alert" className="text-sm text-bad">
                   {chat.error}

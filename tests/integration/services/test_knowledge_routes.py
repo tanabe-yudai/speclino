@@ -432,3 +432,46 @@ async def test_policy_note_source_is_audited(ctx: Ctx, engine: AsyncEngine) -> N
     assert res.status_code == 200, res.text
     (detail,) = await _audit_details(engine, slug, "policy.draft")
     assert detail["note_source"] == "chat_summary"
+
+
+async def test_approval_checks_the_note_the_approver_saw(ctx: Ctx) -> None:
+    """S73: note は content_hash に入らないので、承認者が見た note のハッシュも照合する。"""
+    import hashlib
+
+    c, slug, _, _ = ctx
+    res = await c.post(
+        f"/api/workspaces/{slug}/artifacts",
+        json={"kind": "instructions", "name": "noted2", "content": _instr(), "note": "説明 A"},
+        headers=MEMBER,
+    )
+    rev = res.json()
+    seen = "sha256:" + hashlib.sha256("古い説明".encode()).hexdigest()
+    url = f"/api/workspaces/{slug}/artifacts/{rev['artifact_id']}/approve"
+    body = {"expected_revision": 1, "expected_hash": rev["content_hash"]}
+    stale = await c.post(url, json={**body, "expected_note_hash": seen}, headers=OWNER)
+    assert stale.status_code == 409
+    right = "sha256:" + hashlib.sha256("説明 A".encode()).hexdigest()
+    ok = await c.post(url, json={**body, "expected_note_hash": right}, headers=OWNER)
+    assert ok.status_code == 200, ok.text
+
+
+async def test_policy_approval_checks_the_note(ctx: Ctx) -> None:
+    import hashlib
+
+    c, slug, _, _ = ctx
+    package = {"id": "team", "version": "1", "status": "draft", "owner": slug, "rules": []}
+    await c.put(
+        f"/api/workspaces/{slug}/policies/draft",
+        json={"package": package, "note": "説明 P"},
+        headers=MEMBER,
+    )
+    view = (await c.get(f"/api/workspaces/{slug}/policies", headers=OWNER)).json()
+    body = {"expected_revision": view["draft"]["revision"], "expected_hash": view["draft_hash"]}
+    url = f"/api/workspaces/{slug}/policies/draft/approve"
+    wrong = "sha256:" + hashlib.sha256(b"x").hexdigest()
+    assert (
+        await c.post(url, json={**body, "expected_note_hash": wrong}, headers=OWNER)
+    ).status_code == 409
+    right = "sha256:" + hashlib.sha256("説明 P".encode()).hexdigest()
+    res = await c.post(url, json={**body, "expected_note_hash": right}, headers=OWNER)
+    assert res.status_code == 200, res.text

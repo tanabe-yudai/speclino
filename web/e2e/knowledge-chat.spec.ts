@@ -25,6 +25,7 @@ test('チャットで指示書を作り、要約を説明にして保存する',
 
   // 2. 話しかける → 説明と提案（差分）が返る
   await page.getByLabel('AI への発言').fill('開発の手順を AGENTS.md に書きたい')
+  await expect(page.getByText(/残り \d+ バイト/)).toBeVisible()
   await page.getByRole('button', { name: '送る' }).click()
   await expect(page.getByText('下書きの案を作りました（台本の応答）')).toBeVisible()
   await expect(page.getByRole('region', { name: '提案の差分' })).toContainText('変更の前にテストを書く')

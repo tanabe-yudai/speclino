@@ -24,9 +24,13 @@ class GeminiJsonLlm:
         model: str,
         client: genai.Client | None = None,
         max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
+        thinking_level: types.ThinkingLevel | None = None,
     ) -> None:
         self.model = model
         self.max_output_tokens = max_output_tokens
+        # 思考の量（Gemini 3 の thinking_level）。None ならモデルの既定。思考トークンも
+        # max_output_tokens に含まれるので、会話（S73）は LOW にして出力の枠を本文に残す
+        self.thinking_level = thinking_level
         self._client = client
 
     @property
@@ -44,6 +48,11 @@ class GeminiJsonLlm:
                 response_json_schema=schema,
                 temperature=0,
                 max_output_tokens=self.max_output_tokens,
+                thinking_config=(
+                    types.ThinkingConfig(thinking_level=self.thinking_level)
+                    if self.thinking_level is not None
+                    else None
+                ),
             ),
         )
         usage = response.usage_metadata
@@ -52,7 +61,11 @@ class GeminiJsonLlm:
         output_tokens = (
             (usage.candidates_token_count or 0) + (usage.thoughts_token_count or 0) if usage else 0
         )
-        return JsonGeneration(response.text or "", input_tokens, output_tokens)
+        candidates = getattr(response, "candidates", None) or []
+        truncated = (
+            bool(candidates) and candidates[0].finish_reason == types.FinishReason.MAX_TOKENS
+        )
+        return JsonGeneration(response.text or "", input_tokens, output_tokens, truncated)
 
 
 __all__ = ["DEFAULT_MAX_OUTPUT_TOKENS", "GeminiJsonLlm"]

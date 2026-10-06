@@ -14,7 +14,10 @@ import {
   noteFromSummary,
   proposalText,
   ruleEditorText,
+  idempotencyKeyFor,
+  messageBytesLeft,
   textHash,
+  utf8Bytes,
 } from './knowledgeChat'
 import type { ArtifactContent } from '@/types/knowledge'
 import type { KnowledgeChat } from '@/types/knowledgeChat'
@@ -110,5 +113,19 @@ describe('knowledgeChat', () => {
     expect(describeChatError(new ApiError(429, '今日の発言の上限に達しました', 'message_limit'))).toBe('今日の発言の上限に達しました')
     expect(describeChatError(new ApiError(404, 'x', 'chat_not_found'))).toContain('見つかりません')
     expect(describeChatError(new Error('boom'))).toContain('通信に失敗')
+  })
+
+  it('発言の上限は UTF-8 のバイト数で数える', () => {
+    expect(utf8Bytes('あa')).toBe(4)
+    expect(messageBytesLeft('a'.repeat(8192))).toBe(0)
+    expect(messageBytesLeft('あ'.repeat(2731))).toBe(-1)
+    expect(describeChatError(new ApiError(413, 'x', 'message_too_long'))).toContain('8192 バイト')
+  })
+
+  it('失敗した発言の再送は同じ本文なら同じキー', () => {
+    const retry = { text: '同じ', key: 'key-1' }
+    expect(idempotencyKeyFor('同じ', retry)).toBe('key-1')
+    expect(idempotencyKeyFor('違う', retry)).not.toBe('key-1')
+    expect(idempotencyKeyFor('同じ', null)).not.toBe('key-1')
   })
 })

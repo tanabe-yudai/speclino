@@ -118,13 +118,17 @@ function PoliciesBody({ slug, name }: { slug: string; name: string }) {
     persist(removeRule(pkg, ruleId), `${ruleId} を削除`)
   }
 
+  /** 提案を重ねる土台: 編集中のルール、編集していなければ提案と同じ ID の既存のルール（無ければ null）。 */
+  function proposalBase(raw: RawProposal): PolicyRule | null {
+    if (editing !== undefined) return ruleDraft ?? editing
+    return pkg.rules.find((r) => r.id === raw.rule?.id) ?? null
+  }
+
   /** 提案をルールの編集欄に入れる（保存はしない）。編集していなければ、同じ ID のルールか新しいルールを開く。 */
   function applyChatProposal(raw: RawProposal) {
-    const existing = pkg.rules.find((r) => r.id === raw.rule?.id) ?? null
-    const target = editing !== undefined ? editing : existing
-    const base = editing !== undefined ? (ruleDraft ?? editing ?? newRule('')) : (existing ?? newRule(''))
-    setEditing(target)
-    setSeed((s) => ({ key: (s?.key ?? 0) + 1, rule: applyRuleProposal(base, raw) }))
+    const base = proposalBase(raw)
+    if (editing === undefined) setEditing(base)
+    setSeed((s) => ({ key: (s?.key ?? 0) + 1, rule: applyRuleProposal(base ?? newRule(''), raw) }))
     toast.success('提案をルールの編集欄に反映しました（まだ保存していません）')
   }
 
@@ -147,7 +151,7 @@ function PoliciesBody({ slug, name }: { slug: string; name: string }) {
         <ChatPanel
           chat={chat}
           editorText={ruleEditorText(editingRule)}
-          currentFieldText={currentRuleText(editingRule)}
+          beforeText={(raw) => currentRuleText(proposalBase(raw))}
           afterText={(raw) => proposalText(raw)}
           onApply={applyChatProposal}
         />

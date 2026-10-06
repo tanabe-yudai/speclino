@@ -17,6 +17,8 @@ class JsonGeneration:
     text: str
     input_tokens: int = 0
     output_tokens: int = 0
+    # 出力の上限で打ち切られた（Gemini の finish_reason == MAX_TOKENS）。text は途中で切れている
+    truncated: bool = False
 
 
 class TextLlm(Protocol):

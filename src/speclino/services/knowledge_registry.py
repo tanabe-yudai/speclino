@@ -50,7 +50,7 @@ from speclino.domain.spec_ir import SpecIR
 from speclino.domain.uml import ParseResult, SpecDiagnostic
 from speclino.services import bundle_signing
 from speclino.services.check_pipeline import policy_package_hash
-from speclino.services.policy_governance import DraftConflict
+from speclino.services.policy_governance import DraftConflict, note_hash
 from speclino.services.workspaces import WorkspaceNotFound, record_denial
 from speclino.spec.loader import content_hash as _sha256
 from speclino.spec.uml import compile_spec
@@ -340,6 +340,7 @@ async def approve(
     approver: str,
     audit_factory: async_sessionmaker[AsyncSession] | None = None,
     compiler: SpecCompiler = uml_compiler,
+    expected_note_hash: str | None = None,
 ) -> Bundle:
     """承認者が見た下書き（番号と content_hash）を承認し、新しい bundle を返す。
 
@@ -371,7 +372,13 @@ async def approve(
             detail={"reason": "not_an_approver"},
         )
         raise PermissionError(f"{approver} は {workspace} の承認者ではない")
-    if draft is None or draft.revision != expected_revision or draft.content_hash != expected_hash:
+    if (
+        draft is None
+        or draft.revision != expected_revision
+        or draft.content_hash != expected_hash
+        # S73: 説明（note）は content_hash に入らないので、見た説明のハッシュも照合する（任意）
+        or (expected_note_hash is not None and note_hash(draft.note) != expected_note_hash)
+    ):
         raise DraftConflict(f"{artifact_id}@{expected_revision} は承認者が見た下書きではない")
     final = _compile(artifact.name, draft.content, compiler)
     final_hash = content_hash(final)

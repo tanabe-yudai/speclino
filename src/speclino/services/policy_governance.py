@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+import hashlib
+
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from speclino.db.repositories.audit import AuditRepository
@@ -142,6 +144,11 @@ async def save_draft(
     return updated
 
 
+def note_hash(note: str) -> str:
+    """改訂の説明（note）のハッシュ（S73）。承認者が見た説明の照合に使う（UTF-8 の sha256）。"""
+    return "sha256:" + hashlib.sha256(note.encode()).hexdigest()
+
+
 def draft_hash(revision: PolicyRevision) -> str:
     """承認者が見た下書きの内容のハッシュ（manifest の team_policy_hash と同じ計算）。"""
     return policy_package_hash(revision.package)
@@ -155,8 +162,11 @@ async def approve_draft(
     expected_hash: str,
     approver: str,
     audit_factory: async_sessionmaker[AsyncSession] | None,
+    expected_note_hash: str | None = None,
 ) -> PolicyRevision:
     """承認者が見た下書き（番号と内容のハッシュ）を承認する（S43）。
+
+    `expected_note_hash`（S73、任意）は承認者が見た説明（note）のハッシュ。違えば DraftConflict。
 
     1. 承認者でなければ、下書きの有無や番号に関係なく拒否し、監査に残す（PermissionError）
     2. 今の下書きが見たもの（番号・ハッシュ）でなければ DraftConflict
@@ -175,6 +185,7 @@ async def approve_draft(
         current is None
         or current.revision != expected_revision
         or draft_hash(current) != expected_hash
+        or (expected_note_hash is not None and note_hash(current.note) != expected_note_hash)
     ):
         raise DraftConflict(f"{team}@{expected_revision} は承認者が見た下書きではない")
     return await approve(
@@ -364,6 +375,7 @@ __all__ = [
     "create_draft",
     "draft_hash",
     "llm_scope_warnings",
+    "note_hash",
     "save_draft",
     "seed_from_package",
     "validate_package",

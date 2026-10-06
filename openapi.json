@@ -2358,6 +2358,18 @@
             "title": "Expected Hash",
             "type": "string"
           },
+          "expected_note_hash": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Note Hash"
+          },
           "expected_revision": {
             "minimum": 1.0,
             "title": "Expected Revision",
@@ -2438,6 +2450,18 @@
             "minLength": 1,
             "title": "Expected Hash",
             "type": "string"
+          },
+          "expected_note_hash": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Note Hash"
           },
           "expected_revision": {
             "minimum": 1.0,
@@ -4727,7 +4751,6 @@
                     "type": "string"
                   },
                   "text": {
-                    "maxLength": 8192,
                     "minLength": 1,
                     "title": "Text",
                     "type": "string"

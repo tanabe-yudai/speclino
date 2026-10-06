@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createChat, deleteChat, getChat, listChats, patchChat, postMessage, summarizeChat } from '@/api/knowledgeChat'
-import { chatsFor, describeChatError, newIdempotencyKey } from '@/services/knowledgeChat'
+import { ApiError } from '@/api/errors'
+import { chatsFor, describeChatError, idempotencyKeyFor } from '@/services/knowledgeChat'
 import type { ChatSummaryDraft, KnowledgeChat, KnowledgeChatController, KnowledgeChatKind, KnowledgeChatSummary } from '@/types/knowledgeChat'
 
 /**
@@ -19,6 +20,8 @@ export function useKnowledgeChat(
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [listError, setListError] = useState<string | null>(null)
+  // 失敗した発言（届いたか分からない）。同じ本文の再送は同じキーで送り、二重にしない
+  const retry = useRef<{ text: string; key: string } | null>(null)
   const alive = useRef(true)
   useEffect(() => {
     alive.current = true
@@ -70,20 +73,27 @@ export function useKnowledgeChat(
     setCurrent(null)
   }, [])
 
-  async function send(text: string, editorText: string) {
+  async function send(text: string, editorText: string): Promise<boolean> {
     setSending(true)
     setError(null)
+    const key = idempotencyKeyFor(text, retry.current)
+    retry.current = { text, key }
     try {
       const chat = current ?? (await createChat(slug, kind, artifactId))
       if (!current && alive.current) setCurrent(chat)
-      const turn = await postMessage(slug, chat.id, { text, idempotency_key: newIdempotencyKey(), editor_text: editorText })
+      const turn = await postMessage(slug, chat.id, { text, idempotency_key: key, editor_text: editorText })
+      // 結果が確定した（返答あり、または前の失敗の再送）。次の発言は新しいキーで送る
+      retry.current = null
       if (alive.current) setCurrent(turn.chat)
+      if (turn.replayed && !turn.reply && alive.current) setError('この発言は前に失敗しています。もう一度送ると新しい発言として送ります')
+      return !turn.replayed || !!turn.reply
     } catch (err) {
-      if (!alive.current) return
+      if (!alive.current) return false
       setError(describeChatError(err))
       // 失敗した発言も会話に残るので、読み直して表示を揃える
       const id = current?.id
       if (id) getChat(slug, id).then((c) => alive.current && setCurrent(c)).catch(() => undefined)
+      return false
     } finally {
       if (alive.current) setSending(false)
       refresh()
@@ -117,7 +127,15 @@ export function useKnowledgeChat(
   async function bind(target: string): Promise<KnowledgeChat | null> {
     if (!current || current.artifact_id === target) return current
     try {
-      const chat = await patchChat(slug, current.id, current.version, { artifact_id: target })
+      let chat: KnowledgeChat
+      try {
+        chat = await patchChat(slug, current.id, current.version, { artifact_id: target })
+      } catch (err) {
+        // 別の画面で版が進んでいたら、読み直して一度だけやり直す
+        if (!(err instanceof ApiError && err.code === 'version_conflict')) throw err
+        const fresh = await getChat(slug, current.id)
+        chat = await patchChat(slug, fresh.id, fresh.version, { artifact_id: target })
+      }
       if (alive.current) setCurrent(chat)
       return chat
     } catch (err) {

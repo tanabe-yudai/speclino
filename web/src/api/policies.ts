@@ -35,10 +35,13 @@ export async function approveDraft(
   slug: string,
   expectedRevision: number,
   expectedHash: string,
+  expectedNoteHash?: string,
 ): Promise<PolicyRevision> {
   if (USE_MOCK) return { ...(MOCK_POLICIES.draft as PolicyRevision), status: 'active' }
   return apiFetch<PolicyRevision>(`${base(slug)}/draft/approve`, {
-    method: 'POST', headers: json, body: JSON.stringify({ expected_revision: expectedRevision, expected_hash: expectedHash }),
+    method: 'POST',
+    headers: json,
+    body: JSON.stringify({ expected_revision: expectedRevision, expected_hash: expectedHash, expected_note_hash: expectedNoteHash }),
   })
 }
 

@@ -23,6 +23,7 @@ NoteSource = Literal["manual", "chat_summary"]
 ChatErrorCode = Literal[
     "chat_not_found",
     "invalid_request",
+    "message_too_long",
     "invalid_binding",
     "version_conflict",
     "chat_full",

@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -64,8 +65,11 @@ from speclino.services.knowledge_chat_proposal import build_proposal, response_s
 logger = logging.getLogger(__name__)
 
 LLM_TIMEOUT_SECONDS = 120.0
-# 会話の 1 回の出力トークンの上限（設計 C7。費用の予約もこの値で見積もる）
-CHAT_OUTPUT_TOKENS = 4096
+# 会話の 1 回の出力トークンの上限（設計 C7、思考を含む。費用の予約もこの値で見積もる）。
+# 思考は LOW にして、枠を本文に残す（api/routes/knowledge_chat.py の配線）
+CHAT_OUTPUT_TOKENS = 16384
+# 出力の上限で返答が切れたとき、提案を省いて説明だけで確定し、利用者にこう伝える
+TRUNCATED_NOTICE = "本文が長いため提案を省きました。範囲を絞って頼んでください"
 # これより古い保留の発言は、処理が途中で止まったものとして扱う（再送を永久に断らない）
 PENDING_STALE_AFTER = timedelta(minutes=10)
 _EXPLANATION_MAX_CHARS = 16_000
@@ -298,7 +302,7 @@ def _replay(chat: KnowledgeChat, key: str) -> ChatTurn | None:
     user = next((m for m in chat.messages if m.role == "user" and m.idempotency_key == key), None)
     if user is None:
         return None
-    if user.status == "pending" and not _is_stale(user):
+    if user.status == "pending":
         raise ChatError("message_pending")
     reply = next(
         (m for m in chat.messages if m.role == "assistant" and m.idempotency_key == key), None
@@ -338,6 +342,15 @@ async def _begin_turn(
         chat = await repo.get(workspace, owner, cid, for_update=True)
         if chat is None:
             raise ChatError("chat_not_found")
+        if any(_is_stale(m) for m in chat.messages):
+            # 処理が途中で止まった発言（10 分を過ぎた保留）は失敗に直してから進める
+            fixed = [
+                m.model_copy(update={"status": "failed"}) if _is_stale(m) else m
+                for m in chat.messages
+            ]
+            saved = await repo.save_messages(workspace, owner, cid, fixed)
+            assert saved is not None
+            chat = saved
         replayed = _replay(chat, key)
         if replayed is not None:
             return replayed
@@ -423,8 +436,12 @@ async def _call_llm(
     prompt: str,
     schema: dict[str, Any],
     purpose: ChatPurpose,
-) -> str:
-    """予約 → LLM → 精算。断ったとき・失敗したときは `ChatError`（固定のコード）。"""
+) -> JsonGeneration:
+    """予約 → LLM → 精算。断ったとき・失敗したときは `ChatError`（固定のコード）。
+
+    精算: 成功は実費。事業者の例外は 0（課金されない前提）。タイムアウト・取り消しは
+    LLM が処理を続けて課金されうるので、予約した最悪の額のまま残す（過少に数えない）。
+    """
     worst = deps.cost_guard.estimate(deps.llm.model, len(prompt.encode()), CHAT_OUTPUT_TOKENS)
     reservation, refusal = await deps.budget.reserve(
         deps.today(), deps.llm.model, worst, workspace=workspace, uid=owner, purpose=purpose
@@ -432,22 +449,63 @@ async def _call_llm(
     if reservation is None:
         raise ChatError(refusal or "cost_limit")
     gen: JsonGeneration | None = None
+    keep_worst = False
     try:
         async with asyncio.timeout(LLM_TIMEOUT_SECONDS):
             gen = await deps.llm.generate_json(prompt, schema)
+    except TimeoutError:
+        keep_worst = True
+        logger.warning("会話の AI の呼出しが時間切れになった")
+        raise ChatError("chat_failed") from None
+    except asyncio.CancelledError:
+        keep_worst = True
+        raise
     except Exception as e:
         # 事業者の例外の文はプロンプトや入力を含みうるので、型名だけを残し、連鎖もさせない
         logger.warning("会話の AI の呼出しに失敗した: %s", type(e).__name__)
         raise ChatError("chat_failed") from None
     finally:
-        await asyncio.shield(_settle_quietly(deps.budget, reservation, gen))
-    return gen.text
+        if not keep_worst:  # 最悪の額のまま残すときは精算の行を足さない
+            await asyncio.shield(_settle_quietly(deps.budget, reservation, gen))
+    return gen
 
 
-def _parse_reply(raw: str) -> tuple[str, Any]:
+def _cut_off(raw: str, err: json.JSONDecodeError) -> bool:
+    """JSON が途中で切れている（壊れているのではなく、末尾まで読んで足りない）。"""
+    body = raw.rstrip()
+    # 文字列の途中で終わった（Unterminated string）か、末尾で次の値・区切りを待っている
+    return body.startswith("{") and (
+        err.msg.startswith("Unterminated string") or err.pos >= len(body) - 1
+    )
+
+
+def _partial_explanation(raw: str) -> str:
+    """切れた応答から、最後まで書かれた説明だけを取り出す（無ければ空）。"""
+    m = re.search(r'"explanation"\s*:\s*', raw)
+    if m is None:
+        return ""
+    try:
+        value, _ = json.JSONDecoder().raw_decode(raw, m.end())
+    except json.JSONDecodeError:
+        return ""
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _truncated_reply(raw: str) -> tuple[str, Any]:
+    """出力の上限で切れた返答: 提案を省き、説明（あれば）と知らせだけで確定する。"""
+    explanation = _partial_explanation(raw)[:_EXPLANATION_MAX_CHARS]
+    return (f"{explanation}\n\n{TRUNCATED_NOTICE}" if explanation else TRUNCATED_NOTICE), None
+
+
+def _parse_reply(gen: JsonGeneration) -> tuple[str, Any]:
+    raw = gen.text
+    if gen.truncated:
+        return _truncated_reply(raw)
     try:
         data = json.loads(raw)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        if _cut_off(raw, e):
+            return _truncated_reply(raw)
         raise ChatError("chat_failed") from None
     if not isinstance(data, dict):
         raise ChatError("chat_failed")
@@ -468,8 +526,10 @@ async def post_message(
     editor_text: str = "",
 ) -> ChatTurn:
     """発言を足し、AI の返答（説明＋提案）を保存して返す（C8）。"""
-    if not text.strip() or len(text.encode()) > MESSAGE_MAX_BYTES:
+    if not text.strip():
         raise ChatError("invalid_request")
+    if len(text.encode()) > MESSAGE_MAX_BYTES:
+        raise ChatError("message_too_long")
     if len(editor_text.encode()) > EDITOR_TEXT_MAX_BYTES:
         raise ChatError("input_too_large")
     cid = _chat_id(chat_id)
@@ -502,7 +562,7 @@ async def post_message(
             names=ctx.names,
             history=ctx.chat.messages,
         )
-        raw = await _call_llm(
+        gen = await _call_llm(
             deps,
             workspace=workspace,
             owner=owner,
@@ -510,7 +570,7 @@ async def post_message(
             schema=response_schema(ctx.chat.kind),
             purpose="chat_message",
         )
-        explanation, proposal_data = _parse_reply(raw)
+        explanation, proposal_data = _parse_reply(gen)
         proposal: ChatProposal | None = await build_proposal(
             ctx.chat.kind,
             proposal_data,
@@ -538,13 +598,16 @@ async def post_message(
     )
     if len(reply.model_dump_json().encode()) > REPLY_MAX_BYTES:
         raise await fail("chat_failed")
-    turn = await _finish_turn(
-        deps,
-        workspace=workspace,
-        owner=owner,
-        cid=cid,
-        message_id=ctx.message_id,
-        reply=reply,
+    # 確定は取り消されても終わらせる（保留のまま残さない）
+    turn = await asyncio.shield(
+        _finish_turn(
+            deps,
+            workspace=workspace,
+            owner=owner,
+            cid=cid,
+            message_id=ctx.message_id,
+            reply=reply,
+        )
     )
     if turn is None:  # 途中で会話が消された: 応答を捨て、行を復活させない
         raise ChatError("chat_not_found")
@@ -565,7 +628,7 @@ async def summarize(
         chat = await get_chat(s, workspace=workspace, owner=owner, chat_id=chat_id)
     if not any(m.role == "user" and m.status == "done" for m in chat.messages):
         raise ChatError("nothing_to_summarize")
-    raw = await _call_llm(
+    gen = await _call_llm(
         deps,
         workspace=workspace,
         owner=owner,
@@ -573,6 +636,7 @@ async def summarize(
         schema=SUMMARY_SCHEMA,
         purpose="chat_summary",
     )
+    raw = gen.text
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:

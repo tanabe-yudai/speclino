@@ -22,7 +22,22 @@ import type { PolicyRule } from '@/types/policy'
 export const CHAT_NOTICE = '会話は Google の Vertex AI（Gemini）に送られ、SpecLino の運用者は技術的に読めます。ほかのメンバーには見えません'
 
 export const NOTE_MAX_CHARS = 500
-export const MESSAGE_MAX_CHARS = 4000
+/** 1 回の発言の上限（UTF-8 のバイト数。サーバの MESSAGE_MAX_BYTES と同じ） */
+export const MESSAGE_MAX_BYTES = 8192
+
+export function utf8Bytes(text: string): number {
+  return new TextEncoder().encode(text).length
+}
+
+/** 発言の残りのバイト数（負なら超えている）。 */
+export function messageBytesLeft(text: string): number {
+  return MESSAGE_MAX_BYTES - utf8Bytes(text)
+}
+
+/** 失敗した発言の再送: 同じ本文なら同じ冪等キー（届いていた発言を二重にしない）。 */
+export function idempotencyKeyFor(text: string, retry: { text: string; key: string } | null): string {
+  return retry && retry.text === text ? retry.key : newIdempotencyKey()
+}
 
 /** キーの順に依らない JSON（提案の土台の直列化。送る文字列とハッシュを取る文字列を同じにする）。 */
 export function canonicalJson(v: unknown): string {
@@ -167,6 +182,7 @@ export function chatsFor(chats: KnowledgeChatSummary[], artifactId: string | nul
 export function describeChatError(err: unknown): string {
   if (err instanceof ApiError) {
     if (err.status === 404 && err.code === 'chat_not_found') return '会話が見つかりません（消された可能性があります）'
+    if (err.code === 'message_too_long') return `発言が長すぎます。${MESSAGE_MAX_BYTES} バイト（日本語でおよそ 2,700 文字）以内にしてください`
     return err.message
   }
   return '通信に失敗しました。時間をおいて、もう一度試してください'

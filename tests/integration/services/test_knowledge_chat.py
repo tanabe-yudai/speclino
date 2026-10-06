@@ -12,6 +12,7 @@ import os
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -21,6 +22,8 @@ from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from speclino.db.repositories.cost_ledger import CostLedgerRepository
+from speclino.db.repositories.knowledge_chats import KnowledgeChatRepository
+from speclino.domain.knowledge_chat import ChatMessage
 from speclino.ports.text_llm import JsonGeneration
 from speclino.services import knowledge_chat as kc
 from speclino.services import members
@@ -47,6 +50,7 @@ class FakeLlm:
 
     def __init__(self, response: str = REPLY) -> None:
         self.response = response
+        self.truncated = False
         self.prompts: list[str] = []
         self.hook: Callable[[], Awaitable[None]] | None = None
 
@@ -54,7 +58,7 @@ class FakeLlm:
         self.prompts.append(prompt)
         if self.hook is not None:
             await self.hook()
-        return JsonGeneration(self.response, 1000, 100)
+        return JsonGeneration(self.response, 1000, 100, self.truncated)
 
 
 @dataclass
@@ -410,3 +414,89 @@ async def test_member_removal_deletes_their_chats(ctx: Ctx) -> None:
             )
         ).scalar_one()
     assert json.loads(detail) == {"chat_id": None, "message_count": 1}
+
+
+# ------------------------------------------------------------------ fix round 1
+async def test_reply_cut_at_max_tokens_is_saved_without_proposal(ctx: Ctx) -> None:
+    """出力の上限で切れた返答は、提案を省いて説明と知らせだけで確定する。"""
+    cid = await _create(ctx)
+    ctx.llm.response = '{"explanation": "見出しを足します", "proposal": {"body": "# 長い'
+    ctx.llm.truncated = True
+    turn = await _send(ctx, cid)
+    assert turn.reply is not None and turn.reply.proposal is None
+    assert turn.reply.text == f"見出しを足します\n\n{kc.TRUNCATED_NOTICE}"
+    assert [m.status for m in turn.chat.messages] == ["done", "done"]
+
+
+async def test_cut_json_without_flag_is_also_truncation(ctx: Ctx) -> None:
+    cid = await _create(ctx)
+    ctx.llm.response = '{"explanation": "途中で'
+    turn = await _send(ctx, cid)
+    assert turn.reply is not None and turn.reply.text == kc.TRUNCATED_NOTICE
+
+
+async def test_reservation_uses_16k_output_tokens(ctx: Ctx) -> None:
+    seen: list[Decimal] = []
+    budget = ctx.deps.budget
+    real = budget.reserve
+
+    async def spy(*args: Any, **kw: Any) -> Any:
+        seen.append(args[2])
+        return await real(*args, **kw)
+
+    budget.reserve = spy  # type: ignore[method-assign]
+    cid = await _create(ctx)
+    await _send(ctx, cid)
+    prompt_bytes = len(ctx.llm.prompts[0].encode())
+    assert kc.CHAT_OUTPUT_TOKENS == 16384
+    assert seen == [Decimal(prompt_bytes + 16384) / Decimal(1_000_000)]
+
+
+async def test_timeout_keeps_the_worst_case_reservation(
+    ctx: Ctx, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(kc, "LLM_TIMEOUT_SECONDS", 0.05)
+
+    async def slow() -> None:
+        await asyncio.sleep(1)
+
+    ctx.llm.hook = slow
+    cid = await _create(ctx)
+    with pytest.raises(kc.ChatError) as e:
+        await _send(ctx, cid)
+    assert e.value.code == "chat_failed"
+    async with ctx.deps.session_factory() as s:
+        used = await CostLedgerRepository(s).total_for_day(ctx.deps.today(), uid="alice")
+    assert used > Decimal("0.016")  # 出力 16,384 トークン分の最悪の額が残る（過少に数えない）
+
+
+async def test_stale_pending_is_failed_before_processing(ctx: Ctx) -> None:
+    cid = await _create(ctx)
+    old = datetime.now(UTC) - kc.PENDING_STALE_AFTER - timedelta(seconds=1)
+    stuck = ChatMessage(
+        id="stuck",
+        role="user",
+        text="止まった発言",
+        idempotency_key="key-stuck",
+        status="pending",
+        created_at=old,
+    )
+    async with ctx.deps.session_factory() as s, s.begin():
+        await KnowledgeChatRepository(s).save_messages(ctx.slug, "alice", uuid.UUID(cid), [stuck])
+    replay = await _send(ctx, cid, key="key-stuck")
+    assert replay.replayed and replay.reply is None and ctx.llm.prompts == []
+    assert [m.status for m in replay.chat.messages] == ["failed"]
+
+
+async def test_message_too_long_is_its_own_code(ctx: Ctx) -> None:
+    cid = await _create(ctx)
+    with pytest.raises(kc.ChatError) as e:
+        await kc.post_message(
+            ctx.deps,
+            workspace=ctx.slug,
+            owner="alice",
+            chat_id=cid,
+            text="あ" * 2731,  # 8,193 バイト
+            idempotency_key="key-long",
+        )
+    assert e.value.code == "message_too_long"

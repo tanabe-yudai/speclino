@@ -93,8 +93,8 @@ export interface ChatPanelProps {
   chat: KnowledgeChatController
   /** 今の編集欄の本文（提案の土台。サーバに送り、ハッシュで古さを見る） */
   editorText: string
-  /** 差分の「前」に出す、今の編集欄の該当する欄 */
-  currentFieldText: string
+  /** 差分の「前」: 提案が置き換える今の欄（規約は、提案の ID の既存のルールのこともある） */
+  beforeText: (proposal: RawProposal) => string
   /** 差分の「後」: 提案を重ねた欄（skill の files が無ければ今の付属ファイルのまま） */
   afterText: (proposal: RawProposal) => string
   onApply: (proposal: RawProposal) => void
@@ -108,7 +108,8 @@ export interface KnowledgeChatController {
   listError: string | null
   select: (id: string) => void
   startNew: () => void
-  send: (text: string, editorText: string) => Promise<void>
+  /** 返答（または確定した結果）を得たら true。失敗したら本文を残して再送できるように false */
+  send: (text: string, editorText: string) => Promise<boolean>
   remove: (id: string) => Promise<void>
   summarize: () => Promise<ChatSummaryDraft | null>
   bind: (artifactId: string) => Promise<KnowledgeChat | null>

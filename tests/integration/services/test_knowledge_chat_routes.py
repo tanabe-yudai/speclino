@@ -239,7 +239,6 @@ async def _audit_text(ctx: Ctx) -> str:
     [
         _msg(text=SECRET, extra_field=SECRET),
         _msg(text=SECRET, key=f"bad key {SECRET}"),
-        _msg(text=SECRET * 1000),
         {"text": 12, "idempotency_key": SECRET},
     ],
 )
@@ -317,3 +316,42 @@ async def test_retry_with_same_key_returns_previous_result(ctx: Ctx) -> None:
     again = await ctx.client.post(url, json=_msg(), headers=ALICE)
     assert again.status_code == 200 and again.json()["replayed"] is True
     assert again.json()["reply"] == first.json()["reply"] and len(ctx.llm.prompts) == 1
+
+
+async def test_message_too_long_is_413_without_echo(ctx: Ctx) -> None:
+    chat = await _create(ctx)
+    res = await ctx.client.post(
+        _url(ctx.slug, f"/{chat['id']}/messages"), json=_msg(text=SECRET * 1000), headers=ALICE
+    )
+    assert res.status_code == 413
+    assert res.json()["error"]["code"] == "message_too_long" and SECRET not in res.text
+    assert ctx.llm.prompts == []
+
+
+async def test_create_rechecks_membership_inside_the_transaction(
+    ctx: Ctx, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """body を読む間にメンバーから外されたら、会話を作らない。"""
+    from speclino.api.routes import knowledge_chat as route
+
+    real = route._read_body
+
+    async def remove_then_read(request: Any, model: Any) -> Any:
+        async with ctx.engine.begin() as conn:
+            await conn.execute(
+                sql_text("DELETE FROM workspace_members WHERE team = :t AND uid = 'alice'"),
+                {"t": ctx.slug},
+            )
+        return await real(request, model)
+
+    monkeypatch.setattr(route, "_read_body", remove_then_read)
+    res = await ctx.client.post(_url(ctx.slug), json={"kind": "spec"}, headers=ALICE)
+    assert res.status_code == 404
+    async with ctx.engine.connect() as conn:
+        n = (
+            await conn.execute(
+                sql_text("SELECT count(*) FROM knowledge_chats WHERE workspace = :t"),
+                {"t": ctx.slug},
+            )
+        ).scalar_one()
+    assert n == 0

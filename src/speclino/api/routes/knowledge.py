@@ -56,6 +56,8 @@ class ApproveRequest(BaseModel):
 
     expected_revision: int = Field(ge=1)
     expected_hash: str = Field(min_length=1, max_length=200)
+    # 承認者が見た説明（note）のハッシュ（S73、任意）。違えば 409
+    expected_note_hash: str | None = Field(default=None, max_length=200)
 
 
 def _not_found(e: Exception) -> Exception:
@@ -175,6 +177,7 @@ async def approve(
                 expected_hash=body.expected_hash,
                 approver=user.uid,
                 audit_factory=state.session_factory,
+                expected_note_hash=body.expected_note_hash,
             )
             revision = await kr.revision_at(s, artifact_id, body.expected_revision)
     except (WorkspaceNotFound, kr.ArtifactNotFound) as e:

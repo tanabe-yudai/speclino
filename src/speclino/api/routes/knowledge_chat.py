@@ -13,6 +13,7 @@ import logging
 from typing import Any, NoReturn, get_args
 
 from fastapi import APIRouter, Depends, Request
+from google.genai import types
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from speclino.adapters.llm.chat_scripted import ScriptedChatLlm
@@ -46,6 +47,7 @@ MAX_BODY_BYTES = 256 * 1024
 ERRORS: dict[ChatErrorCode, tuple[int, str]] = {
     "chat_not_found": (404, "会話が見つかりません"),
     "invalid_request": (422, "リクエストの形式が正しくありません"),
+    "message_too_long": (413, "発言が長すぎます（8KB まで）"),
     "invalid_binding": (422, "この会話に結び付けられない知識です"),
     "version_conflict": (409, "会話が別の画面で変わりました。読み直してください"),
     "chat_full": (409, "この会話はいっぱいです。新しい会話を始めてください"),
@@ -79,7 +81,8 @@ class PatchChatRequest(BaseModel):
 class MessageRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    text: str = Field(min_length=1, max_length=8 * 1024)
+    # 長さ（UTF-8 で 8KB）はサービスで数え、固定のコード message_too_long で断る
+    text: str = Field(min_length=1)
     idempotency_key: str = Field(pattern=IDEMPOTENCY_KEY_PATTERN)
     editor_text: str = Field(default="", max_length=64 * 1024)
 
@@ -138,7 +141,12 @@ def _llm(state: AppState) -> TextLlm:
             state.knowledge_chat_llm = ScriptedChatLlm()
         else:
             model = settings.chat_model or settings.a2a_model or settings.agent_model
-            state.knowledge_chat_llm = GeminiJsonLlm(model, max_output_tokens=kc.CHAT_OUTPUT_TOKENS)
+            # 思考は LOW にして、出力の枠（思考を含む）を返答の本文に残す
+            state.knowledge_chat_llm = GeminiJsonLlm(
+                model,
+                max_output_tokens=kc.CHAT_OUTPUT_TOKENS,
+                thinking_level=types.ThinkingLevel.LOW,
+            )
     return state.knowledge_chat_llm
 
 
@@ -190,6 +198,8 @@ async def create_chat(
     body = await _read_body(request, CreateChatRequest)
     try:
         async with state.session_factory() as s, s.begin():
+            # body を読む間に外されていないか、作るトランザクションの中で確かめ直す
+            await require_member(s, slug, user.uid)
             chat = await kc.create_chat(
                 s,
                 workspace=slug,
@@ -198,6 +208,8 @@ async def create_chat(
                 artifact_id=body.artifact_id,
                 title=body.title,
             )
+    except WorkspaceNotFound:
+        raise api_error(404, "workspace_not_found", "ワークスペースが無い") from None
     except kc.ChatError as e:
         _raise(e.code)
     except Exception as e:  # noqa: BLE001
