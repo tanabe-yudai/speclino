@@ -8,6 +8,7 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { useCurrentWorkspace } from '@/hooks/useCurrentWorkspace'
 import { useMe } from '@/hooks/useMe'
 import { approvalState, describeKnowledgeError } from '@/services/knowledge'
+import { textHash } from '@/services/knowledgeChat'
 import type { ApprovalPanelProps } from '@/types/specEditor'
 
 /**
@@ -29,7 +30,9 @@ export function ApprovalPanel({ slug, draft, dirty, previewErrors, previewPendin
     setConfirming(false)
     setApproving(true)
     setError(null)
-    approveArtifact(slug, draft.artifact_id, draft.revision, draft.content_hash)
+    // 表示した説明（note）のハッシュも送る。説明だけが変わっていても、見たものでなければ 409
+    textHash(draft.note)
+      .then((noteHash) => approveArtifact(slug, draft.artifact_id, draft.revision, draft.content_hash, noteHash))
       .then((result) => {
         const self = result.revision.self_approved ? '（自己承認）' : ''
         toast.success(`改訂 ${result.revision.revision} を承認しました${self}。bundle の世代 ${result.bundle.generation}`)
@@ -57,6 +60,8 @@ export function ApprovalPanel({ slug, draft, dirty, previewErrors, previewPendin
         <dd className="font-mono">{draft.revision}</dd>
         <dt className="text-ink-3">content_hash</dt>
         <dd className="font-mono break-all">{draft.content_hash}</dd>
+        <dt className="text-ink-3">変更の説明</dt>
+        <dd className="break-words whitespace-pre-wrap">{draft.note || '（なし）'}</dd>
       </dl>
       {!state.visible && <p className="text-sm text-ink-3">承認できるのは owner / approver です。</p>}
       {state.visible && (

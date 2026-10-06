@@ -21,6 +21,7 @@ from speclino.api.routes import (
     internal_github,
     internal_mcp,
     knowledge,
+    knowledge_chat,
     mcp_tokens,
     me,
     members,
@@ -108,6 +109,7 @@ def create_app(settings: Settings, state: AppState | None = None) -> FastAPI:
         app.include_router(projects.router)
         app.include_router(policies.router)
         app.include_router(knowledge.router)
+        app.include_router(knowledge_chat.router)
         app.include_router(observability.router)
         app.include_router(attestations.router)
         app.include_router(spec_preview.router)

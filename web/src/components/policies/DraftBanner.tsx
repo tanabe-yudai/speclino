@@ -15,6 +15,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { POLICY_LEVEL_LABELS, RULE_FIELD_LABELS } from '@/services/labels'
+import { textHash } from '@/services/knowledgeChat'
 import { diffPackages } from '@/services/policyDraft'
 import type { PoliciesView, RuleChange } from '@/types/policy'
 
@@ -50,7 +51,10 @@ export function DraftBanner({ slug, view, onChanged }: { slug: string; view: Pol
   function approve() {
     if (!draft || !view.draft_hash) return
     setConfirming(false)
-    approveDraft(slug, draft.revision, view.draft_hash)
+    const draftHash = view.draft_hash
+    // 表示した説明（note）のハッシュも送る（S73）
+    textHash(draft.note)
+      .then((noteHash) => approveDraft(slug, draft.revision, draftHash, noteHash))
       .then(() => {
         toast.success(`改訂 ${draft.revision} を有効にしました`)
         onChanged()

@@ -44,12 +44,13 @@ from speclino.domain.knowledge import (
     SkillContent,
     SpecContent,
 )
+from speclino.domain.knowledge_chat import NoteSource
 from speclino.domain.knowledge_view import ArtifactSummary
 from speclino.domain.spec_ir import SpecIR
 from speclino.domain.uml import ParseResult, SpecDiagnostic
 from speclino.services import bundle_signing
 from speclino.services.check_pipeline import policy_package_hash
-from speclino.services.policy_governance import DraftConflict
+from speclino.services.policy_governance import DraftConflict, note_hash
 from speclino.services.workspaces import WorkspaceNotFound, record_denial
 from speclino.spec.loader import content_hash as _sha256
 from speclino.spec.uml import compile_spec
@@ -207,8 +208,14 @@ async def create_draft(
     name: str,
     content: ArtifactContent,
     author: str,
+    note: str = "",
+    note_source: NoteSource = "manual",
 ) -> ArtifactRevision:
-    """新しい artifact と、その改訂 1（draft）を作る。同じ名前があれば `ArtifactExists`。"""
+    """新しい artifact と、その改訂 1（draft）を作る。同じ名前があれば `ArtifactExists`。
+
+    `note` は改訂の説明（S73）。`note_source` は本人の申告（会話の要約から入れたか）で、監査に
+    残すだけ（サーバは由来を証明しない）。
+    """
     if content.kind != kind:
         raise InvalidArtifact(f"kind {kind} と内容の kind {content.kind} が違う")
     _reject_client_derived(content)
@@ -226,13 +233,20 @@ async def create_draft(
         content=content.model_dump(mode="json"),
         content_hash=content_hash(content),
         author=author,
+        note=note,
+        note_source=note_source,
     )
     await AuditRepository(session).record(
         author,
         _DRAFT,
         _target(workspace, revision.artifact_id, 1),
         "created",
-        {"kind": kind, "name": name, "content_hash": revision.content_hash},
+        {
+            "kind": kind,
+            "name": name,
+            "content_hash": revision.content_hash,
+            "note_source": note_source,
+        },
     )
     return revision
 
@@ -245,8 +259,12 @@ async def update_draft(
     expected_hash: str,
     content: ArtifactContent,
     author: str,
+    note: str = "",
+    note_source: NoteSource = "manual",
 ) -> ArtifactRevision:
     """下書きを保存する。下書きがあれば置き換え、無ければ最新の改訂の次の番号で作る。
+
+    `note`（改訂の説明、S73）は内容と同じ照合の中で一緒に置き換える。
 
     `expected_revision` / `expected_hash` は保存する人が前提にした改訂の番号と content_hash
     （下書きがあればその下書き、無ければ今の最新＝active）。違えば `DraftConflict`（古い画面から
@@ -270,7 +288,12 @@ async def update_draft(
         if draft.revision != expected_revision or draft.content_hash != expected_hash:
             raise DraftConflict(f"{artifact_id} の下書きが変わった。読み直してから保存する")
         saved = await repo.update_draft(
-            artifact_id=aid, revision=draft.revision, content=data, content_hash=digest
+            artifact_id=aid,
+            revision=draft.revision,
+            content=data,
+            content_hash=digest,
+            note=note,
+            note_source=note_source,
         )
         decision = "updated"
     else:
@@ -287,6 +310,8 @@ async def update_draft(
             content=data,
             content_hash=digest,
             author=author,
+            note=note,
+            note_source=note_source,
         )
         decision = "created"
     if saved is None:
@@ -296,7 +321,12 @@ async def update_draft(
         _DRAFT,
         _target(artifact.workspace, artifact_id, saved.revision),
         decision,
-        {"kind": artifact.kind, "name": artifact.name, "content_hash": saved.content_hash},
+        {
+            "kind": artifact.kind,
+            "name": artifact.name,
+            "content_hash": saved.content_hash,
+            "note_source": note_source,
+        },
     )
     return saved
 
@@ -310,6 +340,7 @@ async def approve(
     approver: str,
     audit_factory: async_sessionmaker[AsyncSession] | None = None,
     compiler: SpecCompiler = uml_compiler,
+    expected_note_hash: str | None = None,
 ) -> Bundle:
     """承認者が見た下書き（番号と content_hash）を承認し、新しい bundle を返す。
 
@@ -341,7 +372,13 @@ async def approve(
             detail={"reason": "not_an_approver"},
         )
         raise PermissionError(f"{approver} は {workspace} の承認者ではない")
-    if draft is None or draft.revision != expected_revision or draft.content_hash != expected_hash:
+    if (
+        draft is None
+        or draft.revision != expected_revision
+        or draft.content_hash != expected_hash
+        # S73: 説明（note）は content_hash に入らないので、見た説明のハッシュも照合する（任意）
+        or (expected_note_hash is not None and note_hash(draft.note) != expected_note_hash)
+    ):
         raise DraftConflict(f"{artifact_id}@{expected_revision} は承認者が見た下書きではない")
     final = _compile(artifact.name, draft.content, compiler)
     final_hash = content_hash(final)

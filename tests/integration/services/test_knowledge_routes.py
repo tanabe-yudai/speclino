@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import uuid
 from collections.abc import AsyncIterator
@@ -337,3 +338,140 @@ async def test_policy_activation_conflict_is_409_and_seed_explains(
         headers=OWNER,
     )
     assert res.status_code == 409 and res.json()["error"]["code"] == "bundle_conflict", res.text
+
+
+async def _audit_details(engine: AsyncEngine, slug: str, action: str) -> list[dict[str, object]]:
+    async with engine.connect() as conn:
+        rows = (
+            await conn.execute(
+                text(
+                    "SELECT detail::text FROM audit_events WHERE action = :a AND target LIKE :t "
+                    "ORDER BY ts"
+                ),
+                {"a": action, "t": f"{slug}%"},
+            )
+        ).all()
+    return [json.loads(r[0]) for r in rows]
+
+
+async def test_note_is_saved_with_the_draft(ctx: Ctx, engine: AsyncEngine) -> None:
+    """S73: 改訂の note（500 文字まで）。要約から入れたかは本人の申告として監査に残す。"""
+    c, slug, _, _ = ctx
+    res = await c.post(
+        f"/api/workspaces/{slug}/artifacts",
+        json={
+            "kind": "instructions",
+            "name": "noted",
+            "content": _instr(),
+            "note": "何を: 最初の版",
+            "note_source": "chat_summary",
+        },
+        headers=MEMBER,
+    )
+    assert res.status_code == 200, res.text
+    rev = res.json()
+    assert rev["note"] == "何を: 最初の版" and rev["note_source"] == "chat_summary"
+    aid = rev["artifact_id"]
+    res = await c.put(
+        f"/api/workspaces/{slug}/artifacts/{aid}/draft",
+        json={
+            "expected_revision": 1,
+            "expected_hash": rev["content_hash"],
+            "content": _instr("新しい本文"),
+            "note": "手で書いた説明",
+        },
+        headers=MEMBER,
+    )
+    assert res.status_code == 200, res.text
+    revisions = (
+        await c.get(f"/api/workspaces/{slug}/artifacts/{aid}/revisions", headers=MEMBER)
+    ).json()
+    assert revisions[0]["note"] == "手で書いた説明" and revisions[0]["note_source"] == "manual"
+    # 照合に外れた保存では note も変わらない
+    stale = await c.put(
+        f"/api/workspaces/{slug}/artifacts/{aid}/draft",
+        json={
+            "expected_revision": 1,
+            "expected_hash": rev["content_hash"],
+            "content": _instr("別の本文"),
+            "note": "上書き",
+        },
+        headers=MEMBER,
+    )
+    assert stale.status_code == 409
+    too_long = await c.put(
+        f"/api/workspaces/{slug}/artifacts/{aid}/draft",
+        json={
+            "expected_revision": 1,
+            "expected_hash": res.json()["content_hash"],
+            "content": _instr("x"),
+            "note": "あ" * 501,
+        },
+        headers=MEMBER,
+    )
+    assert too_long.status_code == 422
+    details = await _audit_details(engine, slug, "knowledge.draft")
+    assert [d.get("note_source") for d in details] == ["chat_summary", "manual"]
+    assert all("note" not in d for d in details)
+
+
+async def test_policy_note_source_is_audited(ctx: Ctx, engine: AsyncEngine) -> None:
+    c, slug, _, _ = ctx
+    package = {
+        "id": "team",
+        "version": "1",
+        "status": "draft",
+        "owner": slug,
+        "rules": [],
+    }
+    res = await c.put(
+        f"/api/workspaces/{slug}/policies/draft",
+        json={"package": package, "note": "要約から", "note_source": "chat_summary"},
+        headers=MEMBER,
+    )
+    assert res.status_code == 200, res.text
+    (detail,) = await _audit_details(engine, slug, "policy.draft")
+    assert detail["note_source"] == "chat_summary"
+
+
+async def test_approval_checks_the_note_the_approver_saw(ctx: Ctx) -> None:
+    """S73: note は content_hash に入らないので、承認者が見た note のハッシュも照合する。"""
+    import hashlib
+
+    c, slug, _, _ = ctx
+    res = await c.post(
+        f"/api/workspaces/{slug}/artifacts",
+        json={"kind": "instructions", "name": "noted2", "content": _instr(), "note": "説明 A"},
+        headers=MEMBER,
+    )
+    rev = res.json()
+    seen = "sha256:" + hashlib.sha256("古い説明".encode()).hexdigest()
+    url = f"/api/workspaces/{slug}/artifacts/{rev['artifact_id']}/approve"
+    body = {"expected_revision": 1, "expected_hash": rev["content_hash"]}
+    stale = await c.post(url, json={**body, "expected_note_hash": seen}, headers=OWNER)
+    assert stale.status_code == 409
+    right = "sha256:" + hashlib.sha256("説明 A".encode()).hexdigest()
+    ok = await c.post(url, json={**body, "expected_note_hash": right}, headers=OWNER)
+    assert ok.status_code == 200, ok.text
+
+
+async def test_policy_approval_checks_the_note(ctx: Ctx) -> None:
+    import hashlib
+
+    c, slug, _, _ = ctx
+    package = {"id": "team", "version": "1", "status": "draft", "owner": slug, "rules": []}
+    await c.put(
+        f"/api/workspaces/{slug}/policies/draft",
+        json={"package": package, "note": "説明 P"},
+        headers=MEMBER,
+    )
+    view = (await c.get(f"/api/workspaces/{slug}/policies", headers=OWNER)).json()
+    body = {"expected_revision": view["draft"]["revision"], "expected_hash": view["draft_hash"]}
+    url = f"/api/workspaces/{slug}/policies/draft/approve"
+    wrong = "sha256:" + hashlib.sha256(b"x").hexdigest()
+    assert (
+        await c.post(url, json={**body, "expected_note_hash": wrong}, headers=OWNER)
+    ).status_code == 409
+    right = "sha256:" + hashlib.sha256("説明 P".encode()).hexdigest()
+    res = await c.post(url, json={**body, "expected_note_hash": right}, headers=OWNER)
+    assert res.status_code == 200, res.text

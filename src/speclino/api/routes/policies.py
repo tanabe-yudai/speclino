@@ -16,6 +16,7 @@ from speclino.api.deps import AppState, get_state
 from speclino.api.errors import api_error, error_responses
 from speclino.db.repositories.audit import AuditRepository
 from speclino.db.repositories.policy_revisions import PolicyRevisionRepository
+from speclino.domain.knowledge_chat import NoteSource
 from speclino.domain.policy import PolicyPackage
 from speclino.domain.workspace import AuthUser
 from speclino.services import policy_governance as gov
@@ -33,6 +34,8 @@ HISTORY_LIMIT = 50
 class DraftRequest(BaseModel):
     package: PolicyPackage
     note: str = Field(default="", max_length=500)
+    # 本人の申告（S73: 会話の要約から入れたか）。監査に残すだけ
+    note_source: NoteSource = "manual"
     # 保存する人が前提にした下書き（無ければ両方 null）。今の下書きと違えば 409
     expected_revision: int | None = Field(default=None, ge=1)
     expected_hash: str | None = Field(default=None, max_length=200)
@@ -41,6 +44,8 @@ class DraftRequest(BaseModel):
 class ApproveRequest(BaseModel):
     expected_revision: int = Field(ge=1)
     expected_hash: str = Field(min_length=1, max_length=200)
+    # 承認者が見た説明（note）のハッシュ（S73、任意）。違えば 409
+    expected_note_hash: str | None = Field(default=None, max_length=200)
 
 
 def _not_found() -> Exception:
@@ -75,6 +80,7 @@ async def put_draft(
                 package=body.package,
                 author=user.uid,
                 note=body.note,
+                note_source=body.note_source,
                 expected_revision=body.expected_revision,
                 expected_hash=body.expected_hash,
             )
@@ -104,6 +110,7 @@ async def approve_draft(
                 expected_hash=body.expected_hash,
                 approver=user.uid,
                 audit_factory=state.session_factory,
+                expected_note_hash=body.expected_note_hash,
             )
     except WorkspaceNotFound as e:
         raise _not_found() from e

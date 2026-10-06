@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Panel, PanelTitle } from '@/components/app/Panel'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -21,8 +21,17 @@ export function RuleEditor({
   onCancel,
   onSave,
   onDelete,
+  initial,
+  onDraftChange,
+  footer,
 }: {
   rule: PolicyRule | null
+  /** 編集欄の初期値（S73: AI の提案を反映したルール）。無ければ rule */
+  initial?: PolicyRule
+  /** 編集中のルール（S73: AI に見せる編集欄の本文） */
+  onDraftChange?: (rule: PolicyRule) => void
+  /** 保存のボタンの前に置く欄（S73: 変更の説明） */
+  footer?: ReactNode
   existingIds: string[]
   verifiers: Record<string, string>
   saving: boolean
@@ -31,9 +40,13 @@ export function RuleEditor({
   onDelete: (ruleId: string) => void
 }) {
   const originalId = rule?.id
-  const [draft, setDraft] = useState<PolicyRule>(rule ?? newRule(''))
-  const [paths, setPaths] = useState((rule?.applies_to.paths ?? []).join('\n'))
+  const [draft, setDraft] = useState<PolicyRule>(initial ?? rule ?? newRule(''))
+  const [paths, setPaths] = useState(((initial ?? rule)?.applies_to.paths ?? []).join('\n'))
   const current: PolicyRule = { ...draft, id: draft.id.trim(), applies_to: { ...draft.applies_to, paths: parsePaths(paths) } }
+  const currentJson = JSON.stringify(current)
+  useEffect(() => {
+    onDraftChange?.(JSON.parse(currentJson) as PolicyRule)
+  }, [currentJson, onDraftChange])
   const problems = ruleProblems(current, existingIds, originalId)
   const set = (patch: Partial<PolicyRule>) => setDraft({ ...draft, ...patch })
 
@@ -117,6 +130,7 @@ export function RuleEditor({
           />
           例外（.speclino/exceptions.yaml）を認める
         </label>
+        {footer}
         {problems.length > 0 && (
           <ul className="space-y-0.5 text-sm text-bad">
             {problems.map((p) => (

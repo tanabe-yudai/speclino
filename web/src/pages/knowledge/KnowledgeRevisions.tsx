@@ -153,6 +153,13 @@ function RevisionsBody({ slug, kind, id }: { slug: string; kind: ArtifactKind; i
                 改訂 {current.revision} {previous ? `と改訂 ${previous.revision} の差分` : '（最初の改訂）'}
               </PanelTitle>
               <p className="font-mono text-xs break-all text-ink-3">content_hash {current.content_hash}</p>
+              <div className="space-y-1" aria-label="変更の説明">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-xs font-semibold">変更の説明</h3>
+                  {current.note && current.note_source === 'chat_summary' && <ToneBadge tone="rev">会話の要約から（作者が確認）</ToneBadge>}
+                </div>
+                <p className="text-sm break-words whitespace-pre-wrap text-ink-2">{current.note || '（説明はありません）'}</p>
+              </div>
               <DiffView label="本文の差分" before={previous ? revisionText(previous.content, names) : ''} after={revisionText(current.content, names)} />
             </Panel>
             {kind === 'spec' && (

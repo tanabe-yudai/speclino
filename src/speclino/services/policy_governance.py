@@ -12,11 +12,14 @@
 
 from __future__ import annotations
 
+import hashlib
+
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from speclino.db.repositories.audit import AuditRepository
 from speclino.db.repositories.policy_revisions import PolicyRevisionRepository
 from speclino.db.repositories.teams import TeamRepository
+from speclino.domain.knowledge_chat import NoteSource
 from speclino.domain.policy import PolicyPackage, PolicyRevision
 from speclino.services.check_pipeline import policy_package_hash
 from speclino.verifiers.catalog import KNOWN_VERIFIERS
@@ -70,7 +73,8 @@ class DraftConflict(Exception):
     """承認しようとした下書きが、承認者の見た改訂ではない（別の人が先に更新・承認した）。"""
 
 
-def _validate(package: PolicyPackage) -> None:
+def validate_package(package: PolicyPackage) -> None:
+    """下書きにできる規約か（ルール ID の重複・未登録の検査器・版）。違えば `InvalidPackage`。"""
     ids = [r.id for r in package.rules]
     dup = sorted({i for i in ids if ids.count(i) > 1})
     if dup:
@@ -105,6 +109,7 @@ async def save_draft(
     note: str,
     expected_revision: int | None,
     expected_hash: str | None,
+    note_source: NoteSource = "manual",
 ) -> PolicyRevision:
     """下書きを保存する（S43）。無ければ作り、あれば同じ下書きを更新する（下書きは同時に 1 つ）。
 
@@ -112,7 +117,7 @@ async def save_draft(
     DraftConflict（古い画面から保存して他の人の変更を黙って上書きしない）。
     チーム行のロックを先に取るので、同時の保存・承認・seed と直列化される（create_draft と同じ）。
     """
-    _validate(package)
+    validate_package(package)
     await TeamRepository(session).ensure_and_lock(team)
     revisions = PolicyRevisionRepository(session)
     current = await revisions.current_draft(team)
@@ -123,7 +128,9 @@ async def save_draft(
     if not seen:
         raise DraftConflict(f"{team} の下書きが変わった。読み直してから保存する")
     if current is None:
-        return await create_draft(session, team=team, package=package, author=author, note=note)
+        return await create_draft(
+            session, team=team, package=package, author=author, note=note, note_source=note_source
+        )
     updated = await revisions.update_draft(
         team=team, revision=current.revision, package=package, note=note
     )
@@ -132,9 +139,14 @@ async def save_draft(
         action="policy.draft",
         target=f"{team}@{current.revision}",
         decision="updated",
-        detail={"note": note, "rule_count": len(package.rules)},
+        detail={"note": note, "rule_count": len(package.rules), "note_source": note_source},
     )
     return updated
+
+
+def note_hash(note: str) -> str:
+    """改訂の説明（note）のハッシュ（S73）。承認者が見た説明の照合に使う（UTF-8 の sha256）。"""
+    return "sha256:" + hashlib.sha256(note.encode()).hexdigest()
 
 
 def draft_hash(revision: PolicyRevision) -> str:
@@ -150,8 +162,11 @@ async def approve_draft(
     expected_hash: str,
     approver: str,
     audit_factory: async_sessionmaker[AsyncSession] | None,
+    expected_note_hash: str | None = None,
 ) -> PolicyRevision:
     """承認者が見た下書き（番号と内容のハッシュ）を承認する（S43）。
+
+    `expected_note_hash`（S73、任意）は承認者が見た説明（note）のハッシュ。違えば DraftConflict。
 
     1. 承認者でなければ、下書きの有無や番号に関係なく拒否し、監査に残す（PermissionError）
     2. 今の下書きが見たもの（番号・ハッシュ）でなければ DraftConflict
@@ -170,6 +185,7 @@ async def approve_draft(
         current is None
         or current.revision != expected_revision
         or draft_hash(current) != expected_hash
+        or (expected_note_hash is not None and note_hash(current.note) != expected_note_hash)
     ):
         raise DraftConflict(f"{team}@{expected_revision} は承認者が見た下書きではない")
     return await approve(
@@ -188,6 +204,7 @@ async def create_draft(
     package: PolicyPackage,
     author: str,
     note: str = "",
+    note_source: NoteSource = "manual",
 ) -> PolicyRevision:
     """draft 改訂を作り、`audit_events` に `policy.draft` を残す。
 
@@ -214,7 +231,7 @@ async def create_draft(
         action="policy.draft",
         target=f"{team}@{revision.revision}",
         decision="created",
-        detail={"note": note, "rule_count": len(package.rules)},
+        detail={"note": note, "rule_count": len(package.rules), "note_source": note_source},
     )
     return revision
 
@@ -358,8 +375,10 @@ __all__ = [
     "create_draft",
     "draft_hash",
     "llm_scope_warnings",
+    "note_hash",
     "save_draft",
     "seed_from_package",
+    "validate_package",
 ]
 
 

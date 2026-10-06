@@ -172,7 +172,7 @@ def test_every_executable_verifier_passes_approval_validation() -> None:
             on_missing_input="unknown",
             tier="llm_assisted" if llm else "deterministic",
         )
-        gov._validate(_package(rule))  # 例外にならない
+        gov.validate_package(_package(rule))  # 例外にならない
     # 登録の無い検証器・違う版は承認できない
     unknown = rule.model_copy(
         update={
@@ -181,7 +181,7 @@ def test_every_executable_verifier_passes_approval_validation() -> None:
         }
     )
     with pytest.raises(gov.InvalidPackage):
-        gov._validate(_package(unknown))
+        gov.validate_package(_package(unknown))
 
 
 def test_llm_scope_warnings_for_missing_or_broad_paths() -> None:
@@ -216,7 +216,7 @@ def test_llm_scope_warnings_for_missing_or_broad_paths() -> None:
     assert len(broad) == 1 and "広すぎる" in broad[0] and "**/*" in broad[0]
     both = gov.llm_scope_warnings(_package(llm_rule("BOTH", ["**/*.py"], None)))
     assert len(both) == 2
-    gov._validate(_package(llm_rule("BOTH", ["**/*.py"], None)))  # 拒否はしない
+    gov.validate_package(_package(llm_rule("BOTH", ["**/*.py"], None)))  # 拒否はしない
 
 
 def test_string_literal_llm_rule_requires_call_names() -> None:
@@ -239,6 +239,6 @@ def test_string_literal_llm_rule_requires_call_names() -> None:
 
     base = {"items": [{"id": "i", "question": "q"}], "unit_kind": "string_literal"}
     with pytest.raises(gov.InvalidPackage, match="call_names"):
-        gov._validate(_package(rule(base)))
-    gov._validate(_package(rule({**base, "call_names": ["HTTPException"]})))
-    gov._validate(_package(rule({**base, "unit_kind": "function"})))
+        gov.validate_package(_package(rule(base)))
+    gov.validate_package(_package(rule({**base, "call_names": ["HTTPException"]})))
+    gov.validate_package(_package(rule({**base, "unit_kind": "function"})))

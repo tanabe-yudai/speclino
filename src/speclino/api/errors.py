@@ -15,6 +15,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+# 会話の API の経路（S73）。検証エラーの応答に入力を含めない
+CHAT_PATH_MARKER = "/knowledge/chats"
+
 
 class ErrorBody(BaseModel):
     code: str
@@ -54,8 +57,12 @@ def install_error_handlers(app: FastAPI) -> None:
         return JSONResponse(status_code=exc.status_code, content=body, headers=exc.headers)
 
     @app.exception_handler(RequestValidationError)
-    async def _validation(_: Request, exc: RequestValidationError) -> JSONResponse:
-        body = _error_body("validation_error", str(exc.errors()))
+    async def _validation(request: Request, exc: RequestValidationError) -> JSONResponse:
+        if CHAT_PATH_MARKER in request.url.path:
+            # 会話の API（S73、C9）: 検証の詳細は入力を含みうるので、固定のコードと文だけ
+            body = _error_body("invalid_request", "リクエストの形式が正しくありません")
+        else:
+            body = _error_body("validation_error", str(exc.errors()))
         return JSONResponse(status_code=422, content=body)
 
 

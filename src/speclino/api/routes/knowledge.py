@@ -17,6 +17,7 @@ from speclino.api.auth import require_user
 from speclino.api.deps import AppState, get_state
 from speclino.api.errors import api_error, error_responses
 from speclino.domain.knowledge import ArtifactContent, ArtifactKind
+from speclino.domain.knowledge_chat import NOTE_MAX_CHARS, NoteSource
 from speclino.domain.knowledge_view import ApproveResult
 from speclino.domain.workspace import AuthUser
 from speclino.services import knowledge_registry as kr
@@ -34,6 +35,9 @@ class CreateArtifactRequest(BaseModel):
     kind: ArtifactKind
     name: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9-]*$")
     content: ArtifactContent
+    # 改訂の説明（S73）。note_source は本人の申告（会話の要約から入れたか）
+    note: str = Field(default="", max_length=NOTE_MAX_CHARS)
+    note_source: NoteSource = "manual"
 
 
 class DraftRequest(BaseModel):
@@ -43,6 +47,8 @@ class DraftRequest(BaseModel):
     expected_revision: int = Field(ge=1)
     expected_hash: str = Field(min_length=1, max_length=200)
     content: ArtifactContent
+    note: str = Field(default="", max_length=NOTE_MAX_CHARS)
+    note_source: NoteSource = "manual"
 
 
 class ApproveRequest(BaseModel):
@@ -50,6 +56,8 @@ class ApproveRequest(BaseModel):
 
     expected_revision: int = Field(ge=1)
     expected_hash: str = Field(min_length=1, max_length=200)
+    # 承認者が見た説明（note）のハッシュ（S73、任意）。違えば 409
+    expected_note_hash: str | None = Field(default=None, max_length=200)
 
 
 def _not_found(e: Exception) -> Exception:
@@ -88,6 +96,8 @@ async def create_artifact(
                 name=body.name,
                 content=body.content,
                 author=user.uid,
+                note=body.note,
+                note_source=body.note_source,
             )
     except WorkspaceNotFound as e:
         raise _not_found(e) from e
@@ -136,6 +146,8 @@ async def put_draft(
                 expected_hash=body.expected_hash,
                 content=body.content,
                 author=user.uid,
+                note=body.note,
+                note_source=body.note_source,
             )
     except (WorkspaceNotFound, kr.ArtifactNotFound) as e:
         raise _not_found(e) from e
@@ -165,6 +177,7 @@ async def approve(
                 expected_hash=body.expected_hash,
                 approver=user.uid,
                 audit_factory=state.session_factory,
+                expected_note_hash=body.expected_note_hash,
             )
             revision = await kr.revision_at(s, artifact_id, body.expected_revision)
     except (WorkspaceNotFound, kr.ArtifactNotFound) as e:

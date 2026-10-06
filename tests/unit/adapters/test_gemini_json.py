@@ -35,3 +35,33 @@ async def test_max_output_tokens_is_passed_and_usage_is_returned() -> None:
     [call] = models.calls
     assert call["config"].max_output_tokens == 1234 == llm.max_output_tokens
     assert (out.text, out.input_tokens, out.output_tokens) == ('{"rules": []}', 100, 25)
+
+
+async def test_thinking_level_and_truncation_are_reported() -> None:
+    """S73: 会話は思考を LOW にし、MAX_TOKENS で切れた応答を見分ける。"""
+
+    class _Truncating(_FakeModels):
+        async def generate_content(self, **kwargs: Any) -> Any:
+            self.calls.append(kwargs)
+            return SimpleNamespace(
+                text='{"explanation": "途中',
+                usage_metadata=None,
+                candidates=[SimpleNamespace(finish_reason=types.FinishReason.MAX_TOKENS)],
+            )
+
+    models = _Truncating()
+    client = SimpleNamespace(aio=SimpleNamespace(models=models))
+    llm = GeminiJsonLlm(
+        "gemini-3.8-flash",
+        client=client,  # type: ignore[arg-type]
+        max_output_tokens=16384,
+        thinking_level=types.ThinkingLevel.LOW,
+    )
+    out = await llm.generate_json("prompt", {"type": "object"})
+    [call] = models.calls
+    assert call["config"].thinking_config.thinking_level == types.ThinkingLevel.LOW
+    assert out.truncated
+    # 既定（思考の指定なし）では thinking_config を送らない
+    plain = GeminiJsonLlm("gemini-3.8-flash", client=client)  # type: ignore[arg-type]
+    await plain.generate_json("prompt", {"type": "object"})
+    assert models.calls[-1]["config"].thinking_config is None

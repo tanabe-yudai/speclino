@@ -19,6 +19,8 @@ export const paths = {
   knowledgeRoot: (slug: string) => `/w/${e(slug)}/knowledge`,
   knowledge: (slug: string, kind: ArtifactKind = 'spec') => kn(slug, kind),
   knowledgeNew: (slug: string, kind: ArtifactKind) => `${kn(slug, kind)}/new`,
+  /** S73: 会話から新しく作る（エディタで AI と作るパネルを開く） */
+  knowledgeNewWithChat: (slug: string, kind: ArtifactKind) => `${kn(slug, kind)}/new?chat=new`,
   knowledgeItem: (slug: string, kind: ArtifactKind, id: string) => `${kn(slug, kind)}/${e(id)}`,
   knowledgeRevisions: (slug: string, kind: ArtifactKind, id: string) => `${kn(slug, kind)}/${e(id)}/revisions`,
   observability: (slug: string) => `/w/${e(slug)}/observability`,

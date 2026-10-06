@@ -14,6 +14,8 @@ export interface PolicyRule {
   verifier: { id: string; version: string; params?: Record<string, unknown> } | null
   on_missing_input: OnMissingInput
   exceptions_allowed: boolean
+  /** llm_assisted は検査器 llm.checklist（S70）。無ければ deterministic */
+  tier?: 'deterministic' | 'llm_assisted'
 }
 
 export interface PolicyPackage {

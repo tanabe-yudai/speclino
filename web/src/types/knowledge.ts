@@ -58,6 +58,8 @@ export interface ArtifactRevision {
   approver: string | null
   self_approved: boolean
   note: string
+  /** 改訂の説明の由来（S73、本人の申告）。説明が無ければ null */
+  note_source?: 'manual' | 'chat_summary' | null
   created_at: string
   approved_at: string | null
 }
