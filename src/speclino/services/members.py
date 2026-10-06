@@ -18,6 +18,7 @@ from speclino.db.models import WorkspaceMember
 from speclino.db.repositories.audit import AuditRepository
 from speclino.db.repositories.teams import TeamRepository
 from speclino.domain.workspace import WorkspaceMemberView, WorkspaceRole
+from speclino.services.knowledge_chat import purge_member_chats
 from speclino.services.workspaces import (
     NotPermitted,
     WorkspaceNotFound,
@@ -197,6 +198,8 @@ async def remove_member(
     await AuditRepository(session).record(
         actor_uid, action, slug, "removed", {"uid": target_uid, "role": current}
     )
+    # S73: 外した人の会話を消す（本人にも owner にも読めないデータを残さない）
+    await purge_member_chats(session, workspace=slug, uid=target_uid, actor=actor_uid)
 
 
 __all__ = [

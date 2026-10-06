@@ -19,6 +19,27 @@ ChatRole = Literal["user", "assistant"]
 ChatMessageStatus = Literal["pending", "done", "failed"]
 DiagnosticSeverity = Literal["error", "warning", "info"]
 NoteSource = Literal["manual", "chat_summary"]
+# 会話の API が返す固定のエラーコード（C9: 入力・LLM の応答・例外の文を返さない）
+ChatErrorCode = Literal[
+    "chat_not_found",
+    "invalid_request",
+    "invalid_binding",
+    "version_conflict",
+    "chat_full",
+    "message_pending",
+    "input_too_large",
+    "message_limit",
+    "cost_limit",
+    "chat_unavailable",
+    "chat_failed",
+    "nothing_to_summarize",
+]
+ChatAuditAction = Literal[
+    "knowledge.chat.create",
+    "knowledge.chat.delete",
+    "knowledge.chat.message",
+    "knowledge.chat.purge",
+]
 
 CHAT_TITLE_MAX_CHARS = 120
 CHAT_MAX_MESSAGES = 200
@@ -103,6 +124,8 @@ class ChatSummaryDraft(IRModel):
 
 
 __all__ = [
+    "ChatAuditAction",
+    "ChatErrorCode",
     "CHAT_MAX_BYTES",
     "CHAT_MAX_MESSAGES",
     "CHAT_TITLE_MAX_CHARS",

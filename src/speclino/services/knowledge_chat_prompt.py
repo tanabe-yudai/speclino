@@ -46,7 +46,8 @@ _KIND_RULES: dict[KnowledgeChatKind, str] = {
     "spec": """\
 提案の markdown は仕様の本文の全文（Markdown と Mermaid の図、要求の表）。
 機械可読な IR は SpecLino の決定的な parser が本文から作るので、IR や JSON を書かない。
-図の要素と要求の表の行には明示的な ID を付け、ガードは `before.` / `after.` / `outcome.` の式で書く。
+図の要素と要求の表の行には明示的な ID を付ける。
+ガードは `before.` / `after.` / `outcome.` の式で書く。
 """,
     "skill": """\
 提案の skill_md は SKILL.md の全文（frontmatter の name と description を含む）。
@@ -58,8 +59,9 @@ files は付属ファイルの全体（相対パスと本文。テキストの�
 """,
     "policy": """\
 提案の rule はチーム規約のルール 1 件の定義（id・title・text・level・tier・verifier・applies_to）。
-level が mandatory のルールには verifier が要る。verifier は次の検査器の一覧から id と version を選び、
-params_json に検査器の設定を JSON のオブジェクトで書く。tier が llm_assisted なら verifier は llm.checklist。
+level が mandatory のルールには verifier が要る。
+verifier は次の一覧から id と version を選び、params_json に設定を JSON のオブジェクトで書く。
+tier が llm_assisted なら verifier は llm.checklist。
 検査器の一覧（id: version）: {verifiers}
 """,
 }
