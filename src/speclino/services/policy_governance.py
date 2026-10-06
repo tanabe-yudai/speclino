@@ -70,7 +70,8 @@ class DraftConflict(Exception):
     """承認しようとした下書きが、承認者の見た改訂ではない（別の人が先に更新・承認した）。"""
 
 
-def _validate(package: PolicyPackage) -> None:
+def validate_package(package: PolicyPackage) -> None:
+    """下書きにできる規約か（ルール ID の重複・未登録の検査器・版）。違えば `InvalidPackage`。"""
     ids = [r.id for r in package.rules]
     dup = sorted({i for i in ids if ids.count(i) > 1})
     if dup:
@@ -112,7 +113,7 @@ async def save_draft(
     DraftConflict（古い画面から保存して他の人の変更を黙って上書きしない）。
     チーム行のロックを先に取るので、同時の保存・承認・seed と直列化される（create_draft と同じ）。
     """
-    _validate(package)
+    validate_package(package)
     await TeamRepository(session).ensure_and_lock(team)
     revisions = PolicyRevisionRepository(session)
     current = await revisions.current_draft(team)
@@ -360,6 +361,7 @@ __all__ = [
     "llm_scope_warnings",
     "save_draft",
     "seed_from_package",
+    "validate_package",
 ]
 
 
