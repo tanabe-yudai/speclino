@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ApiError } from '@/api/errors'
 import { createArtifact, getDraft, listArtifactRevisions, saveDraft } from '@/api/knowledge'
 import { ToneBadge } from '@/components/app/ToneBadge'
 import { ErrorState } from '@/components/ErrorState'
 import { ApprovalPanel } from '@/components/knowledge/ApprovalPanel'
+import { ChatPanel } from '@/components/knowledge/ChatPanel'
 import { ConflictDialog } from '@/components/knowledge/ConflictDialog'
 import { InstructionsEditorPane } from '@/components/knowledge/InstructionsEditorPane'
 import { KnowledgeNav } from '@/components/knowledge/KnowledgeNav'
+import { NoteField } from '@/components/knowledge/NoteField'
 import { NotFoundPanel } from '@/components/knowledge/NotFoundPanel'
 import { ScopePicker } from '@/components/knowledge/ScopePicker'
 import { SkillEditorPane } from '@/components/knowledge/SkillEditorPane'
@@ -18,6 +20,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useCurrentWorkspace } from '@/hooks/useCurrentWorkspace'
+import { useKnowledgeChat } from '@/hooks/useKnowledgeChat'
 import { useSpecPreview } from '@/hooks/useSpecPreview'
 import { useWorkspaceProjects } from '@/hooks/useWorkspaceProjects'
 import {
@@ -34,9 +37,11 @@ import {
   toEditable,
   type EditBase,
 } from '@/services/knowledge'
+import { applyProposal, canSummarize, currentFieldText, editorText, proposalText } from '@/services/knowledgeChat'
 import { paths } from '@/services/paths'
 import { countErrors } from '@/services/specPreview'
 import type { ArtifactContent, ArtifactKind, ArtifactRevision, SpecPreviewRequest } from '@/types/knowledge'
+import type { NoteState, RawProposal } from '@/types/knowledgeChat'
 
 const NAME_RE = /^[a-z0-9][a-z0-9-]*$/
 
@@ -87,6 +92,8 @@ function EditorLoader({ slug, kind, id }: { slug: string; kind: ArtifactKind; id
 
 function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind: ArtifactKind; id: string | null; initial: Loaded; onReload: () => void }) {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const chatParam = searchParams.get('chat')
   const { projects, error: projectsError } = useWorkspaceProjects(slug)
   const [base, setBase] = useState<EditBase>(() => editBase(initial.draft, initial.revisions))
   const [draft, setDraft] = useState<ArtifactRevision | null>(initial.draft)
@@ -97,6 +104,10 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
   const [saveError, setSaveError] = useState<string | null>(null)
   const [conflict, setConflict] = useState(false)
   const [resetKey, setResetKey] = useState(0)
+  // 改訂の説明（S73）。下書きを直すときは今の下書きの説明から始める
+  const [note, setNote] = useState<NoteState>(() => ({ text: initial.draft?.note ?? '', source: initial.draft?.note_source ?? 'manual' }))
+  const [chatOpen, setChatOpen] = useState(chatParam !== null)
+  const chat = useKnowledgeChat(slug, kind, id, chatParam && chatParam !== 'new' ? chatParam : null)
   // 保存の応答の時点の本文（送信後の入力を含む）を読むため
   const latest = useRef(content)
   useEffect(() => {
@@ -118,7 +129,15 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
   const shownPreview = preview ?? last
   const previewErrors = countErrors(preview?.parse_result.diagnostics ?? [])
 
-  const saveBlock = nameIssue ?? scopeIssue ?? (paneInvalid ? '読めない欄があります（赤い欄を直してください）' : null) ?? (id && !dirty ? '変更はありません' : null)
+  const noteChanged = note.text.trim() !== (draft?.note ?? '')
+  const saveBlock = nameIssue ?? scopeIssue ?? (paneInvalid ? '読めない欄があります（赤い欄を直してください）' : null) ?? (id && !dirty && !noteChanged ? '変更はありません' : null)
+
+  function applyChatProposal(raw: RawProposal) {
+    setContent(applyProposal(content, raw))
+    // スキルの付属ファイル・仕様の JSON 欄を、反映した内容から作り直す
+    setResetKey((k) => k + 1)
+    toast.success('提案を編集欄に反映しました（まだ保存していません）')
+  }
 
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -127,17 +146,21 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
     setSaveError(null)
     const sent = content
     const request = id
-      ? saveDraft(slug, id, base.expectedRevision as number, base.expectedHash as string, content)
-      : createArtifact(slug, kind, name, content)
+      ? saveDraft(slug, id, base.expectedRevision as number, base.expectedHash as string, content, note)
+      : createArtifact(slug, kind, name, content, note)
     request
-      .then((rev) => {
+      .then(async (rev) => {
         toast.success(`下書き 改訂 ${rev.revision} を保存しました`)
         if (!id) {
-          navigate(paths.knowledgeItem(slug, kind, rev.artifact_id), { replace: true })
+          // 会話で作り始めた知識: 最初の保存でできた知識に会話を結び付ける
+          const bound = chat.current ? await chat.bind(rev.artifact_id) : null
+          const target = paths.knowledgeItem(slug, kind, rev.artifact_id)
+          navigate(bound ? `${target}?chat=${encodeURIComponent(bound.id)}` : target, { replace: true })
           return
         }
         setDraft(rev)
         setBase({ base: rev, expectedRevision: rev.revision, expectedHash: rev.content_hash })
+        setNote({ text: rev.note, source: rev.note_source ?? 'manual' })
         // 保存中に入力した文字は消さない（そのときは dirty のまま残る）
         const next = contentAfterSave(sent, latest.current, rev)
         if (next.replaced) {
@@ -177,7 +200,20 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
           )}
         </div>
         {id && !draft && active && <p className="text-sm text-ink-2">有効な改訂 {active.revision} を土台に編集します。保存すると次の改訂の下書きになります。</p>}
+        <Button type="button" size="sm" variant={chatOpen ? 'secondary' : 'outline'} onClick={() => setChatOpen(!chatOpen)} aria-expanded={chatOpen}>
+          {chatOpen ? 'AI と作るパネルを閉じる' : 'AI と作る'}
+        </Button>
       </header>
+
+      {chatOpen && (
+        <ChatPanel
+          chat={chat}
+          editorText={editorText(content)}
+          currentFieldText={currentFieldText(content)}
+          afterText={(raw) => proposalText(raw, content)}
+          onApply={applyChatProposal}
+        />
+      )}
 
       {id && (
         <ApprovalPanel
@@ -227,6 +263,10 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
         )}
         {content.kind === 'skill' && <SkillEditorPane content={content} onChange={setContent} onInvalidChange={setPaneInvalid} resetKey={resetKey} />}
         {content.kind === 'instructions' && <InstructionsEditorPane content={content} onChange={setContent} />}
+
+        <div className="max-w-3xl">
+          <NoteField id="revision-note" note={note} onChange={setNote} summarize={canSummarize(chat.current) ? chat.summarize : undefined} />
+        </div>
 
         <div className="sticky bottom-0 z-10 -mx-4 flex flex-wrap items-center gap-3 border-t bg-background/80 px-4 py-3 backdrop-blur-md sm:-mx-6 sm:px-6">
           <Button type="submit" disabled={!!saveBlock || saving} aria-describedby="save-status">

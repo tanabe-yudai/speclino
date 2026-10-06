@@ -82,7 +82,10 @@ function ListBody({ slug, name, kind }: { slug: string; name: string; kind: Arti
                 ? `今の bundle: 世代 ${loaded.bundle.generation}（${formatDateTime(loaded.bundle.created_at)}、${loaded.bundle.members.length} 件）`
                 : 'まだ bundle はありません（最初の承認で作られます）'}
             </p>
-            <Button asChild size="sm" className="ml-auto bg-brand text-white">
+            <Button asChild size="sm" variant="outline" className="ml-auto">
+              <Link to={paths.knowledgeNewWithChat(slug, kind)}>チャットで新規作成</Link>
+            </Button>
+            <Button asChild size="sm" className="bg-brand text-white">
               <Link to={paths.knowledgeNew(slug, kind)}>{label}を作る</Link>
             </Button>
           </div>

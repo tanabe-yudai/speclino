@@ -5,15 +5,21 @@ import { ApiError } from '@/api/errors'
 import { getPolicies, listPolicyAudit, listRevisions, saveDraft } from '@/api/policies'
 import { Panel, PanelTitle } from '@/components/app/Panel'
 import { ErrorState } from '@/components/ErrorState'
+import { ChatPanel } from '@/components/knowledge/ChatPanel'
+import { NoteField } from '@/components/knowledge/NoteField'
 import { LoadingState } from '@/components/LoadingState'
 import { AuditLog } from '@/components/policies/AuditLog'
 import { DraftBanner } from '@/components/policies/DraftBanner'
 import { RevisionHistory } from '@/components/policies/RevisionHistory'
 import { RuleEditor } from '@/components/policies/RuleEditor'
 import { RuleList } from '@/components/policies/RuleList'
+import { Button } from '@/components/ui/button'
 import { useCurrentWorkspace } from '@/hooks/useCurrentWorkspace'
+import { useKnowledgeChat } from '@/hooks/useKnowledgeChat'
+import { applyRuleProposal, canSummarize, currentRuleText, proposalText, ruleEditorText } from '@/services/knowledgeChat'
 import { paths } from '@/services/paths'
-import { baseForDraft, removeRule, upsertRule } from '@/services/policyDraft'
+import { baseForDraft, newRule, removeRule, upsertRule } from '@/services/policyDraft'
+import type { NoteState, RawProposal } from '@/types/knowledgeChat'
 import type { AuditEntry, PoliciesView, PolicyRule, RevisionSummary } from '@/types/policy'
 
 interface Loaded {
@@ -45,6 +51,12 @@ function PoliciesBody({ slug, name }: { slug: string; name: string }) {
   // undefined = 編集していない、null = 追加、PolicyRule = そのルールを編集
   const [editing, setEditing] = useState<PolicyRule | null | undefined>(undefined)
   const [saving, setSaving] = useState(false)
+  // S73: AI と作る。規約の会話は artifact に結び付かない。提案はルールの編集欄に入れる
+  const [chatOpen, setChatOpen] = useState(false)
+  const chat = useKnowledgeChat(slug, 'policy', null, null)
+  const [ruleDraft, setRuleDraft] = useState<PolicyRule | null>(null)
+  const [seed, setSeed] = useState<{ key: number; rule: PolicyRule } | null>(null)
+  const [note, setNote] = useState<NoteState>({ text: '', source: 'manual' })
 
   useEffect(() => {
     let alive = true
@@ -69,19 +81,27 @@ function PoliciesBody({ slug, name }: { slug: string; name: string }) {
   const { view } = loaded
   const pkg = baseForDraft(view)
 
+  function closeEditor() {
+    setEditing(undefined)
+    setSeed(null)
+    setRuleDraft(null)
+    setNote({ text: '', source: 'manual' })
+  }
+
   // 保存の前提は画面に出している下書き（無ければ null）。他の人が先に変えていれば 409
-  function persist(next: typeof pkg, note: string) {
+  function persist(next: typeof pkg, autoNote: string) {
     setSaving(true)
-    saveDraft(slug, next, note, view.draft?.revision ?? null, view.draft_hash)
+    const written = note.text.trim()
+    saveDraft(slug, next, written || autoNote, view.draft?.revision ?? null, view.draft_hash, written ? note.source : 'manual')
       .then(() => {
         toast.success('下書きに保存しました')
-        setEditing(undefined)
+        closeEditor()
         reload()
       })
       .catch((err: unknown) => {
         if (err instanceof ApiError && err.status === 409) {
           toast.error('下書きが他の人に変えられました。読み直してから、もう一度変更してください')
-          setEditing(undefined)
+          closeEditor()
           reload()
           return
         }
@@ -98,6 +118,18 @@ function PoliciesBody({ slug, name }: { slug: string; name: string }) {
     persist(removeRule(pkg, ruleId), `${ruleId} を削除`)
   }
 
+  /** 提案をルールの編集欄に入れる（保存はしない）。編集していなければ、同じ ID のルールか新しいルールを開く。 */
+  function applyChatProposal(raw: RawProposal) {
+    const existing = pkg.rules.find((r) => r.id === raw.rule?.id) ?? null
+    const target = editing !== undefined ? editing : existing
+    const base = editing !== undefined ? (ruleDraft ?? editing ?? newRule('')) : (existing ?? newRule(''))
+    setEditing(target)
+    setSeed((s) => ({ key: (s?.key ?? 0) + 1, rule: applyRuleProposal(base, raw) }))
+    toast.success('提案をルールの編集欄に反映しました（まだ保存していません）')
+  }
+
+  const editingRule = editing !== undefined ? ruleDraft : null
+
   return (
     <div className="space-y-6">
       <header className="min-w-0">
@@ -107,7 +139,19 @@ function PoliciesBody({ slug, name }: { slug: string; name: string }) {
           {view.active ? `有効な改訂 ${view.active.revision}` : '有効な改訂はまだありません'}
           。ルールの変更は下書きに入り、owner / approver が承認すると以後の検査に使われます。
         </p>
+        <Button type="button" size="sm" className="mt-3" variant={chatOpen ? 'secondary' : 'outline'} onClick={() => setChatOpen(!chatOpen)} aria-expanded={chatOpen}>
+          {chatOpen ? 'AI と作るパネルを閉じる' : 'AI と作る'}
+        </Button>
       </header>
+      {chatOpen && (
+        <ChatPanel
+          chat={chat}
+          editorText={ruleEditorText(editingRule)}
+          currentFieldText={currentRuleText(editingRule)}
+          afterText={(raw) => proposalText(raw)}
+          onApply={applyChatProposal}
+        />
+      )}
       {!view.active && !view.draft && (
         <Panel className="text-sm text-ink-2">
           チーム規約はまだありません。ルールを追加して下書きを作り、owner / approver が承認すると有効になります。
@@ -118,16 +162,27 @@ function PoliciesBody({ slug, name }: { slug: string; name: string }) {
           <DraftBanner slug={slug} view={view} onChanged={reload} />
           {editing !== undefined ? (
             <RuleEditor
+              key={seed?.key ?? 0}
               rule={editing}
+              initial={seed?.rule}
+              onDraftChange={setRuleDraft}
               existingIds={pkg.rules.map((r) => r.id)}
               verifiers={view.verifiers}
               saving={saving}
-              onCancel={() => setEditing(undefined)}
+              onCancel={closeEditor}
               onSave={save}
               onDelete={remove}
+              footer={<NoteField id="policy-note" note={note} onChange={setNote} summarize={canSummarize(chat.current) ? chat.summarize : undefined} />}
             />
           ) : (
-            <RuleList view={view} pkg={pkg} onEdit={setEditing} />
+            <RuleList
+              view={view}
+              pkg={pkg}
+              onEdit={(r) => {
+                setSeed(null)
+                setEditing(r)
+              }}
+            />
           )}
         </div>
         <aside className="min-w-0 space-y-6">

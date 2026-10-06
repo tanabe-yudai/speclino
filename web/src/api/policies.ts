@@ -2,6 +2,7 @@
 
 import { apiFetch } from './client'
 import { MOCK_POLICIES, MOCK_POLICY_AUDIT, MOCK_REVISIONS } from './mock/policies'
+import type { NoteSource } from '../types/knowledgeChat'
 import type { AuditEntry, PoliciesView, PolicyPackage, PolicyRevision, RevisionSummary } from '../types/policy'
 
 const USE_MOCK = import.meta.env.VITE_MOCK === '1'
@@ -20,9 +21,14 @@ export async function saveDraft(
   note: string,
   expectedRevision: number | null,
   expectedHash: string | null,
+  noteSource: NoteSource = 'manual',
 ): Promise<PolicyRevision> {
   if (USE_MOCK) return { ...(MOCK_POLICIES.draft as PolicyRevision), package: pkg, note }
-  return apiFetch<PolicyRevision>(`${base(slug)}/draft`, { method: 'PUT', headers: json, body: JSON.stringify({ package: pkg, note, expected_revision: expectedRevision, expected_hash: expectedHash }) })
+  return apiFetch<PolicyRevision>(`${base(slug)}/draft`, {
+    method: 'PUT',
+    headers: json,
+    body: JSON.stringify({ package: pkg, note, note_source: noteSource, expected_revision: expectedRevision, expected_hash: expectedHash }),
+  })
 }
 
 export async function approveDraft(

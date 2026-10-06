@@ -12,10 +12,17 @@ import type {
   SpecPreview,
   SpecPreviewRequest,
 } from '../types/knowledge'
+import type { NoteSource, NoteState } from '../types/knowledgeChat'
 
 const ws = (slug: string) => `/api/workspaces/${encodeURIComponent(slug)}`
 const art = (slug: string, id: string) => `${ws(slug)}/artifacts/${encodeURIComponent(id)}`
 const json = { 'Content-Type': 'application/json' }
+
+/** 改訂の説明（S73）。由来（要約から入れたか）は本人の申告。 */
+function noteBody(note: NoteState | undefined): { note?: string; note_source?: NoteSource } {
+  if (!note || !note.text.trim()) return {}
+  return { note: note.text.trim(), note_source: note.source }
+}
 
 /** 404 のうち、指定した code のときだけ null にする（ワークスペースが無い 404 は投げる）。 */
 async function nullOn404<T>(promise: Promise<T>, code: string): Promise<T | null> {
@@ -36,11 +43,12 @@ export function createArtifact(
   kind: ArtifactKind,
   name: string,
   content: ArtifactContent,
+  note?: NoteState,
 ): Promise<ArtifactRevision> {
   return apiFetch<ArtifactRevision>(`${ws(slug)}/artifacts`, {
     method: 'POST',
     headers: json,
-    body: JSON.stringify({ kind, name, content }),
+    body: JSON.stringify({ kind, name, content, ...noteBody(note) }),
   })
 }
 
@@ -56,11 +64,12 @@ export function saveDraft(
   expectedRevision: number,
   expectedHash: string,
   content: ArtifactContent,
+  note?: NoteState,
 ): Promise<ArtifactRevision> {
   return apiFetch<ArtifactRevision>(`${art(slug, id)}/draft`, {
     method: 'PUT',
     headers: json,
-    body: JSON.stringify({ expected_revision: expectedRevision, expected_hash: expectedHash, content }),
+    body: JSON.stringify({ expected_revision: expectedRevision, expected_hash: expectedHash, content, ...noteBody(note) }),
   })
 }
 
