@@ -9,7 +9,7 @@ SpecLino 自身の解析対象（specs/SPEC-GATE-001.md、R-GATE-01〜03）な�
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from speclino.domain.finding import Finding, Findings, Verdict
 from speclino.domain.run import GateStatus
@@ -34,6 +34,12 @@ class GateResult:
     advisory: list[Finding] = field(default_factory=list)  # 助言ルールの非成立
     waived: list[Finding] = field(default_factory=list)  # 有効な例外で免除された Finding
     reason: str = ""
+    # 阻止しない REVIEW（S70: 人が attested で確定した指摘）。verdict は REVIEW のまま
+    cleared: list[Finding] = field(default_factory=list)
+    # cleared のうち PR の作成者が自分で確定したもの（S70。拒否はせず印を残す）
+    self_attested_ids: list[str] = field(default_factory=list)
+    # cleared のうち作成者との照合ができなかった確定によるもの（黙って「自己確定でない」にしない）
+    self_attest_unverified_ids: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -45,6 +51,7 @@ class Triage:
     blocking: list[Finding]
     advisory: list[Finding]
     waived: list[Finding]
+    cleared: list[Finding] = field(default_factory=list)
 
     @property
     def has_blocking(self) -> bool:
@@ -60,11 +67,17 @@ def triage(
     levels: dict[str, RuleLevel],
     policy: GatePolicy = DEFAULT_POLICY,
     waived_ids: frozenset[str] = frozenset(),
+    cleared_ids: frozenset[str] = frozenset(),
 ) -> Triage:
-    """levels は requirement_id → mandatory|advisory。無いものは mandatory とみなす（安全側）。"""
+    """levels は requirement_id → mandatory|advisory。無いものは mandatory とみなす（安全側）。
+
+    `cleared_ids` は阻止しない REVIEW の ID（S70）。REVIEW 以外の verdict には効かない
+    （UNKNOWN・VIOLATED を人の確定で通すことはできない）。
+    """
     blocking: list[Finding] = []
     advisory: list[Finding] = []
     waived: list[Finding] = []
+    cleared: list[Finding] = []
     has_mandatory = False
     for f in findings.findings:
         level = levels.get(f.requirement_id, "mandatory")
@@ -74,11 +87,13 @@ def triage(
             continue
         if f.id in waived_ids and f.verdict == "VIOLATED":
             waived.append(f)
+        elif f.id in cleared_ids and f.verdict == "REVIEW":
+            cleared.append(f)
         elif level == "mandatory":
             blocking.append(f)
         else:
             advisory.append(f)
-    return Triage(bool(findings.findings), has_mandatory, blocking, advisory, waived)
+    return Triage(bool(findings.findings), has_mandatory, blocking, advisory, waived, cleared)
 
 
 def decide_gate(t: Triage, policy: GatePolicy) -> GateResult:
@@ -100,8 +115,10 @@ def aggregate_gate(
     levels: dict[str, RuleLevel],
     policy: GatePolicy = DEFAULT_POLICY,
     waived_ids: frozenset[str] = frozenset(),
+    cleared_ids: frozenset[str] = frozenset(),
 ) -> GateResult:
-    return decide_gate(triage(findings, levels, policy, waived_ids), policy)
+    t = triage(findings, levels, policy, waived_ids, cleared_ids)
+    return replace(decide_gate(t, policy), cleared=t.cleared)
 
 
 # ------------------------------------------------------------------ outcomes

@@ -1,0 +1,33 @@
+schema_version: "0.1"
+
+# キーは spec.md の図の名前（<クラス>.<メソッド>）。図の操作・入口はこの名前で対応を引く。
+# 操作の symbol は入口のメソッドから見た呼出し先（注入された self.inventory など）。
+behaviors:
+  OrderService.place_order:
+    entrypoint: examples.shop.app.service.OrderService.place_order
+    variables:
+      order.status: order.status
+      order.quantity: order.quantity
+      inventory.available: stock.available
+  OrderService.ship_order:
+    entrypoint: examples.shop.app.service.OrderService.ship_order
+    variables:
+      order.status: order.status
+  OrderService.cancel_order:
+    entrypoint: examples.shop.app.service.OrderService.cancel_order
+    variables:
+      order.status: order.status
+
+operations:
+  Inventory.reserve:
+    symbol: self.inventory.reserve
+    claim_scope: command_invocation
+  Payment.charge:
+    symbol: self.payment.charge
+    claim_scope: command_invocation
+  Payment.refund:
+    symbol: self.payment.refund
+    claim_scope: command_invocation
+  Mailer.notify:
+    symbol: self.mailer.notify
+    claim_scope: command_invocation

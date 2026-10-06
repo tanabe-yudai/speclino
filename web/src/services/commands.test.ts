@@ -33,7 +33,9 @@ describe('buildCommands', () => {
       '/app',
       '/w/ws',
       '/w/ws/p/example-org/example-repo',
+      '/w/ws/knowledge/specs',
       '/w/ws/policies',
+      '/w/ws/observability',
       '/w/ws/settings',
     ])
   })

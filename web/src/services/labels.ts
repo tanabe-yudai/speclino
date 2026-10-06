@@ -1,6 +1,13 @@
 /** 判定・状態を日本語ラベルへ変換する定数群。コンポーネントには埋め込まない。 */
 
-import type { BaseHeadStatus, Category, Severity, TestObservation, Verdict } from '../types/finding'
+import type {
+  AssessmentOutcome,
+  BaseHeadStatus,
+  Category,
+  Severity,
+  TestObservation,
+  Verdict,
+} from '../types/finding'
 import type { OnMissingInput, PolicyRevision } from '../types/policy'
 import type { ApprovalState, NextActionKind, PolicyLevel, RequirementFilter } from '../types/project'
 import type { ExecState, GateStatus } from '../types/run'
@@ -13,6 +20,9 @@ export const VERDICT_LABELS: Record<Verdict, string> = {
   UNKNOWN: '未検証',
   REVIEW: '要確認',
 }
+
+/** ゲートを止めない REVIEW（人が問題なしと確定した指摘）の区分。verdict は REVIEW のまま */
+export const CLEARED_LABEL = '確定済み・情報'
 
 /** VIOLATED → REVIEW → UNKNOWN → VERIFIED_IN_SCOPE の表示順。 */
 export const VERDICT_ORDER: Record<Verdict, number> = {
@@ -171,4 +181,31 @@ export function auditLabel(action: string, decision: string): string {
   if (action === 'policy.draft') return decision === 'updated' ? '下書きを更新' : '下書きを作成'
   if (action === 'policy.approve') return decision === 'denied' ? '承認を拒否（承認者ではない）' : '承認して有効にした'
   return `${action} ${decision}`
+}
+
+/**
+ * LLM 支援の規約の区分（S70）。指摘なしは機械検証ではないことを明記する独自の区分。
+ * 指摘なしも人の確定まではゲートを止める（#114）ので「人の確定が必要」と出す。
+ */
+export const ASSESSMENT_OUTCOME_LABELS: Record<AssessmentOutcome, string> = {
+  issue: 'LLM の指摘あり（人の確定待ち）',
+  split: 'LLM の評価が割れた（人の確定待ち）',
+  no_issue: 'LLM で確認、指摘なし（機械検証ではない）— 人の確定が必要',
+}
+
+/** 確定済み（ゲートの cleared）の LLM 支援の区分。確定待ちの文言を外す。 */
+export const ASSESSMENT_OUTCOME_CLEARED_LABELS: Record<AssessmentOutcome, string> = {
+  issue: 'LLM の指摘あり（人が問題なしと確定）',
+  split: 'LLM の評価が割れた（人が問題なしと確定）',
+  no_issue: 'LLM で確認、指摘なし（機械検証ではない）— 人が確定',
+}
+
+export function assessmentOutcomeLabel(outcome: AssessmentOutcome, cleared: boolean): string {
+  return (cleared ? ASSESSMENT_OUTCOME_CLEARED_LABELS : ASSESSMENT_OUTCOME_LABELS)[outcome]
+}
+
+export const ASSESSMENT_OUTCOME_TONE: Record<AssessmentOutcome, VerdictTone> = {
+  issue: 'rev',
+  split: 'rev',
+  no_issue: 'rev',
 }

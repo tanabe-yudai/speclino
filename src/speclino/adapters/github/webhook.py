@@ -87,6 +87,7 @@ def extract_pr(payload: dict[str, object]) -> PullRequestRef | None:
         is_fork=head_repo_full_name != repo_full_name,
         author_login=_as_str(user.get("login")),
         html_url=_as_str(pr.get("html_url")),
+        author_id=_as_int(user.get("id")),
     )
 
 
@@ -117,6 +118,7 @@ def extract_comment(payload: dict[str, object]) -> IssueCommentRef | None:
         author_id=_as_int(user.get("id")),
         comment_url=_as_str(comment.get("html_url")),
         is_pull_request="pull_request" in issue,
+        issue_author_id=_as_int(_as_dict(issue.get("user")).get("id")),
     )
 
 

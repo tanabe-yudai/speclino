@@ -15,6 +15,7 @@ from sqlalchemy import Enum as SAEnum
 
 from speclino.db.models import Base
 from speclino.domain.finding import Verdict
+from speclino.domain.knowledge import ArtifactKind, ArtifactStatus
 from speclino.domain.policy import PolicyRevisionStatus
 from speclino.domain.run import ExecState, GateStatus
 
@@ -38,6 +39,13 @@ EXPECTED_TABLES = {
     "workspace_invitations",
     "a2a_tasks",
     "agent_supplements",
+    "artifacts",
+    "artifact_revisions",
+    "bundles",
+    "sync_tokens",
+    "knowledge_fetches",
+    "llm_assessments",
+    "attestations",
 }
 
 
@@ -87,3 +95,22 @@ def test_policy_revisions_has_team_revision_unique_constraint() -> None:
 def test_policy_revisions_has_partial_unique_active_index() -> None:
     index_names = {ix.name for ix in Base.metadata.tables["policy_revisions"].indexes}
     assert "uq_policy_revisions_team_active" in index_names
+
+
+def test_artifact_enums_match_domain_literal() -> None:
+    assert _enum_values("artifacts", "kind") == set(get_args(ArtifactKind))
+    assert _enum_values("artifact_revisions", "status") == set(get_args(ArtifactStatus))
+
+
+def test_knowledge_tables_have_uniqueness() -> None:
+    def names(table: str) -> set[str | None]:
+        t = Base.metadata.tables[table]
+        return {c.name for c in t.constraints} | {ix.name for ix in t.indexes}
+
+    assert "uq_artifacts_workspace_kind_name" in names("artifacts")
+    assert {
+        "uq_artifact_revisions_artifact_revision",
+        "uq_artifact_revisions_artifact_active",
+        "uq_artifact_revisions_artifact_draft",
+    } <= names("artifact_revisions")
+    assert "uq_bundles_workspace_generation" in names("bundles")

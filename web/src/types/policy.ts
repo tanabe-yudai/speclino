@@ -48,6 +48,8 @@ export interface PoliciesView {
   can_approve: boolean
   verifiers: Record<string, string>
   results: Record<string, RuleResult>
+  /** 下書きの LLM 支援の規約の送り先の範囲の警告（#114。承認は拒否しない） */
+  draft_warnings?: string[]
 }
 
 export interface RevisionSummary {

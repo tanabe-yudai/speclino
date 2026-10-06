@@ -1,8 +1,9 @@
 /** 再利用コンポーネントの props 型。コンポーネント本体には型を書かず、ここに集約する。 */
 
+import type { AttestationTarget } from './attestation'
 import type { Counterexample, Finding } from './finding'
 import type { RunEvent } from './events'
-import type { RerunResponse } from './run'
+import type { RerunResponse, ReviewRunDetail } from './run'
 import type { AgentSupplement } from './supplement'
 
 /** 判定の 4 値の色（design 3.1。意味と色の対応は固定）と、免除中（exempt）の色。 */
@@ -26,6 +27,8 @@ export interface FindingCardProps {
   /** GitHub リンク生成に使う。無ければリンクを出さずテキストのみ表示する。 */
   repoFullName: string | null
   headSha: string
+  /** ゲートの cleared（人が確定して阻止しない REVIEW）として出すか */
+  cleared?: boolean
 }
 
 export interface ScopeBlockProps {
@@ -40,6 +43,23 @@ export interface ScopeBlockProps {
 
 export interface TimelineProps {
   events: RunEvent[]
+}
+
+export interface AttestButtonProps {
+  slug: string
+  runId: string
+  target: AttestationTarget
+  /** 確定の後に呼ぶ（再検査の run があればその ID）。 */
+  onDone: (recheckRunId: string | null) => void
+}
+
+export interface FindingAttestProps {
+  /** run のワークスペース（未登録なら null） */
+  slug: string | null
+  run: ReviewRunDetail
+  finding: Finding
+  /** owner / approver なら確定のボタンを出す */
+  mayAttest: boolean
 }
 
 export interface RerunButtonProps {

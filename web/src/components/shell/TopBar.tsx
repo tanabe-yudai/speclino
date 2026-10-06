@@ -25,8 +25,14 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
         {workspace && (
           <>
             {/* スマホ幅ではアカウントメニューに入れる（ピルの幅を残す） */}
+            <NavLink to={paths.knowledgeRoot(workspace.slug)} className={(s) => cn(navClass(s), 'hidden sm:inline-flex')}>
+              知識
+            </NavLink>
             <NavLink to={paths.policies(workspace.slug)} className={(s) => cn(navClass(s), 'hidden sm:inline-flex')}>
               規約
+            </NavLink>
+            <NavLink to={paths.observability(workspace.slug)} className={(s) => cn(navClass(s), 'hidden sm:inline-flex')}>
+              可観測性
             </NavLink>
             <NavLink to={paths.settings(workspace.slug)} className={(s) => cn(navClass(s), 'hidden sm:inline-flex')}>
               設定

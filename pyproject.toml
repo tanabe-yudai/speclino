@@ -25,6 +25,8 @@ dependencies = [
   "google-cloud-tasks>=2,<3",
   "google-cloud-storage>=2,<4",
   "a2a-sdk[http-server,postgresql]>=1.2,<2",
+  "regex>=2026.9.29",
+  "markdown-it-py>=4.2.0",
 ]
 
 [project.scripts]
@@ -42,6 +44,8 @@ dev = [
   "respx",
   "types-PyYAML",
   "types-jsonschema",
+  "types-regex>=2026.9.10.20260911",
+  "hypothesis>=6.168.3",
 ]
 
 [build-system]

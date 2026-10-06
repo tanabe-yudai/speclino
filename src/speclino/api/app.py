@@ -17,16 +17,22 @@ from starlette.types import Scope
 from speclino.api.deps import AppState, build_state
 from speclino.api.errors import error_responses, install_error_handlers
 from speclino.api.routes import (
+    attestations,
     internal_github,
     internal_mcp,
+    knowledge,
     mcp_tokens,
     me,
     members,
+    observability,
     policies,
     project_settings,
     projects,
     repositories,
     review_runs,
+    spec_preview,
+    spec_suggest,
+    sync,
     tasks,
     webhooks,
 )
@@ -101,6 +107,13 @@ def create_app(settings: Settings, state: AppState | None = None) -> FastAPI:
         app.include_router(repositories.router)
         app.include_router(projects.router)
         app.include_router(policies.router)
+        app.include_router(knowledge.router)
+        app.include_router(observability.router)
+        app.include_router(attestations.router)
+        app.include_router(spec_preview.router)
+        app.include_router(spec_suggest.router)
+        app.include_router(sync.router)
+        app.include_router(sync.bundle_router)
         app.include_router(project_settings.router)
         app.include_router(members.router)
         app.include_router(members.accept_router)

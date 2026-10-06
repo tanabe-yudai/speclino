@@ -57,6 +57,12 @@ def _run_view(run: ReviewRun, repo: str | None = None) -> dict[str, Any]:
     }
 
 
+def _cleared_ids(manifest: dict[str, Any] | None) -> list[str]:
+    gate = (manifest or {}).get("gate")
+    ids = gate.get("cleared_ids") if isinstance(gate, dict) else None
+    return [str(i) for i in ids] if isinstance(ids, list) else []
+
+
 async def _require_visible_run(state: AppState, user: AuthUser, run_id: uuid.UUID) -> None:
     async with state.session_factory() as session:
         if await visible_run(session, user.uid, run_id) is None:
@@ -114,7 +120,12 @@ async def get_run(
         findings = await FindingRepository(session).list_for_run(run_id)
         return {
             **_run_view(run, project.repo_full_name),
+            # S70: 画面が確定（attestations）の権限と API の宛先を決めるのに使う
+            "workspace": project.team,
             "findings": [f.payload for f in findings],
+            # ゲートを止めない REVIEW の ID（gate の cleared）。画面は判定ごとの件数と失敗の理由を
+            # この集合で数える。記録の無い古い run は空
+            "cleared_ids": _cleared_ids(run.manifest),
         }
 
 

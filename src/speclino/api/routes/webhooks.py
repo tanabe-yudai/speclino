@@ -38,7 +38,13 @@ from speclino.db.repositories import (
     ReviewRunRepository,
     WebhookDeliveryRepository,
 )
-from speclino.services.approvals import authorize_command, parse_commands
+from speclino.services.approvals import attest_disposition, authorize_command, parse_commands
+from speclino.services.attestations import (
+    NOT_IN_PR_REASON,
+    attest,
+    in_pr_findings,
+    same_github_user,
+)
 from speclino.services.workspaces import resolve_github_project
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
@@ -88,6 +94,7 @@ async def _dispatch(
             base_sha=pr.base_sha,
             pr_number=pr.pr_number,
             trigger=f"pull_request.{event.action}",
+            pr_author_id=pr.author_id,
         )
         return {"status": "queued", "run_id": str(run_id), "fork": pr.is_fork}, [run_id]
 
@@ -163,6 +170,10 @@ async def _handle_comment(
                 approver=cm.author_login,
                 comment_url=cm.comment_url,
             )
+        if cmd.kind == "attest":
+            outcome = await _record_attestation(session, cmd.args, cm, project)
+            results.append({"kind": cmd.kind, **outcome})
+            continue
         if cmd.kind == "answer":
             outcome = await _record_answer(session, cmd.args, cm, project, latest)
             results.append({"kind": cmd.kind, **outcome})
@@ -182,6 +193,66 @@ async def _handle_comment(
         )
         return {"status": "queued", "run_id": str(run_id), "commands": results}, [run_id]
     return {"status": "handled", "commands": results}, []
+
+
+async def _record_attestation(
+    session: AsyncSession, args: tuple[str, ...], cm: IssueCommentRef, project: Project | None
+) -> dict[str, Any]:
+    """`/speclino attest <指紋> <sha256:hash> [ack]` を確定として記録する（S70）。
+
+    承認者の照合は `authorize_command`（GitHub のユーザー ID で照合、S61）で済んでいる。確定は
+    ワークスペースに属するので、ワークスペースに登録されていないリポジトリでは記録しない。actor は
+    `github:<ユーザー ID>`（ログイン名は変えられ、別人に再利用されうるので識別に使わない）。
+    ログイン名は監査の詳細に残す。
+    確定できるのはこの PR の最新の完了した run の指摘（指紋と hash）だけ。無ければ記録せず、
+    監査に拒否を残して応答で知らせる（answer の S52 と同じく、webhook はコメントを書かない）。
+    """
+    if project is None or project.team is None:
+        return {"accepted": False, "reason": "ワークスペースに登録されていないリポジトリ"}
+    if cm.author_id is None:
+        # authorize_command が ID の無いコメントを承認しないので来ないが、ログイン名には戻さない
+        return {"accepted": False, "reason": "コメントした人の GitHub ユーザー ID が無い"}
+    actor = f"github:{cm.author_id}"
+    # このコメントの PR の検査に出た指紋だけ（他の PR の指摘をここで確定させない。S52 と同じ考え方）
+    if not await in_pr_findings(
+        session,
+        project_id=project.id,
+        pr_number=cm.issue_number,
+        fingerprint=args[0],
+        content_hash=args[1],
+    ):
+        await AuditRepository(session).record(
+            actor,
+            "attestation.record",
+            f"{project.team}:{args[0]}",
+            "rejected",
+            {
+                "actor_login": cm.author_login,
+                "content_hash": args[1],
+                "via": f"pr_comment:{cm.comment_url}",
+                "reason": NOT_IN_PR_REASON,
+                "pr_number": cm.issue_number,
+            },
+        )
+        return {"accepted": False, "reason": NOT_IN_PR_REASON}
+    saved = await attest(
+        session,
+        fingerprint=args[0],
+        content_hash=args[1],
+        disposition=attest_disposition(args),
+        actor=actor,
+        actor_login=cm.author_login,
+        workspace=project.team,
+        project_id=project.id,
+        via=f"pr_comment:{cm.comment_url}",
+        # PR の作成者が自分で確定した（GitHub の ID で照合。拒否はせず印を残す。照合不可は None）
+        self_attested=same_github_user(cm.author_id, cm.issue_author_id),
+    )
+    return {
+        "accepted": True,
+        "disposition": saved.disposition,
+        "self_attested": saved.self_attested,
+    }
 
 
 async def _record_answer(

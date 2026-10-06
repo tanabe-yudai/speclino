@@ -1,0 +1,12 @@
+diff --git a/.speclino/bindings.yaml b/.speclino/bindings.yaml
+--- a/.speclino/bindings.yaml
++++ b/.speclino/bindings.yaml
+@@ -23,7 +23,7 @@ operations:
+     symbol: self.inventory.reserve
+     claim_scope: command_invocation
+   Payment.charge:
+-    symbol: self.payment.charge
++    symbol: self.mailer.notify
+     claim_scope: command_invocation
+   Payment.refund:
+     symbol: self.payment.refund

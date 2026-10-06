@@ -1,0 +1,14 @@
+diff --git a/examples/shop/app/service.py b/examples/shop/app/service.py
+--- a/examples/shop/app/service.py
++++ b/examples/shop/app/service.py
+@@ -23,9 +23,7 @@ class OrderService:
+         if order.status != OrderStatus.PENDING:
+             raise OrderError("確定できるのは未確定の注文だけです。注文の状態を確認してください。")
+         if stock.available < order.quantity:
+-            raise OrderError(
+-                "在庫が足りないため注文を確定できません。数量を減らしてやり直してください。"
+-            )
++            raise OrderError("在庫が足りない")
+         self.inventory.reserve(order.id, order.quantity)
+         self.payment.charge(order.id)
+         order.status = OrderStatus.PAID

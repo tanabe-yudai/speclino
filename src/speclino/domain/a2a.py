@@ -11,8 +11,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from speclino.domain.run import GitRef
 
-SkillId = Literal["spec_review", "requirement_consult", "run_clarification"]
-SKILL_IDS: tuple[SkillId, ...] = ("spec_review", "requirement_consult", "run_clarification")
+SkillId = Literal["spec_review", "requirement_consult", "run_clarification", "spec_suggest"]
+SKILL_IDS: tuple[SkillId, ...] = (
+    "spec_review",
+    "requirement_consult",
+    "run_clarification",
+    "spec_suggest",
+)
 
 
 class SkillRequest(BaseModel):

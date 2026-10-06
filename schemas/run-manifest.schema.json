@@ -30,6 +30,79 @@
       "title": "AnalysisLimits",
       "type": "object"
     },
+    "Attestation": {
+      "additionalProperties": false,
+      "properties": {
+        "fingerprint": {
+          "minLength": 1,
+          "title": "Fingerprint",
+          "type": "string"
+        },
+        "content_hash": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Content Hash",
+          "type": "string"
+        },
+        "disposition": {
+          "enum": [
+            "attested",
+            "acknowledged_violation"
+          ],
+          "title": "Disposition",
+          "type": "string"
+        },
+        "actor": {
+          "minLength": 1,
+          "title": "Actor",
+          "type": "string"
+        },
+        "workspace": {
+          "minLength": 1,
+          "title": "Workspace",
+          "type": "string"
+        },
+        "project_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Project Id"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "self_attested": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "PR の作成者が自分で確定したか（GitHub のユーザー ID で照合。拒否はしないが印を残す）。None は照合できない（確定者が GitHub 未連携、または PR の作成者の ID が無い run）",
+          "title": "Self Attested"
+        }
+      },
+      "required": [
+        "fingerprint",
+        "content_hash",
+        "disposition",
+        "actor",
+        "workspace",
+        "created_at"
+      ],
+      "title": "Attestation",
+      "type": "object"
+    },
     "BehaviorAnalysis": {
       "additionalProperties": false,
       "description": "増分解析（S41c）の記録。再利用は「解析していない」ことなので必ず記録して隠さない。",
@@ -368,6 +441,109 @@
       "default": null,
       "description": "適用したチーム規約の改訂番号（S42）。replay はこの改訂を解決して照合する",
       "title": "Policy Revision"
+    },
+    "bundle_generation": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "run の開始時に固定した bundle",
+      "title": "Bundle Generation"
+    },
+    "bundle_hash": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Bundle Hash"
+    },
+    "uml_parser_version": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Uml Parser Version"
+    },
+    "expected_requirement_ids": {
+      "description": "出るべき要求 ID（欠けたら UNKNOWN）",
+      "items": {
+        "type": "string"
+      },
+      "title": "Expected Requirement Ids",
+      "type": "array"
+    },
+    "llm_assessment_keys": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Llm Assessment Keys",
+      "type": "array"
+    },
+    "attestations": {
+      "description": "このゲートで効いた人の確定（S70）。verdict は書き換えず、ゲートの処置として残す",
+      "items": {
+        "$ref": "#/$defs/Attestation"
+      },
+      "title": "Attestations",
+      "type": "array"
+    },
+    "trusted_commit": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "bundle の run（S65）で対応・契約・免除・規約を読んだ信頼側のコミット（worker が取ったデフォルトブランチの先端）。None は信頼側を確かめられなかった run",
+      "title": "Trusted Commit"
+    },
+    "source_roots": {
+      "description": "解析した source_roots（空は既定。replay で使う）",
+      "items": {
+        "type": "string"
+      },
+      "title": "Source Roots",
+      "type": "array"
+    },
+    "today": {
+      "anyOf": [
+        {
+          "format": "date",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "例外の期限判定に使った日付",
+      "title": "Today"
+    },
+    "bindings_patch": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "人の回答による run 限定の操作束縛（S32）",
+      "title": "Bindings Patch",
+      "type": "object"
     }
   },
   "required": [

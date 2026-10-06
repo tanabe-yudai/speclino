@@ -2,12 +2,17 @@
 
 例外（PolicyException）の適用はまだ行わない（S30 で実装）。`exceptions` はシグネチャに
 残すが、ここでは参照しない。
+
+LLM 支援の規約（検査器 ID `llm.checklist`、S70）も同じ登録の仕組みを通すが、検査器
+（`verifiers/llm_checklist.py`）は LLM を呼ばない。Finding を作るのは `services/llm_policies.py`
+で、worker が run の前に評価した結果を検査器に渡す（判定の層は LLM に依存しない）。
 """
 
 from __future__ import annotations
 
-from speclino.domain.finding import Category, Finding, Verdict
+from speclino.domain.finding import Finding
 from speclino.domain.policy import PolicyExceptions, PolicyPackage, PolicyRule
+from speclino.verifiers._findings import missing_input_outcome
 from speclino.verifiers.base import Snapshot, Verifier
 
 
@@ -16,10 +21,10 @@ def _has_any_match(paths: list[str], snapshot: Snapshot) -> bool:
 
 
 def _missing_input_finding(rule: PolicyRule, snapshot: Snapshot) -> Finding | None:
-    if rule.on_missing_input == "skipped":
+    outcome = missing_input_outcome(rule)
+    if outcome is None:
         return None
-    verdict: Verdict = "VIOLATED" if rule.on_missing_input == "violation" else "UNKNOWN"
-    category: Category = "missing_effect" if verdict == "VIOLATED" else "unsupported_analysis"
+    verdict, category = outcome
     patterns = ", ".join(rule.applies_to.paths) or "(未指定)"
     return Finding(
         id=f"policy:{rule.id}:missing_input",
@@ -45,6 +50,10 @@ class VerifierRegistry:
 
     def get(self, verifier_id: str) -> Verifier | None:
         return self._verifiers.get(verifier_id)
+
+    def versions(self) -> dict[str, str]:
+        """登録した検証器 ID → 版。"""
+        return {vid: v.version for vid, v in self._verifiers.items()}
 
     def run_package(
         self,

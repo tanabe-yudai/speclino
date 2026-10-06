@@ -36,7 +36,10 @@ from speclino.ports.github_users import GitHubUserLookup
 from speclino.ports.mcp_context import McpContextSource
 from speclino.ports.sandbox import Sandbox
 from speclino.ports.task_queue import TaskQueue
+from speclino.ports.text_llm import TextLlm
+from speclino.services import bundle_signing
 from speclino.services.cost_guard import CostGuard, CostLedger
+from speclino.services.knowledge_inputs import make_knowledge_resolver
 from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
 from speclino.settings import Settings
 
@@ -61,6 +64,8 @@ class AppState:
     github_user_oauth: GitHubUserOAuth | None = None
     # A2A のスキルの処理（S59）。None なら state から本物を組み立てる。テストで差し替える
     a2a_handlers: dict[SkillId, SkillHandler] | None = None
+    # AI の書き換え提案（S67）の LLM。None なら初回に Gemini を作る。テストで台本に差し替える
+    spec_suggest_llm: TextLlm | None = None
     # 承認者のログイン名 → GitHub ユーザー ID（S61）。引き先は `build_github_user_lookup`
     github_users: GitHubUserLookup = field(default_factory=PublicGitHubUserLookup)
 
@@ -117,7 +122,10 @@ def _github_app_auth(settings: Settings) -> GitHubAppAuth | None:
 
 def build_code_host(settings: Settings, installation_id: int | None = None) -> CodeHost:
     if settings.code_host_kind == "local":
-        return LocalCodeHost(repos={k: Path(v) for k, v in settings.local_repos.items()})
+        return LocalCodeHost(
+            repos={k: Path(v) for k, v in settings.local_repos.items()},
+            repo_ids=dict(settings.local_repo_ids),
+        )
     auth = _github_app_auth(settings)
     if auth is None:
         raise RuntimeError("GitHub App の設定（SPECLINO_GITHUB_APP_ID / PRIVATE_KEY）が無い")
@@ -206,8 +214,15 @@ class LazyCodeHost:
     async def repository_id(self, repo: str) -> int | None:
         return await self.inner.repository_id(repo)
 
+    async def branch_head(self, repo: str, branch: str) -> str | None:
+        return await self.inner.branch_head(repo, branch)
+
 
 def build_state(settings: Settings) -> AppState:
+    if settings.role in ("web", "worker", "all"):
+        # bundle を作る（web の承認）・確かめる（worker の run）役割は署名鍵が要る。本番で
+        # 未設定なら最初の承認で落ちる前に、起動で落とす
+        bundle_signing.configure(settings)
     engine = make_engine(settings)
     factory = make_session_factory(engine)
     if settings.blob_kind == "fs":
@@ -266,8 +281,16 @@ def build_state(settings: Settings) -> AppState:
             agent_enabled=settings.agent_enabled,
             sandbox=build_sandbox(settings),
             resolve_team_policy=make_team_policy_resolver(factory),
+            # S65: ワークスペースに登録されたプロジェクトの run は bundle を固定して検査する
+            resolve_knowledge=make_knowledge_resolver(factory),
             # Gemini のクライアントは初回呼出しで作る（web ロールや認証情報の無い環境でも
             # 起動できる。認証が無ければ bot は理由をコメントに書く）
+            # S70: LLM 支援の規約を評価する LLM（クライアントは初回呼出しで作る）
+            policy_llm=(
+                GeminiJsonLlm(settings.llm_policies_model or settings.agent_model)
+                if settings.llm_policies_enabled
+                else None
+            ),
             spec_llm=(
                 GeminiJsonLlm(settings.spec_bot_model or settings.agent_model)
                 if settings.spec_bot_enabled

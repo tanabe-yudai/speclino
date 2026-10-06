@@ -9,4 +9,4 @@ export interface Command {
   path: string
 }
 
-export type SettingsTab = 'projects' | 'repositories' | 'members' | 'tokens'
+export type SettingsTab = 'projects' | 'repositories' | 'members' | 'sync' | 'tokens'

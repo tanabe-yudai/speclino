@@ -67,10 +67,16 @@ export function AccountMenu() {
         )}
         {workspace && (
           <>
-            {/* スマホ幅では上部のバーから「規約」「設定」を外すので、ここから行けるようにする */}
+            {/* スマホ幅では上部のバーから「知識」「規約」「可観測性」「設定」を外すので、ここから行けるようにする */}
             <DropdownMenuSeparator className="sm:hidden" />
+            <DropdownMenuItem className="sm:hidden" onSelect={() => navigate(paths.knowledge(workspace.slug))}>
+              知識
+            </DropdownMenuItem>
             <DropdownMenuItem className="sm:hidden" onSelect={() => navigate(paths.policies(workspace.slug))}>
               規約
+            </DropdownMenuItem>
+            <DropdownMenuItem className="sm:hidden" onSelect={() => navigate(paths.observability(workspace.slug))}>
+              可観測性
             </DropdownMenuItem>
             <DropdownMenuItem className="sm:hidden" onSelect={() => navigate(paths.settings(workspace.slug))}>
               設定

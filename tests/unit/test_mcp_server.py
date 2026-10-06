@@ -75,6 +75,10 @@ async def test_tools_are_exposed_in_process() -> None:
         "context_get",
         "verification_start",
         "verification_get",
+        "sync_status",
+        "spec_get",
+        "skill_get",
+        "spec_suggest",
     }
 
 

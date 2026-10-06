@@ -35,6 +35,9 @@ export type BaseHeadStatus = 'new' | 'existing' | 'resolved' | 'unchanged'
 
 export type TestObservation = 'OBSERVED' | 'NOT_OBSERVED' | 'CONTRADICTED'
 
+/** LLM 支援の規約の区分（S70）。verdict は常に REVIEW。 */
+export type AssessmentOutcome = 'issue' | 'no_issue' | 'split'
+
 /** 仕様またはコード上の位置。requirement_id か symbol のどちらかを持つ。 */
 export interface SourceRef {
   snapshot_id: string
@@ -72,4 +75,6 @@ export interface Finding {
   base_head_status: BaseHeadStatus | null
   test_observation: TestObservation | null
   next_steps: string[]
+  /** LLM 支援の規約だけ（S70）。それ以外は null か欠落 */
+  assessment_outcome?: AssessmentOutcome | null
 }

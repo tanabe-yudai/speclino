@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from speclino.adapters.localgit.code_host import export_snapshot
+from speclino.adapters.localgit.code_host import GitError, export_snapshot, resolve_sha
 
 
 @dataclass
@@ -83,6 +83,15 @@ class LocalCodeHost:
 
     async def repository_id(self, repo: str) -> int | None:
         return self.repo_ids.get(repo)
+
+    async def branch_head(self, repo: str, branch: str) -> str | None:
+        root = self.repos.get(repo)
+        if root is None:
+            return None
+        try:
+            return resolve_sha(root, f"refs/heads/{branch}")
+        except GitError:
+            return None
 
     async def fetch_snapshot(self, repo: str, sha: str, dest_dir: Path) -> Path:
         root = self.repos[repo]

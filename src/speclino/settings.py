@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -35,6 +36,9 @@ class Settings(BaseSettings):
     gcs_bucket: str | None = None
     code_host_kind: Literal["github", "local"] = "github"
     local_repos: dict[str, Path] = {}  # code_host_kind=local のとき repo_full_name → パス
+    # code_host_kind=local のとき repo_full_name → リポジトリ ID（project の github_repo_id と
+    # 照合される。無いリポジトリの project は ID の照合で run が失敗する）
+    local_repo_ids: dict[str, int] = {}
 
     # サンドボックス（test_run、S31/S38）: docker はローカル、cloud_run は本番の Cloud Run sandboxes
     sandbox_kind: Literal["disabled", "docker", "cloud_run"] = "disabled"
@@ -58,6 +62,10 @@ class Settings(BaseSettings):
     spec_bot_enabled: bool = True
     spec_bot_model: str | None = None
     demo_rerun_limit_per_day: int = 20
+    # LLM 支援の規約（S70）。tier=llm_assisted のルールを worker が評価する（verdict は REVIEW、
+    # 確定は人）。無効なら LLM 支援のルールは UNKNOWN。費用は daily_cost_limit_usd の枠を共有する
+    llm_policies_enabled: bool = True
+    llm_policies_model: str | None = None  # 未指定なら agent_model
     # A2A の議論役（S59）。web に A2A の入口を出すか。本番は Terraform の環境変数で true
     a2a_enabled: bool = False
     a2a_model: str | None = None  # 未指定なら agent_model
@@ -65,3 +73,17 @@ class Settings(BaseSettings):
     # 認証（S13）
     auth_kind: Literal["dev", "identity_platform"] = "dev"
     firebase_project_id: str | None = None
+
+    # 知識の bundle の署名鍵（S62、HMAC-SHA256）。本番は Secret Manager から環境変数へ。
+    # 未設定なら env=local は固定の開発鍵、env=prod は起動時にエラー（services/bundle_signing.py）
+    bundle_signing_key: str | None = None
+    # 鍵の更新の間だけ、前の鍵を検証に使う（#114）。`kid:secret` をカンマ区切り。kid は
+    # `speclino signing-key-id` で確かめる。lock の期限（30 日）が過ぎたら外してよい
+    bundle_signing_keys_old: str | None = None
+
+    @model_validator(mode="after")
+    def _no_local_code_host_in_prod(self) -> Settings:
+        # ローカルのコードホストは手元の git をそのまま信じる（GitHub の認証も ID の照合も無い）
+        if self.env == "prod" and self.code_host_kind == "local":
+            raise ValueError("env=prod では code_host_kind=local を使えない")
+        return self

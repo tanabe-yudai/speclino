@@ -39,7 +39,14 @@ from speclino.services.review_run_service import ReviewRunService
 
 # ADK のエージェントに渡すのは spec_context と run_findings だけ。残りは手順だけが呼ぶ
 CONSULT_TOOLS: frozenset[str] = frozenset(
-    {"spec_context", "run_findings", "spec_extract", "supplement_record", "verification_start"}
+    {
+        "spec_context",
+        "run_findings",
+        "spec_extract",
+        "spec_suggest",
+        "supplement_record",
+        "verification_start",
+    }
 )
 # 日次の費用枠の予約を直列化する advisory lock の鍵（固定）
 _COST_LOCK_KEY = 0x53504C494E4F01

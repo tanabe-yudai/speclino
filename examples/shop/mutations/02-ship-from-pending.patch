@@ -1,0 +1,16 @@
+diff --git a/examples/shop/app/service.py b/examples/shop/app/service.py
+--- a/examples/shop/app/service.py
++++ b/examples/shop/app/service.py
+@@ -31,10 +31,8 @@ class OrderService:
+         order.status = OrderStatus.PAID
+ 
+     def ship_order(self, order: Order) -> None:
+-        if order.status != OrderStatus.PAID:
+-            raise OrderError(
+-                "出荷できるのは決済済みの注文だけです。決済を済ませてから出荷してください。"
+-            )
++        if order.status == OrderStatus.CANCELLED:
++            raise OrderError("取り消した注文は出荷できません。新しく注文してください。")
+         order.status = OrderStatus.SHIPPED
+         self.mailer.notify(order.id)
+ 

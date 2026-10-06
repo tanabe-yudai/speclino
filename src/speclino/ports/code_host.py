@@ -61,5 +61,12 @@ class CodeHost(Protocol):
         """
         ...
 
+    async def branch_head(self, repo: str, branch: str) -> str | None:
+        """repo の branch の今の先端のコミット SHA。無い・読めないなら None。
+
+        bundle の run（S65）が信頼側（デフォルトブランチ）を、リクエストの値に頼らず自分で決める。
+        """
+        ...
+
 
 __all__ = ["CodeHost"]

@@ -1,0 +1,9 @@
+diff --git a/examples/shop/app/service.py b/examples/shop/app/service.py
+--- a/examples/shop/app/service.py
++++ b/examples/shop/app/service.py
+@@ -44,4 +44,5 @@ class OrderService:
+                 "取り消せるのは未確定の注文だけです。決済済みの注文は返品の手続きをしてください。"
+             )
+         order.status = OrderStatus.CANCELLED
++        self.payment.refund(order.id)
+         self.mailer.notify(order.id)

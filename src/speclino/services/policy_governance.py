@@ -19,27 +19,43 @@ from speclino.db.repositories.policy_revisions import PolicyRevisionRepository
 from speclino.db.repositories.teams import TeamRepository
 from speclino.domain.policy import PolicyPackage, PolicyRevision
 from speclino.services.check_pipeline import policy_package_hash
-from speclino.verifiers.api_error_format import VERIFIER_ID as _API_ID
-from speclino.verifiers.api_error_format import VERIFIER_VERSION as _API_V
-from speclino.verifiers.ci_required import VERIFIER_ID as _CI_ID
-from speclino.verifiers.ci_required import VERIFIER_VERSION as _CI_V
-from speclino.verifiers.make_targets import VERIFIER_ID as _MAKE_ID
-from speclino.verifiers.make_targets import VERIFIER_VERSION as _MAKE_V
-from speclino.verifiers.spec_format import VERIFIER_ID as _SPEC_ID
-from speclino.verifiers.spec_format import VERIFIER_VERSION as _SPEC_V
-from speclino.verifiers.spec_tests import VERIFIER_ID as _TESTS_ID
-from speclino.verifiers.spec_tests import VERIFIER_VERSION as _TESTS_V
+from speclino.verifiers.catalog import KNOWN_VERIFIERS
 
 SEED_ACTOR = "seed"
 
-# 画面から選べる検証器（services/check_pipeline.py の _policy_registry と同じ集合）
-KNOWN_VERIFIERS: dict[str, str] = {
-    _MAKE_ID: _MAKE_V,
-    _SPEC_ID: _SPEC_V,
-    _TESTS_ID: _TESTS_V,
-    _CI_ID: _CI_V,
-    _API_ID: _API_V,
-}
+
+# LLM 支援の規約で「広すぎる」とみなすパターン（リポジトリ全体に当たる）
+_BROAD_PATTERNS = frozenset({"*", "**", "**/*", "**/*.py", "*.py", "./**", "./**/*"})
+
+
+def llm_scope_warnings(package: PolicyPackage) -> list[str]:
+    """LLM 支援の規約（`llm.checklist`）の送り先の範囲の警告（#114）。承認は拒否しない。
+
+    秘密情報の検出は完全ではないので、LLM に送るのは送ってよいと確かめたパスだけにする。
+    `params.paths` が無い（`applies_to.paths` をそのまま送る）・リポジトリ全体に当たるパターンを
+    含む場合に警告する。
+    """
+    from speclino.domain.policy import LLM_CHECKLIST_VERIFIER_ID
+
+    warnings: list[str] = []
+    for rule in package.rules:
+        if rule.verifier is None or rule.verifier.id != LLM_CHECKLIST_VERIFIER_ID:
+            continue
+        raw = rule.verifier.params.get("paths") if isinstance(rule.verifier.params, dict) else None
+        paths = [p for p in raw if isinstance(p, str)] if isinstance(raw, list) else []
+        if not paths:
+            warnings.append(
+                f"{rule.id}: LLM に送るパス（params.paths）が無い。applies_to.paths に一致する"
+                "ファイルをすべて送る。送ってよいパスだけを指定する"
+            )
+        effective = paths or list(rule.applies_to.paths)
+        broad = sorted({p for p in effective if p.strip() in _BROAD_PATTERNS})
+        if broad:
+            warnings.append(
+                f"{rule.id}: LLM に送るパスが広すぎる（{', '.join(broad)}）。秘密情報の検出は"
+                "完全ではないので、送ってよいディレクトリに絞る"
+            )
+    return warnings
 
 
 class InvalidPackage(ValueError):
@@ -62,6 +78,17 @@ def _validate(package: PolicyPackage) -> None:
     for r in package.rules:
         if r.verifier is not None and r.verifier.id not in KNOWN_VERIFIERS:
             raise InvalidPackage(f"{r.id}: 未登録の検証器 {r.verifier.id}")
+        if (
+            r.verifier is not None
+            and r.verifier.id == "llm.checklist"
+            and r.verifier.params.get("unit_kind") == "string_literal"
+            and not r.verifier.params.get("call_names")
+        ):
+            # #114 裁定 37: LLM に送る文字列は、指定した呼出しに渡されたリテラルだけに限る
+            raise InvalidPackage(
+                f"{r.id}: unit_kind=string_literal の LLM 支援の規約には params.call_names が要る"
+                "（例: OrderError、HTTPException、api_error）"
+            )
         if r.verifier is not None and r.verifier.version != KNOWN_VERIFIERS[r.verifier.id]:
             raise InvalidPackage(
                 f"{r.id}: 検証器 {r.verifier.id} の版 {r.verifier.version} は使えない"
@@ -251,12 +278,24 @@ async def _approve(
         team=team, revision=revision, approver=approver
     )
     self_approved = approver == approved.author or approver in editors
+    # S62: 規約が変わったら同じトランザクションで知識の bundle を作り直す（run が固定する単位）。
+    # knowledge_registry はこのモジュールの DraftConflict を使うので、循環を避けて関数内で import
+    from speclino.services.knowledge_registry import build_bundle
+
+    await build_bundle(session, team)
     await AuditRepository(session).record(
         actor=approver,
         action="policy.approve",
         target=f"{team}@{revision}",
         decision="approved",
-        detail={"author": approved.author, "self_approved": self_approved},
+        detail={
+            "author": approved.author,
+            "self_approved": self_approved,
+            # LLM 支援の規約の送り先の範囲の警告（#114。拒否はしない）
+            **(
+                {"warnings": warnings} if (warnings := llm_scope_warnings(approved.package)) else {}
+            ),
+        },
     )
     return approved
 
@@ -318,6 +357,7 @@ __all__ = [
     "approve_draft",
     "create_draft",
     "draft_hash",
+    "llm_scope_warnings",
     "save_draft",
     "seed_from_package",
 ]

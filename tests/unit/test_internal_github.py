@@ -74,5 +74,8 @@ async def test_a_login_that_is_not_a_github_login_is_422() -> None:
 
 
 async def test_the_web_role_does_not_serve_it() -> None:
-    res = await _post(_FakeUsers({"octocat": 1}), {"login": "octocat"}, role="web")
-    assert res.status_code == 404
+    users = _FakeUsers({"octocat": 1})
+    res = await _post(users, {"login": "octocat"}, role="web")
+    # web/dist があると SPA の静的配信が "/" 配下を受けるので 405 になる（無ければ 404）
+    assert res.status_code in (404, 405)
+    assert users.seen == []

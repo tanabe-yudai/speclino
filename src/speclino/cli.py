@@ -15,7 +15,7 @@ import httpx
 import typer
 from pydantic import ValidationError
 
-from speclino import __version__
+from speclino import __version__, cli_sync
 from speclino.adapters.localgit import GitError, export_snapshot, resolve_sha
 from speclino.analysis.limits import DEFAULT_LIMITS, clamp
 from speclino.conformance.engine import EngineInputError
@@ -33,6 +33,7 @@ policy_app = typer.Typer(name="policy", help="チーム規約（改訂・承認�
 app.add_typer(policy_app, name="policy")
 workspace_app = typer.Typer(name="workspace", help="ワークスペース（テナント境界）の管理（S53）")
 app.add_typer(workspace_app, name="workspace")
+app.command("sync")(cli_sync.sync)
 DEFAULT_SCHEMAS_DIR = Path("schemas")
 DEFAULT_POLICY_SEED_SOURCE = Path(".speclino/policy/speclino-core.yaml")
 
@@ -299,7 +300,7 @@ def a2a_send(
     url: Annotated[str, typer.Option("--url", help="SpecLino のベース URL")] = "",
     skill: Annotated[
         str | None,
-        typer.Option(help="spec_review / requirement_consult / run_clarification"),
+        typer.Option(help="spec_review / requirement_consult / run_clarification / spec_suggest"),
     ] = None,
     repo: Annotated[str | None, typer.Option(help="owner/name")] = None,
     behavior: Annotated[str | None, typer.Option(help="spec_review の対象の振る舞い")] = None,
@@ -381,8 +382,26 @@ def replay(
             ),
         ),
     ] = False,
+    project_id: Annotated[
+        str | None,
+        typer.Option("--project-id", help="bundle を固定した run のプロジェクト ID（DB を使う）"),
+    ] = None,
+    repo: Annotated[
+        Path | None, typer.Option("--repo", help="bundle の run: head のスナップショット")
+    ] = None,
+    base: Annotated[
+        Path | None, typer.Option("--base", help="bundle の PR の run: base のスナップショット")
+    ] = None,
+    trusted: Annotated[
+        Path | None,
+        typer.Option("--trusted", help="bundle の run: 信頼側（trusted_commit）のスナップショット"),
+    ] = None,
 ) -> None:
     """凍結した IR から判定を再評価し、保存された結果と一致するか確認する（AC-013）。
+
+    bundle を固定した run（S65）は `--project-id` と `--repo`（PR なら `--base` も）を渡すと、
+    `SPECLINO_DATABASE_URL` の DB から記録の bundle を解決し、規約・lock を含む決定的な検査を
+    再実行して比べる。
 
     run-manifest がチーム規約の改訂（`policy_revision`）を記録している run は、CLI 単体では
     DB に接続できず改訂を解決できないため既定で失敗する（規約が変わっても過去の判定が
@@ -390,6 +409,39 @@ def replay(
     付けるとその検査だけを明示的に飛ばして再評価する。
     """
     from speclino.services.replay_service import replay as _replay
+
+    if project_id is not None:
+        from speclino.services.replay_service import BundleReplayResult, replay_bundle
+
+        if repo is None:
+            typer.echo("入力不正: bundle の run の replay には --repo が要る", err=True)
+            raise typer.Exit(code=2)
+        head_root = repo
+
+        async def work(s: AsyncSession) -> BundleReplayResult:
+            return await replay_bundle(
+                s,
+                run_dir,
+                project_id=project_id,
+                repo_root=head_root,
+                base_root=base,
+                trusted_root=trusted,
+            )
+
+        try:
+            bres = _in_transaction(work)
+        except (OSError, LookupError) as e:
+            typer.echo(f"入力不正: {e}", err=True)
+            raise typer.Exit(code=2) from e
+        typer.echo(
+            f"run_id: {bres.run_id}  bundle: {bres.bundle_generation}  compared: {bres.compared}"
+        )
+        for d in bres.differences:
+            typer.echo(f"  差異: {d}")
+        if bres.llm_findings:
+            typer.echo(f"  LLM 支援（記録で再評価、比較対象外）: {len(bres.llm_findings)} 件")
+        typer.echo("一致" if bres.identical else "不一致")
+        raise typer.Exit(code=0 if bres.identical else 1)
 
     try:
         res = _replay(run_dir, require_policy_check=not no_policy_check)
@@ -482,7 +534,8 @@ def policy_seed(
     """
     import yaml
 
-    from speclino.domain.policy import PolicyPackage
+    from speclino.domain.policy import PolicyPackage, PolicyRevision
+    from speclino.services.knowledge_registry import BundleConflict
     from speclino.services.policy_governance import seed_from_package
 
     try:
@@ -492,12 +545,122 @@ def policy_seed(
         typer.echo(f"入力不正: {e}", err=True)
         raise typer.Exit(code=2) from e
 
+    async def seed(s: AsyncSession) -> PolicyRevision:
+        try:
+            return await seed_from_package(s, team=team, package=package)
+        except BundleConflict as e:
+            # 規約の有効化は知識の bundle を作り直す（S62）。作れなければ規約も有効にしない
+            raise ValueError(f"規約を有効にすると知識の bundle を作れない: {e}") from e
+
     # 既に改訂があるチームへの seed は ValueError で拒否される（seed_from_package）
-    revision = _in_transaction(lambda s: seed_from_package(s, team=team, package=package))
+    revision = _in_transaction(seed)
     typer.echo(
         f"{team}@{revision.revision} を {revision.status} として取り込んだ"
         f"（rules={len(revision.package.rules)}）"
     )
+
+
+@app.command("import-specs")
+def import_specs(
+    workspace: Annotated[str, typer.Option("--workspace", help="取り込み先のワークスペース")],
+    project_id: Annotated[
+        str, typer.Option("--project-id", help="仕様を当てるプロジェクトの ID（scope）")
+    ],
+    author: Annotated[str, typer.Option("--author", help="下書きの作者として記録する uid")],
+    repo: Annotated[
+        Path, typer.Option("--repo", help="specs/ と .speclino/ のあるディレクトリ")
+    ] = Path("."),
+) -> None:
+    """リポジトリの旧形式の仕様（specs/*.md・specs/ir・domain.yaml）を spec の下書きにする。
+
+    承認は画面か API で行う（承認時にサーバが IR を固定する）。図への書き換えは行わない。
+    DB 接続は `SPECLINO_DATABASE_URL`。同じ名前の仕様が既にあれば拒否する（終了コード 2）。
+    """
+    from speclino.domain.knowledge import ArtifactRevision
+    from speclino.services.spec_import import import_specs as _import
+
+    async def work(s: AsyncSession) -> list[ArtifactRevision]:
+        return await _import(
+            s, workspace=workspace, project_id=project_id, repo_root=repo, author=author
+        )
+
+    try:
+        created = _in_transaction(work)
+    except (OSError, LookupError) as e:
+        typer.echo(f"入力不正: {e}", err=True)
+        raise typer.Exit(code=2) from e
+    for rev in created:
+        typer.echo(f"{rev.name}: 下書き {rev.revision} を作成した（{rev.content_hash}）")
+
+
+@app.command("cutover-status")
+def cutover_status(
+    workspace: Annotated[
+        str | None, typer.Option("--workspace", help="対象のワークスペース（省略で全部）")
+    ] = None,
+) -> None:
+    """知識レジストリへの切り替えの進み具合をプロジェクトごとに出す（読み取りだけ、#114）。
+
+    承認済みの仕様・sync トークン・lock の一致した最新の検査がそろったプロジェクトを ready とする。
+    手順は docs/runbooks/knowledge-registry-cutover.md。
+    """
+    from speclino.services.cutover_status import cutover_status as _status
+
+    rows = _in_transaction(lambda s: _status(s, workspace))
+    if not rows:
+        typer.echo("ワークスペースに登録されたプロジェクトが無い")
+        return
+    for r in rows:
+        mark = "ready" if r.ready else "TODO "
+        specs = ",".join(r.approved_specs) or ("-" if r.bundle_problem is None else "!")
+        typer.echo(
+            f"{mark} {r.workspace} {r.repo_full_name} project={r.project_id} "
+            f"bundle={r.bundle_generation or '-'} specs={specs} "
+            f"sync_tokens={r.active_sync_tokens} lock={r.lock_verdict or '-'}"
+            + (f" problem={r.bundle_problem}" if r.bundle_problem else "")
+        )
+    done = sum(1 for r in rows if r.ready)
+    typer.echo(f"{done}/{len(rows)} プロジェクトが切り替え済み")
+
+
+@app.command("signing-key-id")
+def signing_key_id() -> None:
+    """今の bundle の署名鍵（`SPECLINO_BUNDLE_SIGNING_KEY`）の ID を出す（鍵そのものは出さない）。
+
+    鍵の更新で前の鍵を `SPECLINO_BUNDLE_SIGNING_KEYS_OLD`（`kid:secret`）に残すときの kid。
+    """
+    from speclino.services import bundle_signing
+
+    typer.echo(bundle_signing.current_key_id())
+
+
+@app.command("rebundle-all")
+def rebundle_all(
+    force: Annotated[
+        bool, typer.Option("--force", help="今の鍵で署名済みのワークスペースも作り直す")
+    ] = False,
+    workspace: Annotated[
+        list[str] | None,
+        typer.Option("--workspace", help="対象のワークスペース（複数可。省略で全部）"),
+    ] = None,
+) -> None:
+    """鍵の更新の後、全ワークスペースの bundle を今の鍵で作り直す（新しい世代、#114）。
+
+    1 つでも失敗すれば終了コード 1（他のワークスペースの作り直しは残る）。
+    """
+    from speclino.services import bundle_signing
+    from speclino.services.signing_rotation import rebundle_all as _rebundle
+
+    outcomes = _in_transaction(lambda s: _rebundle(s, force=force, only=workspace))
+    typer.echo(f"今の鍵の ID: {bundle_signing.current_key_id()}")
+    for o in outcomes:
+        before = f"世代 {o.previous_generation}（鍵 {o.previous_key_id or '-'}）"
+        if o.status == "rebundled":
+            typer.echo(f"{o.workspace}: {before} → 世代 {o.generation}")
+        else:
+            typer.echo(f"{o.workspace}: {before} {o.status}: {o.detail}")
+    if any(o.status == "failed" for o in outcomes):
+        raise typer.Exit(code=1)
 
 
 @workspace_app.command("create")

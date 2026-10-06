@@ -153,3 +153,24 @@ variable "user_project_override" {
   type        = bool
   default     = true
 }
+
+variable "mount_bundle_signing_key" {
+  description = <<-EOT
+    知識の bundle・lock の署名鍵（Secret Manager の bundle-signing-key）を web・worker・admin Job に
+    SPECLINO_BUNDLE_SIGNING_KEY として注入するか。値を投入してから true にする（バージョンの無い
+    secret を参照するとリビジョンが起動できない）。env=prod で鍵が無いと新しいコードは起動しないので、
+    知識レジストリを含むイメージをデプロイする前に true にする（docs/runbooks/knowledge-registry-cutover.md）。
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "mount_bundle_signing_keys_old" {
+  description = <<-EOT
+    署名鍵の更新の間だけ true にし、前の鍵（Secret Manager の bundle-signing-keys-old、
+    `kid:secret` のカンマ区切り）を SPECLINO_BUNDLE_SIGNING_KEYS_OLD として注入する。値を投入してから
+    true にする。lock の期限（30 日）が過ぎたら false に戻してよい（docs/runbooks/knowledge-registry-cutover.md）。
+  EOT
+  type        = bool
+  default     = false
+}

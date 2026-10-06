@@ -29,7 +29,7 @@ def _gate_dict(gate: GateResult, waivers: list[Waiver] | None = None) -> dict[st
     # ゲートで実際に免除された finding の分だけ（どの例外で・いつまで・どう直すか）を残す
     waived = {f.id for f in gate.waived}
     kept = sorted((w for w in waivers or [] if w.finding_id in waived), key=lambda w: w.finding_id)
-    return {
+    out: dict[str, object] = {
         "status": gate.status,
         "reason": gate.reason,
         "blocking_ids": sorted(f.id for f in gate.blocking),
@@ -48,12 +48,21 @@ def _gate_dict(gate: GateResult, waivers: list[Waiver] | None = None) -> dict[st
             for w in kept
         ],
     }
+    if gate.cleared:
+        # 阻止しない REVIEW（S70: 人の attested の確定）。無い run の gate.json は変えない
+        out["cleared_ids"] = sorted(f.id for f in gate.cleared)
+    if gate.self_attested_ids:
+        out["self_attested_ids"] = sorted(gate.self_attested_ids)
+    if gate.self_attest_unverified_ids:
+        # 確定者と PR の作成者を照合できなかった（作成者との照合不可）
+        out["self_attest_unverified_ids"] = sorted(gate.self_attest_unverified_ids)
+    return out
 
 
 def write_artifacts(
     out_dir: Path,
     manifest: RunManifest,
-    spec: SpecIR,
+    spec: SpecIR | None,
     code: CodeIR | None,
     findings: Findings,
     gate: GateResult | None,
@@ -76,7 +85,9 @@ def write_artifacts(
         written[name] = path
 
     emit("run-manifest.json", manifest.model_dump(mode="json"))
-    emit("spec-ir.json", spec.model_dump(mode="json"))
+    # bundle の run（S65）で旧形式の仕様が無いときは spec-ir.json を書かない
+    if spec is not None:
+        emit("spec-ir.json", spec.model_dump(mode="json"))
     if code is not None:
         emit("code-ir.json", code.model_dump(mode="json"))
     emit("findings.json", findings.model_dump(mode="json"))
@@ -87,7 +98,14 @@ def write_artifacts(
 
     review_path = out_dir / "review.md"
     review_path.write_text(
-        render_review(manifest, findings, gate, spec.behavior_id, semantic_diff), encoding="utf-8"
+        render_review(
+            manifest,
+            findings,
+            gate,
+            spec.behavior_id if spec is not None else "(bundle)",
+            semantic_diff,
+        ),
+        encoding="utf-8",
     )
     written["review.md"] = review_path
     return written
