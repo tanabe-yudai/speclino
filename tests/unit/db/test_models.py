@@ -16,6 +16,7 @@ from sqlalchemy import Enum as SAEnum
 from speclino.db.models import Base
 from speclino.domain.finding import Verdict
 from speclino.domain.knowledge import ArtifactKind, ArtifactStatus
+from speclino.domain.knowledge_chat import KnowledgeChatKind
 from speclino.domain.policy import PolicyRevisionStatus
 from speclino.domain.run import ExecState, GateStatus
 
@@ -46,6 +47,7 @@ EXPECTED_TABLES = {
     "knowledge_fetches",
     "llm_assessments",
     "attestations",
+    "knowledge_chats",
 }
 
 
@@ -114,3 +116,42 @@ def test_knowledge_tables_have_uniqueness() -> None:
         "uq_artifact_revisions_artifact_draft",
     } <= names("artifact_revisions")
     assert "uq_bundles_workspace_generation" in names("bundles")
+
+
+def test_knowledge_chats_columns_and_constraints() -> None:
+    """S73: 会話の表。kind は専用の Enum、artifact は NULL 可で消えたら NULL、規約は結び付けない。"""
+    t = Base.metadata.tables["knowledge_chats"]
+    assert {c.name for c in t.columns} == {
+        "id",
+        "workspace",
+        "owner_uid",
+        "kind",
+        "artifact_id",
+        "title",
+        "messages",
+        "version",
+        "created_at",
+        "updated_at",
+    }
+    assert _enum_values("knowledge_chats", "kind") == set(get_args(KnowledgeChatKind))
+    kind_type = t.columns["kind"].type
+    assert isinstance(kind_type, SAEnum) and kind_type.name == "knowledge_chat_kind"
+    assert t.columns["artifact_id"].nullable
+    assert not t.columns["owner_uid"].nullable
+    assert t.columns["title"].type.length == 120  # type: ignore[attr-defined]
+    (ws_fk,) = t.columns["workspace"].foreign_keys
+    assert ws_fk.target_fullname == "teams.team" and ws_fk.ondelete == "CASCADE"
+    (art_fk,) = t.columns["artifact_id"].foreign_keys
+    assert art_fk.target_fullname == "artifacts.id" and art_fk.ondelete == "SET NULL"
+    names = {c.name for c in t.constraints} | {ix.name for ix in t.indexes}
+    assert "ck_knowledge_chats_policy_unbound" in names
+    assert "ix_knowledge_chats_workspace_owner_updated" in names
+    index = next(ix for ix in t.indexes if ix.name == "ix_knowledge_chats_workspace_owner_updated")
+    assert [c.name for c in index.columns] == ["workspace", "owner_uid", "updated_at"]
+
+
+def test_cost_ledger_has_chat_columns() -> None:
+    """S73: 会話の費用をユーザー・ワークスペースごとに数える列（NULL 可の追加だけ）。"""
+    t = Base.metadata.tables["cost_ledger"]
+    for name in ("workspace", "uid", "purpose"):
+        assert t.columns[name].nullable

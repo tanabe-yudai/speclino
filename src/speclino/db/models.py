@@ -25,6 +25,7 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    CheckConstraint,
     Column,
     Date,
     DateTime,
@@ -47,6 +48,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from speclino.domain.finding import Verdict
 from speclino.domain.knowledge import ArtifactKind, ArtifactStatus
+from speclino.domain.knowledge_chat import KnowledgeChatKind
 from speclino.domain.policy import PolicyRevisionStatus
 from speclino.domain.run import ExecState, GateStatus
 from speclino.domain.workspace import WorkspaceRole
@@ -504,6 +506,11 @@ class CostLedgerEntry(Base):
     input_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
     output_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
     model: Mapped[str] = mapped_column(String, nullable=False)
+    # S73: 会話の費用をワークスペース・ユーザーごとに数える。purpose は予約の行の用途
+    # （`chat_message` / `chat_summary`）。それ以外の行と精算の行は NULL
+    workspace: Mapped[str | None] = mapped_column(String, nullable=True)
+    uid: Mapped[str | None] = mapped_column(String, nullable=True)
+    purpose: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class AgentSupplementRecord(Base):
@@ -733,6 +740,46 @@ class AttestationRecord(Base):
     # PR の作成者が自分で確定したか（GitHub の ID で照合、拒否はしない）。NULL は照合できない
     self_attested: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class KnowledgeChatRecord(Base):
+    """`knowledge_chats`: 知識を AI と作る会話（S73）。持ち主だけが読み書きする。
+
+    `messages` は `domain.knowledge_chat.ChatMessage` の配列（JSONB）。件数と大きさの上限は
+    サービスで確かめる。問い合わせは必ず (workspace, owner_uid) で絞る。規約の会話
+    （kind=policy）はチーム規約を指すので artifact に結び付けない（CHECK）。ワークスペースを
+    消せば会話も消え、artifact が消えれば結び付けだけ外れる。
+    """
+
+    __tablename__ = "knowledge_chats"
+    __table_args__ = (
+        CheckConstraint(
+            "kind <> 'policy' OR artifact_id IS NULL", name="ck_knowledge_chats_policy_unbound"
+        ),
+        Index("ix_knowledge_chats_workspace_owner_updated", "workspace", "owner_uid", "updated_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace: Mapped[str] = mapped_column(
+        String, ForeignKey("teams.team", ondelete="CASCADE"), nullable=False
+    )
+    owner_uid: Mapped[str] = mapped_column(String, nullable=False)
+    kind: Mapped[KnowledgeChatKind] = mapped_column(
+        SAEnum(*get_args(KnowledgeChatKind), name="knowledge_chat_kind", native_enum=True),
+        nullable=False,
+    )
+    artifact_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("artifacts.id", ondelete="SET NULL"), nullable=True
+    )
+    title: Mapped[str] = mapped_column(String(120), nullable=False)
+    messages: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
