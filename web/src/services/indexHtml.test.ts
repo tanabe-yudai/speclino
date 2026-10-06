@@ -3,7 +3,7 @@ import html from '../../index.html?raw'
 
 describe('index.html', () => {
   it('タイトルと説明と OGP がある', () => {
-    expect(html).toMatch(/<title>SpecLino — [^<]+<\/title>/)
+    expect(html).toMatch(/<title>SpecLino<\/title>/)
     expect(html).toMatch(/<meta name="description" content="[^"]+"/)
     expect(html).toMatch(/<meta property="og:title" content="[^"]+"/)
     expect(html).toMatch(/<meta property="og:description" content="[^"]+"/)

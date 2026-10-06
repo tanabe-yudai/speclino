@@ -21,6 +21,7 @@ import { paths } from '@/services/paths'
 import { countErrors } from '@/services/specPreview'
 import type { ArtifactKind, ArtifactRevision, SpecPreviewRequest } from '@/types/knowledge'
 import type { SpecSideDiffProps } from '@/types/specEditor'
+import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 
 const STATUS_TONE = { draft: 'rev', active: 'ok' } as const
 
@@ -29,6 +30,7 @@ export function KnowledgeRevisions() {
   const { section, id } = useParams<{ section: string; id: string }>()
   const workspace = useCurrentWorkspace()
   const kind = parseSection(section)
+  useDocumentTitle('改訂の履歴')
   if (!workspace) return <NotFoundPanel title="このワークスペースは見つかりません" />
   if (!kind || !id) return <NotFoundPanel title="この知識は見つかりません" />
   return <RevisionsBody key={`${workspace.slug}/${id}`} slug={workspace.slug} kind={kind} id={id} />
