@@ -14,13 +14,17 @@
 
 ## 0. 前提
 
-- **統合ブランチ（`s72-integration`）はまだ main にマージしない**。main へのマージで
-  `.github/workflows/deploy.yml` が自動でマイグレーションとデプロイを行い、新しいコードは env=prod で
-  署名鍵が無いと起動しない。署名鍵の secret の作成・値の投入・注入（手順 1〜3）は、マージより前に
-  統合ブランチの `.tf` で行う
+- **署名鍵の secret の作成・値の投入・注入（手順 1〜3）を、デプロイより前に統合ブランチの `.tf` で行う**。
+  新しいコードは env=prod で署名鍵が無いと起動しない。本番へのデプロイは `gh workflow run Deploy --ref main`
+  で手動で起動する（main への push で動く deploy.yml の実行は `DEPLOY_ENABLED` が無いため skip される）。
+  念のため、手順 1〜3 が済むまではマージもしない
 - 統合ブランチの CI（lint / typecheck / test / self-check / web）が緑
 - `speclino-migrate` と `speclino-admin` の Cloud Run Job がある（`infra/envs/prod/run.tf`）
-- 手元に `gcloud` と `terraform`。統合ブランチを checkout し、`infra/envs/prod` で `terraform init` 済み
+- 手元に `gcloud` と `terraform`。統合ブランチを checkout し、`infra/envs/prod` で
+  `terraform init -backend-config="bucket=<state のバケット>" -backend-config="prefix=envs/prod"` 済み
+- `terraform.tfvars` はリポジトリで管理していない（`.gitignore`）。別の worktree で作業するときは、正本の
+  tfvars へのシンボリックリンクを張る（`ln -s <正本の checkout>/infra/envs/prod/terraform.tfvars .`）。
+  tfvars が無いまま plan すると既定値で大量の差分（sandbox の destroy など）が出る。手順 3 の追記も正本に残すこと
 
 ## 1. 署名鍵の secret を作る（統合ブランチの .tf で apply 1 回目、ユーザー、マージ前）
 
@@ -59,9 +63,11 @@ terraform apply tfplan
 
 ## 4. main にマージする（マイグレーション 0010 / 0011 とデプロイ）
 
-手順 1〜3 が済んでから統合ブランチを main にマージする。deploy.yml が次を順に行う:
+手順 1〜3 が済んでから統合ブランチを main にマージし、`gh workflow run Deploy --ref main` でデプロイする
+（`gh run watch <id> --exit-status` で見守る。マージの push で起動した実行は skip されるので、確認は
+`--event workflow_dispatch` の実行を見る）。Deploy は次を順に行う:
 migrate Job（0010 / 0011）→ admin Job の `backfill-repo-ids` → web / worker の更新。
-デプロイを止めていて手で流す場合:
+ワークフローを使わずに手で流す場合:
 
 ```sh
 IMAGE=$REGION-docker.pkg.dev/$P/speclino/speclino:<新しいイメージのタグ>
