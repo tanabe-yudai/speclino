@@ -119,7 +119,7 @@ def test_knowledge_tables_have_uniqueness() -> None:
 
 
 def test_knowledge_chats_columns_and_constraints() -> None:
-    """S73: 会話の表。kind は専用の Enum、artifact は NULL 可で消えたら NULL、規約は結び付けない。"""
+    """S73: 会話の表。kind は専用の Enum、artifact は NULL 可（消えたら NULL）、規約は結ばない。"""
     t = Base.metadata.tables["knowledge_chats"]
     assert {c.name for c in t.columns} == {
         "id",
