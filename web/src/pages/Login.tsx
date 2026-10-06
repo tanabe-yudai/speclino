@@ -8,6 +8,7 @@ import { ThemeToggle } from '@/components/shell/ThemeToggle'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { BrandMark } from '@/components/shell/BrandMark'
 
 interface LocationState {
   from?: LoginFrom
@@ -45,7 +46,7 @@ export function Login() {
       <Panel className="w-full max-w-sm space-y-6 p-8 shadow-lift">
         <div className="space-y-2">
           <p className="font-extrabold tracking-tight">
-            <span className="text-brand">◆</span> SpecLino
+            <BrandMark /> SpecLino
           </p>
           <h1 className="text-2xl font-bold tracking-tight">
             <span className="text-brand">仕様どおりか</span>、確かめる。
