@@ -33,7 +33,7 @@ from speclino.db.repositories.cost_ledger import CostLedgerRepository
 from speclino.domain.a2a import CostReservation, TokenIdentity
 from speclino.ports.mcp_context import McpContextSource
 from speclino.ports.text_llm import TextLlm
-from speclino.services.cost_guard import CostGuard
+from speclino.services.cost_guard import COST_LOCK_KEY, CostGuard
 from speclino.services.mcp_context import ContextUnavailable
 from speclino.services.review_run_service import ReviewRunService
 
@@ -48,8 +48,8 @@ CONSULT_TOOLS: frozenset[str] = frozenset(
         "verification_start",
     }
 )
-# 日次の費用枠の予約を直列化する advisory lock の鍵（固定）
-_COST_LOCK_KEY = 0x53504C494E4F01
+# 日次の費用枠の予約を直列化する advisory lock の鍵（会話の予約と共有する）
+_COST_LOCK_KEY = COST_LOCK_KEY
 
 
 def consult_permissions(

@@ -10,6 +10,9 @@ from datetime import date
 from decimal import Decimal
 from typing import Protocol
 
+# 日次の費用枠の予約を直列化する advisory lock の鍵（固定）。議論役（S59）と会話（S73）が共有する
+COST_LOCK_KEY = 0x53504C494E4F01
+
 # 100 万トークンあたりの USD（2026-09 時点の公開価格。実装時に確認済みの値を settings で上書き可）
 DEFAULT_PRICING: dict[str, tuple[Decimal, Decimal]] = {
     "gemini-3.8-flash": (Decimal("0.75"), Decimal("3.75")),
