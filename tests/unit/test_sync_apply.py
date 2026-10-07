@@ -606,8 +606,9 @@ def test_source_uses_only_the_standard_library() -> None:
 def test_constants_match_the_server() -> None:
     from speclino.domain.knowledge import BODY_MAX_BYTES, MANAGED_BEGIN, MANAGED_END
     from speclino.services import knowledge_sync as ks
+    from speclino.spec.loader import content_hash
 
     assert sa.MAX_FILE_BYTES == BODY_MAX_BYTES
     assert (sa.MANAGED_BEGIN, sa.MANAGED_END) == (MANAGED_BEGIN, MANAGED_END)
     assert tuple(ks.MANAGED_FILES) == sa.MANAGED_FILES
-    assert sa.file_hash("a\r\nb") == ks.content_hash("a\nb")
+    assert sa.file_hash("a\r\nb") == content_hash("a\nb") == ks.file_hash("a\nb")

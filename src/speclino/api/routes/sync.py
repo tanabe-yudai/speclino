@@ -2,9 +2,11 @@
 
 - `/api/workspaces/{slug}/sync-tokens`: sync トークンの発行・失効（owner / approver）と一覧
   （メンバー）。メンバーでなければ 404、role が足りなければ 403
-- `GET /api/sync/bundle?repo_id=`: sync トークン（`Authorization: Bearer slsync_...`）で、
-  そのリポジトリに当たる最新の bundle の書き出し内容と署名つきの lock を返す。トークンが無効なら
-  401、トークンのリポジトリでなければ 404（他のリポジトリの存在を漏らさない）
+- `POST /api/sync/bundle`（body `{repo_id, lock_json?}`）: sync トークン
+  （`Authorization: Bearer slsync_...`）で、そのリポジトリに当たる最新の bundle の書き出し計画
+  （`SyncPlan`、署名つき）を返す。`lock_json` は手元の lock で、サーバが署名・ワークスペース・
+  リポジトリ ID を確かめたときだけ削除の根拠にする（S75）。トークンが無効なら 401、トークンの
+  リポジトリでなければ 404（他のリポジトリの存在を漏らさない）
 """
 
 from __future__ import annotations
@@ -13,13 +15,13 @@ import logging
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
 from speclino.api.auth import require_user
 from speclino.api.deps import AppState, get_state
 from speclino.api.errors import api_error, error_responses
-from speclino.domain.knowledge_sync import SyncTokenInfo
+from speclino.domain.knowledge_sync import SyncBundleRequest, SyncTokenInfo
 from speclino.domain.workspace import AuthUser
 from speclino.services import knowledge_sync, sync_tokens
 from speclino.services.workspaces import NotPermitted, WorkspaceNotFound
@@ -108,10 +110,10 @@ def _bearer(request: Request) -> str:
     return auth.removeprefix("Bearer ").strip() if auth.startswith("Bearer ") else ""
 
 
-@bundle_router.get("/bundle", responses=error_responses(409))
-async def get_sync_bundle(
+@bundle_router.post("/bundle", responses=error_responses(409))
+async def plan_sync_bundle(
     request: Request,
-    repo_id: int = Query(description="GitHub のリポジトリ ID"),
+    body: SyncBundleRequest,
     state: AppState = Depends(get_state),
 ) -> dict[str, Any]:
     token = _bearer(request)
@@ -121,7 +123,7 @@ async def get_sync_bundle(
         raise api_error(401, "unauthenticated", "sync トークンが必要")
     try:
         async with state.session_factory() as s, s.begin():
-            payload = await knowledge_sync.fetch_for_sync(s, identity, repo_id)
+            plan = await knowledge_sync.fetch_for_sync(s, identity, body.repo_id, body.lock_json)
     except LookupError as e:
         raise api_error(404, "repository_not_found", "このトークンのリポジトリではない") from e
     except ValueError as e:
@@ -135,7 +137,7 @@ async def get_sync_bundle(
         raise api_error(
             409, "bundle_unavailable", "知識を配信できない。管理者に連絡してください"
         ) from e
-    return payload.model_dump(mode="json")
+    return plan.model_dump(mode="json")
 
 
 __all__ = ["bundle_router", "router"]

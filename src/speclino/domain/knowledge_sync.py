@@ -5,11 +5,12 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Annotated, Literal
 
 from pydantic import Field
 
 from speclino.domain.common import IRModel
-from speclino.domain.knowledge import Bundle, KnowledgeLock
+from speclino.domain.knowledge import KnowledgeLock
 
 
 @dataclass(frozen=True)
@@ -43,15 +44,83 @@ class SyncIdentity:
     project_id: uuid.UUID
 
 
-class SyncPayload(IRModel):
-    """`GET /api/sync/bundle` の応答。`files` は相対パス → 本文。
+class WriteOp(IRModel):
+    """ファイル全体を書く。既存の中身が違えば `expected_sha256`（前回の lock の記録）と一致するとき
+    だけ上書きする。"""
 
-    `AGENTS.md` / `CLAUDE.md` の本文は管理区画の中身だけ（区画の外は利用者のもの）。
+    op: Literal["write"] = "write"
+    path: str
+    content: str
+    sha256: str
+    expected_sha256: str | None = None
+
+
+class SetManagedBlockOp(IRModel):
+    """AGENTS.md / CLAUDE.md の管理区画の中だけを置き換える（無ければ末尾に足す）。"""
+
+    op: Literal["set_managed_block"] = "set_managed_block"
+    path: str
+    inner: str
+    generation: int = Field(ge=1)
+    expected_inner_sha256: str | None = None
+
+
+class RemoveManagedBlockOp(IRModel):
+    """管理区画だけを取り除く（中身が前回の lock の記録どおりのときだけ）。"""
+
+    op: Literal["remove_managed_block"] = "remove_managed_block"
+    path: str
+    expected_inner_sha256: str
+
+
+class DeleteOp(IRModel):
+    """ファイルを消す（中身が前回の lock の記録どおりのときだけ）。"""
+
+    op: Literal["delete"] = "delete"
+    path: str
+    expected_sha256: str
+
+
+SyncOp = Annotated[
+    WriteOp | SetManagedBlockOp | RemoveManagedBlockOp | DeleteOp, Field(discriminator="op")
+]
+
+
+class SyncPlan(IRModel):
+    """書き出しの計画（S75、design/2026-10-07-agent-sync.md A3）。サーバが作って署名する。
+
+    実行スクリプト（`speclino_apply.py`）が checkout に当てる。lock は最後に書く。
+    削除（`delete` / `remove_managed_block`）は、サーバが署名・ワークスペース・リポジトリ ID を
+    確かめた前回の lock からだけ作る。
     """
 
-    bundle: Bundle
-    files: dict[str, str] = Field(default_factory=dict)
+    schema_version: Literal["0.1"] = "0.1"
+    workspace: str
+    repo_full_name: str
+    github_repo_id: int
+    bundle_generation: int = Field(ge=1)
+    ops: list[SyncOp] = Field(default_factory=list)
     lock: KnowledgeLock
+    key_id: str | None = None
+    signature: str = Field(min_length=1)
 
 
-__all__ = ["IssuedSyncToken", "SyncIdentity", "SyncPayload", "SyncTokenInfo"]
+class SyncBundleRequest(IRModel):
+    """`POST /api/sync/bundle` の要求。`lock_json` は手元の `.speclino/lock.json`（削除の根拠）。"""
+
+    repo_id: int
+    lock_json: str | None = Field(default=None, max_length=1024 * 1024)
+
+
+__all__ = [
+    "DeleteOp",
+    "IssuedSyncToken",
+    "RemoveManagedBlockOp",
+    "SetManagedBlockOp",
+    "SyncBundleRequest",
+    "SyncIdentity",
+    "SyncOp",
+    "SyncPlan",
+    "SyncTokenInfo",
+    "WriteOp",
+]

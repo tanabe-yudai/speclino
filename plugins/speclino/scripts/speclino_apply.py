@@ -319,7 +319,8 @@ def _check_repo(root: Path, plan: Mapping[str, Any], lock: Mapping[str, Any]) ->
     return int(generation)
 
 
-def _check_shapes(ops: Sequence[Mapping[str, Any]]) -> None:
+def check_ops(ops: Sequence[Mapping[str, Any]]) -> None:
+    """op の形・パス・重複・上限（計画の作成時もサーバが同じ関数で確かめる）。"""
     if len(ops) > MAX_FILES:
         raise PreconditionFailed(f"ファイルが多すぎる（{len(ops)} > {MAX_FILES}）")
     seen: dict[str, str] = {}
@@ -509,7 +510,7 @@ def _apply(repo_root: Path, plan: Mapping[str, Any], result: ApplyResult) -> Non
     lock = _require(plan.get("lock"), Mapping, "lock")
     root = repo_root.resolve(strict=True)
     result.bundle_generation = _check_repo(root, plan, lock)
-    _check_shapes(ops)
+    check_ops(ops)
     _check_lock(ops, lock)
     lock_target = check_target(root, LOCK_PATH)
 

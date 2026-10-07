@@ -1,4 +1,4 @@
-"""S68: 知識の書き出し（write_bundle）と lock の鮮度（check_lock）。DB を使わない。"""
+"""S68・S75: 知識の書き出しの計画と実行、lock の鮮度（check_lock）。DB を使わない。"""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from typing import cast
 
 import pytest
 
+from speclino import sync_apply as sa
 from speclino.domain.finding import Finding
 from speclino.domain.knowledge import (
     ArtifactRevision,
@@ -175,13 +176,144 @@ def test_lock_is_signed_and_expires_in_30_days() -> None:
 
 
 # ---------------------------------------------------------------------------
-# write_bundle
+# 計画（plan_writes / build_plan）と実行（sync_apply.apply_plan）
 # ---------------------------------------------------------------------------
+
+REPO = "acme/app"
+
+
+def _write(
+    root: Path,
+    files: dict[str, str],
+    lock: KnowledgeLock,
+    previous: KnowledgeLock | None = None,
+) -> sa.ApplyResult:
+    """サーバの計画を実行スクリプトで当てる。前提が崩れれば SyncRejected、失敗は OSError。"""
+    plan = ks.plan_writes(files, lock, previous, repo_full_name=REPO)
+    result = sa.apply_plan(root, plan.model_dump(mode="json"))
+    if result.exit_code == sa.EXIT_PRECONDITION:
+        raise ks.SyncRejected(result.reason)
+    if result.exit_code == sa.EXIT_FAILED:
+        raise OSError(result.reason)
+    return result
+
+
+def _local_lock(root: Path) -> str | None:
+    target = root / ks.LOCK_PATH
+    return target.read_text() if target.is_file() else None
+
+
+def _resync(
+    root: Path, revs: list[ArtifactRevision], generation: int, repo_id: int = 42
+) -> sa.ApplyResult:
+    """手元の lock を送ってサーバが計画を作り（削除の根拠は検証済みの lock だけ）、当てる。"""
+    resolved = _resolved(revs, generation)
+    previous = ks.verified_previous_lock(_local_lock(root), workspace=WS, github_repo_id=repo_id)
+    plan = ks.build_plan(
+        resolved, github_repo_id=repo_id, repo_full_name=REPO, previous=previous, now=NOW
+    )
+    result = sa.apply_plan(root, plan.model_dump(mode="json"))
+    if result.exit_code == sa.EXIT_PRECONDITION:
+        raise ks.SyncRejected(result.reason)
+    assert result.exit_code == 0, result
+    return result
+
+
+def test_plan_is_signed_and_lists_writes() -> None:
+    files, lock, _ = _payload(BASE)
+    plan = ks.plan_writes(files, lock, None, repo_full_name=REPO)
+    assert ks.verify_plan(plan)
+    assert plan.key_id == bundle_signing.current_key_id()
+    assert [(op.op, op.path) for op in plan.ops] == [
+        ("write", ".agents/skills/review/SKILL.md"),
+        ("write", ".claude/skills/review/SKILL.md"),
+        ("write", ".speclino/specs/orders.md"),
+        ("set_managed_block", "AGENTS.md"),
+    ]
+    assert all(getattr(op, "expected_sha256", None) is None for op in plan.ops)
+    forged = plan.model_copy(update={"repo_full_name": "evil/repo"})
+    assert not ks.verify_plan(forged)
+
+
+def test_plan_deletes_only_from_verified_previous_lock() -> None:
+    old = [_skill("old", files={"x.md": "X"}), *BASE]
+    files, lock, _ = _payload(old)
+    lock_json = lock.model_dump_json()
+    previous = ks.verified_previous_lock(lock_json, workspace=WS, github_repo_id=42)
+    assert previous == lock
+    plan = ks.build_plan(
+        _resolved([BASE[0], BASE[2]], 2),
+        github_repo_id=42,
+        repo_full_name=REPO,
+        previous=previous,
+        now=NOW,
+    )
+    deletes = {op.path: op for op in plan.ops if op.op in ("delete", "remove_managed_block")}
+    assert sorted(deletes) == [
+        ".agents/skills/old/SKILL.md",
+        ".agents/skills/old/x.md",
+        ".claude/skills/old/SKILL.md",
+        ".claude/skills/old/x.md",
+        "AGENTS.md",
+    ]
+    assert deletes["AGENTS.md"].op == "remove_managed_block"  # AGENTS.md に delete は出さない
+    assert plan.lock.absent == sorted(deletes)
+    assert ks.verify_lock(plan.lock)
+    writes = {op.path: op for op in plan.ops if op.op == "write"}
+    assert (
+        writes[".speclino/specs/orders.md"].expected_sha256
+        == lock.files[  # type: ignore[union-attr]
+            ".speclino/specs/orders.md"
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        {"signature": "hmac-sha256:" + "0" * 64},
+        {"workspace": "other"},
+        {"github_repo_id": 7},
+    ],
+)
+def test_forged_or_foreign_previous_lock_plans_no_deletion(tamper: dict[str, object]) -> None:
+    _, lock, _ = _payload([_skill("old"), *BASE])
+    forged = lock.model_copy(update=tamper)
+    if "signature" not in tamper:  # 別のワークスペース・リポジトリの本物の lock
+        forged = forged.model_copy(
+            update={"signature": bundle_signing.sign(ks.lock_payload(forged))}
+        )
+    previous = ks.verified_previous_lock(forged.model_dump_json(), workspace=WS, github_repo_id=42)
+    assert previous is None
+    plan = ks.build_plan(
+        _resolved(BASE, 2), github_repo_id=42, repo_full_name=REPO, previous=previous, now=NOW
+    )
+    assert {op.op for op in plan.ops} == {"write", "set_managed_block"}
+    assert plan.lock.absent == []
+    assert ks.verified_previous_lock("{not json", workspace=WS, github_repo_id=42) is None
+    assert ks.verified_previous_lock(None, workspace=WS, github_repo_id=42) is None
+
+
+def test_plan_rejects_absent_without_previous_lock() -> None:
+    files, lock, _ = _payload(BASE)
+    lock = lock.model_copy(update={"absent": [".speclino/specs/user.md"]})
+    with pytest.raises(ks.SyncRejected, match="absent"):
+        ks.plan_writes(files, lock, None, repo_full_name=REPO)
+
+
+def test_absent_is_signed_and_old_locks_keep_their_signature() -> None:
+    _, lock, _ = _payload(BASE)
+    assert lock.absent == [] and "absent" not in ks.lock_payload(lock).decode()
+    with_absent = lock.model_copy(update={"absent": [".speclino/specs/x.md"]})
+    assert not ks.verify_lock(with_absent)
+    data = json.loads(lock.model_dump_json())
+    data.pop("absent")
+    assert ks.verify_lock(KnowledgeLock.model_validate(data))
 
 
 def test_sync_writes_files_and_lock(tmp_path: Path) -> None:
     files, lock, bundle = _payload(BASE)
-    ks.write_bundle(tmp_path, files, lock)
+    _write(tmp_path, files, lock)
     assert (tmp_path / ".claude/skills/review/SKILL.md").read_text().startswith("---")
     assert (tmp_path / ".agents/skills/review/SKILL.md").exists()
     assert (tmp_path / ".speclino/specs/orders.md").read_text() == "# orders\n"
@@ -199,13 +331,12 @@ def test_sync_writes_files_and_lock(tmp_path: Path) -> None:
 def test_sync_keeps_outside_managed_block(tmp_path: Path) -> None:
     (tmp_path / "AGENTS.md").write_text("# 手書き\n\n大事なメモ\n")
     files, lock, _ = _payload(BASE)
-    ks.write_bundle(tmp_path, files, lock)
+    _write(tmp_path, files, lock)
     first = (tmp_path / "AGENTS.md").read_text()
     assert first.startswith("# 手書き\n\n大事なメモ\n\n<!-- speclino:begin bundle=1 -->\n")
     # 区画の後に利用者が書き足しても、次の sync は区画だけを置き換える
     (tmp_path / "AGENTS.md").write_text(first + "\n## 後ろの手書き\n")
-    files2, lock2, _ = _payload([*BASE[:1], _instr("agents", "新しい指示\n"), BASE[2]], 2)
-    ks.write_bundle(tmp_path, files2, lock2)
+    _resync(tmp_path, [*BASE[:1], _instr("agents", "新しい指示\n"), BASE[2]], 2)
     assert (tmp_path / "AGENTS.md").read_text() == (
         "# 手書き\n\n大事なメモ\n\n<!-- speclino:begin bundle=2 -->\n新しい指示\n"
         "<!-- speclino:end -->\n\n## 後ろの手書き\n"
@@ -230,7 +361,7 @@ def test_sync_rejects_parent_path(tmp_path: Path, bad: str) -> None:
     lock = lock.model_copy(update={"files": {**lock.files, bad: ks.file_hash("x")}})
     before = _snapshot(tmp_path)
     with pytest.raises(ks.SyncRejected):
-        ks.write_bundle(tmp_path, files, lock)
+        _write(tmp_path, files, lock)
     assert _snapshot(tmp_path) == before
     assert not (tmp_path / ks.LOCK_PATH).exists()
 
@@ -243,29 +374,10 @@ def test_sync_rejects_symlink_target(tmp_path: Path) -> None:
     (repo / ".claude").symlink_to(outside, target_is_directory=True)
     files, lock, _ = _payload(BASE)
     with pytest.raises(ks.SyncRejected, match="symlink"):
-        ks.write_bundle(repo, files, lock)
+        _write(repo, files, lock)
     assert list(outside.iterdir()) == []
     assert not (repo / "AGENTS.md").exists()
     assert not (repo / ks.LOCK_PATH).exists()
-
-
-def test_sync_rejects_symlink_file(tmp_path: Path) -> None:
-    secret = tmp_path / "secret.txt"
-    secret.write_text("keep")
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    (repo / "AGENTS.md").symlink_to(secret)
-    files, lock, _ = _payload(BASE)
-    with pytest.raises(ks.SyncRejected, match="symlink"):
-        ks.write_bundle(repo, files, lock)
-    assert secret.read_text() == "keep"
-
-
-def test_sync_rejects_directory_where_file_expected(tmp_path: Path) -> None:
-    (tmp_path / "AGENTS.md").mkdir()
-    files, lock, _ = _payload(BASE)
-    with pytest.raises(ks.SyncRejected, match="ディレクトリ"):
-        ks.write_bundle(tmp_path, files, lock)
 
 
 @pytest.mark.parametrize(
@@ -273,17 +385,14 @@ def test_sync_rejects_directory_where_file_expected(tmp_path: Path) -> None:
     [
         "<!-- speclino:begin bundle=1 -->\nA\n<!-- speclino:end -->\n<!-- speclino:end -->\n",
         "<!-- speclino:begin bundle=1 -->\nA\n",
-        "<!-- speclino:end -->\n<!-- speclino:begin bundle=1 -->\n",
         "<!--speclino:begin bundle=x-->\nA\n<!-- speclino:end -->\n",
-        "<!-- speclino:begin bundle=1 -->\nA\n<!-- speclino:end -->\n"
-        "<!-- speclino:begin bundle=1 -->\nB\n<!-- speclino:end -->\n",
     ],
 )
 def test_sync_rejects_tampered_markers(tmp_path: Path, agents: str) -> None:
     (tmp_path / "AGENTS.md").write_text(agents)
     files, lock, _ = _payload(BASE)
     with pytest.raises(ks.SyncRejected, match="管理区画"):
-        ks.write_bundle(tmp_path, files, lock)
+        _write(tmp_path, files, lock)
     assert (tmp_path / "AGENTS.md").read_text() == agents
     assert not (tmp_path / ".claude").exists()
     assert not (tmp_path / ks.LOCK_PATH).exists()
@@ -295,7 +404,7 @@ def test_sync_rejects_marker_in_body(tmp_path: Path) -> None:
     files = {**files, "AGENTS.md": evil}
     lock = lock.model_copy(update={"files": {**lock.files, "AGENTS.md": ks.file_hash(evil)}})
     with pytest.raises(ks.SyncRejected):
-        ks.write_bundle(tmp_path, files, lock)
+        _write(tmp_path, files, lock)
     assert not (tmp_path / "AGENTS.md").exists()
 
 
@@ -303,37 +412,12 @@ def test_sync_rejects_files_not_matching_lock(tmp_path: Path) -> None:
     files, lock, _ = _payload(BASE)
     files = {**files, ".speclino/specs/orders.md": "書き換え"}
     with pytest.raises(ks.SyncRejected, match="ハッシュ"):
-        ks.write_bundle(tmp_path, files, lock)
-
-
-def test_sync_failure_keeps_old_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    files, lock, _ = _payload(BASE)
-    ks.write_bundle(tmp_path, files, lock)
-    (tmp_path / "AGENTS.md").write_text("# 手書き\n" + (tmp_path / "AGENTS.md").read_text())
-    before = _snapshot(tmp_path)
-    files2, lock2, _ = _payload(
-        [_skill("review", "改訂\n"), _instr("agents", "新\n"), _spec("orders"), _spec("billing")], 2
-    )
-    # 段階書きの 3 つ目で失敗させる
-    real = Path.write_bytes
-    calls = {"n": 0}
-
-    def flaky(self: Path, data: bytes) -> int:
-        calls["n"] += 1
-        if calls["n"] == 3:
-            raise OSError("disk full")
-        return real(self, data)
-
-    monkeypatch.setattr(Path, "write_bytes", flaky)
-    with pytest.raises(OSError):
-        ks.write_bundle(tmp_path, files2, lock2)
-    monkeypatch.undo()
-    assert _snapshot(tmp_path) == before
+        _write(tmp_path, files, lock)
 
 
 def test_sync_commit_failure_rolls_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     files, lock, _ = _payload(BASE)
-    ks.write_bundle(tmp_path, files, lock)
+    _write(tmp_path, files, lock)
     before = _snapshot(tmp_path)
     files2, lock2, _ = _payload(
         [_skill("review", "改訂\n"), _instr("agents", "新\n"), _spec("billing")], 2
@@ -349,7 +433,7 @@ def test_sync_commit_failure_rolls_back(tmp_path: Path, monkeypatch: pytest.Monk
 
     monkeypatch.setattr(os, "replace", flaky)
     with pytest.raises(OSError, match="boom"):
-        ks.write_bundle(tmp_path, files2, lock2)
+        _write(tmp_path, files2, lock2, previous=lock)
     monkeypatch.undo()
     assert _snapshot(tmp_path) == before
     assert not (tmp_path / ".speclino/specs/billing.md").exists()
@@ -357,14 +441,13 @@ def test_sync_commit_failure_rolls_back(tmp_path: Path, monkeypatch: pytest.Monk
 
 def test_sync_removes_only_previously_locked_skill_dirs(tmp_path: Path) -> None:
     files, lock, _ = _payload([_skill("old", files={"x.md": "X"}), *BASE])
-    ks.write_bundle(tmp_path, files, lock)
+    _write(tmp_path, files, lock)
     # 利用者が自分で置いたスキルと、同期済みのスキルに足したファイル
     (tmp_path / ".claude/skills/mine").mkdir()
     (tmp_path / ".claude/skills/mine/SKILL.md").write_text("mine")
     (tmp_path / ".agents/skills/old/notes.md").write_text("user")
 
-    files2, lock2, _ = _payload(BASE, 2)
-    ks.write_bundle(tmp_path, files2, lock2)
+    _resync(tmp_path, BASE, 2)
     assert not (tmp_path / ".claude/skills/old").exists()
     assert (tmp_path / ".claude/skills/mine/SKILL.md").read_text() == "mine"
     # 前の lock に無いファイルは消さない（ディレクトリも残る）
@@ -373,26 +456,82 @@ def test_sync_removes_only_previously_locked_skill_dirs(tmp_path: Path) -> None:
     assert (tmp_path / ".claude/skills/review/SKILL.md").exists()
 
 
-def test_sync_ignores_unsafe_paths_in_previous_lock(tmp_path: Path) -> None:
+def test_sync_ignores_paths_in_forged_previous_lock(tmp_path: Path) -> None:
     (tmp_path / "src").mkdir()
     (tmp_path / "src/app.py").write_text("code")
+    (tmp_path / ".agents/skills/mine").mkdir(parents=True)
+    (tmp_path / ".agents/skills/mine/SKILL.md").write_text("user skill")
     files, lock, _ = _payload(BASE)
-    ks.write_bundle(tmp_path, files, lock)
+    _write(tmp_path, files, lock)
     forged = json.loads((tmp_path / ks.LOCK_PATH).read_text())
     forged["files"]["src/app.py"] = ks.file_hash("code")
+    forged["files"][".agents/skills/mine/SKILL.md"] = ks.file_hash("user skill")
     (tmp_path / ks.LOCK_PATH).write_text(json.dumps(forged))
-    files2, lock2, _ = _payload(BASE, 2)
-    ks.write_bundle(tmp_path, files2, lock2)
+    _resync(tmp_path, BASE, 2)
     assert (tmp_path / "src/app.py").read_text() == "code"
+    assert (tmp_path / ".agents/skills/mine/SKILL.md").read_text() == "user skill"
 
 
 def test_sync_removes_managed_block_when_instructions_gone(tmp_path: Path) -> None:
     (tmp_path / "AGENTS.md").write_text("# 手書き\n")
     files, lock, _ = _payload(BASE)
-    ks.write_bundle(tmp_path, files, lock)
-    files2, lock2, _ = _payload([BASE[0], BASE[2]], 2)
-    ks.write_bundle(tmp_path, files2, lock2)
+    _write(tmp_path, files, lock)
+    result = _resync(tmp_path, [BASE[0], BASE[2]], 2)
+    assert "AGENTS.md" in result.deleted
     assert (tmp_path / "AGENTS.md").read_text() == "# 手書き\n\n"
+
+
+def test_sync_stops_on_edited_file_of_removed_skill(tmp_path: Path) -> None:
+    """手で直したファイルは消さずに止まる（消し忘れを VERIFIED にしないため、何も書かない）。"""
+    files, lock, _ = _payload([_skill("old"), *BASE])
+    _write(tmp_path, files, lock)
+    (tmp_path / ".claude/skills/old/SKILL.md").write_text("手で直した")
+    before = _snapshot(tmp_path)
+    with pytest.raises(ks.SyncRejected, match=".claude/skills/old/SKILL.md"):
+        _resync(tmp_path, BASE, 2)
+    assert _snapshot(tmp_path) == before
+
+
+def test_sync_stops_on_edited_managed_block_when_instructions_gone(tmp_path: Path) -> None:
+    files, lock, _ = _payload(BASE)
+    _write(tmp_path, files, lock)
+    agents = tmp_path / "AGENTS.md"
+    agents.write_text(agents.read_text().replace("共通の指示", "手で足した指示"))
+    with pytest.raises(ks.SyncRejected, match="AGENTS.md"):
+        _resync(tmp_path, [BASE[0], BASE[2]], 2)
+    assert "手で足した指示" in agents.read_text()
+
+
+def test_sync_stops_on_user_file_in_the_way(tmp_path: Path) -> None:
+    """検証済みの lock が無いとき、既存の別の内容のファイルは上書きしない（A5）。"""
+    (tmp_path / ".speclino/specs").mkdir(parents=True)
+    (tmp_path / ".speclino/specs/orders.md").write_text("利用者の仕様\n")
+    files, lock, _ = _payload(BASE)
+    with pytest.raises(ks.SyncRejected, match="orders.md"):
+        _write(tmp_path, files, lock)
+    assert (tmp_path / ".speclino/specs/orders.md").read_text() == "利用者の仕様\n"
+
+
+@pytest.mark.parametrize(
+    ("limit", "value"),
+    [("MAX_FILES", 3), ("MAX_FILE_BYTES", 4), ("MAX_TOTAL_BYTES", 30)],
+)
+def test_plan_rejects_over_limits(monkeypatch: pytest.MonkeyPatch, limit: str, value: int) -> None:
+    monkeypatch.setattr(sa, limit, value)
+    files, lock, _ = _payload(BASE)
+    with pytest.raises(ks.SyncRejected):
+        ks.plan_writes(files, lock, None, repo_full_name=REPO)
+
+
+def test_plan_rejects_case_only_duplicate_paths() -> None:
+    files, lock, _ = _payload(BASE)
+    dup = ".claude/skills/review/Ref.md"
+    files = {**files, dup: "x", dup.lower(): "x"}
+    lock = lock.model_copy(
+        update={"files": {**lock.files, dup: ks.file_hash("x"), dup.lower(): ks.file_hash("x")}}
+    )
+    with pytest.raises(ks.SyncRejected, match="重複"):
+        ks.plan_writes(files, lock, None, repo_full_name=REPO)
 
 
 # ---------------------------------------------------------------------------
@@ -422,7 +561,7 @@ def _check(
 
 def _synced(tmp_path: Path, revs: list[ArtifactRevision] = BASE) -> tuple[str, Bundle]:
     files, lock, bundle = _payload(revs)
-    ks.write_bundle(tmp_path, files, lock)
+    _write(tmp_path, files, lock)
     return (tmp_path / ks.LOCK_PATH).read_text(), bundle
 
 
@@ -499,7 +638,7 @@ def test_lock_other_workspace_or_repo_is_unknown(tmp_path: Path) -> None:
 
 def test_lock_newer_than_current_is_unknown(tmp_path: Path) -> None:
     files, lock, _ = _payload(BASE, generation=3)
-    ks.write_bundle(tmp_path, files, lock)
+    _write(tmp_path, files, lock)
     current = _bundle(BASE, generation=2)
     lock_json = (tmp_path / ks.LOCK_PATH).read_text()
     assert _check(tmp_path, lock_json, current=current, now=NOW).verdict == "UNKNOWN"
@@ -527,63 +666,18 @@ def test_lock_ignores_crlf_checkout(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _forged_previous_lock(root: Path, files: dict[str, str]) -> None:
-    """利用者が置いた（または書き換えた）、署名の合わない前回の lock。"""
-    lock = _payload(BASE)[1].model_copy(
-        update={"files": {p: ks.file_hash(b) for p, b in files.items()}, "signature": "forged"}
-    )
-    (root / ".speclino").mkdir(exist_ok=True)
-    (root / ks.LOCK_PATH).write_text(lock.model_dump_json())
-
-
-def test_sync_does_not_delete_user_files_listed_in_forged_lock(tmp_path: Path) -> None:
-    (tmp_path / ".agents/skills/mine").mkdir(parents=True)
-    (tmp_path / ".agents/skills/mine/SKILL.md").write_text("user skill")
-    (tmp_path / ".speclino/specs").mkdir(parents=True)
-    (tmp_path / ".speclino/specs/user.md").write_text("user spec")
-    _forged_previous_lock(
-        tmp_path, {".agents/skills/mine/SKILL.md": "x", ".speclino/specs/user.md": "y"}
-    )
-    files, lock, _ = _payload(BASE)
-    kept = ks.write_bundle(tmp_path, files, lock)
-    assert (tmp_path / ".agents/skills/mine/SKILL.md").read_text() == "user skill"
-    assert (tmp_path / ".speclino/specs/user.md").read_text() == "user spec"
-    assert kept == [".agents/skills/mine/SKILL.md", ".speclino/specs/user.md"]
-
-
-def test_sync_keeps_edited_file_of_removed_skill(tmp_path: Path) -> None:
-    files, lock, _ = _payload([_skill("old"), *BASE])
-    ks.write_bundle(tmp_path, files, lock)
-    (tmp_path / ".claude/skills/old/SKILL.md").write_text("手で直した")
-    files2, lock2, _ = _payload(BASE, 2)
-    kept = ks.write_bundle(tmp_path, files2, lock2)
-    assert kept == [".claude/skills/old/SKILL.md"]
-    assert (tmp_path / ".claude/skills/old/SKILL.md").read_text() == "手で直した"
-    assert not (tmp_path / ".agents/skills/old").exists()
-
-
-def test_sync_keeps_edited_managed_block_when_instructions_gone(tmp_path: Path) -> None:
-    files, lock, _ = _payload(BASE)
-    ks.write_bundle(tmp_path, files, lock)
-    agents = tmp_path / "AGENTS.md"
-    agents.write_text(agents.read_text().replace("共通の指示", "手で足した指示"))
-    files2, lock2, _ = _payload([BASE[0], BASE[2]], 2)
-    assert ks.write_bundle(tmp_path, files2, lock2) == ["AGENTS.md"]
-    assert "手で足した指示" in agents.read_text()
-
-
 def test_sync_and_check_accept_crlf_managed_block(tmp_path: Path) -> None:
     files, lock, bundle = _payload(BASE)
-    ks.write_bundle(tmp_path, files, lock)
+    _write(tmp_path, files, lock)
     agents = tmp_path / "AGENTS.md"
     agents.write_bytes(agents.read_bytes().replace(b"\n", b"\r\n"))
     lock_json = (tmp_path / ks.LOCK_PATH).read_text()
     assert _check(tmp_path, lock_json, current=bundle).verdict == "VERIFIED_IN_SCOPE"
-    files2, lock2, bundle2 = _payload([*BASE[:1], _instr("agents", "新\n"), BASE[2]], 2)
-    ks.write_bundle(tmp_path, files2, lock2)
+    _resync(tmp_path, [*BASE[:1], _instr("agents", "新\n"), BASE[2]], 2)
     assert b"<!-- speclino:begin bundle=2 -->\n" in agents.read_bytes()
     assert agents.read_bytes().count(b"speclino:begin") == 1
     lock_json2 = (tmp_path / ks.LOCK_PATH).read_text()
+    bundle2 = _bundle([*BASE[:1], _instr("agents", "新\n"), BASE[2]], 2)
     assert _check(tmp_path, lock_json2, current=bundle2).verdict == "VERIFIED_IN_SCOPE"
 
 
@@ -608,7 +702,7 @@ def test_lock_from_other_project_is_unknown(tmp_path: Path) -> None:
     current = _bundle([spec_a, spec_b], generation=5)
     member_a, member_b = current.members
     files = {".speclino/specs/b.md": "# b\n"}
-    ks.write_bundle(tmp_path, files, _lock_for(files, gen=5, repo=222, members=[member_b]))
+    _write(tmp_path, files, _lock_for(files, gen=5, repo=222, members=[member_b]))
     lock_json = (tmp_path / ks.LOCK_PATH).read_text()
     # 同じリポジトリ ID を名乗っても、同じ世代でメンバーが違えば持ち込み
     replay = _check(
@@ -646,88 +740,6 @@ def test_lock_managed_block_generation_edited_is_unknown(tmp_path: Path) -> None
     assert _check(tmp_path, lock_json, current=bundle).verdict == "UNKNOWN"
 
 
-def test_sync_rejects_marker_in_user_code_fence(tmp_path: Path) -> None:
-    """利用者の本文にマーカーがあれば、区画の位置を決められないので触らない（安全側）。"""
-    original = "doc:\n```\n<!-- speclino:end -->\n```\n"
-    (tmp_path / "CLAUDE.md").write_text(original)
-    files, lock, _ = _payload([_instr("c", "C\n", target="claude_md")])
-    with pytest.raises(ks.SyncRejected):
-        ks.write_bundle(tmp_path, files, lock)
-    assert (tmp_path / "CLAUDE.md").read_text() == original
-
-
-@pytest.mark.parametrize(
-    ("limit", "value"),
-    [("MAX_FILES", 3), ("MAX_FILE_BYTES", 4), ("MAX_TOTAL_BYTES", 30)],
-)
-def test_sync_rejects_over_limits(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, limit: str, value: int
-) -> None:
-    monkeypatch.setattr(ks, limit, value)
-    files, lock, _ = _payload(BASE)
-    with pytest.raises(ks.SyncRejected):
-        ks.write_bundle(tmp_path, files, lock)
-    assert list(tmp_path.iterdir()) == []
-
-
-def test_sync_rejects_case_only_duplicate_paths(tmp_path: Path) -> None:
-    files, lock, _ = _payload(BASE)
-    dup = ".speclino/specs/orders.md".replace("orders", "Orders")
-    files = {**files, dup: "x"}
-    lock = lock.model_copy(update={"files": {**lock.files, dup: ks.file_hash("x")}})
-    with pytest.raises(ks.SyncRejected, match="大文字小文字"):
-        ks.write_bundle(tmp_path, files, lock)
-
-
-def test_sync_rechecks_symlink_just_before_commit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    files, lock, _ = _payload(BASE)
-    real_stage = ks._stage
-
-    def swap_then_stage(*args: object, **kwargs: object) -> object:
-        ops = real_stage(*args, **kwargs)  # type: ignore[arg-type]
-        (repo / ".claude").symlink_to(outside, target_is_directory=True)
-        return ops
-
-    monkeypatch.setattr(ks, "_stage", swap_then_stage)
-    with pytest.raises(ks.SyncRejected, match="symlink"):
-        ks.write_bundle(repo, files, lock)
-    assert list(outside.iterdir()) == []
-    assert not (repo / ks.LOCK_PATH).exists()
-
-
-def test_rollback_continues_after_a_restore_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    files, lock, _ = _payload(BASE)
-    ks.write_bundle(tmp_path, files, lock)
-    files2, lock2, _ = _payload([_skill("review", "改訂\n"), _instr("agents", "新\n"), BASE[2]], 2)
-    real = os.replace
-    calls = {"n": 0, "restore": 0}
-
-    def flaky(src: object, dst: object) -> None:
-        calls["n"] += 1
-        if calls["n"] == 6:
-            raise OSError("boom")
-        if calls["n"] > 6 and "/b" in str(src).rsplit(".tmp-", 1)[-1]:
-            calls["restore"] += 1
-            if calls["restore"] == 1:
-                raise OSError("restore failed")
-        real(src, dst)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(os, "replace", flaky)
-    with pytest.raises(OSError, match="boom") as info:
-        ks.write_bundle(tmp_path, files2, lock2)
-    monkeypatch.undo()
-    assert calls["restore"] >= 2  # 1 つ目の復元に失敗しても残りを続けた
-    assert any("元に戻せなかった" in n for n in getattr(info.value, "__notes__", []))
-
-
 # ---------------------------------------------------------------------------
 # 規約の鮮度（#114）: 規約の有効化でも bundle の世代は進む
 # ---------------------------------------------------------------------------
@@ -750,7 +762,7 @@ def _synced_with_policy(tmp_path: Path, revision: int | None, policy_hash: str |
     )
     files = ks.render_files(resolved)
     lock = ks.issue_lock(resolved, github_repo_id=42, files=files, now=NOW)
-    ks.write_bundle(tmp_path, files, lock)
+    _write(tmp_path, files, lock)
     return (tmp_path / ks.LOCK_PATH).read_text()
 
 
