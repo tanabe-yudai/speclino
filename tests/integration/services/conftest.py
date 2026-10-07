@@ -128,7 +128,7 @@ async def engine() -> AsyncIterator[AsyncEngine]:
                 f"(SELECT id FROM artifacts WHERE workspace IN ({ws}))"
             )
         )
-        for table in ("artifacts", "bundles", "knowledge_fetches", "attestations"):
+        for table in ("artifacts", "bundles", "knowledge_fetches", "attestations", "sync_plans"):
             await conn.execute(sql_text(f"DELETE FROM {table} WHERE workspace IN ({ws})"))
         await conn.execute(sql_text(f"DELETE FROM sync_tokens WHERE team IN ({ws})"))
         await conn.execute(

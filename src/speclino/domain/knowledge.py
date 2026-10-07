@@ -216,6 +216,11 @@ class KnowledgeLock(IRModel):
     policy_hash: str | None = None
     members: list[BundleMember]
     files: dict[str, str] = Field(description="書き出したファイルの相対パス → sha256")
+    # S75（A6）: 前回あって今回は無いファイル・管理区画。ゲートが残っていないことを照合する。
+    # 欄の無い古い lock も読めるよう既定は空（空のときは署名の対象から外す）
+    absent: list[str] = Field(
+        default_factory=list, description="消したファイル・取り除いた管理区画の相対パス"
+    )
     issued_at: datetime
     expires_at: datetime
     # 署名した鍵の ID（#114、鍵の更新）。欄の無い古い lock も読めるよう既定は None
