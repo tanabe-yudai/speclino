@@ -49,7 +49,7 @@ export function StatusPanel({ overview }: { overview: ProjectOverview }) {
         {policies.exempted > 0 && <span>免除の最短の期限 {policies.earliestExpiry ?? '—'}</span>}
       </p>
       <p className="text-xs text-ink-3">
-        未検証には未解析の要求を含みます。免除中は、期限付きの例外で違反を免除している規約です。適合は、検査器が確認した範囲（検査の詳細の「保証範囲」）での適合です。
+        未検証には、解析できなかった要求を含みます。免除中は、期限付きの例外で違反を免除している規約です。適合は、検査の詳細の「確認の範囲」の中での適合です。
       </p>
       {run && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t pt-4 text-sm">

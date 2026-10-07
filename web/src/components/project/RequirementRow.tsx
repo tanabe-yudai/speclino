@@ -7,7 +7,8 @@ import { FindingCard } from '@/components/FindingCard'
 import { LoadingState } from '@/components/LoadingState'
 import { cn } from '@/lib/utils'
 import { githubBlobUrl } from '@/services/github'
-import { APPROVAL_LABELS } from '@/services/labels'
+import { APPROVAL_LABELS, systemRuleTitle } from '@/services/labels'
+import { plainTerms } from '@/services/displayText'
 import { paths } from '@/services/paths'
 import type { Finding } from '@/types/finding'
 import type { ProjectRun, RequirementView } from '@/types/project'
@@ -38,20 +39,22 @@ export function RequirementRow({
     setOpen(!open)
   }
 
+  // 題があれば主な行に、ID は下の行に小さく（題が無ければ ID を主な行に）
+  const heading = req.title ? plainTerms(req.title) : (systemRuleTitle(req.id) ?? req.id)
   const summary = (
     <>
-      <code className="min-w-0 flex-1 font-mono text-xs break-all">{req.id}</code>
+      <span className="min-w-0 flex-1 text-sm break-words">{heading}</span>
       <span className="flex flex-wrap items-center gap-2">
         {req.removed && <ToneBadge tone="rev">削除</ToneBadge>}
         {req.approval !== 'approved' && <ToneBadge tone="rev">{APPROVAL_LABELS[req.approval]}</ToneBadge>}
         <span className="text-xs text-ink-3">テスト {req.tests_declared}</span>
-        {req.verdict ? <VerdictBadge verdict={req.verdict} /> : <span className="text-xs text-ink-3">未解析</span>}
+        {req.verdict ? <VerdictBadge verdict={req.verdict} /> : <span className="text-xs text-ink-3">未検証</span>}
       </span>
     </>
   )
 
   // 題は ID とバッジ（と開閉の矢印）の下の行に、省略せず折り返す（横に並べるとスマホで数文字しか見えない）
-  const title = <span className="w-full text-sm text-ink-2">{req.title ?? '（題なし）'}</span>
+  const title = heading === req.id ? null : <code className="w-full font-mono text-xs text-ink-3 break-all">{req.id}</code>
 
   if (!openable) {
     return (
@@ -81,7 +84,7 @@ export function RequirementRow({
           ) : mine.length === 0 ? (
             <p className="text-sm text-ink-3">この要求の根拠を取得できませんでした。検査の詳細で確認してください。</p>
           ) : (
-            mine.map((f) => <FindingCard key={f.id} finding={f} repoFullName={repo} headSha={run.head_sha} />)
+            mine.map((f) => <FindingCard key={f.id} finding={f} title={req.title} repoFullName={repo} headSha={run.head_sha} />)
           )}
           <p className="flex flex-wrap gap-x-4 text-sm">
             {req.spec_path && (

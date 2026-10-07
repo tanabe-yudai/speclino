@@ -1,11 +1,9 @@
-import { Check, CircleDashed, CircleHelp } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ApiError } from '@/api/errors'
 import { getOnboarding, getProjectSettings, updateProjectSettings } from '@/api/projectSettings'
 import { Panel, PanelTitle } from '@/components/app/Panel'
-import { ToneBadge } from '@/components/app/ToneBadge'
 import { ErrorState } from '@/components/ErrorState'
 import { LoadingState } from '@/components/LoadingState'
 import { Button } from '@/components/ui/button'
@@ -14,53 +12,15 @@ import { Textarea } from '@/components/ui/textarea'
 import { VERDICT_LABELS } from '@/services/labels'
 import { paths } from '@/services/paths'
 import {
-  ONBOARDING_STATE_LABELS,
-  ONBOARDING_STEP_TITLES,
   approverLabel,
   draftSettings,
   needsResave,
-  onboardingDone,
   settingsEqual,
 } from '@/services/projectSettings'
 import type { WorkspaceRole } from '@/types/me'
-import type { OnboardingStep, ProjectOnboarding, ProjectSettingsView } from '@/types/projectSettings'
+import type { ProjectOnboarding, ProjectSettingsView } from '@/types/projectSettings'
 
 const message = (err: unknown, fallback: string) => (err instanceof ApiError ? err.message : fallback)
-
-const STEP_ICON = { done: Check, todo: CircleDashed, unknown: CircleHelp } as const
-
-function Steps({ steps }: { steps: OnboardingStep[] }) {
-  return (
-    <ol className="space-y-3">
-      {steps.map((step, i) => {
-        const Icon = STEP_ICON[step.state]
-        return (
-          <li key={step.id} className="flex gap-3">
-            <Icon
-              aria-hidden
-              className={step.state === 'done' ? 'mt-0.5 size-4 shrink-0 text-ok' : 'mt-0.5 size-4 shrink-0 text-ink-3'}
-            />
-            <div className="min-w-0 flex-1">
-              <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
-                <span>
-                  {i + 1}. {ONBOARDING_STEP_TITLES[step.id]}
-                </span>
-                {step.state === 'done' ? (
-                  <ToneBadge tone="ok">{ONBOARDING_STATE_LABELS.done}</ToneBadge>
-                ) : (
-                  <span className="rounded-full bg-muted px-2.5 py-1 text-xs text-ink-2">
-                    {ONBOARDING_STATE_LABELS[step.state]}
-                  </span>
-                )}
-              </p>
-              <p className="mt-0.5 text-xs break-words text-ink-3">{step.detail}</p>
-            </div>
-          </li>
-        )
-      })}
-    </ol>
-  )
-}
 
 /** 1 project の設定。owner / approver だけが保存できる（API も 403 で拒否する）。 */
 function SettingsForm({ slug, projectId }: { slug: string; projectId: string }) {
@@ -125,7 +85,7 @@ function SettingsForm({ slug, projectId }: { slug: string; projectId: string }) 
     <div className="space-y-4">
       {view.stored_invalid && (
         <p className="rounded-md bg-rev-bg px-3 py-2 text-sm text-rev">
-          保存されている設定が読めないため、エージェントと test_run を止めた安全側の設定で動いています。保存し直してください。
+          保存されている設定が読めないため、エージェントとテスト実行を止めた安全側の設定で動いています。保存し直してください。
         </p>
       )}
       {view.approver_ids_missing && (
@@ -137,7 +97,7 @@ function SettingsForm({ slug, projectId }: { slug: string; projectId: string }) 
         <p className="text-sm font-medium">ゲートを失敗にする判定</p>
         <p className="text-sm text-ink-2">
           {view.settings.fail_on.map((v) => VERDICT_LABELS[v]).join('・')}
-          <span className="ml-1 text-xs text-ink-3">（フェイルクローズのため外せません）</span>
+          <span className="ml-1 text-xs text-ink-3">（判定できないものを通さないため、外せません）</span>
         </p>
       </div>
       <fieldset className="space-y-2" disabled={!editable}>
@@ -161,7 +121,7 @@ function SettingsForm({ slug, projectId }: { slug: string; projectId: string }) 
             onChange={(e) => setTestRunEnabled(e.target.checked)}
           />
           <span>
-            宣言されたテストを隔離環境で実行する（test_run）
+            宣言されたテストを隔離環境で実行する
             <span className="block text-xs text-ink-3">サーバー全体で無効なときは、ここで有効にしても動きません。</span>
           </span>
         </label>
@@ -194,7 +154,7 @@ function SettingsForm({ slug, projectId }: { slug: string; projectId: string }) 
             !view.can_edit_approvers && <p className="font-mono text-xs text-ink-2">（未設定）</p>
           )}
           <p className="text-xs text-ink-3">
-            PR コメントの /speclino approve-spec・answer・attest を受け付ける人。空なら誰も承認できません。変更できるのはオーナーだけです。
+            PR のコメントで仕様の承認や指摘の確定ができる人です。空なら誰も承認できません。変更できるのはオーナーだけです。
           </p>
           {approversError && <p className="text-sm text-bad">{approversError}</p>}
         </div>
@@ -211,7 +171,6 @@ function SettingsForm({ slug, projectId }: { slug: string; projectId: string }) 
 }
 
 function ProjectCard({ slug, project }: { slug: string; project: ProjectOnboarding }) {
-  const done = onboardingDone(project.steps)
   return (
     <Panel className="space-y-5">
       <div className="flex flex-wrap items-center gap-2">
@@ -220,20 +179,13 @@ function ProjectCard({ slug, project }: { slug: string; project: ProjectOnboardi
           プロジェクトを開く
         </Link>
       </div>
-      <section className="space-y-3">
-        <h3 className="text-xs font-semibold tracking-wide text-ink-3">{done ? 'はじめ方（完了）' : 'はじめ方'}</h3>
-        <Steps steps={project.steps} />
-      </section>
-      <section className="space-y-3 border-t pt-4">
-        <h3 className="text-xs font-semibold tracking-wide text-ink-3">設定</h3>
-        <SettingsForm slug={slug} projectId={project.project_id} />
-      </section>
+      <SettingsForm slug={slug} projectId={project.project_id} />
     </Panel>
   )
 }
 
-/** プロジェクトごとのはじめ方（到達状態）と設定（S47）。 */
-export function ProjectsTab({ slug, role }: { slug: string; role: WorkspaceRole | null }) {
+/** プロジェクトごとの設定（S47）。はじめ方はプロジェクトの概要に出す。 */
+export function ProjectSettingsTab({ slug, role }: { slug: string; role: WorkspaceRole | null }) {
   const [projects, setProjects] = useState<ProjectOnboarding[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -249,11 +201,7 @@ export function ProjectsTab({ slug, role }: { slug: string; role: WorkspaceRole 
 
   return (
     <div className="space-y-6">
-      <p className="text-sm text-ink-2">
-        GitHub App を入れてリポジトリを登録し、<code className="font-mono text-xs">.speclino/</code>{' '}
-        と承認済みの仕様を置いて PR を開くと、SpecLino が検査を始めます。各段階は SpecLino が持っている記録
-        （登録・検査の結果）から表示し、確かめられない段階は「未確認」と出します。
-      </p>
+      <p className="text-sm text-ink-2">プロジェクトごとの検査と承認者の設定です。</p>
       {error && (
         <ErrorState
           message={error}

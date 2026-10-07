@@ -148,7 +148,7 @@ export function PoliciesBody({ slug, name, embedded = false }: { slug: string; n
         )}
         <p className={embedded ? 'text-sm text-ink-2' : 'mt-1 text-sm text-ink-2'}>
           {view.active ? `有効な改訂 ${view.active.revision}` : '有効な改訂はまだありません'}
-          。ルールの変更は下書きに入り、owner / approver が承認すると以後の検査に使われます。
+          。ルールの変更は下書きに入り、オーナーか承認者が承認すると、以後の検査に使われます。
         </p>
         <Button type="button" size="sm" className="mt-3" variant={chatOpen ? 'secondary' : 'outline'} onClick={() => setChatOpen(!chatOpen)} aria-expanded={chatOpen}>
           {chatOpen ? 'AI と作るパネルを閉じる' : 'AI と作る'}
@@ -165,7 +165,7 @@ export function PoliciesBody({ slug, name, embedded = false }: { slug: string; n
       )}
       {!view.active && !view.draft && (
         <Panel className="text-sm text-ink-2">
-          チーム規約はまだありません。ルールを追加して下書きを作り、owner / approver が承認すると有効になります。
+          チーム規約はまだありません。ルールを追加して下書きを作り、オーナーか承認者が承認すると有効になります。
         </Panel>
       )}
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">

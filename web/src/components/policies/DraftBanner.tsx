@@ -64,7 +64,7 @@ export function DraftBanner({ slug, view, onChanged }: { slug: string; view: Pol
           toast.error('下書きが変わりました。読み直してから承認してください')
           onChanged()
         } else if (err instanceof ApiError && err.status === 403) {
-          toast.error('承認できるのは owner / approver だけです')
+          toast.error('承認できるのはオーナーと承認者だけです')
         } else {
           toast.error(err instanceof ApiError ? err.message : '承認に失敗しました')
         }

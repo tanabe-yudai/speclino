@@ -12,6 +12,7 @@ import { NotFoundPanel } from '@/components/knowledge/NotFoundPanel'
 import { LoadingState } from '@/components/LoadingState'
 import { cn } from '@/lib/utils'
 import { useCurrentWorkspace } from '@/hooks/useCurrentWorkspace'
+import { useActorLabel } from '@/hooks/useMembers'
 import { useSpecPreview } from '@/hooks/useSpecPreview'
 import { useWorkspaceProjects } from '@/hooks/useWorkspaceProjects'
 import { formatDateTime } from '@/services/format'
@@ -32,7 +33,7 @@ export function KnowledgeRevisions() {
   const kind = parseSection(section)
   useDocumentTitle('改訂の履歴')
   if (!workspace) return <NotFoundPanel title="このワークスペースは見つかりません" />
-  if (!kind || !id) return <NotFoundPanel title="この知識は見つかりません" />
+  if (!kind || !id) return <NotFoundPanel title="この内容は見つかりません" />
   return <RevisionsBody key={`${workspace.slug}/${id}`} slug={workspace.slug} kind={kind} id={id} />
 }
 
@@ -48,6 +49,7 @@ function RevisionsBody({ slug, kind, id }: { slug: string; kind: ArtifactKind; i
   const [selected, setSelected] = useState<number | null>(null)
   const [conflict, setConflict] = useState(false)
   const { projects } = useWorkspaceProjects(slug)
+  const actorLabel = useActorLabel(slug)
   // S74: プロジェクトのタブから開いたときの戻り先（owner/repo）
   const [searchParams] = useSearchParams()
   const from = searchParams.get('from')
@@ -58,7 +60,7 @@ function RevisionsBody({ slug, kind, id }: { slug: string; kind: ArtifactKind; i
     listArtifactRevisions(slug, id)
       .then((r) => alive && setRevisions(r))
       .catch((err: unknown) => {
-        if (alive) setError(err instanceof ApiError && err.status === 404 ? 'この知識は見つかりません' : err instanceof ApiError ? err.message : '改訂を取得できませんでした')
+        if (alive) setError(err instanceof ApiError && err.status === 404 ? 'この内容は見つかりません' : err instanceof ApiError ? err.message : '改訂を取得できませんでした')
       })
     return () => {
       alive = false
@@ -139,11 +141,11 @@ function RevisionsBody({ slug, kind, id }: { slug: string; kind: ArtifactKind; i
                     {r.self_approved && <ToneBadge tone="rev">自己承認</ToneBadge>}
                   </span>
                   <span className="mt-1 block text-xs text-ink-3">
-                    作成 <span className="font-mono break-all">{r.author}</span> · {formatDateTime(r.created_at)}
+                    作成 <span className="break-all">{actorLabel(r.author)}</span> · {formatDateTime(r.created_at)}
                   </span>
                   {r.approver && (
                     <span className="block text-xs text-ink-3">
-                      承認 <span className="font-mono break-all">{r.approver}</span> · {formatDateTime(r.approved_at)}
+                      承認 <span className="break-all">{actorLabel(r.approver)}</span> · {formatDateTime(r.approved_at)}
                     </span>
                   )}
                 </button>
@@ -158,7 +160,6 @@ function RevisionsBody({ slug, kind, id }: { slug: string; kind: ArtifactKind; i
               <PanelTitle>
                 改訂 {current.revision} {previous ? `と改訂 ${previous.revision} の差分` : '（最初の改訂）'}
               </PanelTitle>
-              <p className="font-mono text-xs break-all text-ink-3">content_hash {current.content_hash}</p>
               <div className="space-y-1" aria-label="変更の説明">
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="text-xs font-semibold">変更の説明</h3>
@@ -171,15 +172,15 @@ function RevisionsBody({ slug, kind, id }: { slug: string; kind: ArtifactKind; i
             {kind === 'spec' && (
               <>
                 <Panel className="space-y-3">
-                  <PanelTitle>正規形の差分</PanelTitle>
-                  <p className="text-xs text-ink-3">IR から作った正規形どうしを比べます。見た目だけの違い（空白・コメント・別名）は消え、意味の違いだけが残ります。</p>
-                  <SpecSideDiff label="正規形の差分" previous={!!previous} before={before.preview?.canonical} after={after.preview?.canonical} />
+                  <PanelTitle>整形した本文の差分</PanelTitle>
+                  <p className="text-xs text-ink-3">書式や空白の違いを除いた、内容の違いだけを表示します。</p>
+                  <SpecSideDiff label="整形した本文の差分" previous={!!previous} before={before.preview?.canonical} after={after.preview?.canonical} />
                 </Panel>
                 <Panel className="space-y-3">
-                  <PanelTitle>IR の差分</PanelTitle>
-                  <p className="text-xs text-ink-3">今の parser で前後の本文を変換した IR（JSON）を比べます。</p>
+                  <PanelTitle>意味の差分</PanelTitle>
+                  <p className="text-xs text-ink-3">書式や空白の違いを除いた、内容の違いだけを表示します。</p>
                   <SpecSideDiff
-                    label="IR の差分"
+                    label="意味の差分"
                     previous={!!previous}
                     before={before.preview?.parse_result.compiled ? irText(before.preview.parse_result.compiled) : before.preview ? null : undefined}
                     after={after.preview?.parse_result.compiled ? irText(after.preview.parse_result.compiled) : after.preview ? null : undefined}

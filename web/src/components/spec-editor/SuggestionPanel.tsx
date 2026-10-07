@@ -54,7 +54,7 @@ export function SuggestionPanel({ state, stale, blockedReason, onRequest, onAppl
       </div>
       <p id="suggestion-help" className="text-xs text-ink-3">
         {blockedReason ??
-          'AI は本文の書き換えを提案するだけです。機械可読な形（IR）は SpecLino の parser が本文から作ります。適用しても編集欄が変わるだけで、保存と承認はあなたが行います。'}
+          '提案を適用すると編集欄が変わります。保存と承認はあなたが行います。'}
       </p>
       <div aria-live="polite">
         {state.kind === 'error' && (
@@ -66,7 +66,7 @@ export function SuggestionPanel({ state, stale, blockedReason, onRequest, onAppl
           <p className="text-xs text-ink-3">
             提案を求めたときのエラー {ready.errorsBefore} 件 · 残りの提案 {ready.items.length} 件
             {ready.dropped > 0 && ` · 適用した提案と重なって外した提案 ${ready.dropped} 件`}
-            。各提案のエラー数は、求めたときの本文にその提案だけを当てて parser で検証し直した値です。
+            。各提案のエラー数は、その提案を当てたときに残る問題の数です。
           </p>
         )}
         {stale && ready && ready.items.length > 0 && (

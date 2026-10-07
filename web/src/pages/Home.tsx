@@ -38,10 +38,9 @@ export function Home() {
       <Panel className="mx-auto max-w-xl text-center">
         <PanelTitle className="text-base">所属しているワークスペースがありません</PanelTitle>
         <p className="mt-2 text-sm text-ink-2">
-          招待リンクを受け取っている場合は、そのリンクを開いてください。招待が無い場合は、管理者にこの uid
-          を伝えてワークスペースに追加してもらってください。
+          招待リンクを受け取っている場合は、そのリンクを開いてください。招待が無い場合は、管理者にこのメールアドレスを伝えて招待してもらってください。
         </p>
-        <code className="mt-3 inline-block rounded-md bg-muted px-3 py-1.5 font-mono text-xs select-all">{me.uid}</code>
+        <code className="mt-3 inline-block rounded-md bg-muted px-3 py-1.5 font-mono text-xs select-all">{me.email ?? 'メールアドレスなし'}</code>
       </Panel>
     )
   }
@@ -106,6 +105,8 @@ function ProjectsTab({ slug, canAddRepo }: { slug: string; canAddRepo: boolean }
     setAttempt((n) => n + 1)
   }, [])
 
+  const firstUnchecked = projects?.find((p) => p.status === 'not_checked') ?? null
+
   return (
     <div className="space-y-8">
       <section className="space-y-3">
@@ -131,10 +132,10 @@ function ProjectsTab({ slug, canAddRepo }: { slug: string; canAddRepo: boolean }
             ))}
           </div>
         )}
-        {projects !== null && projects.some((p) => p.status === 'not_checked') && (
+        {firstUnchecked && (
           <p className="text-sm text-ink-3">
             まだ検査されていないプロジェクトがあります。{' '}
-            <Link className="text-primary underline-offset-4 hover:underline" to={paths.settings(slug, 'projects')}>
+            <Link className="text-primary underline-offset-4 hover:underline" to={paths.project(slug, firstUnchecked.repo_full_name)}>
               はじめ方を見る
             </Link>
           </p>

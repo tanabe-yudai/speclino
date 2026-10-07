@@ -188,16 +188,16 @@ export function auditLabel(action: string, decision: string): string {
  * 指摘なしも人の確定まではゲートを止める（#114）ので「人の確定が必要」と出す。
  */
 export const ASSESSMENT_OUTCOME_LABELS: Record<AssessmentOutcome, string> = {
-  issue: 'LLM の指摘あり（人の確定待ち）',
-  split: 'LLM の評価が割れた（人の確定待ち）',
-  no_issue: 'LLM で確認、指摘なし（機械検証ではない）— 人の確定が必要',
+  issue: 'AI の指摘あり（人の確定待ち）',
+  split: 'AI の評価が割れた（人の確定待ち）',
+  no_issue: 'AI で確認、指摘なし（機械検証ではない）— 人の確定が必要',
 }
 
 /** 確定済み（ゲートの cleared）の LLM 支援の区分。確定待ちの文言を外す。 */
 export const ASSESSMENT_OUTCOME_CLEARED_LABELS: Record<AssessmentOutcome, string> = {
-  issue: 'LLM の指摘あり（人が問題なしと確定）',
-  split: 'LLM の評価が割れた（人が問題なしと確定）',
-  no_issue: 'LLM で確認、指摘なし（機械検証ではない）— 人が確定',
+  issue: 'AI の指摘あり（人が問題なしと確定）',
+  split: 'AI の評価が割れた（人が問題なしと確定）',
+  no_issue: 'AI で確認、指摘なし（機械検証ではない）— 人が確定',
 }
 
 export function assessmentOutcomeLabel(outcome: AssessmentOutcome, cleared: boolean): string {
@@ -208,4 +208,40 @@ export const ASSESSMENT_OUTCOME_TONE: Record<AssessmentOutcome, VerdictTone> = {
   issue: 'rev',
   split: 'rev',
   no_issue: 'rev',
+}
+
+/** 検査のきっかけ（review_runs.trigger）。 */
+export const TRIGGER_LABELS: Record<string, string> = {
+  'pull_request.opened': 'PR が開かれた',
+  'pull_request.synchronize': 'PR にコミットが追加された',
+  'pull_request.reopened': 'PR が再び開かれた',
+  'pull_request.ready_for_review': 'PR がレビュー待ちになった',
+  rerequested: 'GitHub から再実行が求められた',
+  comment: 'PR のコメント',
+  rerun: '画面からの再実行',
+  attestation: '人の確定の反映',
+  mcp: 'エージェントからの依頼',
+  a2a: 'エージェントからの依頼',
+  manual: '手動',
+}
+
+/** 知識の同期・対応表・旧形式の仕様の検査（システムが付ける規約）の、人が読む題と対処。 */
+export const SYSTEM_RULES: Record<string, { title: string; hint: string }> = {
+  'KNOWLEDGE-LOCK-001': {
+    title: 'リポジトリの知識が最新ではありません',
+    hint: 'リポジトリで同期を実行して最新にしてください',
+  },
+  'KNOWLEDGE-BINDINGS-001': {
+    title: '仕様とコードの対応表が変わりました',
+    hint: '変更を確認し、承認者が PR で確定してください',
+  },
+  'KNOWLEDGE-SPEC-001': {
+    title: 'リポジトリに旧形式の仕様が残っています',
+    hint: '画面に取り込んで承認してください',
+  },
+}
+
+/** 「ID」または「ID:対象」の ID 部分に対応するシステム規約の題。無ければ null。 */
+export function systemRuleTitle(requirementId: string): string | null {
+  return SYSTEM_RULES[requirementId.split(':')[0]]?.title ?? null
 }

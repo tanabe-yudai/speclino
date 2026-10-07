@@ -35,7 +35,7 @@ export function ApprovalPanel({ slug, draft, dirty, previewErrors, previewPendin
       .then((noteHash) => approveArtifact(slug, draft.artifact_id, draft.revision, draft.content_hash, noteHash))
       .then((result) => {
         const self = result.revision.self_approved ? '（自己承認）' : ''
-        toast.success(`改訂 ${result.revision.revision} を承認しました${self}。bundle の世代 ${result.bundle.generation}`)
+        toast.success(`改訂 ${result.revision.revision} を承認しました${self}。以後の検査に使われます`)
         onApproved(result.bundle.generation)
       })
       .catch((err: unknown) => {
@@ -58,12 +58,10 @@ export function ApprovalPanel({ slug, draft, dirty, previewErrors, previewPendin
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
         <dt className="text-ink-3">承認する改訂</dt>
         <dd className="font-mono">{draft.revision}</dd>
-        <dt className="text-ink-3">content_hash</dt>
-        <dd className="font-mono break-all">{draft.content_hash}</dd>
         <dt className="text-ink-3">変更の説明</dt>
         <dd className="break-words whitespace-pre-wrap">{draft.note || '（なし）'}</dd>
       </dl>
-      {!state.visible && <p className="text-sm text-ink-3">承認できるのは owner / approver です。</p>}
+      {!state.visible && <p className="text-sm text-ink-3">承認できるのはオーナーと承認者です。</p>}
       {state.visible && (
         <div className="flex flex-wrap items-center gap-3">
           <Button onClick={() => setConfirming(true)} disabled={!state.enabled || approving} aria-describedby={state.reason ? 'approve-reason' : undefined}>
@@ -77,7 +75,7 @@ export function ApprovalPanel({ slug, draft, dirty, previewErrors, previewPendin
         </div>
       )}
       {state.visible && state.selfApproval && (
-        <p className="text-sm text-rev">あなたはこの下書きの作者です。承認すると自己承認として監査と画面に印が残ります。</p>
+        <p className="text-sm text-rev">自分が書いた下書きを承認すると、その旨が記録されます。</p>
       )}
       {error && (
         <p role="alert" className="text-sm text-bad">
@@ -89,11 +87,10 @@ export function ApprovalPanel({ slug, draft, dirty, previewErrors, previewPendin
           <DialogHeader>
             <DialogTitle>改訂 {draft.revision} を承認しますか？</DialogTitle>
             <DialogDescription>
-              承認すると新しい bundle が作られ、以後の配信と検査に使われます。照合する content_hash:{' '}
-              <span className="font-mono break-all">{draft.content_hash}</span>
+              承認すると、この内容が以後の配信と検査に使われます。
             </DialogDescription>
           </DialogHeader>
-          {state.selfApproval && <p className="text-sm text-rev">作者本人の承認（自己承認）として記録されます。</p>}
+          {state.selfApproval && <p className="text-sm text-rev">作者本人の承認として記録されます。</p>}
           <DialogFooter>
             <DialogClose asChild>
               <Button variant="secondary">やめる</Button>

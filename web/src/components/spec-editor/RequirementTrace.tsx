@@ -12,16 +12,16 @@ export function RequirementTrace({ trace, hasCompiled }: RequirementTraceProps) 
   if (trace.total === 0) {
     return (
       <p className="text-sm text-ink-3">
-        要求の表（<code className="font-mono text-xs">| ID | level | 要求 | 形式化 |</code>）がありません。
+        要求の表がありません。
       </p>
     )
   }
   return (
     <div className="space-y-3">
       <p className="text-sm text-ink-2">
-        形式化 {trace.formalized} / {trace.total} 件
+        検査できる要求 {trace.formalized} / {trace.total} 件
         {trace.gateReview > 0 && (
-          <span className="text-rev">（必須の未形式化 {trace.gateReview} 件はゲートで REVIEW になります）</span>
+          <span className="text-rev">（必須で検査できない要求 {trace.gateReview} 件は、ゲートで要確認になります）</span>
         )}
       </p>
       <div className="overflow-x-auto">
@@ -29,9 +29,9 @@ export function RequirementTrace({ trace, hasCompiled }: RequirementTraceProps) 
           <thead className="text-xs text-ink-3">
             <tr>
               <th scope="col" className="py-1 pr-3">ID</th>
-              <th scope="col" className="py-1 pr-3">level</th>
+              <th scope="col" className="py-1 pr-3">重要度</th>
               <th scope="col" className="py-1 pr-3">要求</th>
-              <th scope="col" className="py-1">形式化</th>
+              <th scope="col" className="py-1">検査できる形か</th>
             </tr>
           </thead>
           <tbody>
@@ -45,8 +45,8 @@ export function RequirementTrace({ trace, hasCompiled }: RequirementTraceProps) 
                     <span className="font-mono text-xs break-all">{r.formalized_by.join(', ')}</span>
                   ) : (
                     <span className="flex flex-wrap gap-1">
-                      <ToneBadge tone="unk">未形式化</ToneBadge>
-                      {r.gateReview && <ToneBadge tone="rev">ゲートで REVIEW</ToneBadge>}
+                      <ToneBadge tone="unk">検査できない</ToneBadge>
+                      {r.gateReview && <ToneBadge tone="rev">ゲートで要確認</ToneBadge>}
                     </span>
                   )}
                 </td>

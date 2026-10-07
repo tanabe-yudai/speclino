@@ -1,6 +1,6 @@
 /** 検査のタイムラインのイベントを、人が読める要約と「項目名: 値」に直す（API の応答をそのまま見せない）。 */
 
-import { EXEC_STATE_LABELS, GATE_STATUS_LABELS } from './labels'
+import { EXEC_STATE_LABELS, GATE_STATUS_LABELS, TRIGGER_LABELS } from './labels'
 import type { ExecState, GateStatus } from '@/types/run'
 
 export interface EventField {
@@ -40,13 +40,6 @@ const KEY_LABELS: Record<string, string> = {
   n: '回数',
 }
 
-const TRIGGER_LABELS: Record<string, string> = {
-  'pull_request.opened': 'PR が開かれた',
-  'pull_request.synchronize': 'PR に新しいコミット',
-  'pull_request.reopened': 'PR が開き直された',
-  comment: 'PR のコメント（再実行）',
-}
-
 const PUBLISH_LABELS: Record<string, string> = {
   publish: '反映した',
   skip: '反映しない',
@@ -59,7 +52,7 @@ function formatValue(key: string, value: unknown): string | null {
   if (key === 'exec_state') return EXEC_STATE_LABELS[value as ExecState] ?? String(value)
   if (key === 'gate') return GATE_STATUS_LABELS[value as GateStatus] ?? String(value)
   if (key === 'publish') return PUBLISH_LABELS[String(value)] ?? String(value)
-  if (key === 'trigger') return TRIGGER_LABELS[String(value)] ?? String(value)
+  if (key === 'trigger') return TRIGGER_LABELS[String(value)] ?? 'その他'
   if (key === 'superseded' && value === 0) return null
   if (typeof value === 'boolean') return value ? 'はい' : 'いいえ'
   if (Array.isArray(value)) {
