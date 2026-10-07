@@ -12,6 +12,7 @@ import { NotFoundPanel } from '@/components/knowledge/NotFoundPanel'
 import { LoadingState } from '@/components/LoadingState'
 import { cn } from '@/lib/utils'
 import { useCurrentWorkspace } from '@/hooks/useCurrentWorkspace'
+import { useActorLabel } from '@/hooks/useMembers'
 import { useSpecPreview } from '@/hooks/useSpecPreview'
 import { useWorkspaceProjects } from '@/hooks/useWorkspaceProjects'
 import { formatDateTime } from '@/services/format'
@@ -48,6 +49,7 @@ function RevisionsBody({ slug, kind, id }: { slug: string; kind: ArtifactKind; i
   const [selected, setSelected] = useState<number | null>(null)
   const [conflict, setConflict] = useState(false)
   const { projects } = useWorkspaceProjects(slug)
+  const actorLabel = useActorLabel(slug)
   // S74: プロジェクトのタブから開いたときの戻り先（owner/repo）
   const [searchParams] = useSearchParams()
   const from = searchParams.get('from')
@@ -139,11 +141,11 @@ function RevisionsBody({ slug, kind, id }: { slug: string; kind: ArtifactKind; i
                     {r.self_approved && <ToneBadge tone="rev">自己承認</ToneBadge>}
                   </span>
                   <span className="mt-1 block text-xs text-ink-3">
-                    作成 <span className="font-mono break-all">{r.author}</span> · {formatDateTime(r.created_at)}
+                    作成 <span className="break-all">{actorLabel(r.author)}</span> · {formatDateTime(r.created_at)}
                   </span>
                   {r.approver && (
                     <span className="block text-xs text-ink-3">
-                      承認 <span className="font-mono break-all">{r.approver}</span> · {formatDateTime(r.approved_at)}
+                      承認 <span className="break-all">{actorLabel(r.approver)}</span> · {formatDateTime(r.approved_at)}
                     </span>
                   )}
                 </button>

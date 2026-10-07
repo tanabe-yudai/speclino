@@ -25,6 +25,7 @@ import {
 } from '../services/attestation'
 import { describeGateReason } from '../services/gate'
 import { useMe } from '../hooks/useMe'
+import { useActorLabel } from '../hooks/useMembers'
 import { formatDateTime, shortSha } from '../services/format'
 import { githubChecksUrl, githubPrUrl } from '../services/github'
 import { CLEARED_LABEL, EXEC_STATE_LABELS, VERDICT_LABELS } from '../services/labels'
@@ -292,6 +293,7 @@ function CountTile({ verdict, count }: { verdict: Verdict; count: number }) {
  * ボタンを出す（S70）。確定の後は再検査の run へ移る。
  */
 function FindingAttest({ slug, run, finding, mayAttest }: FindingAttestProps) {
+  const actorLabel = useActorLabel(slug)
   const navigate = useNavigate()
   const target = attestationTarget(finding)
   if (!target) return null
@@ -300,7 +302,7 @@ function FindingAttest({ slug, run, finding, mayAttest }: FindingAttestProps) {
     <div className="space-y-2">
       {recorded && (
         <p className="text-sm text-ink-2">
-          {describeAttestation(recorded)}（{recorded.actor}）
+          {describeAttestation(recorded)}（{actorLabel(recorded.actor)}）
         </p>
       )}
       {recorded && configChangeWarning(recorded) && (

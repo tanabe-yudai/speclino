@@ -56,3 +56,35 @@ describe('nextActions', () => {
   })
 })
 
+describe('nextActions: システム規約の人向けの題', () => {
+  it('KNOWLEDGE-LOCK-001 は内部名の題を平易な文言に置き換え、対処を示す', () => {
+    const [a] = nextActions([req('KNOWLEDGE-LOCK-001', { title: 'bundle 6', verdict: 'VIOLATED' })])
+    expect(a.title).toBe('リポジトリの知識が最新ではありません')
+    expect(a.hint).toBe('リポジトリで同期を実行して最新にしてください')
+    expect(a.requirementId).toBe('KNOWLEDGE-LOCK-001')
+  })
+
+  it('KNOWLEDGE-BINDINGS-001 と通常の要求（題をそのまま使う）', () => {
+    const [b, c] = nextActions([
+      req('KNOWLEDGE-BINDINGS-001', { verdict: 'REVIEW' }),
+      req('SHOP-ERR-001', { title: '在庫が無ければエラー', verdict: 'VIOLATED' }),
+    ])
+    expect(c.title).toBe('仕様とコードの対応表が変わりました')
+    expect(b.title).toBe('在庫が無ければエラー')
+    expect(b.hint).toBe('反例を見る')
+  })
+
+  it('規約の要確認・違反も同じ区分に並べる（免除中は除く）', () => {
+    const policy = (rule_id: string, status: 'REVIEW' | 'VIOLATED', exempted = false) => ({
+      rule_id, origin: 'team' as const, title: `題 ${rule_id}`, level: null, has_verifier: true, status,
+      counts: { VERIFIED_IN_SCOPE: 0, VIOLATED: 0, UNKNOWN: 0, REVIEW: 0 }, waived: 0, exempted, waivers: [],
+    })
+    const out = nextActions([req('R-1', { verdict: 'VIOLATED' })], [policy('P-R', 'REVIEW'), policy('P-V', 'VIOLATED'), policy('P-X', 'VIOLATED', true)])
+    expect(out.map((a) => [a.kind, a.requirementId])).toEqual([
+      ['violated', 'R-1'],
+      ['violated', 'P-V'],
+      ['review', 'P-R'],
+    ])
+    expect(out[2].title).toBe('題 P-R')
+  })
+})

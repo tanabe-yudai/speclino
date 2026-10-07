@@ -224,3 +224,24 @@ export const TRIGGER_LABELS: Record<string, string> = {
   a2a: 'エージェントからの依頼',
   manual: '手動',
 }
+
+/** 知識の同期・対応表・旧形式の仕様の検査（システムが付ける規約）の、人が読む題と対処。 */
+export const SYSTEM_RULES: Record<string, { title: string; hint: string }> = {
+  'KNOWLEDGE-LOCK-001': {
+    title: 'リポジトリの知識が最新ではありません',
+    hint: 'リポジトリで同期を実行して最新にしてください',
+  },
+  'KNOWLEDGE-BINDINGS-001': {
+    title: '仕様とコードの対応表が変わりました',
+    hint: '変更を確認し、承認者が PR で確定してください',
+  },
+  'KNOWLEDGE-SPEC-001': {
+    title: 'リポジトリに旧形式の仕様が残っています',
+    hint: '画面に取り込んで承認してください',
+  },
+}
+
+/** 「ID」または「ID:対象」の ID 部分に対応するシステム規約の題。無ければ null。 */
+export function systemRuleTitle(requirementId: string): string | null {
+  return SYSTEM_RULES[requirementId.split(':')[0]]?.title ?? null
+}
