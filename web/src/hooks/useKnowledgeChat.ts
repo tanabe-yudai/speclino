@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createChat, deleteChat, getChat, listChats, patchChat, postMessage, summarizeChat } from '@/api/knowledgeChat'
-import { ApiError } from '@/api/errors'
+import { createChat, deleteChat, getChat, listChats, patchChat, postMessageStream, summarizeChat } from '@/api/knowledgeChat'
+import { ApiError, StreamInterruptedError } from '@/api/errors'
 import { chatsFor, describeChatError, idempotencyKeyFor } from '@/services/knowledgeChat'
-import type { ChatSummaryDraft, KnowledgeChat, KnowledgeChatController, KnowledgeChatKind, KnowledgeChatSummary } from '@/types/knowledgeChat'
+import type { ChatStreaming, ChatSummaryDraft, ChatTurn, KnowledgeChat, KnowledgeChatController, KnowledgeChatKind, KnowledgeChatSummary } from '@/types/knowledgeChat'
 
 /**
  * 自分の会話の一覧と、開いている会話（S73）。会話は本人だけのもの。
@@ -18,6 +18,8 @@ export function useKnowledgeChat(
   const [chats, setChats] = useState<KnowledgeChatSummary[]>([])
   const [current, setCurrent] = useState<KnowledgeChat | null>(null)
   const [sending, setSending] = useState(false)
+  const [streaming, setStreaming] = useState<ChatStreaming | null>(null)
+  const abort = useRef<AbortController | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [listError, setListError] = useState<string | null>(null)
   // 失敗した発言（届いたか分からない）。同じ本文の再送は同じキーで送り、二重にしない
@@ -27,8 +29,11 @@ export function useKnowledgeChat(
     alive.current = true
     return () => {
       alive.current = false
+      abort.current?.abort()
     }
   }, [])
+
+  const stop = useCallback(() => abort.current?.abort(), [])
 
   const refresh = useCallback(() => {
     // 規約の会話は artifact に結び付かない。知識は kind で取り、編集中のものに絞る
@@ -76,26 +81,50 @@ export function useKnowledgeChat(
   async function send(text: string, editorText: string): Promise<boolean> {
     setSending(true)
     setError(null)
+    setStreaming({ userText: text, reply: '' })
     const key = idempotencyKeyFor(text, retry.current)
     retry.current = { text, key }
+    const controller = new AbortController()
+    abort.current = controller
     try {
       const chat = current ?? (await createChat(slug, kind, artifactId))
       if (!current && alive.current) setCurrent(chat)
-      const turn = await postMessage(slug, chat.id, { text, idempotency_key: key, editor_text: editorText })
+      let turn: ChatTurn | null = null
+      await postMessageStream(
+        slug,
+        chat.id,
+        { text, idempotency_key: key, editor_text: editorText },
+        (event) => {
+          if (!alive.current) return
+          if (event.type === 'delta') setStreaming((s) => (s ? { ...s, reply: s.reply + event.text } : s))
+          else if (event.type === 'done') turn = event.turn
+          else if (event.type === 'error') throw new ApiError(event.status, event.message, event.code)
+        },
+        controller.signal,
+      )
+      if (!turn) throw new StreamInterruptedError()
+      const done: ChatTurn = turn
       // 結果が確定した（返答あり、または前の失敗の再送）。次の発言は新しいキーで送る
       retry.current = null
-      if (alive.current) setCurrent(turn.chat)
-      if (turn.replayed && !turn.reply && alive.current) setError('この発言は前に失敗しています。もう一度送ると新しい発言として送ります')
-      return !turn.replayed || !!turn.reply
+      if (alive.current) setCurrent(done.chat)
+      if (done.replayed && !done.reply && alive.current) setError('この発言は前に失敗しています。もう一度送ると新しい発言として送ります')
+      return !done.replayed || !!done.reply
     } catch (err) {
       if (!alive.current) return false
-      setError(describeChatError(err))
+      const stopped = controller.signal.aborted
+      // 止めた発言はサーバ側で失敗になる。次は新しい発言として送る
+      if (stopped) retry.current = null
+      setError(stopped ? '返答を待つのをやめました。もう一度送れます' : describeChatError(err))
       // 失敗した発言も会話に残るので、読み直して表示を揃える
       const id = current?.id
       if (id) getChat(slug, id).then((c) => alive.current && setCurrent(c)).catch(() => undefined)
       return false
     } finally {
-      if (alive.current) setSending(false)
+      abort.current = null
+      if (alive.current) {
+        setSending(false)
+        setStreaming(null)
+      }
       refresh()
     }
   }
@@ -144,5 +173,5 @@ export function useKnowledgeChat(
     }
   }
 
-  return { chats, current, sending, error, listError, select, startNew, send, remove, summarize, bind }
+  return { chats, current, sending, streaming, stop, error, listError, select, startNew, send, remove, summarize, bind }
 }

@@ -6,10 +6,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from collections.abc import AsyncIterator
 from typing import Any
 
-from speclino.ports.text_llm import JsonGeneration
+from speclino.ports.text_llm import JsonGeneration, JsonStreamEvent
 
 _PROPOSALS: dict[str, dict[str, Any]] = {
     "markdown": {
@@ -55,6 +57,16 @@ class ScriptedChatLlm:
                 "proposal": _PROPOSALS[key],
             }
         return JsonGeneration(json.dumps(body, ensure_ascii=False), 0, 0)
+
+    async def stream_json(
+        self, prompt: str, schema: dict[str, Any]
+    ) -> AsyncIterator[JsonStreamEvent]:
+        gen = await self.generate_json(prompt, schema)
+        size = max(1, len(gen.text) // 5)
+        for i in range(0, len(gen.text), size):
+            await asyncio.sleep(0.01)
+            yield gen.text[i : i + size]
+        yield gen
 
 
 __all__ = ["ScriptedChatLlm"]

@@ -107,7 +107,10 @@ def _proposal_schema(kind: KnowledgeChatKind) -> dict[str, Any]:
 
 
 def response_schema(kind: KnowledgeChatKind) -> dict[str, Any]:
-    """AI の返答の JSON Schema（説明の文と、任意の提案）。"""
+    """AI の返答の JSON Schema（説明の文と、任意の提案）。
+
+    キーの順（explanation → proposal）が生成の順になる。ストリームで説明を先に見せるため崩さない。
+    """
     return {
         "type": "object",
         "properties": {

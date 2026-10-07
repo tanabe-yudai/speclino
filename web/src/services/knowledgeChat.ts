@@ -6,11 +6,14 @@
  * 入れるだけで、保存と承認は人が行う。
  */
 
-import { ApiError } from '@/api/errors'
+import { ApiError, StreamInterruptedError } from '@/api/errors'
 import type { ArtifactContent } from '@/types/knowledge'
+import type { SseMessage } from '@/types/sse'
 import type {
   ChatProposal,
+  ChatStreamEvent,
   ChatSummaryDraft,
+  ChatTurn,
   KnowledgeChat,
   KnowledgeChatSummary,
   NoteState,
@@ -179,7 +182,37 @@ export function chatsFor(chats: KnowledgeChatSummary[], artifactId: string | nul
 }
 
 /** 会話の API の失敗の文。サーバは固定の文だけを返すので、それを出す。 */
+/** SSE の 1 イベントを、ストリームの出来事にする。知らない種類・壊れた JSON は null（読み飛ばす）。 */
+export function parseChatStreamEvent(msg: SseMessage): ChatStreamEvent | null {
+  let data: unknown
+  try {
+    data = JSON.parse(msg.data)
+  } catch {
+    return null
+  }
+  if (!data || typeof data !== 'object') return null
+  const d = data as Record<string, unknown>
+  switch (msg.event) {
+    case 'status':
+      return typeof d.state === 'string' ? { type: 'status', state: d.state } : null
+    case 'delta':
+      return typeof d.text === 'string' ? { type: 'delta', text: d.text } : null
+    case 'done':
+      return { type: 'done', turn: data as ChatTurn }
+    case 'error':
+      return {
+        type: 'error',
+        code: typeof d.code === 'string' ? d.code : 'chat_failed',
+        message: typeof d.message === 'string' ? d.message : 'AI の応答を得られませんでした。もう一度試してください',
+        status: typeof d.status === 'number' ? d.status : 502,
+      }
+    default:
+      return null
+  }
+}
+
 export function describeChatError(err: unknown): string {
+  if (err instanceof StreamInterruptedError) return err.message
   if (err instanceof ApiError) {
     if (err.status === 404 && err.code === 'chat_not_found') return '会話が見つかりません（消された可能性があります）'
     if (err.code === 'message_too_long') return `発言が長すぎます。${MESSAGE_MAX_BYTES} バイト（日本語でおよそ 2,700 文字）以内にしてください`

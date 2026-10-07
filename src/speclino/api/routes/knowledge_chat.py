@@ -9,10 +9,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
+from collections.abc import AsyncIterator
 from typing import Any, NoReturn, get_args
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import StreamingResponse
 from google.genai import types
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -25,6 +29,7 @@ from speclino.domain.knowledge_chat import (
     CHAT_TITLE_MAX_CHARS,
     IDEMPOTENCY_KEY_PATTERN,
     ChatErrorCode,
+    ChatStreamEvent,
     KnowledgeChatKind,
 )
 from speclino.domain.workspace import AuthUser
@@ -314,6 +319,99 @@ async def post_message(
     except Exception as e:  # noqa: BLE001
         _unexpected(e)
     return turn.model_dump(mode="json")
+
+
+# 待っている間に出す生存確認の間隔。プロキシ・LB が無通信の接続を切らないようにする
+HEARTBEAT_SECONDS = 10.0
+_SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+
+
+def _sse(event: str, data: dict[str, Any]) -> bytes:
+    payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    return f"event: {event}\ndata: {payload}\n\n".encode()
+
+
+def _sse_event(ev: ChatStreamEvent) -> bytes:
+    if ev.type == "status":
+        return _sse("status", {"state": ev.state})
+    if ev.type == "delta":
+        return _sse("delta", {"text": ev.text})
+    if ev.type == "done":
+        assert ev.turn is not None
+        return _sse("done", ev.turn.model_dump(mode="json"))
+    status, message = ERRORS[ev.code or "chat_failed"]
+    return _sse("error", {"code": ev.code, "message": message, "status": status})
+
+
+async def _sse_stream(events: AsyncIterator[ChatStreamEvent]) -> AsyncIterator[bytes]:
+    """サービスの出来事を SSE にする。待っている間は生存確認のコメントを送る。
+
+    サービスは別のタスクで動かす。切断（この生成器の取り消し・終了）ではそのタスクを取り消し、
+    サービス側が費用の予約を最悪の額のまま残して発言を失敗にする（精算しない）。
+    """
+    queue: asyncio.Queue[ChatStreamEvent | None] = asyncio.Queue()
+
+    async def pump() -> None:
+        try:
+            async for ev in events:
+                await queue.put(ev)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 - 型名だけ残す（C9）
+            logger.error("会話のストリームで予期しない失敗: %s", type(e).__name__)
+            await queue.put(ChatStreamEvent(type="error", code="chat_failed"))
+        finally:
+            queue.put_nowait(None)
+
+    task = asyncio.create_task(pump())
+    try:
+        while True:
+            try:
+                item = await asyncio.wait_for(queue.get(), HEARTBEAT_SECONDS)
+            except TimeoutError:
+                yield b": ping\n\n"
+                continue
+            if item is None:
+                break
+            yield _sse_event(item)
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@router.post(
+    "/{chat_id}/messages/stream",
+    responses=error_responses(409, 413, 422, 429, 502, 503),
+    openapi_extra=_body_schema(MessageRequest),
+)
+async def stream_message(
+    slug: str,
+    chat_id: str,
+    request: Request,
+    state: AppState = Depends(get_state),
+    user: AuthUser = Depends(require_user),
+) -> StreamingResponse:
+    """post_message のストリーム版（text/event-stream）。
+
+    event は status / delta（説明の増えた分）/ done（post_message と同じ ChatTurn）/ error。
+    ストリームを始める前の失敗（認証・メンバー・body・LLM が無い）は通常の HTTP エラー。
+    """
+    await _member(state, slug, user)
+    body = await _read_body(request, MessageRequest)
+    deps = _deps(state)
+    events = kc.stream_message(
+        deps,
+        workspace=slug,
+        owner=user.uid,
+        chat_id=chat_id,
+        text=body.text,
+        idempotency_key=body.idempotency_key,
+        editor_text=body.editor_text,
+    )
+    return StreamingResponse(
+        _sse_stream(events), media_type="text/event-stream", headers=_SSE_HEADERS
+    )
 
 
 @router.post("/{chat_id}/summary", responses=error_responses(422, 429, 502, 503))

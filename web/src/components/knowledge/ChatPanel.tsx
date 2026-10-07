@@ -5,10 +5,11 @@ import { DiffView } from '@/components/knowledge/DiffView'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion'
 import { cn } from '@/lib/utils'
 import { formatDateTime } from '@/services/format'
 import { CHAT_NOTICE, MESSAGE_MAX_BYTES, errorCount, messageBytesLeft, textHash } from '@/services/knowledgeChat'
-import type { ChatMessage, ChatPanelProps, ChatProposal, RawProposal } from '@/types/knowledgeChat'
+import type { ChatMessage, ChatPanelProps, ChatProposal, ChatStreaming, RawProposal } from '@/types/knowledgeChat'
 
 /** 今の編集欄の本文のハッシュ（提案の土台と比べて、古い提案を反映させない）。計算中は null。 */
 function useTextHash(text: string): string | null {
@@ -89,6 +90,39 @@ function Message({ m, children }: { m: ChatMessage; children?: ReactNode }) {
   )
 }
 
+/** 返答を待っている印。動きを減らす設定のときは動かさない。 */
+function ThinkingDots() {
+  const reduced = usePrefersReducedMotion()
+  return (
+    <span className="inline-flex items-center gap-1 text-ink-3" role="status">
+      考えています
+      <span aria-hidden="true" className="inline-flex">
+        {[0, 1, 2].map((i) => (
+          <span key={i} className={reduced ? undefined : 'animate-pulse'} style={reduced ? undefined : { animationDelay: `${i * 200}ms` }}>
+            ・
+          </span>
+        ))}
+      </span>
+    </span>
+  )
+}
+
+/** 送った発言と、届いている途中の返答（返答が届くまでは「考えています」）。 */
+function StreamingMessages({ streaming }: { streaming: ChatStreaming }) {
+  return (
+    <>
+      <li className="ml-6 rounded-md bg-muted px-3 py-2 text-sm" aria-live="off">
+        <div className="mb-1 text-xs font-semibold text-ink-3">あなた</div>
+        <p className="break-words whitespace-pre-wrap">{streaming.userText}</p>
+      </li>
+      <li className="mr-6 rounded-md border bg-background px-3 py-2 text-sm" aria-live="off" aria-busy="true">
+        <div className="mb-1 text-xs font-semibold text-ink-3">AI</div>
+        {streaming.reply ? <p className="break-words whitespace-pre-wrap">{streaming.reply}</p> : <ThinkingDots />}
+      </li>
+    </>
+  )
+}
+
 /**
  * AI と知識を作るパネル（S73、設計 5 章）。会話は本人だけのもの。AI の返答は説明と下書きの提案で、
  * 「エディタに反映」は編集欄だけを変える（保存・承認は人）。提案は送ったときの編集欄の本文に
@@ -153,13 +187,14 @@ export function ChatPanel({ chat, editorText, beforeText, afterText, onApply }: 
         </nav>
 
         <div className="min-w-0 space-y-3">
-          {current && current.messages.length > 0 ? (
+          {(current && current.messages.length > 0) || chat.streaming ? (
             <ol className="max-h-[36rem] space-y-2 overflow-auto" aria-label="会話" aria-live="polite">
-              {current.messages.map((m) => (
+              {current?.messages.map((m) => (
                 <Message key={m.id} m={m}>
                   {m.proposal && <ProposalView proposal={m.proposal} currentHash={currentHash} beforeText={beforeText} afterText={afterText} onApply={onApply} />}
                 </Message>
               ))}
+              {chat.streaming && <StreamingMessages streaming={chat.streaming} />}
             </ol>
           ) : (
             <p className="text-sm text-ink-3">作りたいものを書いて送ってください。例: 「社内の CLI ツール foo の使い方をスキルにしたい」</p>
@@ -182,6 +217,11 @@ export function ChatPanel({ chat, editorText, beforeText, afterText, onApply }: 
               <Button type="submit" size="sm" disabled={chat.sending || !text.trim() || left < 0}>
                 {chat.sending ? '返答を待っています…' : '送る'}
               </Button>
+              {chat.sending && (
+                <Button type="button" size="sm" variant="secondary" onClick={chat.stop}>
+                  止める
+                </Button>
+              )}
               <span id="chat-input-left" className={cn('text-xs', left < 0 ? 'text-bad' : 'text-ink-3')}>
                 {left < 0 ? `${-left} バイト超えています（${MESSAGE_MAX_BYTES} バイトまで）` : `残り ${left} バイト`}
               </span>

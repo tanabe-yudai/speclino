@@ -76,6 +76,19 @@ export interface ChatTurn {
   replayed: boolean
 }
 
+/** ストリームで届く出来事。`delta` は説明の増えた分、`done` は非ストリームと同じ ChatTurn。 */
+export type ChatStreamEvent =
+  | { type: 'status'; state: string }
+  | { type: 'delta'; text: string }
+  | { type: 'done'; turn: ChatTurn }
+  | { type: 'error'; code: string; message: string; status: number }
+
+/** 返答を待っている間の表示（送った発言と、届いた分の説明）。 */
+export interface ChatStreaming {
+  userText: string
+  reply: string
+}
+
 export interface ChatSummaryDraft {
   what: string
   why: string
@@ -104,6 +117,10 @@ export interface KnowledgeChatController {
   chats: KnowledgeChatSummary[]
   current: KnowledgeChat | null
   sending: boolean
+  /** 返答の途中経過（送信中だけ。無ければ null） */
+  streaming: ChatStreaming | null
+  /** 返答を待つのをやめる（サーバへの接続を閉じる） */
+  stop: () => void
   error: string | null
   listError: string | null
   select: (id: string) => void

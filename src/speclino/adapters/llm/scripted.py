@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
 from typing import Any, ClassVar
 
 from google.adk.models.base_llm import BaseLlm
@@ -10,7 +10,7 @@ from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
 from google.genai import types
 
-from speclino.ports.text_llm import JsonGeneration
+from speclino.ports.text_llm import JsonGeneration, JsonStreamEvent
 
 
 def call(name: str, **args: Any) -> types.Part:
@@ -63,7 +63,13 @@ class ScriptedJsonLlm:
     model = "scripted"
     max_output_tokens = 8192
 
-    def __init__(self, response: str | list[str], usage: tuple[int, int] = (1000, 200)) -> None:
+    def __init__(
+        self,
+        response: str | list[str],
+        usage: tuple[int, int] = (1000, 200),
+        chunk_size: int = 8,
+    ) -> None:
+        self.chunk_size = chunk_size
         self.responses = [response] if isinstance(response, str) else list(response)
         self.usage = usage
         self.prompts: list[str] = []
@@ -74,3 +80,13 @@ class ScriptedJsonLlm:
         self.schemas.append(schema)
         idx = min(len(self.prompts) - 1, len(self.responses) - 1)
         return JsonGeneration(self.responses[idx], *self.usage)
+
+    async def stream_json(
+        self, prompt: str, schema: dict[str, Any]
+    ) -> AsyncIterator[JsonStreamEvent]:
+        """generate_json の応答を `chunk_size` 文字ずつに分けて流し、最後に全文と使用量を返す。"""
+        gen = await self.generate_json(prompt, schema)
+        step = self.chunk_size
+        for i in range(0, len(gen.text), step):
+            yield gen.text[i : i + step]
+        yield gen

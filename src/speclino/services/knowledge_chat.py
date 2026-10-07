@@ -19,7 +19,7 @@ import json
 import logging
 import re
 import uuid
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -44,6 +44,7 @@ from speclino.domain.knowledge_chat import (
     ChatErrorCode,
     ChatMessage,
     ChatProposal,
+    ChatStreamEvent,
     ChatSummaryDraft,
     ChatTurn,
     KnowledgeChat,
@@ -51,8 +52,9 @@ from speclino.domain.knowledge_chat import (
     KnowledgeChatSummary,
 )
 from speclino.domain.spec_ir import SpecIR
-from speclino.ports.text_llm import JsonGeneration, TextLlm
+from speclino.ports.text_llm import JsonGeneration, JsonStreamEvent, StreamingTextLlm, TextLlm
 from speclino.services.cost_guard import CostGuard
+from speclino.services.json_string_stream import TopLevelStringStream
 from speclino.services.knowledge_chat_budget import BudgetRefusal, ChatPurpose, ChatReservation
 from speclino.services.knowledge_chat_prompt import (
     SUMMARY_SCHEMA,
@@ -63,6 +65,19 @@ from speclino.services.knowledge_chat_prompt import (
 from speclino.services.knowledge_chat_proposal import build_proposal, response_schema, text_hash
 
 logger = logging.getLogger(__name__)
+
+# 取り消されても最後までやり切る後始末のタスク。asyncio はタスクを弱く参照するだけなので、
+# 待ち手が取り消されたあとに回収されないよう、終わるまでここで持つ
+_DETACHED: set[asyncio.Task[Any]] = set()
+
+
+async def _finish_detached(coro: Any) -> Any:
+    """待ち手が取り消されても、`coro` は別タスクで最後まで走らせる。"""
+    task = asyncio.ensure_future(coro)
+    _DETACHED.add(task)
+    task.add_done_callback(_DETACHED.discard)
+    return await asyncio.shield(task)
+
 
 LLM_TIMEOUT_SECONDS = 120.0
 # 会話の 1 回の出力トークンの上限（設計 C7、思考を含む。費用の予約もこの値で見積もる）。
@@ -515,89 +530,71 @@ def _parse_reply(gen: JsonGeneration) -> tuple[str, Any]:
     return explanation.strip()[:_EXPLANATION_MAX_CHARS], data.get("proposal")
 
 
-async def post_message(
-    deps: ChatDeps,
-    *,
-    workspace: str,
-    owner: str,
-    chat_id: str,
-    text: str,
-    idempotency_key: str,
-    editor_text: str = "",
-) -> ChatTurn:
-    """発言を足し、AI の返答（説明＋提案）を保存して返す（C8）。"""
+def _check_input(text: str, editor_text: str) -> None:
     if not text.strip():
         raise ChatError("invalid_request")
     if len(text.encode()) > MESSAGE_MAX_BYTES:
         raise ChatError("message_too_long")
     if len(editor_text.encode()) > EDITOR_TEXT_MAX_BYTES:
         raise ChatError("input_too_large")
-    cid = _chat_id(chat_id)
-    begun = await _begin_turn(
-        deps, workspace=workspace, owner=owner, cid=cid, text=text, key=idempotency_key
-    )
-    if isinstance(begun, ChatTurn):
-        return begun
-    ctx = begun
 
-    async def fail(code: ChatErrorCode) -> ChatError:
-        await asyncio.shield(
-            _finish_turn(
-                deps,
-                workspace=workspace,
-                owner=owner,
-                cid=cid,
-                message_id=ctx.message_id,
-                reply=None,
-                error=code,
-            )
-        )
-        return ChatError(code)
 
-    try:
-        prompt = build_chat_prompt(
-            ctx.chat.kind,
-            message=text,
-            editor_text=editor_text,
-            names=ctx.names,
-            history=ctx.chat.messages,
-        )
-        gen = await _call_llm(
+async def _fail_turn(
+    deps: ChatDeps,
+    *,
+    workspace: str,
+    owner: str,
+    cid: uuid.UUID,
+    ctx: _Context,
+    code: ChatErrorCode,
+) -> ChatError:
+    """保留の発言を失敗に直す（取り消されても終わらせる）。"""
+    await _finish_detached(
+        _finish_turn(
             deps,
             workspace=workspace,
             owner=owner,
-            prompt=prompt,
-            schema=response_schema(ctx.chat.kind),
-            purpose="chat_message",
+            cid=cid,
+            message_id=ctx.message_id,
+            reply=None,
+            error=code,
         )
-        explanation, proposal_data = _parse_reply(gen)
-        proposal: ChatProposal | None = await build_proposal(
-            ctx.chat.kind,
-            proposal_data,
-            editor_text=editor_text,
-            base_hash=text_hash(editor_text),
-            spec_domain=ctx.spec_domain,
-            spec_legacy=ctx.spec_legacy,
-        )
-    except PromptTooLarge:
-        raise await fail("input_too_large") from None
-    except ChatError as e:
-        raise await fail(e.code) from None
-    except BaseException:
-        # 取り消しなど。保留のまま残さない
-        await fail("chat_failed")
-        raise
+    )
+    return ChatError(code)
+
+
+async def _complete_turn(
+    deps: ChatDeps,
+    *,
+    workspace: str,
+    owner: str,
+    cid: uuid.UUID,
+    ctx: _Context,
+    gen: JsonGeneration,
+    key: str,
+    editor_text: str,
+) -> ChatTurn:
+    """LLM の応答を検証して返答を確定する（提案の検証は最後に 1 度だけ）。"""
+    explanation, proposal_data = _parse_reply(gen)
+    proposal: ChatProposal | None = await build_proposal(
+        ctx.chat.kind,
+        proposal_data,
+        editor_text=editor_text,
+        base_hash=text_hash(editor_text),
+        spec_domain=ctx.spec_domain,
+        spec_legacy=ctx.spec_legacy,
+    )
     reply = ChatMessage(
         id=uuid.uuid4().hex,
         role="assistant",
         text=explanation,
         proposal=proposal,
-        idempotency_key=idempotency_key,
+        idempotency_key=key,
         status="done",
         created_at=_now(),
     )
     if len(reply.model_dump_json().encode()) > REPLY_MAX_BYTES:
-        raise await fail("chat_failed")
+        raise ChatError("chat_failed")
     # 確定は取り消されても終わらせる（保留のまま残さない）
     turn = await asyncio.shield(
         _finish_turn(
@@ -612,6 +609,229 @@ async def post_message(
     if turn is None:  # 途中で会話が消された: 応答を捨て、行を復活させない
         raise ChatError("chat_not_found")
     return turn
+
+
+def _chat_prompt(ctx: _Context, text: str, editor_text: str) -> str:
+    return build_chat_prompt(
+        ctx.chat.kind,
+        message=text,
+        editor_text=editor_text,
+        names=ctx.names,
+        history=ctx.chat.messages,
+    )
+
+
+async def post_message(
+    deps: ChatDeps,
+    *,
+    workspace: str,
+    owner: str,
+    chat_id: str,
+    text: str,
+    idempotency_key: str,
+    editor_text: str = "",
+) -> ChatTurn:
+    """発言を足し、AI の返答（説明＋提案）を保存して返す（C8）。"""
+    _check_input(text, editor_text)
+    cid = _chat_id(chat_id)
+    begun = await _begin_turn(
+        deps, workspace=workspace, owner=owner, cid=cid, text=text, key=idempotency_key
+    )
+    if isinstance(begun, ChatTurn):
+        return begun
+    ctx = begun
+
+    async def fail(code: ChatErrorCode) -> ChatError:
+        return await _fail_turn(deps, workspace=workspace, owner=owner, cid=cid, ctx=ctx, code=code)
+
+    try:
+        gen = await _call_llm(
+            deps,
+            workspace=workspace,
+            owner=owner,
+            prompt=_chat_prompt(ctx, text, editor_text),
+            schema=response_schema(ctx.chat.kind),
+            purpose="chat_message",
+        )
+        return await _complete_turn(
+            deps,
+            workspace=workspace,
+            owner=owner,
+            cid=cid,
+            ctx=ctx,
+            gen=gen,
+            key=idempotency_key,
+            editor_text=editor_text,
+        )
+    except PromptTooLarge:
+        raise await fail("input_too_large") from None
+    except ChatError as e:
+        raise await fail(e.code) from None
+    except BaseException:
+        # 取り消しなど。保留のまま残さない
+        await fail("chat_failed")
+        raise
+
+
+async def _llm_events(
+    llm: TextLlm, prompt: str, schema: dict[str, Any]
+) -> AsyncIterator[JsonStreamEvent]:
+    """ストリームに対応しない LLM は、全文を 1 つの最終要素として返す。"""
+    if hasattr(llm, "stream_json"):
+        streaming: StreamingTextLlm = llm  # type: ignore[assignment]
+        async for event in streaming.stream_json(prompt, schema):
+            yield event
+    else:
+        yield await llm.generate_json(prompt, schema)
+
+
+async def _close_quietly(events: AsyncIterator[JsonStreamEvent]) -> None:
+    aclose = getattr(events, "aclose", None)
+    if aclose is not None:
+        try:
+            await aclose()
+        except Exception as e:  # noqa: BLE001 - 型名だけ残す（C9）
+            logger.warning("会話の AI のストリームを閉じられなかった: %s", type(e).__name__)
+
+
+async def _stream_llm(
+    deps: ChatDeps,
+    *,
+    workspace: str,
+    owner: str,
+    prompt: str,
+    schema: dict[str, Any],
+    purpose: ChatPurpose,
+) -> AsyncIterator[JsonStreamEvent]:
+    """`_call_llm` のストリーム版。断片（str）を流し、最後に JsonGeneration を 1 つ流す。
+
+    精算は `_call_llm` と同じ規則: 最後まで読み切ったときだけ実費で精算する。事業者の例外は、
+    断片を受け取る前なら 0、受け取った後なら最悪の額のまま残す。
+    時間切れ・取り消し・呼び手が読むのをやめた（切断）・最終要素が来なかった場合は、使用量が
+    分からない（LLM は処理を続けて課金されうる）ので、予約した最悪の額のまま残す。
+    """
+    worst = deps.cost_guard.estimate(deps.llm.model, len(prompt.encode()), CHAT_OUTPUT_TOKENS)
+    reservation, refusal = await deps.budget.reserve(
+        deps.today(), deps.llm.model, worst, workspace=workspace, uid=owner, purpose=purpose
+    )
+    if reservation is None:
+        raise ChatError(refusal or "cost_limit")
+    gen: JsonGeneration | None = None
+    keep_worst = False
+    received = False  # 断片を 1 つでも受け取った = 事業者側で課金が始まっている
+    events = _llm_events(deps.llm, prompt, schema)
+    # 全体の期限。yield の間（呼び手の処理中）に時間切れが割り込まないよう、1 歩ずつ区切って測る
+    deadline = asyncio.get_running_loop().time() + LLM_TIMEOUT_SECONDS
+    try:
+        while True:
+            try:
+                async with asyncio.timeout_at(deadline):
+                    event = await anext(events)
+            except StopAsyncIteration:
+                break
+            if isinstance(event, JsonGeneration):
+                gen = event
+            else:
+                received = True
+                yield event
+        if gen is None:  # 最終要素なしで終わった: 使用量が分からない
+            keep_worst = True
+            raise ChatError("chat_failed")
+    except TimeoutError:
+        keep_worst = True
+        logger.warning("会話の AI の呼出しが時間切れになった")
+        raise ChatError("chat_failed") from None
+    except (asyncio.CancelledError, GeneratorExit):
+        keep_worst = True
+        raise
+    except ChatError:
+        raise
+    except Exception as e:
+        # 途中まで出力した後の失敗は使用量が分からないので最悪の額を残す。出力前なら 0 で精算する
+        keep_worst = received
+        # 事業者の例外の文はプロンプトや入力を含みうるので、型名だけを残し、連鎖もさせない
+        logger.warning("会話の AI の呼出しに失敗した: %s", type(e).__name__)
+        raise ChatError("chat_failed") from None
+    finally:
+        if not keep_worst:  # 最悪の額のまま残すときは精算の行を足さない
+            await _finish_detached(_settle_quietly(deps.budget, reservation, gen))
+        await _close_quietly(events)
+    yield gen
+
+
+async def stream_message(
+    deps: ChatDeps,
+    *,
+    workspace: str,
+    owner: str,
+    chat_id: str,
+    text: str,
+    idempotency_key: str,
+    editor_text: str = "",
+) -> AsyncIterator[ChatStreamEvent]:
+    """`post_message` のストリーム版。出来事を順に返し、最後は `done` か `error` のどちらか。
+
+    保存・冪等・費用の扱いは `post_message` と同じ部品を使う。取り消し（切断）されたら、
+    保留の発言を失敗にして最悪の額の予約を残し、例外をそのまま投げ直す。
+    """
+    try:
+        _check_input(text, editor_text)
+        cid = _chat_id(chat_id)
+        begun = await _begin_turn(
+            deps, workspace=workspace, owner=owner, cid=cid, text=text, key=idempotency_key
+        )
+    except ChatError as e:
+        yield ChatStreamEvent(type="error", code=e.code)
+        return
+    if isinstance(begun, ChatTurn):
+        yield ChatStreamEvent(type="done", turn=begun)
+        return
+    ctx = begun
+
+    async def fail(code: ChatErrorCode) -> ChatError:
+        return await _fail_turn(deps, workspace=workspace, owner=owner, cid=cid, ctx=ctx, code=code)
+
+    yield ChatStreamEvent(type="status", state="thinking")
+    explanation_stream = TopLevelStringStream("explanation")
+    gen: JsonGeneration | None = None
+    try:
+        async for item in _stream_llm(
+            deps,
+            workspace=workspace,
+            owner=owner,
+            prompt=_chat_prompt(ctx, text, editor_text),
+            schema=response_schema(ctx.chat.kind),
+            purpose="chat_message",
+        ):
+            if isinstance(item, JsonGeneration):
+                gen = item
+            elif piece := explanation_stream.feed(item):
+                yield ChatStreamEvent(type="delta", text=piece)
+        if gen is None:
+            raise ChatError("chat_failed")
+        turn = await _complete_turn(
+            deps,
+            workspace=workspace,
+            owner=owner,
+            cid=cid,
+            ctx=ctx,
+            gen=gen,
+            key=idempotency_key,
+            editor_text=editor_text,
+        )
+    except PromptTooLarge:
+        err = await fail("input_too_large")
+        yield ChatStreamEvent(type="error", code=err.code)
+        return
+    except ChatError as e:
+        err = await fail(e.code)
+        yield ChatStreamEvent(type="error", code=err.code)
+        return
+    except BaseException:
+        # 取り消し・切断。保留の発言を失敗に直す（予約は `_stream_llm` が最悪の額のまま残す）
+        await fail("chat_failed")
+        raise
+    yield ChatStreamEvent(type="done", turn=turn)
 
 
 # ------------------------------------------------------------------ 要約（C3）
@@ -663,5 +883,6 @@ __all__ = [
     "post_message",
     "purge_member_chats",
     "record_chat_event",
+    "stream_message",
     "summarize",
 ]

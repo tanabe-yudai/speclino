@@ -6,7 +6,7 @@
 import { getAuthHeaders } from '../auth/authHeaders'
 import { ApiError } from './errors'
 
-async function readError(response: Response): Promise<{ message: string; code: string | null }> {
+export async function readError(response: Response): Promise<{ message: string; code: string | null }> {
   try {
     const body: unknown = await response.clone().json()
     // API-ERR-001: エラー本文は {"error": {"code", "message"}} 形式

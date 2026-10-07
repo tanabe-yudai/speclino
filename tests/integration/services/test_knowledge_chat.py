@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from speclino.db.repositories.cost_ledger import CostLedgerRepository
 from speclino.db.repositories.knowledge_chats import KnowledgeChatRepository
 from speclino.domain.knowledge_chat import ChatMessage
-from speclino.ports.text_llm import JsonGeneration
+from speclino.ports.text_llm import JsonGeneration, JsonStreamEvent
 from speclino.services import knowledge_chat as kc
 from speclino.services import members
 from speclino.services.cost_guard import CostGuard, InMemoryLedger
@@ -51,6 +51,8 @@ class FakeLlm:
     def __init__(self, response: str = REPLY) -> None:
         self.response = response
         self.truncated = False
+        self.stall_after_first = False
+        self.fail_after_first = False
         self.prompts: list[str] = []
         self.hook: Callable[[], Awaitable[None]] | None = None
 
@@ -59,6 +61,20 @@ class FakeLlm:
         if self.hook is not None:
             await self.hook()
         return JsonGeneration(self.response, 1000, 100, self.truncated)
+
+    async def stream_json(
+        self, prompt: str, schema: dict[str, Any]
+    ) -> AsyncIterator[JsonStreamEvent]:
+        self.prompts.append(prompt)
+        if self.hook is not None:
+            await self.hook()
+        for i in range(0, len(self.response), 7):
+            yield self.response[i : i + 7]
+            if self.stall_after_first and i == 14:  # 説明の最初の文字が出た後
+                await asyncio.Event().wait()  # 切断・時間切れまで止まる
+            if self.fail_after_first and i == 14:
+                raise RuntimeError("provider failed mid-stream")
+        yield JsonGeneration(self.response, 1000, 100, self.truncated)
 
 
 @dataclass
@@ -500,3 +516,126 @@ async def test_message_too_long_is_its_own_code(ctx: Ctx) -> None:
             idempotency_key="key-long",
         )
     assert e.value.code == "message_too_long"
+
+
+# ---------------------------------------------------------------- ストリーム（S74）
+async def _stream(ctx: Ctx, chat_id: str, key: str = "key-0001") -> list[kc.ChatStreamEvent]:
+    return [
+        ev
+        async for ev in kc.stream_message(
+            ctx.deps,
+            workspace=ctx.slug,
+            owner="alice",
+            chat_id=chat_id,
+            text="指示書を作りたい",
+            idempotency_key=key,
+            editor_text="# 指示\n",
+        )
+    ]
+
+
+async def test_stream_emits_status_deltas_then_done_same_as_post(ctx: Ctx) -> None:
+    cid = await _create(ctx)
+    events = await _stream(ctx, cid)
+    assert [e.type for e in events][0] == "status"
+    assert events[-1].type == "done"
+    deltas = [e.text for e in events if e.type == "delta"]
+    assert len(deltas) >= 1 and "".join(t or "" for t in deltas) == "本文を足しました"
+    turn = events[-1].turn
+    assert turn is not None and turn.reply is not None
+    assert turn.reply.text == "本文を足しました"
+    assert turn.reply.proposal is not None and turn.reply.proposal.valid
+    assert [m.status for m in turn.chat.messages] == ["done", "done"]
+    async with ctx.deps.session_factory() as s:
+        used = await CostLedgerRepository(s).total_for_day(ctx.deps.today(), uid="alice")
+    assert used == Decimal("0.0011")  # 実費で精算（post_message と同じ）
+    # 同じキーの再送は LLM を呼ばず done だけ
+    again = await _stream(ctx, cid)
+    assert [e.type for e in again] == ["done"] and len(ctx.llm.prompts) == 1
+
+
+async def test_stream_provider_error_is_error_event_and_refunds(ctx: Ctx) -> None:
+    cid = await _create(ctx)
+
+    async def boom() -> None:
+        raise RuntimeError("provider said: 秘密のプロンプト")
+
+    ctx.llm.hook = boom
+    events = await _stream(ctx, cid)
+    assert events[-1].type == "error" and events[-1].code == "chat_failed"
+    assert "秘密" not in events[-1].model_dump_json()
+    async with ctx.deps.session_factory() as s:
+        chat = await kc.get_chat(s, workspace=ctx.slug, owner="alice", chat_id=cid)
+        used = await CostLedgerRepository(s).total_for_day(ctx.deps.today(), uid="alice")
+    assert [m.status for m in chat.messages] == ["failed"]
+    assert used == Decimal("0")
+
+
+async def test_stream_provider_error_after_output_keeps_worst_case(ctx: Ctx) -> None:
+    ctx.llm.fail_after_first = True
+    cid = await _create(ctx)
+    events = await _stream(ctx, cid)
+    assert events[-1].type == "error" and events[-1].code == "chat_failed"
+    async with ctx.deps.session_factory() as s:
+        used = await CostLedgerRepository(s).total_for_day(ctx.deps.today(), uid="alice")
+    assert used > Decimal("0.016")  # 出力が始まった後の失敗は課金されうるので 0 で精算しない
+
+
+async def test_stream_input_errors_are_error_events(ctx: Ctx) -> None:
+    events = [
+        ev
+        async for ev in kc.stream_message(
+            ctx.deps,
+            workspace=ctx.slug,
+            owner="alice",
+            chat_id=str(uuid.uuid4()),
+            text="x",
+            idempotency_key="key-none",
+        )
+    ]
+    assert [(e.type, e.code) for e in events] == [("error", "chat_not_found")]
+
+
+async def test_stream_timeout_keeps_worst_case_reservation(
+    ctx: Ctx, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(kc, "LLM_TIMEOUT_SECONDS", 0.05)
+    ctx.llm.stall_after_first = True
+    cid = await _create(ctx)
+    events = await _stream(ctx, cid)
+    assert events[-1].type == "error" and events[-1].code == "chat_failed"
+    async with ctx.deps.session_factory() as s:
+        chat = await kc.get_chat(s, workspace=ctx.slug, owner="alice", chat_id=cid)
+        used = await CostLedgerRepository(s).total_for_day(ctx.deps.today(), uid="alice")
+    assert [m.status for m in chat.messages] == ["failed"]
+    assert used > Decimal("0.016")  # 最悪の額が残る。部分的な使用量で精算しない
+
+
+async def test_stream_disconnect_keeps_worst_case_reservation(ctx: Ctx) -> None:
+    ctx.llm.stall_after_first = True
+    cid = await _create(ctx)
+    seen: list[str] = []
+
+    async def consume() -> None:
+        async for ev in kc.stream_message(
+            ctx.deps,
+            workspace=ctx.slug,
+            owner="alice",
+            chat_id=cid,
+            text="指示書を作りたい",
+            idempotency_key="key-0001",
+        ):
+            seen.append(ev.type)
+
+    task = asyncio.create_task(consume())
+    async with asyncio.timeout(10):
+        while "delta" not in seen:
+            await asyncio.sleep(0.01)
+    task.cancel()  # クライアントの切断
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    async with ctx.deps.session_factory() as s:
+        chat = await kc.get_chat(s, workspace=ctx.slug, owner="alice", chat_id=cid)
+        used = await CostLedgerRepository(s).total_for_day(ctx.deps.today(), uid="alice")
+    assert [m.status for m in chat.messages] == ["failed"]
+    assert used > Decimal("0.016")

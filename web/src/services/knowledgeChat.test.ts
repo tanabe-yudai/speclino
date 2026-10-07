@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ApiError } from '@/api/errors'
+import { ApiError, StreamInterruptedError } from '@/api/errors'
 import {
   CHAT_NOTICE,
   applyProposal,
@@ -12,6 +12,7 @@ import {
   editNote,
   editorText,
   noteFromSummary,
+  parseChatStreamEvent,
   proposalText,
   ruleEditorText,
   idempotencyKeyFor,
@@ -127,5 +128,26 @@ describe('knowledgeChat', () => {
     expect(idempotencyKeyFor('同じ', retry)).toBe('key-1')
     expect(idempotencyKeyFor('違う', retry)).not.toBe('key-1')
     expect(idempotencyKeyFor('同じ', null)).not.toBe('key-1')
+  })
+})
+
+describe('ストリームの出来事', () => {
+  it('SSE のイベントを種類ごとに読み、知らないもの・壊れた JSON は読み飛ばす', () => {
+    expect(parseChatStreamEvent({ event: 'status', data: '{"state":"thinking"}' })).toEqual({ type: 'status', state: 'thinking' })
+    expect(parseChatStreamEvent({ event: 'delta', data: '{"text":"あ"}' })).toEqual({ type: 'delta', text: 'あ' })
+    expect(parseChatStreamEvent({ event: 'error', data: '{"code":"cost_limit","message":"m","status":429}' })).toEqual({
+      type: 'error',
+      code: 'cost_limit',
+      message: 'm',
+      status: 429,
+    })
+    expect(parseChatStreamEvent({ event: 'done', data: '{"reply":null}' })?.type).toBe('done')
+    expect(parseChatStreamEvent({ event: 'delta', data: '{"text":1}' })).toBeNull()
+    expect(parseChatStreamEvent({ event: 'delta', data: '{' })).toBeNull()
+    expect(parseChatStreamEvent({ event: 'other', data: '{}' })).toBeNull()
+  })
+
+  it('途中で切れたときの文言', () => {
+    expect(describeChatError(new StreamInterruptedError())).toBe('応答が途中で切れました。もう一度送ってください')
   })
 })

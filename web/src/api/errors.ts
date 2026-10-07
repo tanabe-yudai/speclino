@@ -10,3 +10,11 @@ export class ApiError extends Error {
     this.code = code
   }
 }
+
+/** ストリームが `done` / `error` を受け取らずに終わった（途中で切れた）。 */
+export class StreamInterruptedError extends Error {
+  constructor() {
+    super('応答が途中で切れました。もう一度送ってください')
+    this.name = 'StreamInterruptedError'
+  }
+}

@@ -6,6 +6,7 @@ C2: 会話は持ち主だけ（同じワークスペースの owner でも 404�
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -27,7 +28,8 @@ from speclino.adapters.queue.inprocess import InProcessQueue
 from speclino.adapters.storage.fs import FileSystemBlobStore
 from speclino.api.app import create_app
 from speclino.api.deps import AppState
-from speclino.ports.text_llm import JsonGeneration
+from speclino.api.routes import knowledge_chat as routes
+from speclino.ports.text_llm import JsonGeneration, JsonStreamEvent
 from speclino.services.cost_guard import CostGuard, InMemoryLedger
 from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
 from speclino.settings import Settings
@@ -57,12 +59,24 @@ class FakeLlm:
         self.response = REPLY
         self.error: Exception | None = None
         self.prompts: list[str] = []
+        self.delay = 0.0
 
     async def generate_json(self, prompt: str, schema: dict[str, Any]) -> JsonGeneration:
         self.prompts.append(prompt)
         if self.error is not None:
             raise self.error
         return JsonGeneration(self.response, 100, 10)
+
+    async def stream_json(
+        self, prompt: str, schema: dict[str, Any]
+    ) -> AsyncIterator[JsonStreamEvent]:
+        self.prompts.append(prompt)
+        if self.error is not None:
+            raise self.error
+        for i in range(0, len(self.response), 6):
+            await asyncio.sleep(self.delay)
+            yield self.response[i : i + 6]
+        yield JsonGeneration(self.response, 100, 10)
 
 
 @dataclass
@@ -355,3 +369,90 @@ async def test_create_rechecks_membership_inside_the_transaction(
             )
         ).scalar_one()
     assert n == 0
+
+
+# ---------------------------------------------------------------- ストリーム（S74）
+def _parse_sse(body: str) -> tuple[list[tuple[str, dict[str, Any]]], list[str]]:
+    events: list[tuple[str, dict[str, Any]]] = []
+    comments: list[str] = []
+    for block in body.split("\n\n"):
+        if not block.strip():
+            continue
+        if block.startswith(":"):
+            comments.append(block)
+            continue
+        lines = dict(line.split(": ", 1) for line in block.split("\n"))
+        events.append((lines["event"], json.loads(lines["data"])))
+    return events, comments
+
+
+async def test_stream_flow_matches_non_stream_shape(ctx: Ctx) -> None:
+    cid = (await _create(ctx))["id"]
+    res = await ctx.client.post(
+        _url(ctx.slug, f"/{cid}/messages/stream"), json=_msg(), headers=ALICE
+    )
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("text/event-stream")
+    assert res.headers["cache-control"] == "no-cache" and res.headers["x-accel-buffering"] == "no"
+    events, _ = _parse_sse(res.text)
+    kinds = [k for k, _ in events]
+    assert kinds[0] == "status" and kinds[-1] == "done"
+    assert set(kinds[1:-1]) == {"delta"}
+    assert "".join(d["text"] for k, d in events if k == "delta") == "了解しました"
+    done = events[-1][1]
+    assert done["reply"]["text"] == "了解しました"
+    assert done["reply"]["proposal"]["raw_proposal"] == {"markdown": "# 仕様\n"}
+
+    # 非ストリームの結果と同じ形（同じ発言の再送は前の結果をそのまま返す）
+    again = await ctx.client.post(_url(ctx.slug, f"/{cid}/messages"), json=_msg(), headers=ALICE)
+    assert again.status_code == 200
+    assert set(again.json()) == set(done)
+    assert again.json()["reply"] == done["reply"]
+
+
+async def test_stream_error_event_has_fixed_code_only(ctx: Ctx) -> None:
+    cid = (await _create(ctx))["id"]
+    ctx.llm.error = RuntimeError(f"provider said: {SECRET}")
+    res = await ctx.client.post(
+        _url(ctx.slug, f"/{cid}/messages/stream"), json=_msg(), headers=ALICE
+    )
+    assert res.status_code == 200
+    events, _ = _parse_sse(res.text)
+    assert events[-1] == (
+        "error",
+        {
+            "code": "chat_failed",
+            "message": "AI の応答を得られませんでした。もう一度試してください",
+            "status": 502,
+        },
+    )
+    assert SECRET not in res.text
+
+
+async def test_stream_unknown_chat_and_non_member(ctx: Ctx) -> None:
+    res = await ctx.client.post(
+        _url(ctx.slug, f"/{uuid.uuid4()}/messages/stream"), json=_msg(), headers=ALICE
+    )
+    events, _ = _parse_sse(res.text)
+    assert [(k, d["code"]) for k, d in events] == [("error", "chat_not_found")]
+    stranger = await ctx.client.post(
+        _url(ctx.slug, f"/{uuid.uuid4()}/messages/stream"), json=_msg(), headers=STRANGER
+    )
+    assert stranger.status_code == 404
+    bad = await ctx.client.post(
+        _url(ctx.slug, f"/{uuid.uuid4()}/messages/stream"), json={"text": ""}, headers=ALICE
+    )
+    assert bad.status_code == 422
+
+
+async def test_stream_sends_heartbeat_while_waiting(
+    ctx: Ctx, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(routes, "HEARTBEAT_SECONDS", 0.05)
+    ctx.llm.delay = 0.1
+    cid = (await _create(ctx))["id"]
+    res = await ctx.client.post(
+        _url(ctx.slug, f"/{cid}/messages/stream"), json=_msg(), headers=ALICE
+    )
+    events, comments = _parse_sse(res.text)
+    assert events[-1][0] == "done" and comments and set(comments) == {": ping"}

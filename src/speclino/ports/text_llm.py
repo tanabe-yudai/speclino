@@ -6,8 +6,9 @@ adapters/llm/gemini_json.py（Gemini）と adapters/llm/scripted.py（テスト�
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 
 @dataclass(frozen=True)
@@ -32,4 +33,19 @@ class TextLlm(Protocol):
         ...
 
 
-__all__ = ["JsonGeneration", "TextLlm"]
+# stream_json の出力: 文字列の断片（str）を順に流し、最後に全文と使用量（JsonGeneration）を 1 つ返す
+JsonStreamEvent = str | JsonGeneration
+
+
+@runtime_checkable
+class StreamingTextLlm(TextLlm, Protocol):
+    def stream_json(self, prompt: str, schema: dict[str, Any]) -> AsyncIterator[JsonStreamEvent]:
+        """generate_json と同じ内容を、断片に分けて流す。最後の要素は必ず JsonGeneration。
+
+        最後の要素まで読み切ったときだけ使用量が確定する。途中で止めたら（中断・時間切れ）
+        使用量は不明で、呼び手は最悪の額を残す。
+        """
+        ...
+
+
+__all__ = ["JsonGeneration", "JsonStreamEvent", "StreamingTextLlm", "TextLlm"]

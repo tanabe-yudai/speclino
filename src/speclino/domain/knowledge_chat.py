@@ -115,6 +115,22 @@ class ChatTurn(IRModel):
     replayed: bool = False
 
 
+ChatStreamEventType = Literal["status", "delta", "done", "error"]
+
+
+class ChatStreamEvent(IRModel):
+    """ストリームで返す出来事。`delta` は説明の増えた分（足していく）、`done` は確定した結果。
+
+    `status` は進行の段階（`state`）、`error` は固定のエラーコード（`code`）だけを持つ（C9）。
+    """
+
+    type: ChatStreamEventType
+    state: Literal["thinking"] | None = None
+    text: str | None = None
+    turn: ChatTurn | None = None
+    code: ChatErrorCode | None = None
+
+
 class ChatSummaryDraft(IRModel):
     """会話の要約の案（保存しない）。`note` は本人が直して改訂の説明に入れる文。"""
 
@@ -139,6 +155,8 @@ __all__ = [
     "ChatMessageStatus",
     "ChatProposal",
     "ChatRole",
+    "ChatStreamEvent",
+    "ChatStreamEventType",
     "ChatSummaryDraft",
     "ChatTurn",
     "DiagnosticSeverity",
