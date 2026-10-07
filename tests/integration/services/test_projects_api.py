@@ -20,6 +20,7 @@ from speclino.adapters.queue.inprocess import InProcessQueue
 from speclino.adapters.storage.fs import FileSystemBlobStore
 from speclino.api.app import create_app
 from speclino.api.deps import AppState
+from speclino.db.models import ReviewRun
 from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
 from speclino.settings import Settings
 from tests.integration.services.conftest import project_id_of, register_repo, repo_id_of
@@ -139,6 +140,32 @@ async def test_missing_artifacts_are_unavailable_not_500(ctx: Ctx) -> None:
         and body["run"]["id"] == run_id
         and body["requirements"] == []
     )
+
+
+async def test_uml_only_bundle_run_is_ok(ctx: Ctx, engine: AsyncEngine) -> None:
+    c, slug, repo, base, head, _, pid, blobs = ctx
+    run_id = await _run(c, repo, head, base)
+    for p in (blobs / "runs" / run_id).glob("spec-ir*.json"):
+        p.unlink()
+    async with async_sessionmaker(engine, expire_on_commit=False)() as s:
+        run = await s.get(ReviewRun, uuid.UUID(run_id))
+        assert run is not None
+        run.manifest = {
+            **(run.manifest or {}),
+            "analysis": [],
+            "bundle_generation": 4,
+            "expected_requirement_ids": ["vocab#OrderService", "place#OrderService.place_order"],
+        }
+        await s.commit()
+    body = (await c.get(f"/api/workspaces/{slug}/projects/{pid}/overview", headers=DEV)).json()
+    assert body["status"] == "ok"
+    rows = {r["id"]: r for r in body["requirements"]}
+    assert set(rows) == {"vocab#OrderService", "place#OrderService.place_order"} | {
+        i for i, r in rows.items() if r["removed"]
+    }
+    assert not rows["vocab#OrderService"]["removed"]
+    assert not rows["place#OrderService.place_order"]["removed"]
+    assert body["unanalyzed"] >= 2  # 検査結果の無い要求は未検証
 
 
 async def test_corrupt_artifact_does_not_break_the_list(ctx: Ctx) -> None:

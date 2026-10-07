@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from speclino.adapters.storage.fs import FileSystemBlobStore
+from speclino.domain.common import SourceRef
 from speclino.domain.finding import Finding, Verdict
 from speclino.domain.policy import PolicyApplicability, PolicyPackage, PolicyRule
 from speclino.domain.semantic_diff import RuleDelta, SemanticDiff
@@ -205,6 +206,51 @@ def test_single_behavior_must_match_manifest(tmp_path: Path) -> None:
     _put(store, run_id, "spec-ir.json", spec)
     with pytest.raises(ArtifactsIncomplete):
         asyncio.run(load_spec_irs(store, run_id, ["refund"]))
+
+
+def test_bundle_run_without_spec_ir_has_no_spec_irs(tmp_path: Path) -> None:
+    store, run_id = FileSystemBlobStore(tmp_path), _uuid.uuid4()
+    asyncio.run(store.put(f"runs/{run_id}/gate.json", b"{}"))
+    assert asyncio.run(load_spec_irs(store, run_id, [], bundle_run=True)) == []
+    with pytest.raises(FileNotFoundError):  # 旧形式の run は従来どおり読めなければ失敗
+        asyncio.run(load_spec_irs(store, run_id, []))
+
+
+def test_uml_requirements_come_from_expected_ids() -> None:
+    spec = _spec()
+    ref = SourceRef(snapshot_id="s", path="specs/order.md", line_start=3, line_end=5)
+    uml = _finding("vocab#Inventory", "VIOLATED", behavior="vocab", fid="u1")
+    uml = uml.model_copy(
+        update={"spec_refs": [ref], "expected": "クラス Inventory（reserve(item)）"}
+    )
+    gone = _finding("R-GONE", "REVIEW", category="stale_approval")
+    rows = build_requirements(
+        [spec],
+        [gone, uml, _finding("POL-1:app/x.py", "VIOLATED", behavior="policy:pol")],
+        None,
+        # 規約の ID（指摘は「規約 ID:単位」）も expected に入るが、要求の行にはしない
+        ["vocab#Inventory", "place#OrderService.place_order", "vocab#Inventory", "POL-1"],
+    )
+    tail = [r.id for r in rows][len(spec.rules) :]
+    assert tail == ["vocab#Inventory", "place#OrderService.place_order", "R-GONE"]
+    by_id = {r.id: r for r in rows}
+    inv, place = by_id["vocab#Inventory"], by_id["place#OrderService.place_order"]
+    assert (inv.removed, inv.approval, inv.verdict, inv.behavior_id) == (
+        False,
+        "approved",
+        "VIOLATED",
+        "vocab",
+    )
+    assert (inv.spec_path, inv.line_start, inv.finding_ids) == ("specs/order.md", 3, ["u1"])
+    assert inv.title == "クラス Inventory（reserve(item)）"
+    assert (place.removed, place.verdict, place.behavior_id, place.finding_ids) == (
+        False,
+        None,
+        "place",
+        [],
+    )
+    assert place.title is None
+    assert by_id["R-GONE"].removed
 
 
 def test_policies_count_findings_waived_by_exceptions() -> None:

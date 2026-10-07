@@ -114,8 +114,22 @@ def _approval(rule: Rule, spec: SpecIR, changed: set[tuple[str, str]]) -> Approv
     return "stale" if (spec.behavior_id, rule.id) in changed else "unapproved"
 
 
+_UML_TITLE_MAX = 80
+
+
+def _uml_title(findings: list[Finding]) -> str | None:
+    """UML の要求は題を持たない。検査が書いた期待（例: 「クラス OrderService（…）」）を題にする。"""
+    text = next((f.expected for f in findings if isinstance(f.expected, str) and f.expected), None)
+    if text is None:
+        return None
+    return text if len(text) <= _UML_TITLE_MAX else text[: _UML_TITLE_MAX - 1] + "…"
+
+
 def build_requirements(
-    spec_irs: list[SpecIR], findings: list[Finding], diff: SemanticDiff | None
+    spec_irs: list[SpecIR],
+    findings: list[Finding],
+    diff: SemanticDiff | None,
+    expected_requirement_ids: list[str] | None = None,
 ) -> list[RequirementView]:
     verdicts = requirement_verdicts(findings)
     ids: dict[str, list[str]] = {}
@@ -146,6 +160,35 @@ def build_requirements(
                     finding_ids=sorted(ids.get(rule.id, [])),
                 )
             )
+    # UML の仕様の要求（Spec IR を持たない。manifest の expected_requirement_ids が正本）
+    # 規約の指摘の ID は「規約 ID:単位」の形（例: SHOP-ERR-001:app/service.py）
+    policy_ids = {
+        part
+        for f in findings
+        if is_policy_finding(f)
+        for part in (f.requirement_id, f.requirement_id.split(":", 1)[0])
+    }
+    for rid in expected_requirement_ids or []:
+        # 規約の ID も expected に入る。規約は build_policies が別に並べるので要求には出さない
+        if rid in known or rid in policy_ids:
+            continue
+        known.add(rid)
+        same = [g for g in findings if g.requirement_id == rid and not is_policy_finding(g)]
+        ref = next((r for g in same for r in g.spec_refs if r.path), None)
+        rows.append(
+            RequirementView(
+                id=rid,
+                behavior_id=same[0].behavior_id if same else rid.split("#", 1)[0],
+                title=_uml_title(same),
+                spec_path=ref.path if ref else None,
+                line_start=ref.line_start if ref else None,
+                line_end=ref.line_end if ref else None,
+                approval="approved",
+                tests_declared=0,
+                verdict=verdicts.get(rid),
+                finding_ids=sorted(g.id for g in same),
+            )
+        )
     # head の Spec IR から消えた要求（承認なしの削除は stale_approval の finding が残る）
     for f in findings:
         if is_policy_finding(f) or f.requirement_id in known:
@@ -297,20 +340,22 @@ async def _optional_json(blobs: BlobStore, run_id: uuid.UUID, name: str) -> Any 
         return None
 
 
-async def load_spec_irs(blobs: BlobStore, run_id: uuid.UUID, expected: list[str]) -> list[SpecIR]:
+async def load_spec_irs(
+    blobs: BlobStore, run_id: uuid.UUID, expected: list[str], *, bundle_run: bool = False
+) -> list[SpecIR]:
     """run の Spec IR を behavior ごとに読む（services/check_pipeline.py の write_result）。
 
     behavior が複数なら `spec-ir.<behavior>.json`、1 つなら `spec-ir.json`（複数のときも先頭の
     behavior の `spec-ir.json` が残るので、見つかったファイルからは数を決めない）。`expected` は
     manifest の `analysis[].behavior_id`。空（S41c より前の run）なら見つかったファイルに従う。
+    bundle の run（`bundle_run`）で旧形式の仕様が無いときは spec-ir.json が書かれないので空を返す。
     """
     if not expected:
         names = [k.rsplit("/", 1)[-1] for k in await blobs.list(f"runs/{run_id}/")]
-        per = sorted(
-            n
-            for n in names
-            if n.startswith("spec-ir.") and n.endswith(".json") and n != "spec-ir.json"
-        )
+        found = [n for n in names if n.startswith("spec-ir.") and n.endswith(".json")]
+        if bundle_run and not found:
+            return []
+        per = sorted(n for n in found if n != "spec-ir.json")
         targets = per or ["spec-ir.json"]
     elif len(expected) == 1:
         targets = ["spec-ir.json"]
@@ -356,7 +401,10 @@ async def _assemble(session: AsyncSession, blobs: BlobStore, run: ReviewRun) -> 
         for a in manifest.get("analysis", [])
         if isinstance(a, dict) and "behavior_id" in a
     ]
-    spec_irs = await load_spec_irs(blobs, run.id, expected)
+    spec_irs = await load_spec_irs(
+        blobs, run.id, expected, bundle_run=manifest.get("bundle_generation") is not None
+    )
+    expected_ids = [i for i in manifest.get("expected_requirement_ids", []) if isinstance(i, str)]
     raw_diff = await _optional_json(blobs, run.id, "semantic-diff.json")
     diff = SemanticDiff.model_validate(raw_diff) if raw_diff is not None else None
     # ゲートを計算した run では gate.json は必ず書かれる（reporter/json_out.py）
@@ -373,7 +421,7 @@ async def _assemble(session: AsyncSession, blobs: BlobStore, run: ReviewRun) -> 
         team = found.package
 
     findings = await _findings(session, run.id)
-    requirements = build_requirements(spec_irs, findings, diff)
+    requirements = build_requirements(spec_irs, findings, diff, expected_ids)
     present = [r for r in requirements if not r.removed]
     policies = build_policies(findings, gate, team)
     return _Assembled(
