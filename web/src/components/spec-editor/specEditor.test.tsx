@@ -43,9 +43,9 @@ describe('RequirementTrace', () => {
 
   it('marks unformalized rows and the mandatory ones left as REVIEW at the gate', () => {
     const html = renderToStaticMarkup(<RequirementTrace trace={requirementTrace(compiled)} hasCompiled />)
-    expect(html).toContain('形式化 1 / 2 件')
-    expect(html).toContain('未形式化')
-    expect(html).toContain('ゲートで REVIEW')
+    expect(html).toContain('検査できる要求 1 / 2 件')
+    expect(html).toContain('検査できない')
+    expect(html).toContain('ゲートで要確認')
     expect(html).toContain('checkout#m1')
   })
 
@@ -57,7 +57,7 @@ describe('RequirementTrace', () => {
 
 describe('CanonicalView', () => {
   it('explains why there is no canonical form', () => {
-    expect(renderToStaticMarkup(<CanonicalView canonical={null} pending={false} hasErrors />)).toContain('正規形は作れません')
+    expect(renderToStaticMarkup(<CanonicalView canonical={null} pending={false} hasErrors />)).toContain('整形できません')
     expect(renderToStaticMarkup(<CanonicalView canonical="```mermaid" pending={false} hasErrors={false} />)).toContain('```mermaid')
   })
 })

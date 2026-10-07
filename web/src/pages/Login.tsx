@@ -57,9 +57,8 @@ export function Login() {
 
         {mode === 'dev' ? (
           <div className="space-y-3">
-            <p className="text-sm text-ink-2">開発モード: Firebase の環境変数が未設定のため、ヘッダ認証で進みます。</p>
             <Button variant="secondary" className="w-full" onClick={enterDevMode}>
-              開発モードで入る
+              開発用ログイン
             </Button>
           </div>
         ) : (

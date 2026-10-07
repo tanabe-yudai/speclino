@@ -1,3 +1,4 @@
+import { plainTerms } from '../services/displayText'
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
@@ -6,6 +7,7 @@ import { getReviewMarkdown, getRun, getRunEvents, getSupplements } from '../api/
 import { ApiError } from '../api/errors'
 import { ErrorState } from '../components/ErrorState'
 import { AttestButton } from '../components/AttestButton'
+import { PrCommentCommand } from '../components/PrCommentCommand'
 import { FindingCard } from '../components/FindingCard'
 import { LoadingState } from '../components/LoadingState'
 import { RerunButton } from '../components/RerunButton'
@@ -32,7 +34,7 @@ import { ToneBadge } from '@/components/app/ToneBadge'
 import { VerdictBadge } from '@/components/app/VerdictBadge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { paths } from '@/services/paths'
-import { describeLimits, describeSemanticDiff, describeTeamPolicy } from '../services/manifest'
+import { describeLimits, describeSemanticDiff, describeTeamPolicy, triggerLabel } from '../services/manifest'
 import {
   collectScopeAndAssumptions,
   collectUnresolvedItems,
@@ -59,7 +61,7 @@ const DETAIL_VERDICTS = ['VIOLATED', 'REVIEW', 'UNKNOWN'] as const
 export function RunDetail() {
   const { id } = useParams<{ id: string }>()
   if (!id) {
-    return <ErrorState message="run ID が指定されていません" />
+    return <ErrorState message="検査が指定されていません" />
   }
   // id ごとに key で強制的に再マウントする。前の run の状態を引きずらず、
   // effect 内での明示的なリセット（setState）も不要になる。
@@ -85,7 +87,7 @@ function RunDetailView({ id }: { id: string }) {
         setEvents(eventsData)
       })
       .catch((err: unknown) => {
-        setLoadError(err instanceof ApiError ? err.message : 'run の取得に失敗しました')
+        setLoadError(err instanceof ApiError ? err.message : '検査を取得できませんでした')
       })
     // 補足は付随情報。取れなくても本体の表示は止めない（取れなければ前回の表示を保つ）
     getSupplements(id)
@@ -209,9 +211,8 @@ function RunSummary({ run }: { run: ReviewRunDetail }) {
               {run.pr_number != null && <span className="text-ink-3"> #{run.pr_number}</span>}
             </h1>
             <p className="mt-1 font-mono text-xs text-ink-3">
-              head <span title={run.head_sha}>{shortSha(run.head_sha)}</span>
-              {' ← '}
-              base <span title={run.base_sha ?? undefined}>{shortSha(run.base_sha)}</span>
+              変更 <span title={run.head_sha}>{shortSha(run.head_sha)}</span>
+              （比較元 <span title={run.base_sha ?? undefined}>{shortSha(run.base_sha)}</span>）
             </p>
           </div>
           {run.gate_status ? (
@@ -263,11 +264,16 @@ function RunSummary({ run }: { run: ReviewRunDetail }) {
         )}
 
         <p className="text-xs text-ink-3">
-          作成 {formatDateTime(run.created_at)} ・ 完了 {formatDateTime(run.finished_at)} ・ トリガー {run.trigger}
+          作成 {formatDateTime(run.created_at)} ・ 完了 {formatDateTime(run.finished_at)} ・ きっかけ: {triggerLabel(run.trigger)}
         </p>
       </Panel>
 
-      <ScopeBlock title="保証範囲" scopeItems={scopeItems} assumptions={assumptions} unresolvedItems={unresolvedItems} />
+      <ScopeBlock
+        title="確認の範囲"
+        scopeItems={scopeItems}
+        assumptions={assumptions.map(plainTerms)}
+        unresolvedItems={unresolvedItems.map(plainTerms)}
+      />
     </div>
   )
 }
@@ -304,8 +310,7 @@ function FindingAttest({ slug, run, finding, mayAttest }: FindingAttestProps) {
       )}
       {requiresPrComment(target) ? (
         <p className="text-sm text-ink-2">
-          対応表・免除・規約の変更の確定は PR コメントで行います（PR の作成者と照合するため）:{' '}
-          <code className="font-mono text-xs break-all">{prCommentCommand(target)}</code>
+          対応表・免除・規約の変更の確定は、PR のコメントで行います。
         </p>
       ) : (
         mayAttest &&
@@ -320,6 +325,8 @@ function FindingAttest({ slug, run, finding, mayAttest }: FindingAttestProps) {
           />
         )
       )}
+      {/* 確定済みの指摘には出さない（PR のコメントでしか確定できないものは常に出す） */}
+      {(!recorded || requiresPrComment(target)) && <PrCommentCommand command={prCommentCommand(target)} />}
     </div>
   )
 }
@@ -364,7 +371,7 @@ function FindingsByVerdict({ run, supplements }: { run: ReviewRunDetail; supplem
             <ToneBadge tone="exempt">{CLEARED_LABEL}</ToneBadge>
             {cleared.length} 件
           </h3>
-          <p className="text-xs text-ink-3">判定は要確認（REVIEW）のまま。owner / approver が問題なしと確定した指摘で、ゲートを止めません（LLM 支援の「指摘なし」も、必須の規約では確定するまで止めます）。</p>
+          <p className="text-xs text-ink-3">人が問題なしと確定した指摘です。マージは止めません。</p>
           {sortFindingsForDisplay(cleared).map((finding) => (
             <div key={finding.id} className="space-y-2">
               <FindingCard finding={finding} repoFullName={run.repo_full_name} headSha={run.head_sha} cleared />

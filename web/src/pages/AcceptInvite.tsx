@@ -97,12 +97,12 @@ export function AcceptInvite() {
         <PanelTitle className="mt-1 text-lg break-words">{workspaceName} への招待</PanelTitle>
       </div>
       <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
-        <dt className="text-ink-3">role</dt>
+        <dt className="text-ink-3">権限</dt>
         <dd>{WORKSPACE_ROLE_LABELS[preview.role]}</dd>
         <dt className="text-ink-3">宛先</dt>
         <dd className="break-all">{preview.email}</dd>
         <dt className="text-ink-3">ログイン中</dt>
-        <dd className="break-all">{me.email ?? me.uid}</dd>
+        <dd className="break-all">{me.email ?? '—'}</dd>
         <dt className="text-ink-3">期限</dt>
         <dd>{formatDateTime(preview.expires_at)}</dd>
       </dl>

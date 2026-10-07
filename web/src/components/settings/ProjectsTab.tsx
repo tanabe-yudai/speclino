@@ -125,7 +125,7 @@ function SettingsForm({ slug, projectId }: { slug: string; projectId: string }) 
     <div className="space-y-4">
       {view.stored_invalid && (
         <p className="rounded-md bg-rev-bg px-3 py-2 text-sm text-rev">
-          保存されている設定が読めないため、エージェントと test_run を止めた安全側の設定で動いています。保存し直してください。
+          保存されている設定が読めないため、エージェントとテスト実行を止めた安全側の設定で動いています。保存し直してください。
         </p>
       )}
       {view.approver_ids_missing && (
@@ -250,9 +250,7 @@ export function ProjectsTab({ slug, role }: { slug: string; role: WorkspaceRole 
   return (
     <div className="space-y-6">
       <p className="text-sm text-ink-2">
-        GitHub App を入れてリポジトリを登録し、<code className="font-mono text-xs">.speclino/</code>{' '}
-        と承認済みの仕様を置いて PR を開くと、SpecLino が検査を始めます。各段階は SpecLino が持っている記録
-        （登録・検査の結果）から表示し、確かめられない段階は「未確認」と出します。
+        リポジトリを登録して承認済みの仕様を置き、PR を開くと検査が始まります。各段階の状態は、確かめられないとき「未確認」と表示します。
       </p>
       {error && (
         <ErrorState

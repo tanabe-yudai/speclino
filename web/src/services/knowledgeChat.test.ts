@@ -40,7 +40,7 @@ const rule: PolicyRule = {
 
 describe('knowledgeChat', () => {
   it('告知の文言は設計どおり', () => {
-    expect(CHAT_NOTICE).toBe('会話は Google の Vertex AI（Gemini）に送られ、SpecLino の運用者は技術的に読めます。ほかのメンバーには見えません')
+    expect(CHAT_NOTICE).toBe('会話は Google の Gemini に送られ、SpecLino の運用者が読む場合があります。ほかのメンバーには見えません')
   })
 
   it('編集欄の本文はキーの順に依らず、名前・スコープ・対象を含めない', () => {

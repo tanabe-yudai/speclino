@@ -42,7 +42,7 @@ import type { Invitation, IssuedInvitation, WorkspaceMember } from '@/types/memb
 
 const ROLES: WorkspaceRole[] = ['owner', 'approver', 'member']
 const SELECT_CLASS = 'h-8 rounded-md border bg-card px-2 text-sm disabled:opacity-50'
-const ROLE_HELP = 'オーナー: 招待・role の変更・リポジトリ登録・MCP トークン / 承認者: 規約の承認と設定の変更 / メンバー: 閲覧と検査の開始'
+const ROLE_HELP = 'オーナー: 招待・権限の変更・リポジトリ登録・エージェント接続トークン / 承認者: 規約の承認と設定の変更 / メンバー: 閲覧と検査の開始'
 
 const message = (err: unknown, fallback: string) => (err instanceof ApiError ? err.message : fallback)
 
@@ -99,7 +99,7 @@ export function MembersTab({
   function handleInvite(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (!isValidEmail(email)) {
-      setInviteError('メールアドレスの形で入力してください（例: owner@example.com）')
+      setInviteError('メールアドレスの形で入力してください（例: name@example.com）')
       return
     }
     setInviting(true)
@@ -122,7 +122,7 @@ export function MembersTab({
         fetchAll()
         if (member.uid === myUid) onSelfChanged()
       })
-      .catch((err: unknown) => toast.error(message(err, 'role を変更できませんでした')))
+      .catch((err: unknown) => toast.error(message(err, '権限を変更できませんでした')))
       .finally(() => setBusyUid(null))
   }
 
@@ -159,8 +159,7 @@ export function MembersTab({
   return (
     <div className="space-y-6">
       <p className="text-sm text-ink-2">
-        ワークスペースのメンバーは SpecLino で管理します（GitHub とは同期しません）。招待・role の変更・削除は owner
-        だけができ、すべて監査ログに残ります。
+        ワークスペースのメンバーは SpecLino で管理します（GitHub とは同期しません）。招待・権限の変更・削除はオーナーだけができ、記録が残ります。
       </p>
 
       {justIssued && (
@@ -197,11 +196,10 @@ export function MembersTab({
                       {memberLabel(m)}
                       {m.uid === myUid && <span className="ml-2 text-xs text-ink-3">（あなた）</span>}
                     </p>
-                    {m.email && <p className="truncate font-mono text-xs text-ink-3">{m.uid}</p>}
                   </div>
                   {isOwner ? (
                     <select
-                      aria-label={`${memberLabel(m)} の role`}
+                      aria-label={`${memberLabel(m)} の権限`}
                       className={SELECT_CLASS}
                       value={m.role}
                       disabled={busyUid === m.uid}
@@ -247,14 +245,14 @@ export function MembersTab({
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="owner@example.com"
+                placeholder="name@example.com"
                 autoComplete="off"
                 maxLength={254}
                 required
               />
             </div>
             <div className="grid gap-1.5">
-              <Label htmlFor="invite-role">role</Label>
+              <Label htmlFor="invite-role">権限</Label>
               <select
                 id="invite-role"
                 className="h-8 rounded-md border bg-card px-2 text-sm"

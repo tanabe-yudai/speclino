@@ -6,11 +6,11 @@
 import { expect, test, type Page } from '@playwright/test'
 
 const SLUG = process.env.E2E_CHAT_WORKSPACE ?? 'chat-team'
-const NOTICE = '会話は Google の Vertex AI（Gemini）に送られ、SpecLino の運用者は技術的に読めます。ほかのメンバーには見えません'
+const NOTICE = '会話は Google の Gemini に送られ、SpecLino の運用者が読む場合があります。ほかのメンバーには見えません'
 
 async function login(page: Page) {
   await page.goto('/login')
-  await page.getByRole('button', { name: '開発モードで入る' }).click()
+  await page.getByRole('button', { name: '開発用ログイン' }).click()
   await page.waitForURL(/\/w\//)
 }
 

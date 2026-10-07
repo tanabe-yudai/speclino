@@ -32,7 +32,7 @@ export function SyncTokensTab({ slug, canManage }: { slug: string; canManage: bo
   const fetchTokens = useCallback(() => {
     listSyncTokens(slug)
       .then(setTokens)
-      .catch((err: unknown) => setError(err instanceof ApiError ? err.message : 'sync トークンの一覧を取得できませんでした'))
+      .catch((err: unknown) => setError(err instanceof ApiError ? err.message : 'リポジトリ同期トークンの一覧を取得できませんでした'))
   }, [slug])
 
   useEffect(() => {
@@ -55,7 +55,7 @@ export function SyncTokensTab({ slug, canManage }: { slug: string; canManage: bo
         setName('')
         fetchTokens()
       })
-      .catch((err: unknown) => toast.error(err instanceof ApiError ? err.message : 'sync トークンを発行できませんでした'))
+      .catch((err: unknown) => toast.error(err instanceof ApiError ? err.message : 'リポジトリ同期トークンを発行できませんでした'))
       .finally(() => setIssuing(false))
   }
 
@@ -68,7 +68,7 @@ export function SyncTokensTab({ slug, canManage }: { slug: string; canManage: bo
         toast.success(`「${target.name}」を失効させました`)
         fetchTokens()
       })
-      .catch((err: unknown) => toast.error(err instanceof ApiError ? err.message : 'sync トークンを失効できませんでした'))
+      .catch((err: unknown) => toast.error(err instanceof ApiError ? err.message : 'リポジトリ同期トークンを失効できませんでした'))
   }
 
   async function copyToken() {
@@ -84,14 +84,14 @@ export function SyncTokensTab({ slug, canManage }: { slug: string; canManage: bo
   return (
     <div className="space-y-6">
       <p className="text-sm text-ink-2">
-        <code className="font-mono text-xs">speclino sync</code> がリポジトリに承認済みの知識（スキル・指示書・仕様）を書き出すためのトークンです。
-        {canManage ? 'リポジトリごとに発行します。' : '発行と失効は owner / approver が行います。'}
+        リポジトリへ、承認済みの仕様・スキル・指示書を書き出すためのトークンです。
+        {canManage ? 'リポジトリごとに発行します。' : '発行と失効はオーナーと承認者が行います。'}
       </p>
 
       {justIssued && (
         <Panel className="border-primary/30">
           <PanelTitle>「{justIssued.name}」を発行しました（{justIssued.repo_full_name}）</PanelTitle>
-          <p className="mt-1 text-sm text-ink-2">この画面を離れると平文は二度と表示されません。今すぐ CI やリポジトリの秘密の設定にコピーしてください。</p>
+          <p className="mt-1 text-sm text-ink-2">この画面を離れると平文は二度と表示されません。今すぐ CI やリポジトリの設定にコピーしてください。</p>
           <div className="mt-3 flex items-center gap-2">
             <code className="min-w-0 flex-1 truncate rounded-md bg-muted px-3 py-2 font-mono text-xs select-all" aria-label="発行したトークン">
               {justIssued.token}
@@ -105,7 +105,7 @@ export function SyncTokensTab({ slug, canManage }: { slug: string; canManage: bo
 
       {canManage && (
         <Panel>
-          <PanelTitle>sync トークンを発行</PanelTitle>
+          <PanelTitle>リポジトリ同期トークンを発行</PanelTitle>
           <form className="mt-3 flex flex-wrap items-end gap-3" onSubmit={handleIssue}>
             <div className="grid min-w-[14rem] flex-1 gap-1.5">
               <Label htmlFor="sync-token-name">トークン名</Label>
@@ -141,11 +141,11 @@ export function SyncTokensTab({ slug, canManage }: { slug: string; canManage: bo
         </Panel>
       )}
 
-      {tokens === null && error === null && <LoadingState message="sync トークンの一覧を取得しています…" />}
+      {tokens === null && error === null && <LoadingState message="リポジトリ同期トークンの一覧を取得しています…" />}
       {error && <ErrorState message={error} onRetry={retry} />}
-      {tokens !== null && tokens.length === 0 && <p className="text-sm text-ink-3">まだ sync トークンがありません。</p>}
+      {tokens !== null && tokens.length === 0 && <p className="text-sm text-ink-3">まだ リポジトリ同期トークンがありません。</p>}
       {tokens !== null && tokens.length > 0 && (
-        <ul className="space-y-2" aria-label="sync トークンの一覧">
+        <ul className="space-y-2" aria-label="リポジトリ同期トークンの一覧">
           {tokens.map((token) => (
             <li key={token.id} className="row flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-sm">
               <span className="min-w-0 flex-1 truncate font-medium">{token.name}</span>
@@ -171,7 +171,7 @@ export function SyncTokensTab({ slug, canManage }: { slug: string; canManage: bo
         <DialogContent>
           <DialogHeader>
             <DialogTitle>「{revoking?.name}」を失効させますか？</DialogTitle>
-            <DialogDescription>以後このトークンでは知識を取得できなくなります。元には戻せません。</DialogDescription>
+            <DialogDescription>以後このトークンでは内容を取得できなくなります。元には戻せません。</DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <DialogClose asChild>

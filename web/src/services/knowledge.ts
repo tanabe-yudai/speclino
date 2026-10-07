@@ -128,13 +128,13 @@ export function describeKnowledgeError(err: unknown): { kind: KnowledgeErrorKind
     case 'draft_changed':
       return { kind: 'conflict', message: '他の人が先に保存または承認しました' }
     case 'bundle_conflict':
-      return { kind: 'bundle_conflict', message: `他の有効な知識と競合するため承認できません: ${err.message}` }
+      return { kind: 'bundle_conflict', message: `ほかの有効な内容と競合するため承認できません: ${err.message}` }
     case 'spec_not_compilable':
-      return { kind: 'not_compilable', message: `仕様を IR に変換できないため承認できません: ${err.message}` }
+      return { kind: 'not_compilable', message: `仕様を読み取れないため承認できません: ${err.message}` }
     case 'not_an_approver':
-      return { kind: 'forbidden', message: '承認できるのは owner / approver だけです' }
+      return { kind: 'forbidden', message: '承認できるのはオーナーと承認者だけです' }
     case 'artifact_exists':
-      return { kind: 'invalid', message: '同じ名前の知識が既にあります' }
+      return { kind: 'invalid', message: '同じ名前のものが既にあります' }
     case 'invalid_artifact':
     case 'validation_error':
       return { kind: 'invalid', message: err.message }

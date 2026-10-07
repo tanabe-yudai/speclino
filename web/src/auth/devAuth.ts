@@ -1,7 +1,7 @@
 /**
  * 開発モード（Firebase 未設定時）の認証。
  * `SPECLINO_AUTH_KIND=dev` のバックエンドは `X-Dev-User` ヘッダだけで通す。
- * ログイン画面は「開発モードで入る」ボタンをクリックしたことをセッション内で覚えておく。
+ * ログイン画面は「開発用ログイン」ボタンをクリックしたことをセッション内で覚えておく。
  */
 
 export const DEV_USER_HEADER_NAME = 'X-Dev-User'

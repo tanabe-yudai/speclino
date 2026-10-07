@@ -18,11 +18,11 @@ const TAB_LABELS: Record<SettingsTab, string> = {
   projects: 'プロジェクト',
   repositories: 'リポジトリ',
   members: 'メンバー',
-  sync: 'sync トークン',
-  tokens: 'MCP トークン',
+  sync: 'リポジトリ同期トークン',
+  tokens: 'エージェント接続トークン',
 }
 
-/** ワークスペースの設定（プロジェクト・リポジトリ・メンバー・sync トークン・MCP トークン）。MCP トークンは owner にだけ出す。 */
+/** ワークスペースの設定。エージェント接続トークンはオーナーにだけ出す。 */
 export function Settings() {
   const { slug } = useParams<{ slug: string }>()
   const { me, reload } = useMe()

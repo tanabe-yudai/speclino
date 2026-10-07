@@ -74,7 +74,7 @@ describe('LLM 支援の「指摘なし」も人の確定までは要確認とし
   })
 
   it('確定待ちと確定済みで区分の文言を分ける', () => {
-    expect(assessmentOutcomeLabel('no_issue', false)).toBe('LLM で確認、指摘なし（機械検証ではない）— 人の確定が必要')
+    expect(assessmentOutcomeLabel('no_issue', false)).toBe('AI で確認、指摘なし（機械検証ではない）— 人の確定が必要')
     expect(assessmentOutcomeLabel('no_issue', true)).not.toContain('確定が必要')
   })
 })

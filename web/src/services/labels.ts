@@ -188,16 +188,16 @@ export function auditLabel(action: string, decision: string): string {
  * 指摘なしも人の確定まではゲートを止める（#114）ので「人の確定が必要」と出す。
  */
 export const ASSESSMENT_OUTCOME_LABELS: Record<AssessmentOutcome, string> = {
-  issue: 'LLM の指摘あり（人の確定待ち）',
-  split: 'LLM の評価が割れた（人の確定待ち）',
-  no_issue: 'LLM で確認、指摘なし（機械検証ではない）— 人の確定が必要',
+  issue: 'AI の指摘あり（人の確定待ち）',
+  split: 'AI の評価が割れた（人の確定待ち）',
+  no_issue: 'AI で確認、指摘なし（機械検証ではない）— 人の確定が必要',
 }
 
 /** 確定済み（ゲートの cleared）の LLM 支援の区分。確定待ちの文言を外す。 */
 export const ASSESSMENT_OUTCOME_CLEARED_LABELS: Record<AssessmentOutcome, string> = {
-  issue: 'LLM の指摘あり（人が問題なしと確定）',
-  split: 'LLM の評価が割れた（人が問題なしと確定）',
-  no_issue: 'LLM で確認、指摘なし（機械検証ではない）— 人が確定',
+  issue: 'AI の指摘あり（人が問題なしと確定）',
+  split: 'AI の評価が割れた（人が問題なしと確定）',
+  no_issue: 'AI で確認、指摘なし（機械検証ではない）— 人が確定',
 }
 
 export function assessmentOutcomeLabel(outcome: AssessmentOutcome, cleared: boolean): string {
@@ -208,4 +208,19 @@ export const ASSESSMENT_OUTCOME_TONE: Record<AssessmentOutcome, VerdictTone> = {
   issue: 'rev',
   split: 'rev',
   no_issue: 'rev',
+}
+
+/** 検査のきっかけ（review_runs.trigger）。 */
+export const TRIGGER_LABELS: Record<string, string> = {
+  'pull_request.opened': 'PR が開かれた',
+  'pull_request.synchronize': 'PR にコミットが追加された',
+  'pull_request.reopened': 'PR が再び開かれた',
+  'pull_request.ready_for_review': 'PR がレビュー待ちになった',
+  rerequested: 'GitHub から再実行が求められた',
+  comment: 'PR のコメント',
+  rerun: '画面からの再実行',
+  attestation: '人の確定の反映',
+  mcp: 'エージェントからの依頼',
+  a2a: 'エージェントからの依頼',
+  manual: '手動',
 }

@@ -74,7 +74,7 @@ function EditorLoader({ slug, kind, id }: { slug: string; kind: ArtifactKind; id
       .then(([draft, revisions]) => alive && setLoaded({ draft, revisions }))
       .catch((err: unknown) => {
         if (!alive) return
-        setError(err instanceof ApiError && err.status === 404 ? 'この知識は見つかりません' : err instanceof ApiError ? err.message : '知識を取得できませんでした')
+        setError(err instanceof ApiError && err.status === 404 ? 'この内容は見つかりません' : err instanceof ApiError ? err.message : '内容を取得できませんでした')
       })
     return () => {
       alive = false
@@ -88,7 +88,7 @@ function EditorLoader({ slug, kind, id }: { slug: string; kind: ArtifactKind; id
   }, [])
 
   if (error) return <ErrorState message={error} onRetry={reload} />
-  if (!loaded) return <LoadingState message="知識を取得しています…" />
+  if (!loaded) return <LoadingState message="内容を取得しています…" />
   return <EditorForm key={version} slug={slug} kind={kind} id={id} initial={loaded} onReload={reload} />
 }
 
@@ -214,7 +214,7 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
             </Link>
           )}
         </div>
-        {id && !draft && active && <p className="text-sm text-ink-2">有効な改訂 {active.revision} を土台に編集します。保存すると次の改訂の下書きになります。</p>}
+        {id && !draft && active && <p className="text-sm text-ink-2">保存すると新しい下書きになります。承認されるまで今の内容が使われます。</p>}
         <Button type="button" size="sm" variant={chatOpen ? 'secondary' : 'outline'} onClick={() => setChatOpen(!chatOpen)} aria-expanded={chatOpen}>
           {chatOpen ? 'AI と作るパネルを閉じる' : 'AI と作る'}
         </Button>
