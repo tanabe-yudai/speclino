@@ -586,6 +586,7 @@ async def resolve_for_project(
 async def list_artifacts(session: AsyncSession, workspace: str) -> list[ArtifactSummary]:
     repo = ArtifactRepository(session)
     numbers = await repo.revision_numbers(workspace)
+    scopes = await repo.revision_scopes(workspace)
     return [
         ArtifactSummary(
             artifact_id=str(a.id),
@@ -594,6 +595,7 @@ async def list_artifacts(session: AsyncSession, workspace: str) -> list[Artifact
             name=a.name,
             active_revision=numbers.get(a.id, {}).get("active"),
             draft_revision=numbers.get(a.id, {}).get("draft"),
+            scope=scopes.get(a.id, {}).get("active") or scopes.get(a.id, {}).get("draft"),
             created_at=a.created_at,
         )
         for a in await repo.list_for_workspace(workspace)

@@ -3,6 +3,7 @@ import { useCurrentWorkspace } from '@/hooks/useCurrentWorkspace'
 import { cn } from '@/lib/utils'
 import { paths } from '@/services/paths'
 import { AccountMenu } from './AccountMenu'
+import { MobileNav } from './MobileNav'
 import { ProjectPill } from './ProjectPill'
 import { ThemeToggle } from './ThemeToggle'
 import { WorkspacePill } from './WorkspacePill'
@@ -17,6 +18,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
   return (
     <header className="sticky top-0 z-40 border-b bg-background/70 backdrop-blur-md">
       <div className="mx-auto flex h-14 w-full max-w-6xl items-center gap-2 px-4 sm:px-6">
+        <MobileNav />
         <Link to={paths.home()} className="mr-1 shrink-0 font-extrabold tracking-tight">
           <BrandMark />
           <span className="hidden sm:inline"> SpecLino</span>
@@ -24,21 +26,9 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
         <WorkspacePill />
         <ProjectPill />
         {workspace && (
-          <>
-            {/* スマホ幅ではアカウントメニューに入れる（ピルの幅を残す） */}
-            <NavLink to={paths.knowledgeRoot(workspace.slug)} className={(s) => cn(navClass(s), 'hidden sm:inline-flex')}>
-              知識
-            </NavLink>
-            <NavLink to={paths.policies(workspace.slug)} className={(s) => cn(navClass(s), 'hidden sm:inline-flex')}>
-              規約
-            </NavLink>
-            <NavLink to={paths.observability(workspace.slug)} className={(s) => cn(navClass(s), 'hidden sm:inline-flex')}>
-              可観測性
-            </NavLink>
-            <NavLink to={paths.settings(workspace.slug)} className={(s) => cn(navClass(s), 'hidden sm:inline-flex')}>
-              設定
-            </NavLink>
-          </>
+          <NavLink to={paths.settings(workspace.slug)} className={(s) => cn(navClass(s), 'hidden sm:inline-flex')}>
+            設定
+          </NavLink>
         )}
         <div className="ml-auto flex items-center gap-1">
           <button

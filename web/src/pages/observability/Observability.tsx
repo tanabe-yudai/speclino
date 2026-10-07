@@ -32,12 +32,13 @@ const td = 'py-2 pr-3 align-top'
 /** 可観測性（設計 9 章）。知識が使われ、守られているか。表示はサーバの集計 1 つだけから作る。 */
 export function Observability() {
   const workspace = useCurrentWorkspace()
-  useDocumentTitle('可観測性')
+  useDocumentTitle('利用状況')
   if (!workspace) return <NotFoundPanel title="このワークスペースは見つかりません" />
-  return <Body key={workspace.slug} slug={workspace.slug} name={workspace.name ?? workspace.slug} />
+  return <ObservabilityBody key={workspace.slug} slug={workspace.slug} name={workspace.name ?? workspace.slug} />
 }
 
-function Body({ slug, name }: { slug: string; name: string }) {
+/** embedded: ワークスペースのタブの中に置くとき（見出しはタブ側にあるので出さない）。 */
+export function ObservabilityBody({ slug, name, embedded = false }: { slug: string; name: string; embedded?: boolean }) {
   const [health, setHealth] = useState<WorkspaceHealth | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
@@ -61,9 +62,13 @@ function Body({ slug, name }: { slug: string; name: string }) {
   return (
     <div className="space-y-6">
       <header className="min-w-0">
-        <p className="text-xs font-semibold tracking-widest text-primary uppercase">Observability</p>
-        <h1 className="mt-1 truncate text-2xl font-bold tracking-tight">{name} の可観測性</h1>
-        <p className="mt-1 text-sm text-ink-2">
+        {!embedded && (
+          <>
+            <p className="text-xs font-semibold tracking-widest text-primary uppercase">Observability</p>
+            <h1 className="mt-1 truncate text-2xl font-bold tracking-tight">{name} の利用状況</h1>
+          </>
+        )}
+        <p className={embedded ? 'text-sm text-ink-2' : 'mt-1 text-sm text-ink-2'}>
           知識が使われ、守られているか。測っていないものは「{UNMEASURED}」と表示し、0% や 100% にはしません。
         </p>
       </header>

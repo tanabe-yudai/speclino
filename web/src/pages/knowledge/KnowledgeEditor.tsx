@@ -9,7 +9,6 @@ import { ApprovalPanel } from '@/components/knowledge/ApprovalPanel'
 import { ChatPanel } from '@/components/knowledge/ChatPanel'
 import { ConflictDialog } from '@/components/knowledge/ConflictDialog'
 import { InstructionsEditorPane } from '@/components/knowledge/InstructionsEditorPane'
-import { KnowledgeNav } from '@/components/knowledge/KnowledgeNav'
 import { NoteField } from '@/components/knowledge/NoteField'
 import { NotFoundPanel } from '@/components/knowledge/NotFoundPanel'
 import { ScopePicker } from '@/components/knowledge/ScopePicker'
@@ -37,6 +36,7 @@ import {
   toEditable,
   type EditBase,
 } from '@/services/knowledge'
+import { backLink, findFromProject, scopeForProject } from '@/services/knowledgeNav'
 import { applyProposal, canSummarize, currentFieldText, editorText, proposalText } from '@/services/knowledgeChat'
 import { paths } from '@/services/paths'
 import { countErrors } from '@/services/specPreview'
@@ -51,9 +51,9 @@ export function KnowledgeEditor() {
   const { section, id } = useParams<{ section: string; id?: string }>()
   const workspace = useCurrentWorkspace()
   const kind = parseSection(section)
-  useDocumentTitle(kind ? (id ? `${KIND_LABELS[kind]}の編集` : `新しい${KIND_LABELS[kind]}`) : '知識')
+  useDocumentTitle(kind ? (id ? `${KIND_LABELS[kind]}の編集` : `新しい${KIND_LABELS[kind]}`) : '編集')
   if (!workspace) return <NotFoundPanel title="このワークスペースは見つかりません" />
-  if (!kind) return <NotFoundPanel title="この種類の知識はありません" />
+  if (!kind) return <NotFoundPanel title="この種類の項目はありません" />
   return <EditorLoader key={`${workspace.slug}/${kind}/${id ?? ''}`} slug={workspace.slug} kind={kind} id={id ?? null} />
 }
 
@@ -96,7 +96,10 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const chatParam = searchParams.get('chat')
+  // S74: プロジェクトのタブから開いたときの戻り先（owner/repo）。そのプロジェクトのスコープで作り始める
+  const from = searchParams.get('from')
   const { projects, error: projectsError } = useWorkspaceProjects(slug)
+  const fromProject = findFromProject(projects, from)
   const [base, setBase] = useState<EditBase>(() => editBase(initial.draft, initial.revisions))
   const [draft, setDraft] = useState<ArtifactRevision | null>(initial.draft)
   const [content, setContent] = useState<ArtifactContent>(() => (base.base ? toEditable(base.base.content) : emptyContent(kind)))
@@ -115,6 +118,14 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
   useEffect(() => {
     latest.current = content
   }, [content])
+  // 新規で from のプロジェクトが分かったら、スコープをそのプロジェクトにする（1 回だけ。選び直しは尊重する）
+  const seededScope = useRef(false)
+  const fromProjectId = fromProject?.id
+  useEffect(() => {
+    if (id || !fromProjectId || seededScope.current) return
+    seededScope.current = true
+    setContent((c) => ({ ...c, scope: scopeForProject(fromProjectId) }))
+  }, [id, fromProjectId])
 
   const active = activeRevision(initial.revisions)
   const artifactName = base.base?.name ?? null
@@ -156,8 +167,7 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
         if (!id) {
           // 会話で作り始めた知識: 最初の保存でできた知識に会話を結び付ける
           const bound = chat.current ? await chat.bind(rev.artifact_id) : null
-          const target = paths.knowledgeItem(slug, kind, rev.artifact_id)
-          navigate(bound ? `${target}?chat=${encodeURIComponent(bound.id)}` : target, { replace: true })
+          navigate(paths.knowledgeItem(slug, kind, rev.artifact_id, { chat: bound?.id, from }), { replace: true })
           return
         }
         setDraft(rev)
@@ -179,10 +189,13 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
   }
 
   const label = KIND_LABELS[kind]
+  const back = backLink(slug, kind, fromProject)
   return (
     <div className="space-y-6">
       <header className="min-w-0 space-y-3">
-        <KnowledgeNav slug={slug} current={kind} />
+        <Link to={back.to} className="inline-block text-sm text-primary underline-offset-4 hover:underline">
+          {back.label}
+        </Link>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <h1 className="min-w-0 truncate text-2xl font-bold tracking-tight">
             {artifactName ? (
@@ -196,7 +209,7 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
           {active && <ToneBadge tone="ok">有効 改訂 {active.revision}</ToneBadge>}
           {draft && <ToneBadge tone="rev">下書き 改訂 {draft.revision}</ToneBadge>}
           {id && (
-            <Link to={paths.knowledgeRevisions(slug, kind, id)} className="ml-auto text-sm text-primary underline-offset-4 hover:underline">
+            <Link to={paths.knowledgeRevisions(slug, kind, id, from)} className="ml-auto text-sm text-primary underline-offset-4 hover:underline">
               改訂の履歴と差分
             </Link>
           )}

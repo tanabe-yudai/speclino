@@ -18,9 +18,9 @@ test('チャットで指示書を作り、要約を説明にして保存する',
   await login(page)
   const name = `dev-rules-${Date.now()}`
 
-  // 1. 一覧の「チャットで新規作成」→ エディタで AI と作るパネルが開き、告知が出る
-  await page.goto(`/w/${SLUG}/knowledge/instructions`)
-  await page.getByRole('link', { name: 'チャットで新規作成' }).click()
+  // 1. チーム共通の指示書の「AI と作る」→ エディタで AI と作るパネルが開き、告知が出る
+  await page.goto(`/w/${SLUG}?tab=shared`)
+  await page.getByRole('region', { name: '指示書' }).getByRole('link', { name: 'AI と作る' }).click()
   await expect(page.getByText(NOTICE)).toBeVisible()
 
   // 2. 話しかける → 説明と提案（差分）が返る

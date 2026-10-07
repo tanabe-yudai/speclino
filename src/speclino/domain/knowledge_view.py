@@ -8,7 +8,7 @@ from pydantic import Field
 
 from speclino.domain.common import IRModel
 from speclino.domain.finding import Verdict
-from speclino.domain.knowledge import ArtifactKind, ArtifactRevision, Bundle
+from speclino.domain.knowledge import ArtifactKind, ArtifactRevision, ArtifactScope, Bundle
 
 
 class ArtifactSummary(IRModel):
@@ -18,6 +18,9 @@ class ArtifactSummary(IRModel):
     name: str
     active_revision: int | None = None
     draft_revision: int | None = None
+    scope: ArtifactScope | None = Field(
+        default=None, description="有効な改訂のスコープ。無ければ下書きのもの"
+    )
     created_at: datetime
 
 

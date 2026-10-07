@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { ApiError } from '@/api/errors'
 import { listArtifactRevisions } from '@/api/knowledge'
 import { Panel, PanelTitle } from '@/components/app/Panel'
@@ -8,7 +8,6 @@ import { ErrorState } from '@/components/ErrorState'
 import { ApprovalPanel } from '@/components/knowledge/ApprovalPanel'
 import { ConflictDialog } from '@/components/knowledge/ConflictDialog'
 import { DiffView } from '@/components/knowledge/DiffView'
-import { KnowledgeNav } from '@/components/knowledge/KnowledgeNav'
 import { NotFoundPanel } from '@/components/knowledge/NotFoundPanel'
 import { LoadingState } from '@/components/LoadingState'
 import { cn } from '@/lib/utils'
@@ -16,6 +15,7 @@ import { useCurrentWorkspace } from '@/hooks/useCurrentWorkspace'
 import { useSpecPreview } from '@/hooks/useSpecPreview'
 import { useWorkspaceProjects } from '@/hooks/useWorkspaceProjects'
 import { formatDateTime } from '@/services/format'
+import { backLink, findFromProject } from '@/services/knowledgeNav'
 import { KIND_LABELS, STATUS_LABELS, parseSection, revisionText } from '@/services/knowledge'
 import { paths } from '@/services/paths'
 import { countErrors } from '@/services/specPreview'
@@ -48,6 +48,10 @@ function RevisionsBody({ slug, kind, id }: { slug: string; kind: ArtifactKind; i
   const [selected, setSelected] = useState<number | null>(null)
   const [conflict, setConflict] = useState(false)
   const { projects } = useWorkspaceProjects(slug)
+  // S74: プロジェクトのタブから開いたときの戻り先（owner/repo）
+  const [searchParams] = useSearchParams()
+  const from = searchParams.get('from')
+  const back = backLink(slug, kind, findFromProject(projects, from))
 
   useEffect(() => {
     let alive = true
@@ -89,12 +93,14 @@ function RevisionsBody({ slug, kind, id }: { slug: string; kind: ArtifactKind; i
   return (
     <div className="space-y-6">
       <header className="min-w-0 space-y-3">
-        <KnowledgeNav slug={slug} current={kind} />
+        <Link to={back.to} className="inline-block text-sm text-primary underline-offset-4 hover:underline">
+          {back.label}
+        </Link>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <h1 className="min-w-0 truncate text-2xl font-bold tracking-tight">
             {KIND_LABELS[kind]} <span className="font-mono">{name}</span> の改訂
           </h1>
-          <Link to={paths.knowledgeItem(slug, kind, id)} className="ml-auto text-sm text-primary underline-offset-4 hover:underline">
+          <Link to={paths.knowledgeItem(slug, kind, id, { from })} className="ml-auto text-sm text-primary underline-offset-4 hover:underline">
             エディタを開く
           </Link>
         </div>

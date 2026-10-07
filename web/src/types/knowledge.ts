@@ -71,6 +71,8 @@ export interface ArtifactSummary {
   name: string
   active_revision: number | null
   draft_revision: number | null
+  /** 有効な改訂のスコープ、無ければ下書きのもの（S74） */
+  scope?: ArtifactScope | null
   created_at: string
 }
 

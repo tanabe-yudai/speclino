@@ -9,6 +9,8 @@ import path from 'node:path'
 const SLUG = process.env.E2E_WORKSPACE ?? 'shop-team'
 // スクリーンショットは E2E_SHOTS_DIR を設定したときだけ保存する（docs の画像を撮り直すとき）
 const SHOTS = process.env.E2E_SHOTS_DIR ? path.resolve(process.env.E2E_SHOTS_DIR) : null
+// seed_demo.py のプロジェクト（examples/shop/seed.py の REPO）
+const PROJECT = '/p/example/shop'
 const DEV_HEADERS = { 'X-Dev-User': 'judge' }
 
 async function shot(page: Page, name: string) {
@@ -23,7 +25,7 @@ async function login(page: Page) {
 }
 
 async function currentGeneration(page: Page): Promise<number> {
-  await page.goto(`/w/${SLUG}/knowledge/specs`)
+  await page.goto(`/w/${SLUG}?tab=usage`)
   const text = await page.getByText(/今の bundle: 世代 \d+/).innerText()
   return Number(/世代 (\d+)/.exec(text)?.[1])
 }
@@ -31,8 +33,9 @@ async function currentGeneration(page: Page): Promise<number> {
 test('仕様の編集・診断・承認、skill、可観測性、検査結果の確定', async ({ page, request }) => {
   await login(page)
 
-  // 1. 仕様の一覧 → 仕様のエディタ
+  // 1. プロジェクトの仕様タブ → 仕様のエディタ
   const before = await currentGeneration(page)
+  await page.goto(`/w/${SLUG}${PROJECT}/specs`)
   await shot(page, 'list')
   await page.getByRole('link', { name: 'shop', exact: true }).click()
   const body = page.getByLabel('仕様の本文（Markdown と ```mermaid の図）')
@@ -87,13 +90,13 @@ test('仕様の編集・診断・承認、skill、可観測性、検査結果の
   expect(await currentGeneration(page)).toBe(before + 1)
 
   // 5. skill のエディタ
-  await page.goto(`/w/${SLUG}/knowledge/skills`)
+  await page.goto(`/w/${SLUG}${PROJECT}/skills`)
   await page.getByRole('link', { name: 'shop-error-format', exact: true }).click()
   await expect(page.getByLabel('SKILL.md')).toHaveValue(/name: shop-error-format/)
   await shot(page, 'skill')
 
-  // 6. 可観測性
-  await page.goto(`/w/${SLUG}/observability`)
+  // 6. 利用状況（ワークスペースのタブ）
+  await page.goto(`/w/${SLUG}?tab=usage`)
   await expect(page.getByText(/今の bundle: 世代 \d+/)).toBeVisible()
   await shot(page, 'observability')
   await page.getByText('LLM 支援の安定度').evaluate((el) => el.scrollIntoView({ block: 'start' }))

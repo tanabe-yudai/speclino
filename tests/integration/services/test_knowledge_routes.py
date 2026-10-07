@@ -91,6 +91,8 @@ async def test_create_update_approve_and_bundle(ctx: Ctx) -> None:
     assert created["revision"] == 1 and created["status"] == "draft"
     listed = (await c.get(f"/api/workspaces/{slug}/artifacts", headers=MEMBER)).json()
     assert [(a["name"], a["draft_revision"]) for a in listed] == [("agents", 1)]
+    # 一覧のスコープは有効な改訂、無ければ下書きのもの
+    assert listed[0]["scope"] == {"workspace": True, "projects": []}
 
     put = await c.put(
         f"/api/workspaces/{slug}/artifacts/{aid}/draft",
@@ -125,6 +127,8 @@ async def test_create_update_approve_and_bundle(ctx: Ctx) -> None:
     assert ok.status_code == 200, ok.text
     assert ok.json()["bundle"]["generation"] == 1
     assert ok.json()["revision"]["self_approved"] is False
+    after = (await c.get(f"/api/workspaces/{slug}/artifacts", headers=MEMBER)).json()
+    assert after[0]["scope"] == {"workspace": True, "projects": []}
 
     current = (await c.get(f"/api/workspaces/{slug}/bundles/current", headers=MEMBER)).json()
     assert current == ok.json()["bundle"]

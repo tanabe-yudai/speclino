@@ -1,89 +1,35 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { listRuns } from '@/api/reviewRuns'
 import { ApiError } from '@/api/errors'
-import { GateBadge } from '@/components/app/GateBadge'
 import { Panel, PanelTitle } from '@/components/app/Panel'
-import { ToneBadge } from '@/components/app/ToneBadge'
+import { ProjectCard } from '@/components/app/ProjectCard'
 import { RunRow } from '@/components/app/RunRow'
 import { ErrorState } from '@/components/ErrorState'
 import { LoadingState } from '@/components/LoadingState'
-import { HealthRing } from '@/components/project/HealthRing'
+import { ArtifactSection } from '@/components/knowledge/ArtifactSection'
+import { TabNav } from '@/components/shell/TabNav'
+import { useArtifacts } from '@/hooks/useArtifacts'
 import { useMe } from '@/hooks/useMe'
 import { useWorkspaceProjects } from '@/hooks/useWorkspaceProjects'
-import { STATE_META, TILE_ORDER } from '@/services/health'
+import { sharedArtifactRows } from '@/services/knowledgeNav'
 import { paths } from '@/services/paths'
+import { WORKSPACE_TABS, WORKSPACE_TAB_LABELS, pickWorkspaceTab } from '@/services/workspaceTabs'
 import { pickWorkspace } from '@/services/workspaces'
-import type { ProjectSummary } from '@/types/project'
+import { PoliciesBody } from './Policies'
+import { ObservabilityBody } from './observability/Observability'
 import type { ReviewRunSummary } from '@/types/run'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 
-/** 1 つのプロジェクトのカード（健康状態・違反などの件数・最新のゲート）。 */
-function ProjectCard({ slug, project }: { slug: string; project: ProjectSummary }) {
-  const [, name] = project.repo_full_name.split('/')
-  return (
-    <Link to={paths.project(slug, project.repo_full_name)} className="row flex min-w-0 items-center gap-4 p-5">
-      <HealthRing counts={project.status_counts} />
-      <div className="min-w-0 flex-1">
-        <p className="truncate font-semibold">{name}</p>
-        <p className="mt-0.5 truncate font-mono text-xs text-ink-3">{project.repo_full_name}</p>
-        {project.status === 'unavailable' ? (
-          <p className="mt-2 text-xs text-ink-3">最新の検査の成果物を読めません</p>
-        ) : project.state && project.status_counts ? (
-          <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-2">
-            <ToneBadge tone={STATE_META[project.state].tone}>{STATE_META[project.state].label}</ToneBadge>
-            {TILE_ORDER.filter((k) => k !== 'ok' && (project.status_counts?.[k] ?? 0) > 0).map((k) => (
-              <span key={k}>
-                {STATE_META[k].segment} {project.status_counts?.[k]}
-              </span>
-            ))}
-          </p>
-        ) : (
-          <p className="mt-2 text-xs text-ink-3">まだ検査されていません</p>
-        )}
-      </div>
-      {project.latest_run?.gate_status && <GateBadge status={project.latest_run.gate_status} />}
-    </Link>
-  )
-}
-
-/** ワークスペースのホーム（`/w/:slug`）: プロジェクトのカードと、そのワークスペースの最近の検査。 */
+/** ワークスペースのホーム（`/w/:slug`）: プロジェクト / チーム共通 / チーム規約 / 利用状況のタブ（`?tab=`）。 */
 export function Home() {
   const { me } = useMe()
   const { slug: urlSlug } = useParams<{ slug?: string }>()
+  const [params] = useSearchParams()
   const workspace = pickWorkspace(me?.workspaces ?? [], urlSlug)
   const slug = workspace?.slug
+  const tab = pickWorkspaceTab(params.get('tab'))
   useDocumentTitle(workspace ? (workspace.name ?? workspace.slug) : undefined)
-  const { projects, error: projectsError, retry: retryProjects } = useWorkspaceProjects(slug)
-  // 最近の検査は API 側でこのワークスペースに絞る。slug が変わった直後は前の一覧を出さない
-  const [loaded, setLoaded] = useState<{ slug: string; runs: ReviewRunSummary[] | null; error: string | null } | null>(
-    null,
-  )
-  const [attempt, setAttempt] = useState(0)
-
-  useEffect(() => {
-    if (!slug) return
-    let alive = true
-    listRuns(50, slug)
-      .then((runs) => alive && setLoaded({ slug, runs, error: null }))
-      .catch((err: unknown) => {
-        if (alive) {
-          setLoaded({ slug, runs: null, error: err instanceof ApiError ? err.message : '検査の一覧を取得できませんでした' })
-        }
-      })
-    return () => {
-      alive = false
-    }
-  }, [slug, attempt])
-
-  const current = loaded && loaded.slug === slug ? loaded : null
-  const recent = current?.runs ?? null
-  const error = current?.error ?? null
-
-  const retry = useCallback(() => {
-    setLoaded(null)
-    setAttempt((n) => n + 1)
-  }, [])
 
   if (!me) return <LoadingState />
 
@@ -112,21 +58,63 @@ export function Home() {
     )
   }
 
+  const name = workspace.name ?? workspace.slug
+  return (
+    <div className="space-y-6">
+      <header className="space-y-4">
+        <div>
+          <p className="text-xs font-semibold tracking-widest text-primary uppercase">Workspace</p>
+          <h1 className="mt-1 truncate text-2xl font-bold tracking-tight">{name}</h1>
+        </div>
+        <TabNav
+          label="ワークスペースの画面"
+          current={tab}
+          items={WORKSPACE_TABS.map((t) => ({ id: t, label: WORKSPACE_TAB_LABELS[t], to: paths.workspace(slug, t) }))}
+        />
+      </header>
+      {tab === 'projects' && <ProjectsTab key={slug} slug={slug} canAddRepo={workspace.role === 'owner'} />}
+      {tab === 'shared' && <SharedTab key={slug} slug={slug} />}
+      {tab === 'policies' && <PoliciesBody key={slug} slug={slug} name={name} embedded />}
+      {tab === 'usage' && <ObservabilityBody key={slug} slug={slug} name={name} embedded />}
+    </div>
+  )
+}
+
+/** プロジェクトのカードと、そのワークスペースの最近の検査。 */
+function ProjectsTab({ slug, canAddRepo }: { slug: string; canAddRepo: boolean }) {
+  const { projects, error: projectsError, retry: retryProjects } = useWorkspaceProjects(slug)
+  const [runs, setRuns] = useState<ReviewRunSummary[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [attempt, setAttempt] = useState(0)
+
+  // 最近の検査は API 側でこのワークスペースに絞る。タブは slug ごとに作り直すので前の一覧は残らない
+  useEffect(() => {
+    let alive = true
+    listRuns(50, slug)
+      .then((r) => alive && setRuns(r))
+      .catch((err: unknown) => {
+        if (alive) setError(err instanceof ApiError ? err.message : '検査の一覧を取得できませんでした')
+      })
+    return () => {
+      alive = false
+    }
+  }, [slug, attempt])
+
+  const retry = useCallback(() => {
+    setError(null)
+    setRuns(null)
+    setAttempt((n) => n + 1)
+  }, [])
+
   return (
     <div className="space-y-8">
-      <header>
-        <p className="text-xs font-semibold tracking-widest text-primary uppercase">Workspace</p>
-        <h1 className="mt-1 truncate text-2xl font-bold tracking-tight">{workspace.name ?? workspace.slug}</h1>
-      </header>
-
       <section className="space-y-3">
-        <h2 className="text-sm font-semibold text-ink-2">プロジェクト</h2>
         {projectsError && <ErrorState message={projectsError} onRetry={retryProjects} />}
         {!projectsError && projects === null && <LoadingState message="プロジェクトを取得しています…" />}
         {projects !== null && projects.length === 0 && (
           <Panel className="text-sm text-ink-2">
             まだリポジトリが登録されていません。
-            {workspace.role === 'owner' && (
+            {canAddRepo && (
               <>
                 {' '}
                 <Link className="text-primary underline-offset-4 hover:underline" to={paths.settings(slug, 'repositories')}>
@@ -137,7 +125,7 @@ export function Home() {
           </Panel>
         )}
         {projects !== null && projects.length > 0 && (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,24rem),1fr))] gap-4">
             {projects.map((p) => (
               <ProjectCard key={p.id} slug={slug} project={p} />
             ))}
@@ -156,16 +144,42 @@ export function Home() {
       <section className="space-y-3">
         <h2 className="text-sm font-semibold text-ink-2">最近の検査</h2>
         {error && <ErrorState message={error} onRetry={retry} />}
-        {!error && recent === null && <LoadingState message="検査の一覧を取得しています…" />}
-        {recent !== null && recent.length === 0 && <p className="text-sm text-ink-3">まだ検査がありません。</p>}
-        {recent !== null && recent.length > 0 && (
+        {!error && runs === null && <LoadingState message="検査の一覧を取得しています…" />}
+        {runs !== null && runs.length === 0 && <p className="text-sm text-ink-3">まだ検査がありません。</p>}
+        {runs !== null && runs.length > 0 && (
           <div className="space-y-2">
-            {recent.map((run) => (
+            {runs.map((run) => (
               <RunRow key={run.id} run={run} />
             ))}
           </div>
         )}
       </section>
+    </div>
+  )
+}
+
+/** チーム共通: ワークスペース全体に効くスキルと指示書。作る操作の初期スコープはワークスペース全体。 */
+function SharedTab({ slug }: { slug: string }) {
+  const { artifacts, error, retry } = useArtifacts(slug)
+  if (error) return <ErrorState message={error} onRetry={retry} />
+  return (
+    <div className="space-y-8">
+      <ArtifactSection
+        slug={slug}
+        kind="skill"
+        heading="スキル"
+        rows={artifacts ? sharedArtifactRows(artifacts, 'skill') : null}
+        error={null}
+        onRetry={retry}
+      />
+      <ArtifactSection
+        slug={slug}
+        kind="instructions"
+        heading="指示書"
+        rows={artifacts ? sharedArtifactRows(artifacts, 'instructions') : null}
+        error={null}
+        onRetry={retry}
+      />
     </div>
   )
 }

@@ -46,7 +46,8 @@ export function Policies() {
   return <PoliciesBody key={workspace.slug} slug={workspace.slug} name={workspace.name ?? workspace.slug} />
 }
 
-function PoliciesBody({ slug, name }: { slug: string; name: string }) {
+/** embedded: ワークスペースのタブの中に置くとき（見出しはタブ側にあるので出さない）。 */
+export function PoliciesBody({ slug, name, embedded = false }: { slug: string; name: string; embedded?: boolean }) {
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
@@ -139,9 +140,13 @@ function PoliciesBody({ slug, name }: { slug: string; name: string }) {
   return (
     <div className="space-y-6">
       <header className="min-w-0">
-        <p className="text-xs font-semibold tracking-widest text-primary uppercase">Policies</p>
-        <h1 className="mt-1 truncate text-2xl font-bold tracking-tight">{name} のチーム規約</h1>
-        <p className="mt-1 text-sm text-ink-2">
+        {!embedded && (
+          <>
+            <p className="text-xs font-semibold tracking-widest text-primary uppercase">Policies</p>
+            <h1 className="mt-1 truncate text-2xl font-bold tracking-tight">{name} のチーム規約</h1>
+          </>
+        )}
+        <p className={embedded ? 'text-sm text-ink-2' : 'mt-1 text-sm text-ink-2'}>
           {view.active ? `有効な改訂 ${view.active.revision}` : '有効な改訂はまだありません'}
           。ルールの変更は下書きに入り、owner / approver が承認すると以後の検査に使われます。
         </p>
