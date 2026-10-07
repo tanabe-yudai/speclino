@@ -472,6 +472,24 @@ def _changed_files(snapshot: Snapshot, lock: KnowledgeLock) -> list[str]:
     return changed
 
 
+def _leftover_absent(snapshot: Snapshot, lock: KnowledgeLock) -> list[str]:
+    """lock の `absent`（消したはずのファイル・取り除いたはずの管理区画）のうち、残っているもの。
+
+    AGENTS.md / CLAUDE.md は区画が無ければよい（区画の外は利用者のもの）。読めない・印が壊れて
+    いて確かめられないものも残っている扱い（フェイルクローズ）。
+    """
+    left = []
+    for path in lock.absent:
+        try:
+            text = snapshot.read_text(path)
+            if text is None or (path in MANAGED_FILES and split_managed(text) is None):
+                continue
+        except (UnicodeDecodeError, ManagedBlockError, OSError):
+            pass
+        left.append(path)
+    return left
+
+
 def _unlisted_skill_files(snapshot: Snapshot, lock: KnowledgeLock) -> list[str]:
     """lock に載ったスキルのディレクトリにある、lock に無いファイル。"""
     dirs = set()
@@ -510,7 +528,8 @@ def assess_lock(
     """lock を今の bundle と比べる。snapshot があれば書き出したファイルも照合する。
 
     - UNKNOWN: lock が無い・読めない・署名不一致・別のワークスペース/リポジトリ・期限切れ・lock の
-      世代が今より新しい・ファイルの改変や欠落・同期したスキルに未登録のファイル・同じ世代なのに
+      世代が今より新しい・ファイルの改変や欠落・消したはずのファイルや区画（`absent`）が残っている・
+      同期したスキルに未登録のファイル・同じ世代なのに
       このプロジェクトのメンバーか規約と違う（他のプロジェクトの lock の持ち込み）
     - REVIEW: lock の世代が古く、このプロジェクトのメンバーか規約（`policy_hash`）が違う
     - VERIFIED_IN_SCOPE: それ以外
@@ -557,6 +576,15 @@ def assess_lock(
                 "sync で書き出した知識が改変されているか欠けています",
                 expected="lock のハッシュと一致",
                 actual=", ".join(changed_files[:20]),
+                lock=lock,
+            )
+        leftover = _leftover_absent(snapshot, lock)
+        if leftover:
+            return LockAssessment(
+                "UNKNOWN",
+                "sync で消したはずの知識が残っています",
+                expected="lock の absent のファイル・管理区画が無い",
+                actual=", ".join(leftover[:20]),
                 lock=lock,
             )
         extra = _unlisted_skill_files(snapshot, lock)

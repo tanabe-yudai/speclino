@@ -644,6 +644,44 @@ def test_lock_newer_than_current_is_unknown(tmp_path: Path) -> None:
     assert _check(tmp_path, lock_json, current=current, now=NOW).verdict == "UNKNOWN"
 
 
+def test_lock_absent_file_left_behind_is_unknown(tmp_path: Path) -> None:
+    """S75（A6）: lock の absent のファイルが残れば、古い知識が残ったまま VERIFIED にしない。"""
+    files, lock, _ = _payload([_skill("old"), *BASE])
+    _write(tmp_path, files, lock)
+    _resync(tmp_path, BASE, 2)
+    lock_json = (tmp_path / ks.LOCK_PATH).read_text()
+    current = _bundle(BASE, 2)
+    assert _check(tmp_path, lock_json, current=current).verdict == "VERIFIED_IN_SCOPE"
+    left = tmp_path / ".claude/skills/old/SKILL.md"
+    left.parent.mkdir()
+    left.write_text("古いスキル")
+    f = _check(tmp_path, lock_json, current=current)
+    assert f.verdict == "UNKNOWN" and "残って" in f.message
+    assert f.actual == ".claude/skills/old/SKILL.md"
+
+
+def test_lock_absent_managed_block_left_behind_is_unknown(tmp_path: Path) -> None:
+    (tmp_path / "AGENTS.md").write_text("# 手書き\n")
+    files, lock, _ = _payload(BASE)
+    _write(tmp_path, files, lock)
+    _resync(tmp_path, [BASE[0], BASE[2]], 2)
+    lock_json = (tmp_path / ks.LOCK_PATH).read_text()
+    assert KnowledgeLock.model_validate_json(lock_json).absent == ["AGENTS.md"]
+    current = _bundle([BASE[0], BASE[2]], 2)
+    agents = tmp_path / "AGENTS.md"
+    # 区画の外（利用者の本文）は照合しない
+    agents.write_text("# 手書き\n\n追記\n")
+    assert _check(tmp_path, lock_json, current=current).verdict == "VERIFIED_IN_SCOPE"
+    agents.write_text(
+        "# 手書き\n<!-- speclino:begin bundle=1 -->\n共通の指示\n<!-- speclino:end -->\n"
+    )
+    assert _check(tmp_path, lock_json, current=current).verdict == "UNKNOWN"
+    agents.write_text("# 手書き\n<!-- speclino:end -->\n")  # 壊れた印も確かめられない
+    assert _check(tmp_path, lock_json, current=current).verdict == "UNKNOWN"
+    agents.unlink()
+    assert _check(tmp_path, lock_json, current=current).verdict == "VERIFIED_IN_SCOPE"
+
+
 def test_check_lock_snapshot_reads_lock_from_snapshot(tmp_path: Path) -> None:
     _, bundle = _synced(tmp_path)
     snap = cast(Snapshot, DirectorySnapshot(tmp_path, snapshot_id="head"))
