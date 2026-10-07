@@ -346,3 +346,13 @@ def test_status_counts_combine_requirements_and_policies() -> None:
     assert project_state(c.model_copy(update={"review": 0, "unknown": 0})) == "exempted"
     assert project_state(c.model_copy(update={"review": 0, "unknown": 0, "exempted": 0})) == "ok"
     assert project_state(c.model_copy(update={"violated": 1})) == "violated"
+
+
+def test_untitled_legacy_rule_takes_title_from_finding_expected() -> None:
+    spec = _spec()
+    rule = spec.rules[0].model_copy(update={"title": None})
+    spec = spec.model_copy(update={"rules": [rule]})
+    f = _finding(rule.id, "VERIFIED_IN_SCOPE").model_copy(update={"expected": "注文は取り消せる"})
+    rows = build_requirements([spec], [f], None)
+    assert rows[0].title == "注文は取り消せる"
+    assert build_requirements([spec], [], None)[0].title is None

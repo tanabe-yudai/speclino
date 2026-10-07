@@ -114,15 +114,15 @@ def _approval(rule: Rule, spec: SpecIR, changed: set[tuple[str, str]]) -> Approv
     return "stale" if (spec.behavior_id, rule.id) in changed else "unapproved"
 
 
-_UML_TITLE_MAX = 80
+_FALLBACK_TITLE_MAX = 80
 
 
-def _uml_title(findings: list[Finding]) -> str | None:
-    """UML の要求は題を持たない。検査が書いた期待（例: 「クラス OrderService（…）」）を題にする。"""
+def _fallback_title(findings: list[Finding]) -> str | None:
+    """題の無い要求（UML・旧形式の取り込み）の題。検査が書いた期待を題にする。"""
     text = next((f.expected for f in findings if isinstance(f.expected, str) and f.expected), None)
     if text is None:
         return None
-    return text if len(text) <= _UML_TITLE_MAX else text[: _UML_TITLE_MAX - 1] + "…"
+    return text if len(text) <= _FALLBACK_TITLE_MAX else text[: _FALLBACK_TITLE_MAX - 1] + "…"
 
 
 def build_requirements(
@@ -150,7 +150,15 @@ def build_requirements(
                 RequirementView(
                     id=rule.id,
                     behavior_id=spec.behavior_id,
-                    title=rule.title,
+                    # 旧形式から取り込んだ要求は題が無いことがある。検査の期待を題にする
+                    title=rule.title
+                    or _fallback_title(
+                        [
+                            f
+                            for f in findings
+                            if f.requirement_id == rule.id and not is_policy_finding(f)
+                        ]
+                    ),
                     spec_path=ref.path if ref else None,
                     line_start=ref.line_start if ref else None,
                     line_end=ref.line_end if ref else None,
@@ -179,7 +187,7 @@ def build_requirements(
             RequirementView(
                 id=rid,
                 behavior_id=same[0].behavior_id if same else rid.split("#", 1)[0],
-                title=_uml_title(same),
+                title=_fallback_title(same),
                 spec_path=ref.path if ref else None,
                 line_start=ref.line_start if ref else None,
                 line_end=ref.line_end if ref else None,
