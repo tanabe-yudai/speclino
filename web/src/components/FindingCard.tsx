@@ -11,6 +11,7 @@ import {
   CATEGORY_LABELS,
   SEVERITY_LABELS,
   TEST_OBSERVATION_LABELS,
+  systemRuleTitle,
 } from '../services/labels'
 import { plainTerms, stripCommands, stripCommandsFromList } from '../services/displayText'
 import type { FindingCardProps } from '../types/components'
@@ -70,15 +71,24 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 /** 1 つの要求の判定。違反は左端に細い線を入れる。 */
-export function FindingCard({ finding, repoFullName, headSha, cleared = false }: FindingCardProps) {
+export function FindingCard({ finding, repoFullName, headSha, cleared = false, title = null }: FindingCardProps) {
   const needsNextSteps = finding.verdict === 'UNKNOWN' || finding.verdict === 'REVIEW'
   const base = finding.base_head_status
   const nextSteps = stripCommandsFromList(finding.next_steps)
   const outcome = finding.assessment_outcome ?? null
+  // 人が読む題があれば主な見出しにし、ID は下に小さく残す
+  const heading = title ? plainTerms(title) : systemRuleTitle(finding.requirement_id)
   return (
     <article className={cn('row space-y-4 p-5', finding.verdict === 'VIOLATED' && 'border-l-4 border-l-bad')}>
       <header className="flex flex-wrap items-center gap-2">
-        <code className="min-w-0 font-mono text-sm font-semibold break-all">{finding.requirement_id}</code>
+        {heading ? (
+          <div className="min-w-0">
+            <p className="text-sm font-semibold break-words">{heading}</p>
+            <code className="block font-mono text-xs text-ink-3 break-all">{finding.requirement_id}</code>
+          </div>
+        ) : (
+          <code className="min-w-0 font-mono text-sm font-semibold break-all">{finding.requirement_id}</code>
+        )}
         <VerdictBadge verdict={finding.verdict} />
         {base && base !== 'unchanged' && (
           <ToneBadge tone={BASE_HEAD_STATUS_TONE[base]}>比較元との差: {BASE_HEAD_STATUS_LABELS[base]}</ToneBadge>

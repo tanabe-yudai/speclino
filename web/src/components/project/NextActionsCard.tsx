@@ -1,9 +1,8 @@
 import { Link } from 'react-router-dom'
 import { Panel, PanelTitle } from '@/components/app/Panel'
 import { ToneBadge } from '@/components/app/ToneBadge'
-import { Button } from '@/components/ui/button'
 import { plainTerms } from '@/services/displayText'
-import { NEXT_ACTION_KIND } from '@/services/labels'
+import { NEXT_ACTION_KIND, systemRuleTitle } from '@/services/labels'
 import { paths } from '@/services/paths'
 import type { NextAction, ProjectRun } from '@/types/project'
 
@@ -21,19 +20,19 @@ export function NextActionsCard({ actions, run }: { actions: NextAction[]; run: 
             <li key={a.requirementId}>
               <Link to={paths.run(run.id)} className="row block min-w-0 px-3 py-2">
                 <span className="flex min-w-0 items-center gap-2">
-                  <ToneBadge tone={NEXT_ACTION_KIND[a.kind].tone}>{NEXT_ACTION_KIND[a.kind].label}</ToneBadge>
-                  <code className="truncate font-mono text-xs">{a.requirementId}</code>
+                  {/* システム規約は平易な題が状況を言うので、「承認切れ」などの仕様向けの区分は出さない */}
+                  {!systemRuleTitle(a.requirementId) && (
+                    <ToneBadge tone={NEXT_ACTION_KIND[a.kind].tone}>{NEXT_ACTION_KIND[a.kind].label}</ToneBadge>
+                  )}
+                  <span className="truncate text-sm">{a.title ? plainTerms(a.title) : a.requirementId}</span>
                 </span>
-                {a.title && <span className="mt-1 block truncate text-sm">{plainTerms(a.title)}</span>}
+                {a.title && <code className="mt-0.5 block truncate font-mono text-xs text-ink-3">{a.requirementId}</code>}
                 <span className="mt-0.5 block text-xs text-ink-3">{plainTerms(a.hint)}</span>
               </Link>
             </li>
           ))}
         </ol>
       )}
-      <Button variant="secondary" size="sm" className="w-full" disabled title="準備中">
-        この件について質問する
-      </Button>
     </Panel>
   )
 }
