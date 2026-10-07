@@ -1,4 +1,5 @@
-"""S68: MCP の知識ツール（sync_status / spec_get / skill_get）と sync トークンの制限。
+"""S68・S75: MCP の知識ツール（sync_status / knowledge_pull / spec_get / skill_get）と
+sync トークンの制限。
 
 実 PostgreSQL が必要（`SPECLINO_DATABASE_URL` が未設定なら skip）。
 """
@@ -23,13 +24,15 @@ from mcp.client.streamable_http import streamable_http_client
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from speclino import sync_apply
 from speclino.adapters.localgit.local_code_host import LocalCodeHost
 from speclino.adapters.queue.inprocess import InProcessQueue
 from speclino.adapters.storage.fs import FileSystemBlobStore
 from speclino.api.app import create_app
 from speclino.api.deps import AppState
 from speclino.domain.knowledge import ArtifactScope, InstructionsContent, SkillContent
-from speclino.domain.knowledge_sync import SyncIdentity
+from speclino.domain.knowledge_sync import SyncIdentity, SyncPlan
+from speclino.mcp_server import server as mcp_server
 from speclino.services import bundle_signing, sync_tokens
 from speclino.services import knowledge_registry as kr
 from speclino.services import knowledge_sync as ks
@@ -294,3 +297,161 @@ async def test_sync_status_rejects_expired_or_other_repo_lock(world: World) -> N
                 await c.call_tool("sync_status", {"repo_full_name": w.repo, "lock_json": lock_json})
             )
             assert got["stale"] is True and got["verdict"] == "UNKNOWN" and word in got["reason"]
+
+
+# ---------------------------------------------------------------------------
+# S75: knowledge_pull と sync_status（エージェントによる取り込み）
+# ---------------------------------------------------------------------------
+
+
+async def _fetch_channels(w: World) -> list[str]:
+    async with w.engine.connect() as conn:
+        rows = (
+            await conn.execute(
+                text("SELECT channel FROM knowledge_fetches WHERE workspace = :w"),
+                {"w": w.slug},
+            )
+        ).all()
+    return sorted(r.channel for r in rows)
+
+
+async def _check(w: World, repo: Path, project_id: str, repo_name: str) -> str:
+    async with w.f() as s, s.begin():
+        bundle = await kr.ensure_bundle(s, w.slug)
+        resolved = await kr.resolve_for_project(s, bundle, project_id)
+    lock_path = repo / ks.LOCK_PATH
+    finding = ks.check_lock(
+        repo,
+        lock_path.read_text() if lock_path.exists() else None,
+        current=resolved.bundle,
+        current_members=ks.project_members(resolved),
+        github_repo_id=repo_id_of(repo_name),
+    )
+    return finding.verdict
+
+
+async def test_knowledge_pull_plan_applies_and_verifies(world: World) -> None:
+    w = world
+    await _seed(w)
+    token = await _sync_token(w)
+    repo = w.tmp / "checkout"
+    repo.mkdir()
+    async with _client(w, token) as c:
+        status = _json(await c.call_tool("sync_status", {"repo_full_name": w.repo}))
+        assert status["pull_needed"] is True and status["reasons"] == ["no_lock"]
+        plan = _json(await c.call_tool("knowledge_pull", {"repo_full_name": w.repo}))
+    assert ks.verify_plan(SyncPlan.model_validate(plan))
+    assert plan["repo_full_name"] == w.repo and plan["github_repo_id"] == repo_id_of(w.repo)
+    assert sync_apply.apply_plan(repo, plan).ok
+    assert await _check(w, repo, w.pid, w.repo) == "VERIFIED_IN_SCOPE"
+    assert await _fetch_channels(w) == ["sync"]
+    lock_json = (repo / ks.LOCK_PATH).read_text()
+    async with _client(w, token) as c:
+        fresh = _json(
+            await c.call_tool("sync_status", {"repo_full_name": w.repo, "lock_json": lock_json})
+        )
+    assert fresh["pull_needed"] is False and fresh["reasons"] == []
+
+
+async def test_knowledge_pull_deletes_only_with_verified_lock(world: World) -> None:
+    w = world
+    await _seed(w)
+    token = await _sync_token(w)
+    repo = w.tmp / "checkout"
+    repo.mkdir()
+    async with _client(w, token) as c:
+        first = _json(await c.call_tool("knowledge_pull", {"repo_full_name": w.repo}))
+    assert sync_apply.apply_plan(repo, first).ok
+    lock_json = (repo / ks.LOCK_PATH).read_text()
+    # スキルを同じワークスペースの別のプロジェクトに移す（このリポジトリからは外れる）
+    pid_b = str(await project_id_of(w.engine, w.repo2))
+    await _revise(w, "review", _skill("手順", ArtifactScope(projects=[pid_b])))
+    forged = json.loads(lock_json)
+    forged["signature"] = "hmac-sha256:" + "0" * 64
+    async with _client(w, token) as c:
+        status = _json(
+            await c.call_tool("sync_status", {"repo_full_name": w.repo, "lock_json": lock_json})
+        )
+        no_delete = _json(
+            await c.call_tool(
+                "knowledge_pull", {"repo_full_name": w.repo, "lock_json": json.dumps(forged)}
+            )
+        )
+        plan = _json(
+            await c.call_tool("knowledge_pull", {"repo_full_name": w.repo, "lock_json": lock_json})
+        )
+    assert status["pull_needed"] is True and status["reasons"] == ["members_changed"]
+    assert {op["op"] for op in no_delete["ops"]} <= {"write", "set_managed_block"}
+    deletes = sorted(op["path"] for op in plan["ops"] if op["op"] == "delete")
+    assert ".claude/skills/review/SKILL.md" in deletes and ".agents/skills/review/ref.md" in deletes
+    assert plan["lock"]["absent"] == deletes
+    assert sync_apply.apply_plan(repo, plan).ok
+    assert not (repo / ".claude/skills/review").exists()
+    assert await _check(w, repo, w.pid, w.repo) == "VERIFIED_IN_SCOPE"
+
+
+async def test_knowledge_pull_tenant_isolation(world: World) -> None:
+    w = world
+    await _seed(w)
+    token = await _sync_token(w)
+    async with _client(w, token) as c:
+        for repo in (w.repo2, w.other_repo):
+            hidden = await c.call_tool("knowledge_pull", {"repo_full_name": repo})
+            assert hidden.is_error and "登録されていない" in _text(hidden)
+            hidden = await c.call_tool("sync_status", {"repo_full_name": repo})
+            assert hidden.is_error and "登録されていない" in _text(hidden)
+    # ワークスペースの MCP トークンは同じワークスペースの別のリポジトリも読める（A9）
+    mcp_token = await issue_mcp_token(w.engine, w.slug)
+    async with _client(w, mcp_token) as c:
+        plan_b = _json(await c.call_tool("knowledge_pull", {"repo_full_name": w.repo2}))
+        other = await c.call_tool("knowledge_pull", {"repo_full_name": w.other_repo})
+    assert plan_b["github_repo_id"] == repo_id_of(w.repo2)
+    assert plan_b["lock"]["github_repo_id"] == repo_id_of(w.repo2)
+    assert other.is_error
+    assert await _fetch_channels(w) == ["mcp"]
+
+
+async def test_knowledge_pull_refuses_large_plan(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    w = world
+    await _seed(w)
+    token = await _sync_token(w)
+    monkeypatch.setattr(mcp_server, "MCP_PLAN_MAX_BYTES", 100)
+    async with _client(w, token) as c:
+        refused = await c.call_tool("knowledge_pull", {"repo_full_name": w.repo})
+    assert refused.is_error and "speclino sync" in _text(refused)
+    assert await _fetch_channels(w) == []
+
+
+async def test_sync_status_reports_modified_files(world: World) -> None:
+    w = world
+    await _seed(w)
+    token = await _sync_token(w)
+    repo = w.tmp / "checkout"
+    repo.mkdir()
+    async with _client(w, token) as c:
+        plan = _json(await c.call_tool("knowledge_pull", {"repo_full_name": w.repo}))
+    assert sync_apply.apply_plan(repo, plan).ok
+    lock = json.loads((repo / ks.LOCK_PATH).read_text())
+    hashes = {p: h for p, h in lock["files"].items() if p not in ks.MANAGED_FILES}
+    inner = {p: h for p, h in lock["files"].items() if p in ks.MANAGED_FILES}
+    args = {"repo_full_name": w.repo, "lock_json": json.dumps(lock)}
+    tampered = {**hashes, ".claude/skills/review/SKILL.md": ks.file_hash("改ざん")}
+    plain_hex = {p: h.removeprefix("sha256:") for p, h in hashes.items()}
+    async with _client(w, token) as c:
+        ok = _json(
+            await c.call_tool(
+                "sync_status", {**args, "local_hashes": plain_hex, "managed_inner": inner}
+            )
+        )
+        bad = _json(await c.call_tool("sync_status", {**args, "local_hashes": tampered}))
+        missing = _json(
+            await c.call_tool(
+                "sync_status", {**args, "managed_inner": {"AGENTS.md": ks.file_hash("x")}}
+            )
+        )
+    assert ok["pull_needed"] is False
+    assert bad["pull_needed"] is True and bad["reasons"] == ["files_modified"]
+    assert bad["modified_files"] == [".claude/skills/review/SKILL.md"]
+    assert missing["modified_files"] == ["AGENTS.md"]

@@ -76,6 +76,7 @@ async def test_tools_are_exposed_in_process() -> None:
         "verification_start",
         "verification_get",
         "sync_status",
+        "knowledge_pull",
         "spec_get",
         "skill_get",
         "spec_suggest",

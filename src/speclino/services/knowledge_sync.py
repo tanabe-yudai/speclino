@@ -513,6 +513,14 @@ class LockAssessment:
     actual: str | None = None
     lock: KnowledgeLock | None = None
     changed: list[dict[str, Any]] = field(default_factory=list)
+    # 取り込みが要る理由（MCP の `sync_status`、A8）。VERIFIED_IN_SCOPE なら空
+    reasons: list[str] = field(default_factory=list)
+
+
+def _change_reasons(changed: list[dict[str, Any]]) -> list[str]:
+    kinds = {c["kind"] for c in changed}
+    out = ["members_changed"] if kinds - {"policy"} else []
+    return out + (["policy_changed"] if "policy" in kinds else [])
 
 
 def assess_lock(
@@ -542,16 +550,24 @@ def assess_lock(
             f"{LOCK_PATH} が無いため、どの知識で作業したか確認できません",
             expected="`speclino sync` が書いた lock",
             actual="lock なし",
+            reasons=["no_lock"],
         )
     try:
         lock = KnowledgeLock.model_validate_json(lock_json)
     except (ValidationError, ValueError) as e:
-        return LockAssessment("UNKNOWN", f"{LOCK_PATH} を読めません", actual=str(e)[:500])
+        return LockAssessment(
+            "UNKNOWN", f"{LOCK_PATH} を読めません", actual=str(e)[:500], reasons=["invalid_lock"]
+        )
     if not verify(lock_payload(lock), lock.signature, lock.key_id):
-        return LockAssessment("UNKNOWN", f"{LOCK_PATH} の署名が合いません", lock=lock)
+        return LockAssessment(
+            "UNKNOWN", f"{LOCK_PATH} の署名が合いません", lock=lock, reasons=["invalid_lock"]
+        )
     if lock.workspace != current.workspace or lock.github_repo_id != github_repo_id:
         return LockAssessment(
-            "UNKNOWN", f"{LOCK_PATH} は別のワークスペースかリポジトリのものです", lock=lock
+            "UNKNOWN",
+            f"{LOCK_PATH} は別のワークスペースかリポジトリのものです",
+            lock=lock,
+            reasons=["other_repo"],
         )
     if (now or datetime.now(UTC)) >= lock.expires_at:
         return LockAssessment(
@@ -559,6 +575,7 @@ def assess_lock(
             f"{LOCK_PATH} の期限が切れています。`speclino sync` をやり直してください",
             actual=f"期限 {lock.expires_at.isoformat()}",
             lock=lock,
+            reasons=["expired"],
         )
     if lock.bundle_generation > current.generation:
         return LockAssessment(
@@ -567,6 +584,7 @@ def assess_lock(
             expected=f"bundle {current.generation} 以下",
             actual=f"bundle {lock.bundle_generation}",
             lock=lock,
+            reasons=["invalid_lock"],
         )
     if snapshot is not None:
         changed_files = _changed_files(snapshot, lock)
@@ -577,6 +595,7 @@ def assess_lock(
                 expected="lock のハッシュと一致",
                 actual=", ".join(changed_files[:20]),
                 lock=lock,
+                reasons=["files_modified"],
             )
         leftover = _leftover_absent(snapshot, lock)
         if leftover:
@@ -586,6 +605,7 @@ def assess_lock(
                 expected="lock の absent のファイル・管理区画が無い",
                 actual=", ".join(leftover[:20]),
                 lock=lock,
+                reasons=["files_modified"],
             )
         extra = _unlisted_skill_files(snapshot, lock)
         if extra:
@@ -595,6 +615,7 @@ def assess_lock(
                 expected="lock に載ったファイルだけ",
                 actual=", ".join(extra[:20]),
                 lock=lock,
+                reasons=["files_modified"],
             )
     changed = changed_members(lock.members, current_members)
     # 規約もこの bundle の一部（規約の有効化でも世代が進む）。lock に規約が無く今はある場合も変化
@@ -614,6 +635,7 @@ def assess_lock(
             "（他のプロジェクトの lock か改変）",
             lock=lock,
             changed=changed,
+            reasons=_change_reasons(changed),
         )
     if changed:
         return LockAssessment(
@@ -623,6 +645,7 @@ def assess_lock(
             actual=f"bundle {lock.bundle_generation}",
             lock=lock,
             changed=changed,
+            reasons=_change_reasons(changed),
         )
     return LockAssessment(
         "VERIFIED_IN_SCOPE",
