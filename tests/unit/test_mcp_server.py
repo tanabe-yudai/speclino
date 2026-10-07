@@ -223,3 +223,20 @@ def test_instructions_point_to_knowledge_pull() -> None:
     assert "knowledge_pull" in text and "speclino-knowledge-sync" in text
     assert "--plan-url" in text
     assert len(text.encode("utf-8")) <= 2048
+
+
+def test_mcp_input_limits() -> None:
+    """sync_status / knowledge_pull の引数の上限（lock 1MB、ハッシュ 2000 件・1MB）。"""
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from speclino.mcp_server import server
+
+    server._check_inputs("x" * server.MAX_LOCK_JSON_BYTES, None, None)
+    with pytest.raises(ToolError, match="lock_json"):
+        server._check_inputs("x" * (server.MAX_LOCK_JSON_BYTES + 1), None, None)
+    full = {f"p{i}": "h" for i in range(server.MAX_HASH_ENTRIES)}
+    server._check_inputs("", full, full)
+    with pytest.raises(ToolError, match="local_hashes"):
+        server._check_inputs("", {**full, "extra": "h"}, None)
+    with pytest.raises(ToolError, match="managed_inner"):
+        server._check_inputs("", None, {"AGENTS.md": "h" * server.MAX_LOCK_JSON_BYTES})

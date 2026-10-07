@@ -43,7 +43,7 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from speclino import sync_apply
-from speclino.db.models import Project, SyncPlanRecord
+from speclino.db.models import McpTokenRecord, Project, SyncPlanRecord, SyncTokenRecord
 from speclino.db.repositories.sync_tokens import KnowledgeFetchRepository, SyncPlanRepository
 from speclino.domain.common import SourceRef
 from speclino.domain.finding import Category, Finding, Severity, Verdict
@@ -441,10 +441,28 @@ def _ticket_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+async def _issuer_still_valid(session: AsyncSession, record: SyncPlanRecord) -> bool:
+    """計画を発行させたトークンが今も有効か（失効していない・同じワークスペース・sync トークンは
+    同じプロジェクト）。トークンを取り消したら、取り消し前に作った計画も渡さない。"""
+    if record.token_id is None:
+        return False
+    if record.channel == "sync":
+        sync = await session.get(SyncTokenRecord, record.token_id)
+        return (
+            sync is not None
+            and sync.revoked_at is None
+            and sync.team == record.workspace
+            and sync.project_id == record.project_id
+        )
+    mcp = await session.get(McpTokenRecord, record.token_id)
+    return mcp is not None and mcp.revoked_at is None and mcp.team == record.workspace
+
+
 async def redeem_plan_ticket(
     session: AsyncSession, token: str, *, now: datetime | None = None
 ) -> str | None:
-    """取得トークンの計画（JSON の本文）。無い・期限切れ・取得済み・リポジトリが変わったなら None。
+    """取得トークンの計画（JSON の本文）。無い・期限切れ・取得済み・リポジトリが変わった・発行元の
+    トークンが取り消されたなら None。
 
     1 回だけ渡す（取得済みにしてから返す）。取得を `knowledge_fetches` に記録する。
     """
@@ -460,6 +478,7 @@ async def redeem_plan_ticket(
         project is None
         or project.team != record.workspace
         or project.github_repo_id != record.github_repo_id
+        or not await _issuer_still_valid(session, record)
     ):
         return None
     await KnowledgeFetchRepository(session).record(

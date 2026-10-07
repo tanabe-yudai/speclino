@@ -122,26 +122,48 @@ class SyncPlanRepository:
         self._session = session
 
     async def create(self, record: SyncPlanRecord, *, now: datetime) -> None:
-        # 期限を 1 日過ぎたものは片付ける（取得済み・失効済みの本文を長く持たない）
-        await self._session.execute(
-            delete(SyncPlanRecord).where(SyncPlanRecord.expires_at < now - timedelta(days=1))
-        )
+        # 期限を 1 日過ぎたものは片付ける（失効済みの本文を長く持たない）
+        await self._purge(now)
         self._session.add(record)
         await self._session.flush()
 
     async def consume(self, token_hash: str, *, now: datetime) -> SyncPlanRecord | None:
-        """未取得・期限内なら取得済みにして返す（1 回だけ。同時の取得はどちらか一方だけ通る）。"""
-        result = await self._session.execute(
-            update(SyncPlanRecord)
+        """未取得・期限内なら取得済みにして（本文は空にする）、取得前の行を返す。
+
+        1 回の UPDATE で行う（行ロックの下で取得前の本文を返す）ので、同時の取得はどちらか一方
+        だけ通る。ついでに期限を 1 日過ぎた行を片付ける。
+        """
+        await self._purge(now)
+        old = (
+            select(SyncPlanRecord.id, SyncPlanRecord.plan_json)
             .where(
                 SyncPlanRecord.token_hash == token_hash,
                 SyncPlanRecord.consumed_at.is_(None),
                 SyncPlanRecord.expires_at > now,
             )
-            .values(consumed_at=now)
-            .returning(SyncPlanRecord)
+            .with_for_update()
+            .subquery()
         )
-        return result.scalar_one_or_none()
+        row = (
+            await self._session.execute(
+                update(SyncPlanRecord)
+                .where(SyncPlanRecord.id == old.c.id)
+                .values(consumed_at=now, plan_json="")
+                .returning(SyncPlanRecord.id, old.c.plan_json)
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        record = await self._session.get(SyncPlanRecord, row[0], populate_existing=True)
+        assert record is not None
+        self._session.expunge(record)
+        record.plan_json = row[1]
+        return record
+
+    async def _purge(self, now: datetime) -> None:
+        await self._session.execute(
+            delete(SyncPlanRecord).where(SyncPlanRecord.expires_at < now - timedelta(days=1))
+        )
 
 
 __all__ = ["KnowledgeFetchRepository", "SyncPlanRepository", "SyncTokenRepository"]

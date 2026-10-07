@@ -14,6 +14,7 @@ from starlette.responses import Response
 from starlette.routing import Route
 from starlette.types import Scope
 
+from speclino.api import access_log
 from speclino.api.deps import AppState, build_state
 from speclino.api.errors import error_responses, install_error_handlers
 from speclino.api.routes import (
@@ -49,6 +50,7 @@ API_PREFIXES = ("api/", "webhooks/", "internal/", "mcp", "a2a", ".well-known")
 
 def create_app(settings: Settings, state: AppState | None = None) -> FastAPI:
     """設定を受け取り FastAPI アプリを構築する。state を渡せばテストで差し替えられる。"""
+    access_log.install()
 
     # MCP は web / all で常にマウントする。使えるのは DB に有効なトークンがあるときだけ（S54）
     mcp_app, mcp_session_manager = (

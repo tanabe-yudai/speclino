@@ -7,6 +7,7 @@ sync トークンの制限。
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import json
 import os
@@ -603,3 +604,68 @@ async def test_sync_status_reports_modified_files(world: World) -> None:
     assert bad["pull_needed"] is True and bad["reasons"] == ["files_modified"]
     assert bad["modified_files"] == [".claude/skills/review/SKILL.md"]
     assert missing["modified_files"] == ["AGENTS.md"]
+
+
+@pytest.mark.parametrize("kind", ["sync", "mcp"])
+async def test_plan_url_of_revoked_token_is_404(world: World, kind: str) -> None:
+    """fix round 2: 発行元のトークンを取り消したら、取り消し前の計画も渡さず記録もしない。"""
+    w = world
+    await _seed(w)
+    token = await _sync_token(w) if kind == "sync" else await issue_mcp_token(w.engine, w.slug)
+    async with _client(w, token) as c:
+        ticket = _json(await c.call_tool("knowledge_pull", {"repo_full_name": w.repo}))
+    table = "sync_tokens" if kind == "sync" else "mcp_tokens"
+    async with w.engine.begin() as conn:
+        await conn.execute(
+            text(f"UPDATE {table} SET revoked_at = now() WHERE token_hash = :h"),
+            {"h": hashlib.sha256(token.encode()).hexdigest()},
+        )
+    async with _http(w) as http:
+        res = await http.get(urlsplit(ticket["plan_url"]).path)
+    assert res.status_code == 404
+    assert await _fetch_channels(w) == []
+
+
+async def test_plan_body_is_cleared_once_fetched(world: World) -> None:
+    w = world
+    await _seed(w)
+    token = await _sync_token(w)
+    async with _client(w, token) as c:
+        _, plan = await _pull(w, c, {"repo_full_name": w.repo})
+    assert plan["ops"]
+    async with w.engine.connect() as conn:
+        rows = (
+            await conn.execute(
+                text("SELECT plan_json, consumed_at FROM sync_plans WHERE workspace = :w"),
+                {"w": w.slug},
+            )
+        ).all()
+    assert [(r.plan_json, r.consumed_at is not None) for r in rows] == [("", True)]
+
+
+async def test_expired_plans_are_purged_when_fetching(world: World) -> None:
+    w = world
+    await _seed(w)
+    async with w.f() as s:
+        project = await s.get(Project, uuid.UUID(w.pid))
+    assert project is not None
+    long_ago = datetime.now(UTC) - timedelta(days=2)
+    async with w.f() as s, s.begin():
+        await ks.issue_plan_ticket(
+            s,
+            workspace=w.slug,
+            project=project,
+            lock_json=None,
+            channel="mcp",
+            token_id=None,
+            now=long_ago,
+        )
+    async with w.f() as s, s.begin():
+        assert await ks.redeem_plan_ticket(s, "slplan_unknown") is None
+    async with w.engine.connect() as conn:
+        left = (
+            await conn.execute(
+                text("SELECT count(*) FROM sync_plans WHERE workspace = :w"), {"w": w.slug}
+            )
+        ).scalar_one()
+    assert left == 0
