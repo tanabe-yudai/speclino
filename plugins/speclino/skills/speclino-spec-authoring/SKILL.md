@@ -12,8 +12,9 @@ VERIFIED_IN_SCOPE / VIOLATED / UNKNOWN / REVIEW の 4 値を出す。実装の�
 結果を読む。LLM（あなた）は証拠を集め候補を書くだけで、判定も承認もしない。判定はエンジンだけが
 行う（verdict を書き換える手段は無い）。承認は人が PR コメントで行う（`/speclino approve-spec`）。
 承認済みの判定は書き換えない。チームが承認したスキル・指示書・仕様は `skill_get` / `spec_get`
-で読み、手元の `.speclino/lock.json` が古くないかを `sync_status` で確かめる（古ければ
-`speclino sync` を勧める）。
+で読む。作業の前に `sync_status` で手元の `.speclino/lock.json` の鮮度を確かめ、`pull_needed` なら
+`knowledge_pull` の計画を同梱の `speclino_apply.py` で当てて、lock ごと作業の PR にコミットする
+（手順はスキル `speclino-knowledge-sync`。ファイルや lock を手で書かない）。
 <!-- mcp-instructions:end -->
 
 ## SpecLino エージェントに相談する（A2A）
@@ -24,7 +25,7 @@ VERIFIED_IN_SCOPE / VIOLATED / UNKNOWN / REVIEW の 4 値を出す。実装の�
 - **A2A（会話）**: 仕様の下書きのレビュー、要求の意味や判定の理由の説明、検査の後の聞き取り。
   あいまいな点は質問が返り（入力待ち）、同じタスクに文章で答えると続きが進む
 - **MCP（関数呼び出し）**: `context_get` / `verification_start` / `verification_get`、
-  チームの知識を読む `sync_status` / `spec_get` / `skill_get`。語彙の取得と検証の実行・結果の
+  チームの知識を読む `sync_status` / `knowledge_pull` / `spec_get` / `skill_get`。語彙の取得と検証の実行・結果の
   読み取りは、こちらで行う
 
 接続先は Agent Card（`https://<your-host>/.well-known/agent-card.json`、認証不要）に書いてある。
@@ -74,9 +75,12 @@ run_id: 00000000-0000-0000-0000-000000000000
 **補足は正式な回答ではない。** 聞き取りで記録した補足は判定にもゲートにも効かない。判定は
 検査器だけが行い、承認は人が PR で行う。
 
-## チームの知識を取り込む（`speclino sync`）
+## チームの知識を取り込む（`knowledge_pull` / `speclino sync`）
 
-チームが SpecLino で承認したスキル・指示書・仕様は、リポジトリごとに配信される。
+チームが SpecLino で承認したスキル・指示書・仕様は、リポジトリごとに配信される。エージェントは
+MCP の `knowledge_pull` で計画を受け取り、プラグインの `scripts/speclino_apply.py` で当てる（手順は
+スキル `speclino-knowledge-sync`）。人が手元で取り込むときは CLI の `speclino sync` を使う。
+どちらも同じ計画と同じ実行スクリプトで書き出す。
 
 - **書き出し**: リポジトリのルートで `speclino sync --url https://<your-host> --repo-id <GitHub のリポジトリ ID>`
   （2 回目からは `--repo-id` を省ける）。トークンは環境変数 `SPECLINO_SYNC_TOKEN` に sync 用の
@@ -89,9 +93,11 @@ run_id: 00000000-0000-0000-0000-000000000000
   30 日の期限）を書く
 - **手で直さない**: 書き出したファイルや区画の中身を直すと、PR のゲートで lock の照合
   （`KNOWLEDGE-LOCK-001`）が UNKNOWN になる。直したいときは SpecLino で改訂を出して承認を通し、
-  もう一度 sync する。sync は手で変えたファイルを消さずに残し、警告を出す
+  もう一度取り込む。取り込みは、手で変えたファイルや利用者のファイルを上書き・削除せずに、何も書かず
+  止まって理由を出す
 - **MCP**: `sync_status(repo_full_name, lock_json)` に lock の本文を渡すと、今の承認済みの知識と
-  比べて `stale`・`verdict`・`changed`（変わった知識）を返す（判定はゲートと同じ）。
+  比べて `pull_needed`・`reasons`・`verdict`・`changed`（変わった知識）を返す（判定はゲートと同じ）。
+  `knowledge_pull(repo_full_name, lock_json)` は署名つきの書き出し計画（2MB まで）を返す。
   `spec_get` / `skill_get(repo_full_name, name)` は承認済みの本文を返す。sync 用トークンでも
   呼べるが、検証の開始（`verification_start`）はできない
 - **MCP**: `spec_suggest(markdown, repo_full_name?)` は仕様の本文の書き換えの提案（本文の位置と置換・

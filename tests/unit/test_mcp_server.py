@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 from pathlib import Path
 
@@ -16,7 +17,13 @@ from speclino.domain.policy import (
     PolicyRevision,
     PolicyRule,
 )
-from speclino.mcp_server.server import allowed_hosts, build_mcp, skill_body, skill_instructions
+from speclino.mcp_server.server import (
+    SKILL_PATH,
+    allowed_hosts,
+    build_mcp,
+    skill_body,
+    skill_instructions,
+)
 from speclino.services.check_pipeline import _run_policies
 from speclino.services.mcp_context import read_context
 from speclino.settings import Settings
@@ -185,3 +192,32 @@ def test_read_context_keeps_the_first_project_rule_like_the_pipeline(tmp_path: P
     assert len(ids) == len(set(ids))
     assert set(ctx["ignored_project_policies"]) == set(ids)
     assert set(ids) == set(_run_policies(tmp_path, None).rules_by_id)
+
+
+KNOWLEDGE_SYNC_SKILL = SKILL_PATH.parents[1] / "speclino-knowledge-sync" / "SKILL.md"
+
+
+def test_knowledge_sync_skill_has_front_matter_and_steps() -> None:
+    """S75（A11）: エージェントの取り込みの手順はプラグインのスキルに書く。"""
+    raw = KNOWLEDGE_SYNC_SKILL.read_text(encoding="utf-8")
+    m = re.match(r"\A---\n(.*?)\n---\n", raw, re.DOTALL)
+    assert m is not None
+    front = dict(line.split(": ", 1) for line in m.group(1).splitlines())
+    assert front["name"] == "speclino-knowledge-sync"
+    assert len(front["description"]) > 20
+    body = raw[m.end() :]
+    order = [
+        "sync_status",
+        "knowledge_pull",
+        "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/speclino_apply.py",
+        "コミットする",
+    ]
+    positions = [body.index(word) for word in order]
+    assert positions == sorted(positions)
+    assert "手で" in body and "終了コード 2" in body
+
+
+def test_instructions_point_to_knowledge_pull() -> None:
+    text = skill_instructions()
+    assert "knowledge_pull" in text and "speclino-knowledge-sync" in text
+    assert len(text.encode("utf-8")) <= 2048
