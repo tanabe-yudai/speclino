@@ -44,7 +44,7 @@ export function MermaidPreview({ markdown, onJump }: MermaidPreviewProps) {
       {failures.length > 0 && (
         <section aria-label="描画できない図" className="space-y-2">
           <h3 className="text-sm font-semibold">描画できない（{failures.length} 件）</h3>
-          <p className="text-xs text-ink-3">mermaid で描けるかの確認です。SpecLino が意味を読めるかは「診断」を見てください。</p>
+          <p className="text-xs text-ink-3">図が描けない箇所です。内容の問題は「診断」タブで確かめられます。</p>
           <ul className="space-y-2">
             {failures.map(({ block, result }) => (
               <li key={block.index}>

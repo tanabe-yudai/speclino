@@ -1,8 +1,8 @@
-import { Navigate, Route, Routes, BrowserRouter, useLocation } from 'react-router-dom'
+import { Navigate, Route, Routes, BrowserRouter, useLocation, useParams } from 'react-router-dom'
 import { Toaster } from '@/components/ui/sonner'
 import { AuthProvider } from './auth/AuthProvider'
 import { RequireAuth } from './components/RequireAuth'
-import { legacyRedirect } from './services/legacyRoutes'
+import { knowledgeListRedirect, legacyRedirect } from './services/legacyRoutes'
 import { AcceptInvite } from './pages/AcceptInvite'
 import { GithubCallback } from './pages/GithubCallback'
 import { Home } from './pages/Home'
@@ -11,7 +11,6 @@ import { Landing } from './pages/Landing'
 import { Login } from './pages/Login'
 import { Policies } from './pages/Policies'
 import { KnowledgeEditor } from './pages/knowledge/KnowledgeEditor'
-import { KnowledgeIndex, KnowledgeList } from './pages/knowledge/KnowledgeList'
 import { KnowledgeRevisions } from './pages/knowledge/KnowledgeRevisions'
 import { Observability } from './pages/observability/Observability'
 import { Project } from './pages/Project'
@@ -24,6 +23,12 @@ function Fallback() {
   return <Navigate to={legacyRedirect(pathname) ?? '/app'} replace />
 }
 
+/** S74: 知識の一覧は無くなった。スキル・指示書はチーム共通、仕様はワークスペースのホームへ。 */
+function KnowledgeListRedirect() {
+  const { slug, section } = useParams<{ slug: string; section?: string }>()
+  return <Navigate to={knowledgeListRedirect(slug ?? '', section)} replace />
+}
+
 function App() {
   return (
     <BrowserRouter>
@@ -34,10 +39,10 @@ function App() {
           <Route element={<RequireAuth />}>
             <Route path="/app" element={<HomeRedirect />} />
             <Route path="/w/:slug" element={<Home />} />
-            <Route path="/w/:slug/p/:owner/:repo" element={<Project />} />
+            <Route path="/w/:slug/p/:owner/:repo/:tab?" element={<Project />} />
             <Route path="/w/:slug/policies" element={<Policies />} />
-            <Route path="/w/:slug/knowledge" element={<KnowledgeIndex />} />
-            <Route path="/w/:slug/knowledge/:section" element={<KnowledgeList />} />
+            <Route path="/w/:slug/knowledge" element={<KnowledgeListRedirect />} />
+            <Route path="/w/:slug/knowledge/:section" element={<KnowledgeListRedirect />} />
             <Route path="/w/:slug/knowledge/:section/new" element={<KnowledgeEditor />} />
             <Route path="/w/:slug/knowledge/:section/:id" element={<KnowledgeEditor />} />
             <Route path="/w/:slug/knowledge/:section/:id/revisions" element={<KnowledgeRevisions />} />

@@ -19,7 +19,7 @@ import type {
 import type { PolicyRule } from '@/types/policy'
 
 /** パネルの最初に出す告知（設計 5 章、文言は固定）。 */
-export const CHAT_NOTICE = '会話は Google の Vertex AI（Gemini）に送られ、SpecLino の運用者は技術的に読めます。ほかのメンバーには見えません'
+export const CHAT_NOTICE = '会話は Google の Gemini に送られ、SpecLino の運用者が読む場合があります。ほかのメンバーには見えません'
 
 export const NOTE_MAX_CHARS = 500
 /** 1 回の発言の上限（UTF-8 のバイト数。サーバの MESSAGE_MAX_BYTES と同じ） */

@@ -15,7 +15,12 @@ from sqlalchemy import Select, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from speclino.db.models import ArtifactRecord, ArtifactRevisionRecord
-from speclino.domain.knowledge import ArtifactContent, ArtifactKind, ArtifactRevision
+from speclino.domain.knowledge import (
+    ArtifactContent,
+    ArtifactKind,
+    ArtifactRevision,
+    ArtifactScope,
+)
 
 _CONTENT: TypeAdapter[Any] = TypeAdapter(ArtifactContent)
 
@@ -94,6 +99,25 @@ class ArtifactRepository:
         out: dict[uuid.UUID, dict[str, int]] = {}
         for aid, status, revision in (await self._session.execute(stmt)).all():
             out.setdefault(aid, {})[status] = revision
+        return out
+
+    async def revision_scopes(self, workspace: str) -> dict[uuid.UUID, dict[str, ArtifactScope]]:
+        """artifact ごとの active / draft のスコープ（一覧の絞り込み用。本文は読まない）。"""
+        stmt = (
+            select(
+                ArtifactRevisionRecord.artifact_id,
+                ArtifactRevisionRecord.status,
+                ArtifactRevisionRecord.content["scope"],
+            )
+            .join(ArtifactRecord, ArtifactRecord.id == ArtifactRevisionRecord.artifact_id)
+            .where(
+                ArtifactRecord.workspace == workspace,
+                ArtifactRevisionRecord.status.in_(("active", "draft")),
+            )
+        )
+        out: dict[uuid.UUID, dict[str, ArtifactScope]] = {}
+        for aid, status, scope in (await self._session.execute(stmt)).all():
+            out.setdefault(aid, {})[status] = ArtifactScope.model_validate(scope)
         return out
 
     async def current_draft(self, artifact_id: uuid.UUID) -> ArtifactRevision | None:

@@ -9,6 +9,8 @@ import path from 'node:path'
 const SLUG = process.env.E2E_WORKSPACE ?? 'shop-team'
 // スクリーンショットは E2E_SHOTS_DIR を設定したときだけ保存する（docs の画像を撮り直すとき）
 const SHOTS = process.env.E2E_SHOTS_DIR ? path.resolve(process.env.E2E_SHOTS_DIR) : null
+// seed_demo.py のプロジェクト（examples/shop/seed.py の REPO）
+const PROJECT = '/p/example/shop'
 const DEV_HEADERS = { 'X-Dev-User': 'judge' }
 
 async function shot(page: Page, name: string) {
@@ -18,21 +20,15 @@ async function shot(page: Page, name: string) {
 
 async function login(page: Page) {
   await page.goto('/login')
-  await page.getByRole('button', { name: '開発モードで入る' }).click()
+  await page.getByRole('button', { name: '開発用ログイン' }).click()
   await page.waitForURL(/\/w\//)
-}
-
-async function currentGeneration(page: Page): Promise<number> {
-  await page.goto(`/w/${SLUG}/knowledge/specs`)
-  const text = await page.getByText(/今の bundle: 世代 \d+/).innerText()
-  return Number(/世代 (\d+)/.exec(text)?.[1])
 }
 
 test('仕様の編集・診断・承認、skill、可観測性、検査結果の確定', async ({ page, request }) => {
   await login(page)
 
-  // 1. 仕様の一覧 → 仕様のエディタ
-  const before = await currentGeneration(page)
+  // 1. プロジェクトの仕様タブ → 仕様のエディタ
+  await page.goto(`/w/${SLUG}${PROJECT}/specs`)
   await shot(page, 'list')
   await page.getByRole('link', { name: 'shop', exact: true }).click()
   const body = page.getByLabel('仕様の本文（Markdown と ```mermaid の図）')
@@ -75,7 +71,7 @@ test('仕様の編集・診断・承認、skill、可観測性、検査結果の
   await page.locator('figure').last().scrollIntoViewIfNeeded()
   await shot(page, 'spec-preview')
 
-  // 4. 下書きを保存 → 承認 → bundle の世代が進む
+  // 4. 下書きを保存 → 承認 → 有効になる
   await page.getByRole('button', { name: '下書きを保存' }).click()
   await expect(page.getByText(/下書き 改訂 \d+ を保存しました/)).toBeVisible()
   await page.getByRole('button', { name: '承認して有効にする' }).click()
@@ -83,22 +79,21 @@ test('仕様の編集・診断・承認、skill、可観測性、検査結果の
   await page.waitForTimeout(500) // 開くアニメーションの後に撮る
   await shot(page, 'spec-approve')
   await page.getByRole('dialog').getByRole('button', { name: '承認して有効にする' }).click()
-  await expect(page.getByText(new RegExp(`bundle の世代 ${before + 1}`))).toBeVisible()
-  expect(await currentGeneration(page)).toBe(before + 1)
+  await expect(page.getByText(/改訂 \d+ を承認しました/)).toBeVisible()
 
   // 5. skill のエディタ
-  await page.goto(`/w/${SLUG}/knowledge/skills`)
+  await page.goto(`/w/${SLUG}${PROJECT}/skills`)
   await page.getByRole('link', { name: 'shop-error-format', exact: true }).click()
   await expect(page.getByLabel('SKILL.md')).toHaveValue(/name: shop-error-format/)
   await shot(page, 'skill')
 
-  // 6. 可観測性
-  await page.goto(`/w/${SLUG}/observability`)
-  await expect(page.getByText(/今の bundle: 世代 \d+/)).toBeVisible()
+  // 6. 利用状況（ワークスペースのタブ）
+  await page.goto(`/w/${SLUG}?tab=usage`)
+  await expect(page.getByText(/集計 /)).toBeVisible()
   await shot(page, 'observability')
-  await page.getByText('LLM 支援の安定度').evaluate((el) => el.scrollIntoView({ block: 'start' }))
+  await page.getByText('AI 判定の状況').evaluate((el) => el.scrollIntoView({ block: 'start' }))
   await page.mouse.wheel(0, -80)
-  await expect(page.getByText('うち自己確定かどうか照合できない')).toBeVisible()
+  await expect(page.getByText('うち作成者との照合ができないもの')).toBeVisible()
   await shot(page, 'observability-llm')
 
   // 7. 検査結果: LLM 支援の REVIEW（確定のボタン）と、bindings の変更（PR コメントの案内）
@@ -119,8 +114,9 @@ test('仕様の編集・診断・承認、skill、可観測性、検査結果の
   await shot(page, 'run-llm-review')
 
   await page.goto(`/runs/${runOf(6)}`)
-  const hint = page.getByText(/対応表・免除・規約の変更の確定は PR コメントで行います/)
+  const hint = page.getByText(/対応表・免除・規約の変更の確定は、PR のコメントで行います/)
   await expect(hint).toBeVisible()
+  await page.getByText('PR のコメントで確定するには').first().click()
   await expect(page.locator('code', { hasText: '/speclino attest KNOWLEDGE-BINDINGS-001' })).toBeVisible()
   await hint.scrollIntoViewIfNeeded()
   await shot(page, 'run-bindings-review')

@@ -1,28 +1,26 @@
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { Panel, PanelTitle } from '@/components/app/Panel'
 import { MembersTab } from '@/components/settings/MembersTab'
-import { ProjectsTab } from '@/components/settings/ProjectsTab'
+import { IntegrationsTab } from '@/components/settings/IntegrationsTab'
+import { ProjectSettingsTab } from '@/components/settings/ProjectSettingsTab'
 import { RepositoriesTab } from '@/components/settings/RepositoriesTab'
-import { SyncTokensTab } from '@/components/settings/SyncTokensTab'
-import { TokensTab } from '@/components/settings/TokensTab'
 import { ErrorState } from '@/components/ErrorState'
 import { LoadingState } from '@/components/LoadingState'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useMe } from '@/hooks/useMe'
 import { paths } from '@/services/paths'
-import { pickSettingsTab, visibleSettingsTabs } from '@/services/settingsTabs'
+import { SETTINGS_TABS, pickSettingsTab } from '@/services/settingsTabs'
 import type { SettingsTab } from '@/types/command'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 
 const TAB_LABELS: Record<SettingsTab, string> = {
-  projects: 'プロジェクト',
-  repositories: 'リポジトリ',
   members: 'メンバー',
-  sync: 'sync トークン',
-  tokens: 'MCP トークン',
+  repositories: 'リポジトリ',
+  integrations: '連携',
+  project: 'プロジェクト',
 }
 
-/** ワークスペースの設定（プロジェクト・リポジトリ・メンバー・sync トークン・MCP トークン）。MCP トークンは owner にだけ出す。 */
+/** ワークスペースの設定。連携の中のエージェント接続トークンはオーナーにだけ出す。 */
 export function Settings() {
   const { slug } = useParams<{ slug: string }>()
   const { me, reload } = useMe()
@@ -41,8 +39,7 @@ export function Settings() {
       </Panel>
     )
   }
-  const visible = visibleSettingsTabs(membership.role)
-  const tab = pickSettingsTab(params.get('tab'), visible)
+  const tab = pickSettingsTab(params.get('tab'))
 
   return (
     <div className="space-y-6">
@@ -53,32 +50,25 @@ export function Settings() {
       <Tabs value={tab} onValueChange={(v) => setParams({ tab: v }, { replace: true })}>
         <div className="-mx-1 overflow-x-auto px-1">
           <TabsList>
-            {visible.map((t) => (
+            {SETTINGS_TABS.map((t) => (
               <TabsTrigger key={t} value={t}>
                 {TAB_LABELS[t]}
               </TabsTrigger>
             ))}
           </TabsList>
         </div>
-        <TabsContent value="projects" className="mt-6">
-          <ProjectsTab slug={slug} role={membership.role} />
+        <TabsContent value="members" className="mt-6">
+          <MembersTab slug={slug} role={membership.role} myUid={me.uid} onSelfChanged={reload} />
         </TabsContent>
         <TabsContent value="repositories" className="mt-6">
           <RepositoriesTab slug={slug} isOwner={membership.role === 'owner'} />
         </TabsContent>
-        <TabsContent value="members" className="mt-6">
-          <MembersTab slug={slug} role={membership.role} myUid={me.uid} onSelfChanged={reload} />
+        <TabsContent value="integrations" className="mt-6">
+          <IntegrationsTab slug={slug} role={membership.role} />
         </TabsContent>
-        {visible.includes('sync') && (
-          <TabsContent value="sync" className="mt-6">
-            <SyncTokensTab slug={slug} canManage={membership.role === 'owner' || membership.role === 'approver'} />
-          </TabsContent>
-        )}
-        {visible.includes('tokens') && (
-          <TabsContent value="tokens" className="mt-6">
-            <TokensTab slug={slug} />
-          </TabsContent>
-        )}
+        <TabsContent value="project" className="mt-6">
+          <ProjectSettingsTab slug={slug} role={membership.role} />
+        </TabsContent>
       </Tabs>
     </div>
   )

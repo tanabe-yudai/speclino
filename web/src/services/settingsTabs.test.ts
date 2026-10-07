@@ -1,23 +1,26 @@
 import { describe, expect, it } from 'vitest'
-import { pickSettingsTab, visibleSettingsTabs } from './settingsTabs'
+import { SETTINGS_TABS, pickSettingsTab } from './settingsTabs'
 
-describe('visibleSettingsTabs', () => {
-  it('owner はプロジェクト・リポジトリ・メンバー・sync トークン・MCP トークン', () => {
-    expect(visibleSettingsTabs('owner')).toEqual(['projects', 'repositories', 'members', 'sync', 'tokens'])
-  })
-  it('owner 以外は MCP トークンを出さない（owner の操作）。sync トークンの一覧はメンバー全員', () => {
-    expect(visibleSettingsTabs('approver')).toEqual(['projects', 'repositories', 'members', 'sync'])
-    expect(visibleSettingsTabs('member')).toEqual(['projects', 'repositories', 'members', 'sync'])
-    expect(visibleSettingsTabs(null)).toEqual(['projects', 'repositories', 'members'])
+describe('SETTINGS_TABS', () => {
+  it('メンバー・リポジトリ・連携・プロジェクトの順', () => {
+    expect(SETTINGS_TABS).toEqual(['members', 'repositories', 'integrations', 'project'])
   })
 })
 
 describe('pickSettingsTab', () => {
-  it('見えるタブならその値、見えない・不正なら先頭', () => {
-    expect(pickSettingsTab('tokens', ['repositories', 'tokens'])).toBe('tokens')
-    expect(pickSettingsTab('tokens', ['repositories'])).toBe('repositories')
-    expect(pickSettingsTab('nope', ['repositories', 'tokens'])).toBe('repositories')
-    expect(pickSettingsTab(null, ['repositories', 'tokens'])).toBe('repositories')
-    expect(pickSettingsTab('members', ['projects', 'repositories', 'members'])).toBe('members')
+  it('新しいタブ名はそのまま', () => {
+    expect(pickSettingsTab('integrations')).toBe('integrations')
+    expect(pickSettingsTab('project')).toBe('project')
+    expect(pickSettingsTab('repositories')).toBe('repositories')
+  })
+  it('旧 URL を新しいタブへ対応づける', () => {
+    expect(pickSettingsTab('sync')).toBe('integrations')
+    expect(pickSettingsTab('tokens')).toBe('integrations')
+    expect(pickSettingsTab('projects')).toBe('project')
+    expect(pickSettingsTab('members')).toBe('members')
+  })
+  it('未指定・不正はメンバー', () => {
+    expect(pickSettingsTab(null)).toBe('members')
+    expect(pickSettingsTab('nope')).toBe('members')
   })
 })

@@ -46,7 +46,8 @@ export function Policies() {
   return <PoliciesBody key={workspace.slug} slug={workspace.slug} name={workspace.name ?? workspace.slug} />
 }
 
-function PoliciesBody({ slug, name }: { slug: string; name: string }) {
+/** embedded: ワークスペースのタブの中に置くとき（見出しはタブ側にあるので出さない）。 */
+export function PoliciesBody({ slug, name, embedded = false }: { slug: string; name: string; embedded?: boolean }) {
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
@@ -139,11 +140,15 @@ function PoliciesBody({ slug, name }: { slug: string; name: string }) {
   return (
     <div className="space-y-6">
       <header className="min-w-0">
-        <p className="text-xs font-semibold tracking-widest text-primary uppercase">Policies</p>
-        <h1 className="mt-1 truncate text-2xl font-bold tracking-tight">{name} のチーム規約</h1>
-        <p className="mt-1 text-sm text-ink-2">
+        {!embedded && (
+          <>
+            <p className="text-xs font-semibold tracking-widest text-primary uppercase">Policies</p>
+            <h1 className="mt-1 truncate text-2xl font-bold tracking-tight">{name} のチーム規約</h1>
+          </>
+        )}
+        <p className={embedded ? 'text-sm text-ink-2' : 'mt-1 text-sm text-ink-2'}>
           {view.active ? `有効な改訂 ${view.active.revision}` : '有効な改訂はまだありません'}
-          。ルールの変更は下書きに入り、owner / approver が承認すると以後の検査に使われます。
+          。ルールの変更は下書きに入り、オーナーか承認者が承認すると、以後の検査に使われます。
         </p>
         <Button type="button" size="sm" className="mt-3" variant={chatOpen ? 'secondary' : 'outline'} onClick={() => setChatOpen(!chatOpen)} aria-expanded={chatOpen}>
           {chatOpen ? 'AI と作るパネルを閉じる' : 'AI と作る'}
@@ -160,7 +165,7 @@ function PoliciesBody({ slug, name }: { slug: string; name: string }) {
       )}
       {!view.active && !view.draft && (
         <Panel className="text-sm text-ink-2">
-          チーム規約はまだありません。ルールを追加して下書きを作り、owner / approver が承認すると有効になります。
+          チーム規約はまだありません。ルールを追加して下書きを作り、オーナーか承認者が承認すると有効になります。
         </Panel>
       )}
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">

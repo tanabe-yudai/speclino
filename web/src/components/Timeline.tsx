@@ -21,7 +21,6 @@ export function Timeline({ events }: TimelineProps) {
     <ol className="relative space-y-4 border-l border-border pl-5">
       {sorted.map((event) => {
         const meta = eventMeta(event.type)
-        const hasPayload = Object.keys(event.payload).length > 0
         const described = describeEvent(event.type, event.payload)
         return (
           <li key={event.seq} className="relative">
@@ -46,14 +45,6 @@ export function Timeline({ events }: TimelineProps) {
                   </div>
                 ))}
               </dl>
-            )}
-            {hasPayload && (
-              <details className="mt-1 text-xs">
-                <summary className="cursor-pointer text-ink-3">生データ（開発者向け）</summary>
-                <pre className="mt-1 overflow-x-auto rounded-md bg-muted/70 p-3 font-mono">
-                  {JSON.stringify(event.payload, null, 2)}
-                </pre>
-              </details>
             )}
           </li>
         )

@@ -11,6 +11,7 @@ import {
 import { useCurrentWorkspace } from '@/hooks/useCurrentWorkspace'
 import { useWorkspaceProjects } from '@/hooks/useWorkspaceProjects'
 import { paths } from '@/services/paths'
+import { cn } from '@/lib/utils'
 import { PILL_CLASS } from './pill'
 
 /** 今のワークスペースに登録されたリポジトリ（プロジェクト）の切り替え。 */
@@ -25,7 +26,8 @@ export function ProjectPill() {
   const current = owner && repo ? `${owner}/${repo}` : null
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className={PILL_CLASS}>
+      {/* スマホ幅でプロジェクトの外にいるときはハンバーガーのメニューから選ぶ（ワークスペース名の幅を残す） */}
+      <DropdownMenuTrigger className={cn(PILL_CLASS, !current && 'hidden sm:inline-flex')}>
         <span className="truncate">{current ? current.split('/')[1] : 'プロジェクト'}</span>
         <ChevronDown className="size-3.5 shrink-0 text-ink-3" />
       </DropdownMenuTrigger>

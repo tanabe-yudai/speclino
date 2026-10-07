@@ -113,12 +113,12 @@ describe('describeKnowledgeError', () => {
     expect(describeKnowledgeError(new ApiError(409, 'm', 'draft_changed')).kind).toBe('conflict')
     expect(describeKnowledgeError(new ApiError(409, '同名の skill', 'bundle_conflict'))).toEqual({
       kind: 'bundle_conflict',
-      message: '他の有効な知識と競合するため承認できません: 同名の skill',
+      message: 'ほかの有効な内容と競合するため承認できません: 同名の skill',
     })
     expect(describeKnowledgeError(new ApiError(422, 'x', 'spec_not_compilable')).kind).toBe('not_compilable')
-    expect(describeKnowledgeError(new ApiError(403, 'x', 'not_an_approver')).message).toBe('承認できるのは owner / approver だけです')
+    expect(describeKnowledgeError(new ApiError(403, 'x', 'not_an_approver')).message).toBe('承認できるのはオーナーと承認者だけです')
     expect(describeKnowledgeError(new ApiError(422, '名前が不正', 'invalid_artifact'))).toEqual({ kind: 'invalid', message: '名前が不正' })
-    expect(describeKnowledgeError(new ApiError(409, 'x', 'artifact_exists')).message).toBe('同じ名前の知識が既にあります')
+    expect(describeKnowledgeError(new ApiError(409, 'x', 'artifact_exists')).message).toBe('同じ名前のものが既にあります')
     expect(describeKnowledgeError(new Error('boom')).kind).toBe('other')
   })
 })

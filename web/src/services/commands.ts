@@ -27,22 +27,22 @@ export function buildCommands(input: {
       })
     }
     commands.push({
-      id: `knowledge:${ws.slug}`,
-      label: `${label} の知識（仕様・スキル・指示書）`,
+      id: `shared:${ws.slug}`,
+      label: `${label} のチーム共通（スキル・指示書）`,
       group: 'ワークスペース',
-      path: paths.knowledge(ws.slug),
+      path: paths.workspace(ws.slug, 'shared'),
     })
     commands.push({
       id: `policies:${ws.slug}`,
-      label: `${label} の規約`,
+      label: `${label} のチーム規約`,
       group: 'ワークスペース',
-      path: paths.policies(ws.slug),
+      path: paths.workspace(ws.slug, 'policies'),
     })
     commands.push({
-      id: `observability:${ws.slug}`,
-      label: `${label} の可観測性`,
+      id: `usage:${ws.slug}`,
+      label: `${label} の利用状況`,
       group: 'ワークスペース',
-      path: paths.observability(ws.slug),
+      path: paths.workspace(ws.slug, 'usage'),
     })
     commands.push({
       id: `settings:${ws.slug}`,

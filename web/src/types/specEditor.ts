@@ -71,11 +71,6 @@ export interface ApprovalPanelProps {
   onConflict: () => void
 }
 
-export interface KnowledgeNavProps {
-  slug: string
-  current: ArtifactKind
-}
-
 export interface DiffViewProps {
   before: string
   after: string

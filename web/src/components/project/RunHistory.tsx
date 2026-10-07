@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import { GateBadge } from '@/components/app/GateBadge'
 import { Panel, PanelTitle } from '@/components/app/Panel'
-import { formatDateTime, shortSha } from '@/services/format'
+import { formatDateTime, runTargetLabel, shortSha } from '@/services/format'
 import { EXEC_STATE_LABELS } from '@/services/labels'
 import { paths } from '@/services/paths'
 import type { ProjectRun } from '@/types/project'
@@ -17,7 +17,7 @@ export function RunHistory({ runs }: { runs: ProjectRun[] }) {
         <div className="space-y-2">
           {runs.map((r) => (
             <Link key={r.id} to={paths.run(r.id)} className="row flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 text-sm">
-              <span className="min-w-0 flex-1 truncate font-medium">{r.pr_number != null ? `PR #${r.pr_number}` : '手動'}</span>
+              <span className="min-w-0 flex-1 truncate font-medium">{runTargetLabel(r.pr_number)}</span>
               <code className="font-mono text-xs text-ink-3">{shortSha(r.head_sha)}</code>
               {r.gate_status ? (
                 <GateBadge status={r.gate_status} />

@@ -51,7 +51,7 @@ export function NoteField({
         aria-describedby={`${id}-help`}
       />
       <p id={`${id}-help`} className="text-xs text-ink-3">
-        承認者が読みます（{NOTE_MAX_CHARS} 文字まで）。要約は AI の案です。見せたくない内容が無いか確かめ、直してから保存してください。
+        承認者が読みます（{NOTE_MAX_CHARS} 文字まで）。AI の要約は、見せたくない内容が無いか確かめてから保存してください。
       </p>
     </div>
   )

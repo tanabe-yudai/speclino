@@ -24,7 +24,7 @@ import { formatDateTime } from '@/services/format'
 import { MCP_TOKEN_STATUS_LABELS, mcpTokenStatus } from '@/services/mcpTokens'
 import type { IssuedMcpToken, McpTokenInfo } from '@/types/mcpToken'
 
-/** ワークスペースの owner が MCP トークンを発行・失効する（S54）。 */
+/** ワークスペースの owner が エージェント接続トークンを発行・失効する。 */
 export function TokensTab({ slug }: { slug: string }) {
   const [tokens, setTokens] = useState<McpTokenInfo[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -89,14 +89,14 @@ export function TokensTab({ slug }: { slug: string }) {
   return (
     <div className="space-y-6">
       <p className="text-sm text-ink-2">
-        エディタのエージェントが SpecLino の MCP サーバーに接続するためのトークンです。owner だけが発行・失効できます。
+        エディタなどのエージェントが SpecLino に接続するためのトークンです（MCP / A2A）。発行と失効はオーナーだけができます。
       </p>
 
       {justIssued && (
         <Panel className="border-primary/30">
           <PanelTitle>「{justIssued.name}」を発行しました</PanelTitle>
           <p className="mt-1 text-sm text-ink-2">
-            この画面を離れると平文は二度と表示されません。今すぐエディタの MCP 設定にコピーしてください。
+            この画面を離れると平文は二度と表示されません。今すぐエージェントの設定にコピーしてください。
           </p>
           <div className="mt-3 flex items-center gap-2">
             <code className="min-w-0 flex-1 truncate rounded-md bg-muted px-3 py-2 font-mono text-xs select-all">
@@ -165,7 +165,7 @@ export function TokensTab({ slug }: { slug: string }) {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>「{revoking?.name}」を失効させますか？</DialogTitle>
-            <DialogDescription>以後このトークンでは MCP に接続できなくなります。元には戻せません。</DialogDescription>
+            <DialogDescription>以後このトークンではエージェントを接続できなくなります。元には戻せません。</DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <DialogClose asChild>

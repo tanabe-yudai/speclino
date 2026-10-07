@@ -2,27 +2,44 @@
 
 import type { SettingsTab } from '@/types/command'
 import type { ArtifactKind } from '@/types/knowledge'
+import type { ProjectTab, WorkspaceTab } from '@/types/navigation'
 import { KIND_SECTION } from './knowledge'
 
 const e = encodeURIComponent
 const kn = (slug: string, kind: ArtifactKind) => `/w/${e(slug)}/knowledge/${KIND_SECTION[kind]}`
 
+/** エディタ・改訂履歴へ渡すクエリ。`from` は戻り先のプロジェクト（owner/repo）、`chat` は会話の ID（`new` なら新規）。 */
+export interface KnowledgeQuery {
+  from?: string | null
+  chat?: string | null
+}
+
+function query(q?: KnowledgeQuery): string {
+  const parts: string[] = []
+  if (q?.chat) parts.push(`chat=${e(q.chat)}`)
+  if (q?.from) parts.push(`from=${e(q.from)}`)
+  return parts.length > 0 ? `?${parts.join('&')}` : ''
+}
+
 export const paths = {
   home: () => '/app',
-  workspace: (slug: string) => `/w/${e(slug)}`,
-  project: (slug: string, fullName: string) => {
+  /** ワークスペースのホーム。tab を省く（またはプロジェクト）なら素のパス。 */
+  workspace: (slug: string, tab?: WorkspaceTab) =>
+    `/w/${e(slug)}${tab && tab !== 'projects' ? `?tab=${tab}` : ''}`,
+  /** プロジェクト。tab を省く（または概要）なら素のパス。 */
+  project: (slug: string, fullName: string, tab?: ProjectTab) => {
     const [owner, repo] = fullName.split('/')
-    return `/w/${e(slug)}/p/${e(owner)}/${e(repo)}`
+    return `/w/${e(slug)}/p/${e(owner)}/${e(repo)}${tab && tab !== 'overview' ? `/${tab}` : ''}`
   },
   policies: (slug: string) => `/w/${e(slug)}/policies`,
-  /** 知識のどの画面でも上部バーの「知識」を選ばれた状態にするための根 */
-  knowledgeRoot: (slug: string) => `/w/${e(slug)}/knowledge`,
-  knowledge: (slug: string, kind: ArtifactKind = 'spec') => kn(slug, kind),
-  knowledgeNew: (slug: string, kind: ArtifactKind) => `${kn(slug, kind)}/new`,
+  knowledgeNew: (slug: string, kind: ArtifactKind, from?: string | null) => `${kn(slug, kind)}/new${query({ from })}`,
   /** S73: 会話から新しく作る（エディタで AI と作るパネルを開く） */
-  knowledgeNewWithChat: (slug: string, kind: ArtifactKind) => `${kn(slug, kind)}/new?chat=new`,
-  knowledgeItem: (slug: string, kind: ArtifactKind, id: string) => `${kn(slug, kind)}/${e(id)}`,
-  knowledgeRevisions: (slug: string, kind: ArtifactKind, id: string) => `${kn(slug, kind)}/${e(id)}/revisions`,
+  knowledgeNewWithChat: (slug: string, kind: ArtifactKind, from?: string | null) =>
+    `${kn(slug, kind)}/new${query({ chat: 'new', from })}`,
+  knowledgeItem: (slug: string, kind: ArtifactKind, id: string, q?: KnowledgeQuery) =>
+    `${kn(slug, kind)}/${e(id)}${query(q)}`,
+  knowledgeRevisions: (slug: string, kind: ArtifactKind, id: string, from?: string | null) =>
+    `${kn(slug, kind)}/${e(id)}/revisions${query({ from })}`,
   observability: (slug: string) => `/w/${e(slug)}/observability`,
   settings: (slug: string, tab?: SettingsTab) => `/w/${e(slug)}/settings${tab ? `?tab=${tab}` : ''}`,
   run: (id: string) => `/runs/${e(id)}`,

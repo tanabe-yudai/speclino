@@ -29,6 +29,8 @@ export interface FindingCardProps {
   headSha: string
   /** ゲートの cleared（人が確定して阻止しない REVIEW）として出すか */
   cleared?: boolean
+  /** 要求の題（あれば見出しにし、ID は小さく添える） */
+  title?: string | null
 }
 
 export interface ScopeBlockProps {

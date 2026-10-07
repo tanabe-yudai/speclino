@@ -103,6 +103,7 @@ export type NextActionKind = 'violated' | 'stale' | 'review' | 'exempted' | 'unk
 export interface NextAction {
   kind: NextActionKind
   requirementId: string
+  /** 人が読む題（規約・要求の題、システム規約の題）。無ければ null */
   title: string | null
   hint: string
 }

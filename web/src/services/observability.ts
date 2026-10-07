@@ -1,4 +1,4 @@
-/** 可観測性の画面の表示用の整形（数え直さない。集計はサーバの WorkspaceHealth だけ）。 */
+/** 利用状況の画面の表示用の整形（数え直さない。集計はサーバの WorkspaceHealth だけ）。 */
 
 import type { VerdictTone } from '@/types/components'
 import type { FetchHealth, Ratio, RuleTier, UnknownBreakdown, UnknownReason } from '@/types/observability'
@@ -10,17 +10,17 @@ export const UNKNOWN_REASON_LABELS: Record<UnknownReason, string> = {
   inexact_path: '不完全な経路',
   analysis_limit: '解析の上限',
   missing_finding: '判定の欠落',
-  lock: 'lock',
+  lock: '同期の記録の不一致',
   other: 'その他',
 }
 
 export const RULE_TIER_LABELS: Record<RuleTier, string> = {
-  deterministic: '決定的',
-  llm_assisted: 'LLM 支援',
+  deterministic: '機械で判定',
+  llm_assisted: 'AI 支援',
   unverified: '検査器なし',
 }
 
-export const CHANNEL_LABELS: Record<string, string> = { sync: 'sync', mcp: 'MCP' }
+export const CHANNEL_LABELS: Record<string, string> = { sync: 'リポジトリ同期', mcp: 'エージェント' }
 
 export function formatRatio(ratio: Ratio | null): string {
   if (!ratio) return UNMEASURED
@@ -29,7 +29,7 @@ export function formatRatio(ratio: Ratio | null): string {
 
 export function lagLabel(lag: number | null): string {
   if (lag === null) return UNMEASURED
-  return lag === 0 ? '最新' : `${lag} 世代遅れ`
+  return lag === 0 ? '最新' : `古い（${lag} 回前の承認）`
 }
 
 export function lagTone(lag: number | null): VerdictTone {
@@ -51,7 +51,7 @@ export function fetchLag(f: FetchHealth): { label: string; tone: VerdictTone } {
 }
 
 export function fetchLabel(f: FetchHealth): string {
-  return f.token_name ?? f.member_email ?? f.uid ?? '-'
+  return f.token_name ?? f.member_email ?? (f.uid ? 'メンバー' : '-')
 }
 
 export function percent(rate: number | null): string {
