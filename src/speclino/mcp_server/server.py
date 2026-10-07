@@ -15,6 +15,11 @@
   1 つのプロジェクトに限る（`verification_start` は拒否、他のプロジェクトは「無い」と同じ応答）。
   チームの知識を読む `sync_status` / `spec_get` / `skill_get` は承認済みの今の bundle から答え、
   取得を `knowledge_fetches` に残す
+- S75: `knowledge_pull`（書き出しの計画を作って置き、使い捨ての取得 URL を返す。計画の本文は
+  応答で運ばない。エージェントはプラグインの `scripts/speclino_apply.py --plan-url` に渡す）と、
+  `sync_status` の `pull_needed` / `reasons`。ワークスペースの MCP トークンと sync トークンの
+  どちらでも呼べる（リポジトリは必ず `_workspace_project` で引き、lock のリポジトリ ID は引いた
+  Project から入れる）。計画の上限は CLI と同じ 8MB
 - S67: `spec_suggest`（AI の書き換え提案）。ワークスペースの MCP トークンだけが呼べる
   （sync トークンは読み取り専用なので拒否。LLM の費用を使うため）。
   返すのは本文の置換の提案と検証の要約だけで、IR は返さない
@@ -50,6 +55,7 @@ from speclino.db.repositories.review_runs import ReviewRunRepository
 from speclino.db.repositories.sync_tokens import KnowledgeFetchRepository
 from speclino.domain.knowledge import (
     ArtifactRevision,
+    KnowledgeLock,
     ResolvedKnowledge,
     SkillContent,
     SpecContent,
@@ -66,6 +72,9 @@ MCP_PATH = "/mcp"
 WORKSPACE_STATE_KEY = "mcp_workspace"
 # 同じく、トークンの身元（`Principal`）の置き場所
 PRINCIPAL_STATE_KEY = "mcp_principal"
+# `sync_status` / `knowledge_pull` の引数の上限（lock の本文・申告のハッシュ）
+MAX_LOCK_JSON_BYTES = 1024 * 1024
+MAX_HASH_ENTRIES = 2000
 
 
 @dataclass(frozen=True)
@@ -182,16 +191,73 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
             return {"error": "run_not_found", "run_id": run_id}
         return {**view, "run_id": run_id}
 
+    # lock_json は `str`（既定 ""）で受ける。`str | None` だと MCP の SDK が JSON に見える文字列を
+    # 先に dict に解析してしまい、引数の検証で落ちる
     @mcp.tool()
-    async def sync_status(repo_full_name: str, lock_json: str, ctx: Context) -> dict[str, Any]:
-        """手元の `.speclino/lock.json`（本文）が今の承認済みの知識と比べて古いか。
+    async def sync_status(
+        repo_full_name: str,
+        ctx: Context,
+        lock_json: str = "",
+        local_hashes: dict[str, str] | None = None,
+        managed_inner: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """作業を始める前に、手元の知識を取り込み直す必要があるか（`pull_needed`）を返す。
 
-        `stale` が true なら `speclino sync` で最新にする（期限切れ・署名不一致・別のリポジトリの
-        lock も stale）。`changed` は lock と今の間で変わった知識。判定はゲートと同じ。
+        `lock_json` は手元の `.speclino/lock.json` の本文（文字列のまま。無ければ省く）。
+        `local_hashes` は lock の `files` に載ったファイル（AGENTS.md / CLAUDE.md 以外）の
+        今の sha256、`managed_inner` は AGENTS.md / CLAUDE.md の管理区画の中身の sha256（どちらも
+        改行を LF に寄せた本文の `sha256:<hex>`、省略可）。`reasons` は no_lock / invalid_lock /
+        expired / other_repo / members_changed / policy_changed / files_modified。`pull_needed` なら
+        `knowledge_pull` で取り込む。最終的な判定はゲートの照合（KNOWLEDGE-LOCK-001）。
         """
         principal = _principal(ctx)
+        _check_inputs(lock_json, local_hashes, managed_inner)
         project, resolved = await _resolve(get_state(), principal, repo_full_name)
-        return _sync_status(project, resolved, lock_json)
+        return _sync_status(project, resolved, lock_json or None, local_hashes, managed_inner)
+
+    @mcp.tool()
+    async def knowledge_pull(
+        repo_full_name: str, ctx: Context, lock_json: str = ""
+    ) -> dict[str, Any]:
+        """このリポジトリに当たる承認済みの知識の書き出し計画を作り、使い捨ての取得 URL を返す。
+
+        `lock_json` に手元の `.speclino/lock.json` の本文を必ず渡す（サーバが確かめたうえで、
+        外れた知識の削除も計画する。渡さないと削除は計画されず古い知識が残りうる）。返すのは
+        `plan_url`（1 回だけ・10 分で失効）・`expires_at`・`bundle_generation`・`summary`。
+        リポジトリのルートで `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/speclino_apply.py --plan-url
+        <plan_url> --expect-generation <bundle_generation>` を実行する（計画やファイルを自分で
+        書かない）。
+        """
+        state = get_state()
+        principal = _principal(ctx)
+        _check_inputs(lock_json, None, None)
+        project = await _workspace_project(state, principal, repo_full_name)
+        try:
+            async with state.session_factory() as session, session.begin():
+                ticket = await knowledge_sync.issue_plan_ticket(
+                    session,
+                    workspace=principal.workspace,
+                    project=project,
+                    lock_json=lock_json or None,
+                    channel=principal.channel,
+                    token_id=principal.token_id,
+                )
+        except LookupError as e:
+            raise ToolError(f"{repo_full_name} はこのワークスペースに登録されていない") from e
+        except ValueError as e:
+            raise ToolError(f"知識を書き出せない: {e}") from e
+        base = state.settings.public_url.rstrip("/")
+        return {
+            "plan_url": f"{base}/api/sync/plans/{ticket.token}",
+            "expires_at": ticket.expires_at.isoformat(),
+            "bundle_generation": ticket.bundle_generation,
+            "summary": {
+                "ops": ticket.ops,
+                "writes": ticket.writes,
+                "deletes": ticket.deletes,
+                "bytes": ticket.bytes,
+            },
+        }
 
     @mcp.tool()
     async def spec_get(repo_full_name: str, name: str, ctx: Context) -> dict[str, Any]:
@@ -302,16 +368,67 @@ async def _record_fetch(
         )
 
 
-def _sync_status(project: Project, resolved: ResolvedKnowledge, lock_json: str) -> dict[str, Any]:
-    """ゲート（`KNOWLEDGE-LOCK-001`）と同じ `assess_lock` で判定する（ファイルの照合は除く）。"""
+def _check_inputs(
+    lock_json: str, local_hashes: dict[str, str] | None, managed_inner: dict[str, str] | None
+) -> None:
+    """引数の大きさの上限（lock の本文 1MB、申告のハッシュは 2000 件・1MB まで）。"""
+    if len(lock_json.encode("utf-8")) > MAX_LOCK_JSON_BYTES:
+        raise ToolError(f"lock_json が大きすぎる（{MAX_LOCK_JSON_BYTES} バイトまで）")
+    for name, given in (("local_hashes", local_hashes), ("managed_inner", managed_inner)):
+        if given is None:
+            continue
+        size = sum(len(k.encode("utf-8")) + len(v.encode("utf-8")) for k, v in given.items())
+        if len(given) > MAX_HASH_ENTRIES or size > MAX_LOCK_JSON_BYTES:
+            raise ToolError(f"{name} が大きすぎる（{MAX_HASH_ENTRIES} 件・1MB まで）")
+
+
+def _normalize_hash(value: str) -> str:
+    return value if value.startswith("sha256:") else "sha256:" + value.lower()
+
+
+def _modified_files(
+    lock: KnowledgeLock,
+    local_hashes: dict[str, str] | None,
+    managed_inner: dict[str, str] | None,
+) -> list[str]:
+    """エージェントが申告した手元のハッシュと lock の食い違い（申告が無ければ照合しない）。
+
+    申告の対象（ファイル / 管理区画）のうち、lock の記録と違う・申告に無い（欠けている）・
+    `absent` なのに申告がある（残っている）パス。
+    """
+    out: set[str] = set()
+    for given, managed in ((local_hashes, False), (managed_inner, True)):
+        if given is None:
+            continue
+        hashes = {p: _normalize_hash(h) for p, h in given.items()}
+        for path, expected in lock.files.items():
+            if (path in knowledge_sync.MANAGED_FILES) == managed and hashes.get(path) != expected:
+                out.add(path)
+        out |= {
+            p for p in lock.absent if (p in knowledge_sync.MANAGED_FILES) == managed and p in hashes
+        }
+    return sorted(out)
+
+
+def _sync_status(
+    project: Project,
+    resolved: ResolvedKnowledge,
+    lock_json: str | None,
+    local_hashes: dict[str, str] | None = None,
+    managed_inner: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """ゲート（`KNOWLEDGE-LOCK-001`）と同じ `assess_lock` で判定し、申告のハッシュも照合する。"""
     generation = resolved.bundle.generation
     if project.github_repo_id is None:
         return {
             "current_generation": generation,
             "lock_generation": None,
             "stale": True,
+            "pull_needed": False,
+            "reasons": ["unregistered_repo"],
+            "modified_files": [],
             "verdict": "UNKNOWN",
-            "reason": "リポジトリ ID が未登録のため照合できない",
+            "reason": "リポジトリ ID が未登録のため照合できない（取り込みもできない）",
             "changed": [],
         }
     a = knowledge_sync.assess_lock(
@@ -320,10 +437,17 @@ def _sync_status(project: Project, resolved: ResolvedKnowledge, lock_json: str) 
         current_members=knowledge_sync.project_members(resolved),
         github_repo_id=project.github_repo_id,
     )
+    modified = _modified_files(a.lock, local_hashes, managed_inner) if a.lock is not None else []
+    reasons = list(a.reasons)
+    if modified and "files_modified" not in reasons:
+        reasons.append("files_modified")
     return {
         "current_generation": generation,
         "lock_generation": a.lock.bundle_generation if a.lock is not None else None,
         "stale": a.verdict != "VERIFIED_IN_SCOPE",
+        "pull_needed": bool(reasons),
+        "reasons": reasons,
+        "modified_files": modified,
         "verdict": a.verdict,
         "reason": a.message,
         "changed": a.changed,

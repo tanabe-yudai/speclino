@@ -48,6 +48,7 @@ EXPECTED_TABLES = {
     "llm_assessments",
     "attestations",
     "knowledge_chats",
+    "sync_plans",
 }
 
 

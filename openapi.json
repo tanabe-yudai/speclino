@@ -2254,6 +2254,33 @@
         "title": "StructureObligation",
         "type": "object"
       },
+      "SyncBundleRequest": {
+        "additionalProperties": false,
+        "description": "`POST /api/sync/bundle` の要求。`lock_json` は手元の `.speclino/lock.json`（削除の根拠）。",
+        "properties": {
+          "lock_json": {
+            "anyOf": [
+              {
+                "maxLength": 1048576,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lock Json"
+          },
+          "repo_id": {
+            "title": "Repo Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "repo_id"
+        ],
+        "title": "SyncBundleRequest",
+        "type": "object"
+      },
       "TokenRequest": {
         "properties": {
           "token": {
@@ -3305,28 +3332,25 @@
       }
     },
     "/api/sync/bundle": {
-      "get": {
-        "operationId": "get_sync_bundle_api_sync_bundle_get",
-        "parameters": [
-          {
-            "description": "GitHub のリポジトリ ID",
-            "in": "query",
-            "name": "repo_id",
-            "required": true,
-            "schema": {
-              "description": "GitHub のリポジトリ ID",
-              "title": "Repo Id",
-              "type": "integer"
+      "post": {
+        "operationId": "plan_sync_bundle_api_sync_bundle_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SyncBundleRequest"
+              }
             }
-          }
-        ],
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Get Sync Bundle Api Sync Bundle Get",
+                  "title": "Response Plan Sync Bundle Api Sync Bundle Post",
                   "type": "object"
                 }
               }
@@ -3374,7 +3398,67 @@
             "description": "Unprocessable Entity"
           }
         },
-        "summary": "Get Sync Bundle",
+        "summary": "Plan Sync Bundle",
+        "tags": [
+          "sync"
+        ]
+      }
+    },
+    "/api/sync/plans/{token}": {
+      "get": {
+        "operationId": "get_sync_plan_api_sync_plans__token__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Get Sync Plan",
         "tags": [
           "sync"
         ]

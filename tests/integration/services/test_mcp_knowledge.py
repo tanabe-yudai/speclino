@@ -1,19 +1,27 @@
-"""S68: MCP の知識ツール（sync_status / spec_get / skill_get）と sync トークンの制限。
+"""S68・S75: MCP の知識ツール（sync_status / knowledge_pull / spec_get / skill_get）と
+sync トークンの制限。
 
 実 PostgreSQL が必要（`SPECLINO_DATABASE_URL` が未設定なら skip）。
 """
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
+import io
 import json
 import os
+import sys
+import urllib.error
+import urllib.request
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx2
 import pytest
@@ -23,13 +31,15 @@ from mcp.client.streamable_http import streamable_http_client
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from speclino import sync_apply
 from speclino.adapters.localgit.local_code_host import LocalCodeHost
 from speclino.adapters.queue.inprocess import InProcessQueue
 from speclino.adapters.storage.fs import FileSystemBlobStore
 from speclino.api.app import create_app
 from speclino.api.deps import AppState
+from speclino.db.models import Project
 from speclino.domain.knowledge import ArtifactScope, InstructionsContent, SkillContent
-from speclino.domain.knowledge_sync import SyncIdentity
+from speclino.domain.knowledge_sync import SyncIdentity, SyncPlan
 from speclino.services import bundle_signing, sync_tokens
 from speclino.services import knowledge_registry as kr
 from speclino.services import knowledge_sync as ks
@@ -294,3 +304,368 @@ async def test_sync_status_rejects_expired_or_other_repo_lock(world: World) -> N
                 await c.call_tool("sync_status", {"repo_full_name": w.repo, "lock_json": lock_json})
             )
             assert got["stale"] is True and got["verdict"] == "UNKNOWN" and word in got["reason"]
+
+
+# ---------------------------------------------------------------------------
+# S75: knowledge_pull と sync_status（エージェントによる取り込み）
+# ---------------------------------------------------------------------------
+
+
+async def _fetch_channels(w: World) -> list[str]:
+    async with w.engine.connect() as conn:
+        rows = (
+            await conn.execute(
+                text("SELECT channel FROM knowledge_fetches WHERE workspace = :w"),
+                {"w": w.slug},
+            )
+        ).all()
+    return sorted(r.channel for r in rows)
+
+
+async def _check(w: World, repo: Path, project_id: str, repo_name: str) -> str:
+    async with w.f() as s, s.begin():
+        bundle = await kr.ensure_bundle(s, w.slug)
+        resolved = await kr.resolve_for_project(s, bundle, project_id)
+    lock_path = repo / ks.LOCK_PATH
+    finding = ks.check_lock(
+        repo,
+        lock_path.read_text() if lock_path.exists() else None,
+        current=resolved.bundle,
+        current_members=ks.project_members(resolved),
+        github_repo_id=repo_id_of(repo_name),
+    )
+    return finding.verdict
+
+
+@asynccontextmanager
+async def _http(w: World) -> AsyncIterator[httpx2.AsyncClient]:
+    """取得 URL を引くための、トークンを付けない HTTP クライアント（同じ DB の別のアプリ）。"""
+    app = _app(w)
+    async with (
+        app.router.lifespan_context(app),
+        httpx2.AsyncClient(
+            transport=httpx2.ASGITransport(app=app), base_url="http://localhost"
+        ) as http,
+    ):
+        yield http
+
+
+async def _pull(w: World, c: Client, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """knowledge_pull の応答と、その URL から取得した計画。"""
+    ticket = _json(await c.call_tool("knowledge_pull", args))
+    async with _http(w) as http:
+        res = await http.get(urlsplit(ticket["plan_url"]).path)
+    assert res.status_code == 200, res.text
+    assert res.headers["cache-control"] == "no-store"
+    return ticket, res.json()
+
+
+class _BridgeOpener:
+    """実行スクリプトの urllib の取得を、テストのイベントループの ASGI アプリに渡す。"""
+
+    def __init__(self, http: httpx2.AsyncClient, loop: asyncio.AbstractEventLoop) -> None:
+        self.http, self.loop = http, loop
+
+    def open(self, request: urllib.request.Request, timeout: float | None = None) -> io.BytesIO:
+        url = request.full_url
+        res = asyncio.run_coroutine_threadsafe(self.http.get(urlsplit(url).path), self.loop).result(
+            timeout=60
+        )
+        if res.status_code != 200:
+            raise urllib.error.HTTPError(url, res.status_code, "error", hdrs=None, fp=None)  # type: ignore[arg-type]
+        return io.BytesIO(res.content)
+
+
+async def _apply_url(w: World, plan_url: str, repo: Path, *extra: str) -> dict[str, Any]:
+    """`speclino_apply.py --plan-url` を実行する（取得は ASGI アプリに橋渡し）。"""
+    loop = asyncio.get_running_loop()
+    async with _http(w) as http:
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                sync_apply.urllib.request, "build_opener", lambda *a: _BridgeOpener(http, loop)
+            )
+            out = io.StringIO()
+            mp.setattr(sys, "stdout", out)
+            argv = ["--plan-url", plan_url, "--allow-http", "--repo", str(repo), *extra]
+            code = await asyncio.to_thread(sync_apply.main, argv)
+    result: dict[str, Any] = json.loads(out.getvalue().splitlines()[-1])
+    assert result["exit_code"] == code
+    return result
+
+
+async def test_knowledge_pull_returns_url_and_round_trip(world: World) -> None:
+    """URL 方式の往復: 取り込み → VERIFIED → 改訂の承認 → 取り込み → VERIFIED →
+    スキルを外す → 削除されて VERIFIED。計画の本文は MCP の応答に載らない。"""
+    w = world
+    await _seed(w)
+    token = await _sync_token(w)
+    repo = w.tmp / "checkout"
+    repo.mkdir()
+    (repo / "AGENTS.md").write_text("# 手書き\n")
+    async with _client(w, token) as c:
+        status = _json(await c.call_tool("sync_status", {"repo_full_name": w.repo}))
+        assert status["pull_needed"] is True and status["reasons"] == ["no_lock"]
+        ticket = _json(await c.call_tool("knowledge_pull", {"repo_full_name": w.repo}))
+    assert set(ticket) == {"plan_url", "expires_at", "bundle_generation", "summary"}
+    assert ticket["plan_url"].startswith("http://localhost:8080/api/sync/plans/slplan_")
+    assert ticket["summary"]["ops"] == 6 and ticket["summary"]["deletes"] == 0
+    assert await _fetch_channels(w) == []  # 取得したときに記録する
+    gen = str(ticket["bundle_generation"])
+    out = await _apply_url(w, ticket["plan_url"], repo, "--expect-generation", gen)
+    assert out["ok"] is True, out
+    assert await _check(w, repo, w.pid, w.repo) == "VERIFIED_IN_SCOPE"
+    assert await _fetch_channels(w) == ["sync"]
+    # 同じ URL は 2 回目は使えない
+    again = await _apply_url(w, ticket["plan_url"], repo)
+    assert again["exit_code"] == 2 and "404" in again["reason"]
+
+    lock_json = (repo / ks.LOCK_PATH).read_text()
+    async with _client(w, token) as c:
+        fresh = _json(
+            await c.call_tool("sync_status", {"repo_full_name": w.repo, "lock_json": lock_json})
+        )
+    assert fresh["pull_needed"] is False and fresh["reasons"] == []
+
+    await _revise(w, "review", _skill("新しい手順", ArtifactScope(projects=[w.pid])))
+    assert await _check(w, repo, w.pid, w.repo) == "REVIEW"
+    async with _client(w, token) as c:
+        ticket = _json(
+            await c.call_tool("knowledge_pull", {"repo_full_name": w.repo, "lock_json": lock_json})
+        )
+    assert (await _apply_url(w, ticket["plan_url"], repo))["ok"] is True
+    assert await _check(w, repo, w.pid, w.repo) == "VERIFIED_IN_SCOPE"
+
+    pid_b = str(await project_id_of(w.engine, w.repo2))
+    await _revise(w, "review", _skill("新しい手順", ArtifactScope(projects=[pid_b])))
+    lock_json = (repo / ks.LOCK_PATH).read_text()
+    async with _client(w, token) as c:
+        ticket = _json(
+            await c.call_tool("knowledge_pull", {"repo_full_name": w.repo, "lock_json": lock_json})
+        )
+    assert ticket["summary"]["deletes"] == 4
+    out = await _apply_url(w, ticket["plan_url"], repo)
+    assert out["ok"] is True and ".claude/skills/review/SKILL.md" in out["deleted"]
+    assert not (repo / ".claude/skills/review").exists()
+    assert await _check(w, repo, w.pid, w.repo) == "VERIFIED_IN_SCOPE"
+    assert (repo / "AGENTS.md").read_text().startswith("# 手書き\n")
+
+
+async def test_plan_url_expires_and_is_bound_to_the_repository(world: World) -> None:
+    w = world
+    await _seed(w)
+    async with w.f() as s:
+        project = await s.get(Project, uuid.UUID(w.pid))
+    assert project is not None
+    past = datetime.now(UTC) - timedelta(minutes=11)
+    async with w.f() as s, s.begin():
+        old = await ks.issue_plan_ticket(
+            s,
+            workspace=w.slug,
+            project=project,
+            lock_json=None,
+            channel="mcp",
+            token_id=None,
+            now=past,
+        )
+        moved = await ks.issue_plan_ticket(
+            s, workspace=w.slug, project=project, lock_json=None, channel="mcp", token_id=None
+        )
+    async with w.engine.begin() as conn:
+        stored = (
+            await conn.execute(
+                text("SELECT token_hash, plan_json FROM sync_plans WHERE workspace = :w"),
+                {"w": w.slug},
+            )
+        ).all()
+    assert all(old.token not in r.token_hash and moved.token not in r.token_hash for r in stored)
+    # リポジトリ ID が変わった（付け替えられた）プロジェクトの計画は渡さない
+    async with w.engine.begin() as conn:
+        await conn.execute(
+            text("UPDATE projects SET github_repo_id = github_repo_id + 100000 WHERE id = :p"),
+            {"p": w.pid},
+        )
+    async with _http(w) as http:
+        expired = await http.get(f"/api/sync/plans/{old.token}")
+        rebound = await http.get(f"/api/sync/plans/{moved.token}")
+        unknown = await http.get("/api/sync/plans/slplan_nope")
+    async with w.engine.begin() as conn:
+        await conn.execute(
+            text("UPDATE projects SET github_repo_id = github_repo_id - 100000 WHERE id = :p"),
+            {"p": w.pid},
+        )
+    assert expired.status_code == rebound.status_code == unknown.status_code == 404
+    assert await _fetch_channels(w) == []
+
+
+async def test_knowledge_pull_deletes_only_with_verified_lock(world: World) -> None:
+    w = world
+    await _seed(w)
+    token = await _sync_token(w)
+    repo = w.tmp / "checkout"
+    repo.mkdir()
+    async with _client(w, token) as c:
+        _, first = await _pull(w, c, {"repo_full_name": w.repo})
+    assert sync_apply.apply_plan(repo, first).ok
+    lock_json = (repo / ks.LOCK_PATH).read_text()
+    pid_b = str(await project_id_of(w.engine, w.repo2))
+    await _revise(w, "review", _skill("手順", ArtifactScope(projects=[pid_b])))
+    forged = json.loads(lock_json)
+    forged["signature"] = "hmac-sha256:" + "0" * 64
+    async with _client(w, token) as c:
+        status = _json(
+            await c.call_tool("sync_status", {"repo_full_name": w.repo, "lock_json": lock_json})
+        )
+        _, no_delete = await _pull(
+            w, c, {"repo_full_name": w.repo, "lock_json": json.dumps(forged)}
+        )
+        _, plan = await _pull(w, c, {"repo_full_name": w.repo, "lock_json": lock_json})
+    assert ks.verify_plan(SyncPlan.model_validate(plan))
+    assert status["pull_needed"] is True and status["reasons"] == ["members_changed"]
+    assert {op["op"] for op in no_delete["ops"]} <= {"write", "set_managed_block"}
+    deletes = sorted(op["path"] for op in plan["ops"] if op["op"] == "delete")
+    assert ".claude/skills/review/SKILL.md" in deletes and ".agents/skills/review/ref.md" in deletes
+    assert plan["lock"]["absent"] == deletes
+    assert sync_apply.apply_plan(repo, plan).ok
+    assert not (repo / ".claude/skills/review").exists()
+    assert await _check(w, repo, w.pid, w.repo) == "VERIFIED_IN_SCOPE"
+
+
+async def test_knowledge_pull_tenant_isolation(world: World) -> None:
+    w = world
+    await _seed(w)
+    token = await _sync_token(w)
+    async with _client(w, token) as c:
+        for repo in (w.repo2, w.other_repo):
+            hidden = await c.call_tool("knowledge_pull", {"repo_full_name": repo})
+            assert hidden.is_error and "登録されていない" in _text(hidden)
+            hidden = await c.call_tool("sync_status", {"repo_full_name": repo})
+            assert hidden.is_error and "登録されていない" in _text(hidden)
+    # ワークスペースの MCP トークンは同じワークスペースの別のリポジトリも読める（A9）
+    mcp_token = await issue_mcp_token(w.engine, w.slug)
+    async with _client(w, mcp_token) as c:
+        _, plan_b = await _pull(w, c, {"repo_full_name": w.repo2})
+        other = await c.call_tool("knowledge_pull", {"repo_full_name": w.other_repo})
+    assert plan_b["github_repo_id"] == repo_id_of(w.repo2)
+    assert plan_b["lock"]["github_repo_id"] == repo_id_of(w.repo2)
+    assert other.is_error
+    assert await _fetch_channels(w) == ["mcp"]
+
+
+async def test_knowledge_pull_refuses_large_plan_and_inputs(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    w = world
+    await _seed(w)
+    token = await _sync_token(w)
+    async with _client(w, token) as c:
+        huge_lock = await c.call_tool(
+            "knowledge_pull", {"repo_full_name": w.repo, "lock_json": "x" * (1024 * 1024 + 1)}
+        )
+        many = await c.call_tool(
+            "sync_status",
+            {"repo_full_name": w.repo, "local_hashes": {f"p{i}": "h" for i in range(2001)}},
+        )
+        monkeypatch.setattr(sync_apply, "MAX_PLAN_BYTES", 100)
+        refused = await c.call_tool("knowledge_pull", {"repo_full_name": w.repo})
+    assert huge_lock.is_error and "lock_json" in _text(huge_lock)
+    assert many.is_error and "local_hashes" in _text(many)
+    assert refused.is_error and "超える" in _text(refused)
+    assert await _fetch_channels(w) == []
+
+
+async def test_sync_status_reports_modified_files(world: World) -> None:
+    w = world
+    await _seed(w)
+    token = await _sync_token(w)
+    repo = w.tmp / "checkout"
+    repo.mkdir()
+    async with _client(w, token) as c:
+        _, plan = await _pull(w, c, {"repo_full_name": w.repo})
+    assert sync_apply.apply_plan(repo, plan).ok
+    lock = json.loads((repo / ks.LOCK_PATH).read_text())
+    hashes = {p: h for p, h in lock["files"].items() if p not in ks.MANAGED_FILES}
+    inner = {p: h for p, h in lock["files"].items() if p in ks.MANAGED_FILES}
+    args = {"repo_full_name": w.repo, "lock_json": json.dumps(lock)}
+    tampered = {**hashes, ".claude/skills/review/SKILL.md": ks.file_hash("改ざん")}
+    plain_hex = {p: h.removeprefix("sha256:") for p, h in hashes.items()}
+    async with _client(w, token) as c:
+        ok = _json(
+            await c.call_tool(
+                "sync_status", {**args, "local_hashes": plain_hex, "managed_inner": inner}
+            )
+        )
+        bad = _json(await c.call_tool("sync_status", {**args, "local_hashes": tampered}))
+        missing = _json(
+            await c.call_tool(
+                "sync_status", {**args, "managed_inner": {"AGENTS.md": ks.file_hash("x")}}
+            )
+        )
+    assert ok["pull_needed"] is False
+    assert bad["pull_needed"] is True and bad["reasons"] == ["files_modified"]
+    assert bad["modified_files"] == [".claude/skills/review/SKILL.md"]
+    assert missing["modified_files"] == ["AGENTS.md"]
+
+
+@pytest.mark.parametrize("kind", ["sync", "mcp"])
+async def test_plan_url_of_revoked_token_is_404(world: World, kind: str) -> None:
+    """fix round 2: 発行元のトークンを取り消したら、取り消し前の計画も渡さず記録もしない。"""
+    w = world
+    await _seed(w)
+    token = await _sync_token(w) if kind == "sync" else await issue_mcp_token(w.engine, w.slug)
+    async with _client(w, token) as c:
+        ticket = _json(await c.call_tool("knowledge_pull", {"repo_full_name": w.repo}))
+    table = "sync_tokens" if kind == "sync" else "mcp_tokens"
+    async with w.engine.begin() as conn:
+        await conn.execute(
+            text(f"UPDATE {table} SET revoked_at = now() WHERE token_hash = :h"),
+            {"h": hashlib.sha256(token.encode()).hexdigest()},
+        )
+    async with _http(w) as http:
+        res = await http.get(urlsplit(ticket["plan_url"]).path)
+    assert res.status_code == 404
+    assert await _fetch_channels(w) == []
+
+
+async def test_plan_body_is_cleared_once_fetched(world: World) -> None:
+    w = world
+    await _seed(w)
+    token = await _sync_token(w)
+    async with _client(w, token) as c:
+        _, plan = await _pull(w, c, {"repo_full_name": w.repo})
+    assert plan["ops"]
+    async with w.engine.connect() as conn:
+        rows = (
+            await conn.execute(
+                text("SELECT plan_json, consumed_at FROM sync_plans WHERE workspace = :w"),
+                {"w": w.slug},
+            )
+        ).all()
+    assert [(r.plan_json, r.consumed_at is not None) for r in rows] == [("", True)]
+
+
+async def test_expired_plans_are_purged_when_fetching(world: World) -> None:
+    w = world
+    await _seed(w)
+    async with w.f() as s:
+        project = await s.get(Project, uuid.UUID(w.pid))
+    assert project is not None
+    long_ago = datetime.now(UTC) - timedelta(days=2)
+    async with w.f() as s, s.begin():
+        await ks.issue_plan_ticket(
+            s,
+            workspace=w.slug,
+            project=project,
+            lock_json=None,
+            channel="mcp",
+            token_id=None,
+            now=long_ago,
+        )
+    async with w.f() as s, s.begin():
+        assert await ks.redeem_plan_ticket(s, "slplan_" + "a" * 43) is None
+    async with w.engine.connect() as conn:
+        left = (
+            await conn.execute(
+                text("SELECT count(*) FROM sync_plans WHERE workspace = :w"), {"w": w.slug}
+            )
+        ).scalar_one()
+    assert left == 0

@@ -33,6 +33,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from examples.shop.materialize import DOMAIN, SPEC, apply_mutation, materialize, mutation_names
+from speclino import sync_apply
 from speclino.adapters.localgit.local_code_host import LocalCodeHost
 from speclino.adapters.queue.inprocess import InProcessQueue
 from speclino.adapters.storage.fs import FileSystemBlobStore
@@ -330,13 +331,22 @@ async def seed_registry(
 async def sync_main(
     f: async_sessionmaker[AsyncSession], n: Names, repo_dir: Path, project_id: str
 ) -> str:
-    """今の bundle を main に書き出し（`speclino sync` と同じ内容と署名つき lock）、コミット。"""
+    """今の bundle を main に書き出し（`speclino sync` と同じ計画と実行スクリプト）、コミット。"""
     async with f() as s, s.begin():
         bundle = await kr.ensure_bundle(s, n.workspace)
         resolved = await kr.resolve_for_project(s, bundle, project_id)
-    files = ks.render_files(resolved)
-    lock = ks.issue_lock(resolved, github_repo_id=n.github_repo_id, files=files)
-    ks.write_bundle(repo_dir, files, lock)
+    lock_path = repo_dir / ks.LOCK_PATH
+    previous = ks.verified_previous_lock(
+        lock_path.read_text() if lock_path.is_file() else None,
+        workspace=n.workspace,
+        github_repo_id=n.github_repo_id,
+    )
+    plan = ks.build_plan(
+        resolved, github_repo_id=n.github_repo_id, repo_full_name=n.repo, previous=previous
+    )
+    result = sync_apply.apply_plan(repo_dir, plan.model_dump(mode="json"))
+    if not result.ok:
+        raise RuntimeError(f"知識を書き出せない: {result.reason}")
     return _commit_all(repo_dir, f"chore: speclino sync（bundle {bundle.generation}）")
 
 

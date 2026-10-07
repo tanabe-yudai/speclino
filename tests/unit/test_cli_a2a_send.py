@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import re
+import secrets
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
@@ -28,7 +29,8 @@ from speclino import cli
 from speclino.a2a_server.card import A2A_PATH, build_agent_card
 from speclino.agent.consultant.request import parse_skill_request
 
-TOKEN = "slmcp_secret-token"
+# ダミーの値は実行時に作る（固定の文字列は秘密の検出に掛かる）
+TOKEN = "slmcp_" + secrets.token_urlsafe(16)
 runner = CliRunner()
 
 
