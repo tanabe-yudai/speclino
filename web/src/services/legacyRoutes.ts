@@ -14,7 +14,7 @@ export function legacyRedirect(pathname: string): string | null {
   } catch {
     return null
   }
-  return paths.settings(slug, m[2] === 'mcp-tokens' ? 'tokens' : 'repositories')
+  return paths.settings(slug, m[2] === 'mcp-tokens' ? 'integrations' : 'repositories')
 }
 
 /**

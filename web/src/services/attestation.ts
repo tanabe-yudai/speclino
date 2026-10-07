@@ -46,7 +46,7 @@ export function recordedAttestation(
 export function selfAttestLabel(selfAttested: boolean | null | undefined): string {
   if (selfAttested === true) return '自己確定'
   if (selfAttested === false) return '作成者以外の確定'
-  return '作成者との照合不可'
+  return 'PR の作成者かどうかは確認できません'
 }
 
 /** 確定の表示の文言。自己確定・照合不可は必ず明示する。 */

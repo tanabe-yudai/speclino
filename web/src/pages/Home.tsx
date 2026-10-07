@@ -105,6 +105,8 @@ function ProjectsTab({ slug, canAddRepo }: { slug: string; canAddRepo: boolean }
     setAttempt((n) => n + 1)
   }, [])
 
+  const firstUnchecked = projects?.find((p) => p.status === 'not_checked') ?? null
+
   return (
     <div className="space-y-8">
       <section className="space-y-3">
@@ -130,10 +132,10 @@ function ProjectsTab({ slug, canAddRepo }: { slug: string; canAddRepo: boolean }
             ))}
           </div>
         )}
-        {projects !== null && projects.some((p) => p.status === 'not_checked') && (
+        {firstUnchecked && (
           <p className="text-sm text-ink-3">
             まだ検査されていないプロジェクトがあります。{' '}
-            <Link className="text-primary underline-offset-4 hover:underline" to={paths.settings(slug, 'projects')}>
+            <Link className="text-primary underline-offset-4 hover:underline" to={paths.project(slug, firstUnchecked.repo_full_name)}>
               はじめ方を見る
             </Link>
           </p>

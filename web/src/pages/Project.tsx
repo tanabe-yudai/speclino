@@ -9,6 +9,7 @@ import { LoadingState } from '@/components/LoadingState'
 import { ArtifactSection } from '@/components/knowledge/ArtifactSection'
 import { TabNav } from '@/components/shell/TabNav'
 import { NextActionsCard } from '@/components/project/NextActionsCard'
+import { GettingStarted } from '@/components/project/GettingStarted'
 import { PoliciesPanel } from '@/components/project/PoliciesPanel'
 import { RequirementsPanel } from '@/components/project/RequirementsPanel'
 import { RunHistory } from '@/components/project/RunHistory'
@@ -164,17 +165,13 @@ function OverviewTabs({
   }
   if (overview.status !== 'ok' || !run) {
     return (
+      <div className="space-y-4">
       <Panel>
         <PanelTitle>
           {overview.status === 'not_checked' ? 'まだ検査されていません' : '最新の検査の成果物を読めませんでした'}
         </PanelTitle>
         {overview.status === 'not_checked' ? (
-          <p className="mt-1 text-sm text-ink-2">
-            PR を開くと最初の検査が始まります。{' '}
-            <Link className="text-primary underline-offset-4 hover:underline" to={paths.settings(slug, 'projects')}>
-              はじめ方を見る
-            </Link>
-          </p>
+          <p className="mt-1 text-sm text-ink-2">PR を開くと最初の検査が始まります。</p>
         ) : (
           overview.run && (
             <Link className="mt-2 inline-block text-sm text-primary hover:underline" to={paths.run(overview.run.id)}>
@@ -183,6 +180,8 @@ function OverviewTabs({
           )
         )}
       </Panel>
+      {overview.status === 'not_checked' && <GettingStarted slug={slug} fullName={fullName} />}
+      </div>
     )
   }
   return (
