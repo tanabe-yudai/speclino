@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
@@ -14,7 +15,8 @@ from speclino import cli, cli_sync
 from speclino.services import knowledge_sync as ks
 from tests.unit.services.test_knowledge_sync import BASE, NOW, REPO, _payload
 
-TOKEN = "slsync_secret-token-value"
+# ダミーの値は実行時に作る（固定の文字列は秘密の検出に掛かる）
+TOKEN = "slsync_" + secrets.token_urlsafe(16)
 runner = CliRunner()
 
 

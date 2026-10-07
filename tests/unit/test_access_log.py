@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import secrets
 
 import pytest
 
@@ -10,7 +11,8 @@ from speclino.api import access_log
 from speclino.api.app import create_app
 from speclino.settings import Settings
 
-TOKEN = "slplan_AbC-123_xyz"
+# ダミーの値は実行時に作る（固定の文字列は秘密の検出に掛かる）
+TOKEN = "slplan_" + secrets.token_urlsafe(32)
 
 
 def test_uvicorn_access_log_masks_plan_token(caplog: pytest.LogCaptureFixture) -> None:

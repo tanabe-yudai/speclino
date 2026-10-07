@@ -661,7 +661,7 @@ async def test_expired_plans_are_purged_when_fetching(world: World) -> None:
             now=long_ago,
         )
     async with w.f() as s, s.begin():
-        assert await ks.redeem_plan_ticket(s, "slplan_unknown") is None
+        assert await ks.redeem_plan_ticket(s, "slplan_" + "a" * 43) is None
     async with w.engine.connect() as conn:
         left = (
             await conn.execute(
