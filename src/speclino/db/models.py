@@ -681,6 +681,38 @@ class KnowledgeFetchRecord(Base):
     )
 
 
+class SyncPlanRecord(Base):
+    """`sync_plans`: MCP の `knowledge_pull` が作った書き出し計画（S75、使い捨ての取得 URL）。
+
+    計画の本文は MCP の応答で運ばず、ここに置いて `GET /api/sync/plans/{token}` で 1 回だけ渡す。
+    保存するのはトークンの SHA-256 だけ。ワークスペース・プロジェクトに結び付け、期限
+    （`expires_at`）を過ぎたもの・取得済み（`consumed_at`）のものは渡さない。ワークスペースか
+    プロジェクトを消せば消える。
+    """
+
+    __tablename__ = "sync_plans"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    workspace: Mapped[str] = mapped_column(
+        String, ForeignKey("teams.team", ondelete="CASCADE"), nullable=False, index=True
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    github_repo_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    bundle_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    channel: Mapped[str] = mapped_column(String, nullable=False)
+    token_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    artifact_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    plan_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class LlmAssessmentRecord(Base):
     """`llm_assessments`: LLM 支援の規約の評価の記録（S70）。キーが同じなら LLM を呼ばない。
 

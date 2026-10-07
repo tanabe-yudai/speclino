@@ -209,15 +209,17 @@ def test_knowledge_sync_skill_has_front_matter_and_steps() -> None:
     order = [
         "sync_status",
         "knowledge_pull",
-        "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/speclino_apply.py",
+        "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/speclino_apply.py --plan-url",
         "コミットする",
     ]
     positions = [body.index(word) for word in order]
     assert positions == sorted(positions)
     assert "手で" in body and "終了コード 2" in body
+    assert "/tmp" not in body  # 計画を一時ファイルに書き写させない
 
 
 def test_instructions_point_to_knowledge_pull() -> None:
     text = skill_instructions()
     assert "knowledge_pull" in text and "speclino-knowledge-sync" in text
+    assert "--plan-url" in text
     assert len(text.encode("utf-8")) <= 2048

@@ -1,4 +1,4 @@
-"""`sync_tokens` / `knowledge_fetches` の repository（S62 で最小限。発行・認証・記録の判断は S68）。
+"""`sync_tokens` / `knowledge_fetches` / `sync_plans` の repository（S62・S68・S75）。
 
 `mcp_tokens` と同じ作り: 平文は保存せず SHA-256 だけ、失効は `revoked_at`、最終利用時刻は
 間隔を置いて書く。トークンは 1 つのワークスペースの 1 つのプロジェクトに限る。
@@ -7,13 +7,13 @@
 from __future__ import annotations
 
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, func, or_, select, update
+from sqlalchemy import CursorResult, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from speclino.db.models import KnowledgeFetchRecord, Project, SyncTokenRecord
+from speclino.db.models import KnowledgeFetchRecord, Project, SyncPlanRecord, SyncTokenRecord
 
 _TOUCH_INTERVAL = timedelta(minutes=1)
 
@@ -115,4 +115,33 @@ class KnowledgeFetchRepository:
         return record
 
 
-__all__ = ["KnowledgeFetchRepository", "SyncTokenRepository"]
+class SyncPlanRepository:
+    """`sync_plans`: 使い捨ての取得 URL の計画（S75）。トークンは SHA-256 だけを扱う。"""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create(self, record: SyncPlanRecord, *, now: datetime) -> None:
+        # 期限を 1 日過ぎたものは片付ける（取得済み・失効済みの本文を長く持たない）
+        await self._session.execute(
+            delete(SyncPlanRecord).where(SyncPlanRecord.expires_at < now - timedelta(days=1))
+        )
+        self._session.add(record)
+        await self._session.flush()
+
+    async def consume(self, token_hash: str, *, now: datetime) -> SyncPlanRecord | None:
+        """未取得・期限内なら取得済みにして返す（1 回だけ。同時の取得はどちらか一方だけ通る）。"""
+        result = await self._session.execute(
+            update(SyncPlanRecord)
+            .where(
+                SyncPlanRecord.token_hash == token_hash,
+                SyncPlanRecord.consumed_at.is_(None),
+                SyncPlanRecord.expires_at > now,
+            )
+            .values(consumed_at=now)
+            .returning(SyncPlanRecord)
+        )
+        return result.scalar_one_or_none()
+
+
+__all__ = ["KnowledgeFetchRepository", "SyncPlanRepository", "SyncTokenRepository"]

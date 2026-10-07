@@ -6,15 +6,21 @@ sync トークンの制限。
 
 from __future__ import annotations
 
+import asyncio
+import io
 import json
 import os
+import sys
+import urllib.error
+import urllib.request
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx2
 import pytest
@@ -30,9 +36,9 @@ from speclino.adapters.queue.inprocess import InProcessQueue
 from speclino.adapters.storage.fs import FileSystemBlobStore
 from speclino.api.app import create_app
 from speclino.api.deps import AppState
+from speclino.db.models import Project
 from speclino.domain.knowledge import ArtifactScope, InstructionsContent, SkillContent
 from speclino.domain.knowledge_sync import SyncIdentity, SyncPlan
-from speclino.mcp_server import server as mcp_server
 from speclino.services import bundle_signing, sync_tokens
 from speclino.services import knowledge_registry as kr
 from speclino.services import knowledge_sync as ks
@@ -330,27 +336,164 @@ async def _check(w: World, repo: Path, project_id: str, repo_name: str) -> str:
     return finding.verdict
 
 
-async def test_knowledge_pull_plan_applies_and_verifies(world: World) -> None:
+@asynccontextmanager
+async def _http(w: World) -> AsyncIterator[httpx2.AsyncClient]:
+    """取得 URL を引くための、トークンを付けない HTTP クライアント（同じ DB の別のアプリ）。"""
+    app = _app(w)
+    async with (
+        app.router.lifespan_context(app),
+        httpx2.AsyncClient(
+            transport=httpx2.ASGITransport(app=app), base_url="http://localhost"
+        ) as http,
+    ):
+        yield http
+
+
+async def _pull(w: World, c: Client, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """knowledge_pull の応答と、その URL から取得した計画。"""
+    ticket = _json(await c.call_tool("knowledge_pull", args))
+    async with _http(w) as http:
+        res = await http.get(urlsplit(ticket["plan_url"]).path)
+    assert res.status_code == 200, res.text
+    assert res.headers["cache-control"] == "no-store"
+    return ticket, res.json()
+
+
+class _BridgeOpener:
+    """実行スクリプトの urllib の取得を、テストのイベントループの ASGI アプリに渡す。"""
+
+    def __init__(self, http: httpx2.AsyncClient, loop: asyncio.AbstractEventLoop) -> None:
+        self.http, self.loop = http, loop
+
+    def open(self, request: urllib.request.Request, timeout: float | None = None) -> io.BytesIO:
+        url = request.full_url
+        res = asyncio.run_coroutine_threadsafe(self.http.get(urlsplit(url).path), self.loop).result(
+            timeout=60
+        )
+        if res.status_code != 200:
+            raise urllib.error.HTTPError(url, res.status_code, "error", hdrs=None, fp=None)  # type: ignore[arg-type]
+        return io.BytesIO(res.content)
+
+
+async def _apply_url(w: World, plan_url: str, repo: Path, *extra: str) -> dict[str, Any]:
+    """`speclino_apply.py --plan-url` を実行する（取得は ASGI アプリに橋渡し）。"""
+    loop = asyncio.get_running_loop()
+    async with _http(w) as http:
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                sync_apply.urllib.request, "build_opener", lambda *a: _BridgeOpener(http, loop)
+            )
+            out = io.StringIO()
+            mp.setattr(sys, "stdout", out)
+            argv = ["--plan-url", plan_url, "--allow-http", "--repo", str(repo), *extra]
+            code = await asyncio.to_thread(sync_apply.main, argv)
+    result: dict[str, Any] = json.loads(out.getvalue().splitlines()[-1])
+    assert result["exit_code"] == code
+    return result
+
+
+async def test_knowledge_pull_returns_url_and_round_trip(world: World) -> None:
+    """URL 方式の往復: 取り込み → VERIFIED → 改訂の承認 → 取り込み → VERIFIED →
+    スキルを外す → 削除されて VERIFIED。計画の本文は MCP の応答に載らない。"""
     w = world
     await _seed(w)
     token = await _sync_token(w)
     repo = w.tmp / "checkout"
     repo.mkdir()
+    (repo / "AGENTS.md").write_text("# 手書き\n")
     async with _client(w, token) as c:
         status = _json(await c.call_tool("sync_status", {"repo_full_name": w.repo}))
         assert status["pull_needed"] is True and status["reasons"] == ["no_lock"]
-        plan = _json(await c.call_tool("knowledge_pull", {"repo_full_name": w.repo}))
-    assert ks.verify_plan(SyncPlan.model_validate(plan))
-    assert plan["repo_full_name"] == w.repo and plan["github_repo_id"] == repo_id_of(w.repo)
-    assert sync_apply.apply_plan(repo, plan).ok
+        ticket = _json(await c.call_tool("knowledge_pull", {"repo_full_name": w.repo}))
+    assert set(ticket) == {"plan_url", "expires_at", "bundle_generation", "summary"}
+    assert ticket["plan_url"].startswith("http://localhost:8080/api/sync/plans/slplan_")
+    assert ticket["summary"]["ops"] == 6 and ticket["summary"]["deletes"] == 0
+    assert await _fetch_channels(w) == []  # 取得したときに記録する
+    gen = str(ticket["bundle_generation"])
+    out = await _apply_url(w, ticket["plan_url"], repo, "--expect-generation", gen)
+    assert out["ok"] is True, out
     assert await _check(w, repo, w.pid, w.repo) == "VERIFIED_IN_SCOPE"
     assert await _fetch_channels(w) == ["sync"]
+    # 同じ URL は 2 回目は使えない
+    again = await _apply_url(w, ticket["plan_url"], repo)
+    assert again["exit_code"] == 2 and "404" in again["reason"]
+
     lock_json = (repo / ks.LOCK_PATH).read_text()
     async with _client(w, token) as c:
         fresh = _json(
             await c.call_tool("sync_status", {"repo_full_name": w.repo, "lock_json": lock_json})
         )
     assert fresh["pull_needed"] is False and fresh["reasons"] == []
+
+    await _revise(w, "review", _skill("新しい手順", ArtifactScope(projects=[w.pid])))
+    assert await _check(w, repo, w.pid, w.repo) == "REVIEW"
+    async with _client(w, token) as c:
+        ticket = _json(
+            await c.call_tool("knowledge_pull", {"repo_full_name": w.repo, "lock_json": lock_json})
+        )
+    assert (await _apply_url(w, ticket["plan_url"], repo))["ok"] is True
+    assert await _check(w, repo, w.pid, w.repo) == "VERIFIED_IN_SCOPE"
+
+    pid_b = str(await project_id_of(w.engine, w.repo2))
+    await _revise(w, "review", _skill("新しい手順", ArtifactScope(projects=[pid_b])))
+    lock_json = (repo / ks.LOCK_PATH).read_text()
+    async with _client(w, token) as c:
+        ticket = _json(
+            await c.call_tool("knowledge_pull", {"repo_full_name": w.repo, "lock_json": lock_json})
+        )
+    assert ticket["summary"]["deletes"] == 4
+    out = await _apply_url(w, ticket["plan_url"], repo)
+    assert out["ok"] is True and ".claude/skills/review/SKILL.md" in out["deleted"]
+    assert not (repo / ".claude/skills/review").exists()
+    assert await _check(w, repo, w.pid, w.repo) == "VERIFIED_IN_SCOPE"
+    assert (repo / "AGENTS.md").read_text().startswith("# 手書き\n")
+
+
+async def test_plan_url_expires_and_is_bound_to_the_repository(world: World) -> None:
+    w = world
+    await _seed(w)
+    async with w.f() as s:
+        project = await s.get(Project, uuid.UUID(w.pid))
+    assert project is not None
+    past = datetime.now(UTC) - timedelta(minutes=11)
+    async with w.f() as s, s.begin():
+        old = await ks.issue_plan_ticket(
+            s,
+            workspace=w.slug,
+            project=project,
+            lock_json=None,
+            channel="mcp",
+            token_id=None,
+            now=past,
+        )
+        moved = await ks.issue_plan_ticket(
+            s, workspace=w.slug, project=project, lock_json=None, channel="mcp", token_id=None
+        )
+    async with w.engine.begin() as conn:
+        stored = (
+            await conn.execute(
+                text("SELECT token_hash, plan_json FROM sync_plans WHERE workspace = :w"),
+                {"w": w.slug},
+            )
+        ).all()
+    assert all(old.token not in r.token_hash and moved.token not in r.token_hash for r in stored)
+    # リポジトリ ID が変わった（付け替えられた）プロジェクトの計画は渡さない
+    async with w.engine.begin() as conn:
+        await conn.execute(
+            text("UPDATE projects SET github_repo_id = github_repo_id + 100000 WHERE id = :p"),
+            {"p": w.pid},
+        )
+    async with _http(w) as http:
+        expired = await http.get(f"/api/sync/plans/{old.token}")
+        rebound = await http.get(f"/api/sync/plans/{moved.token}")
+        unknown = await http.get("/api/sync/plans/slplan_nope")
+    async with w.engine.begin() as conn:
+        await conn.execute(
+            text("UPDATE projects SET github_repo_id = github_repo_id - 100000 WHERE id = :p"),
+            {"p": w.pid},
+        )
+    assert expired.status_code == rebound.status_code == unknown.status_code == 404
+    assert await _fetch_channels(w) == []
 
 
 async def test_knowledge_pull_deletes_only_with_verified_lock(world: World) -> None:
@@ -360,10 +503,9 @@ async def test_knowledge_pull_deletes_only_with_verified_lock(world: World) -> N
     repo = w.tmp / "checkout"
     repo.mkdir()
     async with _client(w, token) as c:
-        first = _json(await c.call_tool("knowledge_pull", {"repo_full_name": w.repo}))
+        _, first = await _pull(w, c, {"repo_full_name": w.repo})
     assert sync_apply.apply_plan(repo, first).ok
     lock_json = (repo / ks.LOCK_PATH).read_text()
-    # スキルを同じワークスペースの別のプロジェクトに移す（このリポジトリからは外れる）
     pid_b = str(await project_id_of(w.engine, w.repo2))
     await _revise(w, "review", _skill("手順", ArtifactScope(projects=[pid_b])))
     forged = json.loads(lock_json)
@@ -372,14 +514,11 @@ async def test_knowledge_pull_deletes_only_with_verified_lock(world: World) -> N
         status = _json(
             await c.call_tool("sync_status", {"repo_full_name": w.repo, "lock_json": lock_json})
         )
-        no_delete = _json(
-            await c.call_tool(
-                "knowledge_pull", {"repo_full_name": w.repo, "lock_json": json.dumps(forged)}
-            )
+        _, no_delete = await _pull(
+            w, c, {"repo_full_name": w.repo, "lock_json": json.dumps(forged)}
         )
-        plan = _json(
-            await c.call_tool("knowledge_pull", {"repo_full_name": w.repo, "lock_json": lock_json})
-        )
+        _, plan = await _pull(w, c, {"repo_full_name": w.repo, "lock_json": lock_json})
+    assert ks.verify_plan(SyncPlan.model_validate(plan))
     assert status["pull_needed"] is True and status["reasons"] == ["members_changed"]
     assert {op["op"] for op in no_delete["ops"]} <= {"write", "set_managed_block"}
     deletes = sorted(op["path"] for op in plan["ops"] if op["op"] == "delete")
@@ -403,7 +542,7 @@ async def test_knowledge_pull_tenant_isolation(world: World) -> None:
     # ワークスペースの MCP トークンは同じワークスペースの別のリポジトリも読める（A9）
     mcp_token = await issue_mcp_token(w.engine, w.slug)
     async with _client(w, mcp_token) as c:
-        plan_b = _json(await c.call_tool("knowledge_pull", {"repo_full_name": w.repo2}))
+        _, plan_b = await _pull(w, c, {"repo_full_name": w.repo2})
         other = await c.call_tool("knowledge_pull", {"repo_full_name": w.other_repo})
     assert plan_b["github_repo_id"] == repo_id_of(w.repo2)
     assert plan_b["lock"]["github_repo_id"] == repo_id_of(w.repo2)
@@ -411,16 +550,25 @@ async def test_knowledge_pull_tenant_isolation(world: World) -> None:
     assert await _fetch_channels(w) == ["mcp"]
 
 
-async def test_knowledge_pull_refuses_large_plan(
+async def test_knowledge_pull_refuses_large_plan_and_inputs(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     w = world
     await _seed(w)
     token = await _sync_token(w)
-    monkeypatch.setattr(mcp_server, "MCP_PLAN_MAX_BYTES", 100)
     async with _client(w, token) as c:
+        huge_lock = await c.call_tool(
+            "knowledge_pull", {"repo_full_name": w.repo, "lock_json": "x" * (1024 * 1024 + 1)}
+        )
+        many = await c.call_tool(
+            "sync_status",
+            {"repo_full_name": w.repo, "local_hashes": {f"p{i}": "h" for i in range(2001)}},
+        )
+        monkeypatch.setattr(sync_apply, "MAX_PLAN_BYTES", 100)
         refused = await c.call_tool("knowledge_pull", {"repo_full_name": w.repo})
-    assert refused.is_error and "speclino sync" in _text(refused)
+    assert huge_lock.is_error and "lock_json" in _text(huge_lock)
+    assert many.is_error and "local_hashes" in _text(many)
+    assert refused.is_error and "超える" in _text(refused)
     assert await _fetch_channels(w) == []
 
 
@@ -431,7 +579,7 @@ async def test_sync_status_reports_modified_files(world: World) -> None:
     repo = w.tmp / "checkout"
     repo.mkdir()
     async with _client(w, token) as c:
-        plan = _json(await c.call_tool("knowledge_pull", {"repo_full_name": w.repo}))
+        _, plan = await _pull(w, c, {"repo_full_name": w.repo})
     assert sync_apply.apply_plan(repo, plan).ok
     lock = json.loads((repo / ks.LOCK_PATH).read_text())
     hashes = {p: h for p, h in lock["files"].items() if p not in ks.MANAGED_FILES}

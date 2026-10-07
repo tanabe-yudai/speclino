@@ -196,9 +196,21 @@ bundle と lock は署名した鍵の ID（`key_id`）を持つ。サーバは�
    メンバーと規約は同じなので、各リポジトリの前の鍵の lock は**前の鍵が鍵束にある間は VERIFIED のまま**
    （lock の鮮度はメンバーと規約で比べ、世代の差だけでは古い扱いにしない）。手順 6 で前の鍵を外すと
    UNKNOWN になるので、それまでに各リポジトリで `speclino sync` をやり直してコミットする
-6. 全リポジトリの lock を新しい鍵で取り直した（または lock の期限の 30 日が過ぎた）ら、
-   `mount_bundle_signing_keys_old = false` にして apply し、`bundle-signing-keys-old` の値を無効化する
-   （`gcloud secrets versions disable`）。前の鍵の lock と bundle はその時点で検証できなくなる
+6. 前の鍵は、**その鍵で最後に署名した lock が全リポジトリで新しい鍵の lock に取り直されるまで**
+   （少なくとも手順 3 から 30 日、lock の期限）`bundle-signing-keys-old` に残す。前の鍵の lock は
+   ゲートの照合だけでなく、取り込み（MCP の `knowledge_pull` / `speclino sync`）の削除と上書きの根拠
+   にも使う（S75）。外すのが早いと、前回の lock を確かめられず、外れた知識のファイルは削除されず、
+   内容の変わった書き出し済みのファイルとの衝突で取り込みが止まる（実行スクリプトの終了コード 2）。
+   全リポジトリで取り直したら、`mount_bundle_signing_keys_old = false` にして apply し、
+   `bundle-signing-keys-old` の値を無効化する（`gcloud secrets versions disable`）。前の鍵の lock と
+   bundle はその時点で検証できなくなる
+
+**前の鍵を外した後に取り込みが止まったリポジトリの復旧**: 書き出したファイル（`.claude/skills/` と
+`.agents/skills/` の SpecLino のスキル、`.speclino/specs/`、AGENTS.md / CLAUDE.md の
+`<!-- speclino:begin … -->` 〜 `<!-- speclino:end -->` の区画、`.speclino/lock.json`）を消し、
+取り込み直して（エージェントの `knowledge_pull`、または `speclino sync`）コミットする。区画の外と、
+利用者が自分で置いたスキルは消さない。消し忘れた古い知識のファイルは、新しい lock の照合
+（`KNOWLEDGE-LOCK-001`）では検出されないので、消す一覧は前の lock の `files` から作る
 
 鍵が漏れた疑いのときは、手順 2 と 6 を飛ばして（前の鍵を残さず）すぐに 3〜5 を行う。前の鍵で
 署名された bundle と lock は直ちに検証できなくなり、検査は sync をやり直すまで失敗する（安全側）。

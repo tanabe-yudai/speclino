@@ -55,6 +55,8 @@ def delete(path: str, expected: str) -> dict[str, Any]:
 def plan(*ops: dict[str, Any], gen: int = 1, repo: str = "acme/app") -> dict[str, Any]:
     files: dict[str, str] = {}
     absent: list[str] = []
+    # 区画の世代は計画の世代にそろえる（そろわない計画は前提の確認で止まる）
+    ops = tuple({**op, "generation": gen} if "generation" in op else op for op in ops)
     for op in ops:
         if op["op"] == "write":
             files[op["path"]] = op["sha256"]
@@ -561,10 +563,12 @@ def test_main_reads_file_and_prints_json(
 def test_main_reads_stdin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(plan(*BASE))))
+    monkeypatch.setattr(
+        sys, "stdin", io.TextIOWrapper(io.BytesIO(json.dumps(plan(*BASE)).encode()))
+    )
     assert sa.main(["-", "--repo", str(tmp_path)]) == 0
     assert (tmp_path / SKILL).exists()
-    monkeypatch.setattr(sys, "stdin", io.StringIO("{not json"))
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b"{not json")))
     assert sa.main(["-", "--repo", str(tmp_path)]) == 2
     assert "JSON" in json.loads(capsys.readouterr().out.splitlines()[-1])["reason"]
 
@@ -612,3 +616,193 @@ def test_constants_match_the_server() -> None:
     assert (sa.MANAGED_BEGIN, sa.MANAGED_END) == (MANAGED_BEGIN, MANAGED_END)
     assert tuple(ks.MANAGED_FILES) == sa.MANAGED_FILES
     assert sa.file_hash("a\r\nb") == content_hash("a\nb") == ks.file_hash("a\nb")
+
+
+# ---------------------------------------------------------------------------
+# fix round 1
+# ---------------------------------------------------------------------------
+
+
+def test_incomplete_rollback_keeps_backup_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """置き換えの 3 回目と復元の 1 回目を失敗させる: 退避を消さず、その場所を理由に書く。"""
+    sa.apply_plan(tmp_path, plan(*BASE))
+    real = os.replace
+    calls = {"n": 0, "restore": 0}
+
+    def flaky(src: Any, dst: Any) -> None:
+        calls["n"] += 1
+        if calls["n"] == 3:
+            raise OSError("boom")
+        if calls["n"] > 3:
+            calls["restore"] += 1
+            if calls["restore"] == 1:
+                raise OSError("restore failed")
+        real(src, dst)
+
+    monkeypatch.setattr(os, "replace", flaky)
+    result = sa.apply_plan(tmp_path, _second_plan())
+    monkeypatch.undo()
+    assert result.exit_code == sa.EXIT_FAILED
+    kept = [x for x in (tmp_path / ".speclino").iterdir() if x.name.startswith(".tmp-")]
+    assert len(kept) == 1 and str(kept[0]) in (result.reason or "")
+    assert "元に戻せなかった" in (result.reason or "")
+    # 退避した前の中身（SKILL の手順）が残っている
+    assert any(p.read_bytes() == "手順\n".encode() for p in kept[0].iterdir())
+
+
+def test_prune_failure_is_only_a_warning(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    old = ".claude/skills/old/SKILL.md"
+    sa.apply_plan(tmp_path, plan(write(old, "古い\n")))
+
+    def deny(self: Path) -> None:
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(Path, "rmdir", deny)
+    result = sa.apply_plan(tmp_path, plan(delete(old, _h("古い\n")), gen=2))
+    monkeypatch.undo()
+    assert result.exit_code == 0 and result.deleted == [old]
+    assert sa.LOCK_PATH in result.written
+    assert result.warnings and "空ディレクトリ" in result.warnings[0]
+    assert not (tmp_path / old).exists()
+
+
+def test_rejects_block_generation_different_from_plan(tmp_path: Path) -> None:
+    p = plan(*BASE)
+    p["ops"][1] = {**p["ops"][1], "generation": 7}
+    stopped(sa.apply_plan(tmp_path, p), "世代")
+
+
+def test_file_changed_after_preflight_rolls_back_with_exit_2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sa.apply_plan(tmp_path, plan(*BASE))
+    real_stage = sa._stage
+
+    def edit_then_stage(*args: Any, **kwargs: Any) -> Any:
+        staged = real_stage(*args, **kwargs)
+        (tmp_path / SPEC).unlink()
+        (tmp_path / SPEC).write_text("途中で直した\n")
+        return staged
+
+    monkeypatch.setattr(sa, "_stage", edit_then_stage)
+    p = _second_plan()
+    p["ops"][3] = delete(SPEC, _h("# orders\n"))  # SKILL・区画・billing を先に置き換えてから
+    result = sa.apply_plan(tmp_path, p)
+    monkeypatch.undo()
+    stopped(result, "途中で変更")
+    assert (tmp_path / SPEC).read_text() == "途中で直した\n"
+    assert (tmp_path / SKILL).read_text() == "手順\n"  # 置き換え済みのものも戻した
+    assert not (tmp_path / ".speclino/specs/billing.md").exists()
+
+
+class _PlanServer:
+    """計画を 1 回だけ返す HTTP サーバ（URL 方式の実行スクリプトの試験）。"""
+
+    def __init__(self, body: bytes, status: int = 200, location: str | None = None) -> None:
+        import http.server
+        import threading
+
+        outer = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802
+                self.send_response(outer.status)
+                if outer.location:
+                    self.send_header("Location", outer.location)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(outer.body)
+
+            def log_message(self, *args: Any) -> None:
+                pass
+
+        self.body, self.status, self.location = body, status, location
+        self.server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.server.server_port}/api/sync/plans/slplan_x"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def close(self) -> None:
+        self.server.shutdown()
+
+
+@pytest.fixture
+def plan_server() -> Any:
+    servers: list[_PlanServer] = []
+
+    def start(body: bytes, status: int = 200, location: str | None = None) -> _PlanServer:
+        s = _PlanServer(body, status, location)
+        servers.append(s)
+        return s
+
+    yield start
+    for s in servers:
+        s.close()
+
+
+def _main_json(capsys: pytest.CaptureFixture[str], *argv: str) -> tuple[int, dict[str, Any]]:
+    code = sa.main(list(argv))
+    return code, json.loads(capsys.readouterr().out.splitlines()[-1])
+
+
+def test_main_fetches_plan_url(
+    tmp_path: Path, plan_server: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    srv = plan_server(json.dumps(plan(*BASE)).encode())
+    code, out = _main_json(capsys, "--plan-url", srv.url, "--repo", str(tmp_path))
+    assert code == 2 and "https" in out["reason"]  # http は既定で拒否
+    assert not (tmp_path / SKILL).exists()
+    code, out = _main_json(
+        capsys,
+        "--plan-url",
+        srv.url,
+        "--allow-http",
+        "--repo",
+        str(tmp_path),
+        "--expect-generation",
+        "2",
+    )
+    assert code == 2 and "世代" in out["reason"]
+    code, out = _main_json(
+        capsys,
+        "--plan-url",
+        srv.url,
+        "--allow-http",
+        "--repo",
+        str(tmp_path),
+        "--expect-generation",
+        "1",
+    )
+    assert code == 0 and out["ok"] is True
+    assert (tmp_path / SKILL).read_text() == "手順\n"
+
+
+def test_allow_http_is_only_for_localhost(tmp_path: Path) -> None:
+    with pytest.raises(sa.PreconditionFailed, match="https"):
+        sa.fetch_plan("http://speclino.example.com/api/sync/plans/x", allow_http=True)
+    with pytest.raises(sa.PreconditionFailed, match="https"):
+        sa.fetch_plan("file:///etc/passwd", allow_http=True)
+
+
+@pytest.mark.parametrize("case", ["404", "redirect", "large", "garbage"])
+def test_plan_url_failures_write_nothing(
+    tmp_path: Path,
+    plan_server: Any,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+) -> None:
+    body = json.dumps(plan(*BASE)).encode()
+    if case == "404":
+        srv = plan_server(b"{}", status=404)
+    elif case == "redirect":
+        srv = plan_server(b"", status=302, location="http://127.0.0.1:1/evil")
+    elif case == "large":
+        monkeypatch.setattr(sa, "MAX_PLAN_BYTES", 100)
+        srv = plan_server(body)
+    else:
+        srv = plan_server(b"<html>")
+    code, out = _main_json(capsys, "--plan-url", srv.url, "--allow-http", "--repo", str(tmp_path))
+    assert code == 2 and out["ok"] is False, out
+    assert tree(tmp_path) == {}

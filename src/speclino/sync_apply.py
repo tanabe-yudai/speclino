@@ -4,15 +4,23 @@ design/2026-10-07-agent-sync.md の A2–A6・3 章。標準ライブラリだ�
 動く（speclino を入れていない環境でも、プラグインの `scripts/speclino_apply.py` として走る）。
 正本は `src/speclino/sync_apply.py` で、プラグインの写しとのバイト一致はテストで固定する。
 
-    python3 speclino_apply.py <plan.json | -> [--repo DIR]
+    python3 speclino_apply.py --plan-url <URL> [--repo DIR] [--expect-generation N]
+    python3 speclino_apply.py <plan.json | -> [--repo DIR]     # CLI・手元の計画ファイル
+
+- MCP の `knowledge_pull` は計画の本文ではなく使い捨ての取得 URL を返す。`--plan-url` で
+  標準ライブラリの urllib で取得する（https だけ。開発用に `--allow-http` で localhost の http を
+  許す。リダイレクトは辿らない。8MB まで）
 
 - 計画はサーバが作って署名する。ここでは署名を確かめない（鍵を持たない）。かわりに、計画と lock の
   リポジトリ ID の一致と、`.git` の remote から `owner/name` を推定できればその一致を確かめる
 - すべての操作の前提（許可リストのパス・パスの途中に symlink が無い・ディレクトリの取り違えが無い・
   `expected_*` の一致・管理区画の印が 1 組だけ・上限・lock と操作の対応）を先に全部確かめ、1 つでも
   崩れたら何も書かずに終了コード 2
-- 通れば `.speclino/.tmp-<乱数>/` に新しい中身を全部書き、置き換え直前に symlink を確かめ直してから
-  1 つずつ置き換える。途中で失敗したら退避から元に戻して終了コード 1。lock は最後に書く
+- 通れば `.speclino/.tmp-<乱数>/` に新しい中身を全部書き、置き換え直前に symlink と手元の中身
+  （事前確認で読んだもの）を確かめ直してから 1 つずつ置き換える。途中で失敗したら退避から元に戻す
+  （中身が変わっていたなら終了コード 2、それ以外は 1）。元に戻せなかったときは退避の一時
+  ディレクトリを消さずに残し、その場所を理由に書く。lock は最後に書く
+- 消したファイルの親の空ディレクトリの片付けに失敗しても、書き出しは済んでいるので警告だけ
 - 結果は JSON 1 行（書いた・消した・変えなかったパスと、止まった理由）
 
 op の種類:
@@ -39,6 +47,9 @@ import re
 import secrets
 import shutil
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -56,6 +67,7 @@ MAX_FILE_BYTES = 256 * 1024
 MAX_MANAGED_BYTES = 4 * MAX_FILE_BYTES  # 複数の指示書を連結するので 1 本より大きくなりうる
 MAX_TOTAL_BYTES = 8 * 1024 * 1024
 MAX_FILES = 2000
+MAX_PLAN_BYTES = 8 * 1024 * 1024  # 計画の JSON そのものの上限（URL から取得するときも同じ）
 
 EXIT_OK = 0
 EXIT_FAILED = 1  # 予期しない失敗（元に戻した）
@@ -76,6 +88,10 @@ _OPS = ("write", "set_managed_block", "remove_managed_block", "delete")
 
 class PreconditionFailed(ValueError):
     """計画を当てる前提が崩れた（何も書いていない）。"""
+
+
+class RollbackIncomplete(OSError):
+    """置き換えの途中で失敗し、元に戻せないファイルが残った（退避の一時ディレクトリを残す）。"""
 
 
 class ManagedBlockError(ValueError):
@@ -217,6 +233,7 @@ class ApplyResult:
     written: list[str] = field(default_factory=list)
     deleted: list[str] = field(default_factory=list)
     unchanged: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     reason: str | None = None
 
     @property
@@ -240,6 +257,8 @@ class _Change:
     target: Path
     text: str | None
     removes: bool = False
+    # 事前確認で読んだ手元の中身（無ければ None）。置き換えの直前に同じであることを確かめる
+    original: str | None = None
     staged: Path | None = None
     backup: Path | None = None
 
@@ -374,9 +393,16 @@ def _check_lock(ops: Sequence[Mapping[str, Any]], lock: Mapping[str, Any]) -> No
 
 def _decide(root: Path, op: Mapping[str, Any]) -> _Change | None:
     """1 つの op の結果（新しい本文か削除）。何も変えないなら None。前提が崩れれば例外。"""
-    kind, path = op["op"], op["path"]
-    target = check_target(root, path)
+    target = check_target(root, op["path"])
     existing = _read_text(target)
+    change = _decide_op(op, target, existing)
+    if change is not None:
+        change.original = existing
+    return change
+
+
+def _decide_op(op: Mapping[str, Any], target: Path, existing: str | None) -> _Change | None:
+    kind, path = op["op"], op["path"]
     if kind == "write":
         content, digest = op["content"], _hash_arg(op, "sha256", required=True)
         if file_hash(content) != digest:
@@ -446,11 +472,19 @@ def _make_parents(root: Path, directory: Path) -> list[Path]:
 
 
 def _commit(root: Path, tmp: Path, changes: list[_Change]) -> None:
-    """changes を順に適用する。途中で失敗したら、適用済みを退避から戻して例外を投げ直す。"""
+    """changes を順に適用する。途中で失敗したら、適用済みを退避から戻して例外を投げ直す。
+
+    置き換えの直前に、手元の中身が事前確認で読んだものと同じかを確かめる（変わっていれば
+    `PreconditionFailed`）。元に戻せないファイルが残れば `RollbackIncomplete`。
+    """
     done: list[_Change] = []
     created_dirs: list[Path] = []
     try:
         for i, change in enumerate(changes):
+            if check_target(root, change.path) != change.target:
+                raise PreconditionFailed(f"書き出し先が変わった: {change.path}")
+            if _read_text(change.target) != change.original:
+                raise PreconditionFailed(f"{change.path} が取り込みの途中で変更された")
             if change.target.exists():
                 change.backup = tmp / f"b{i}"
                 os.replace(change.target, change.backup)
@@ -461,11 +495,10 @@ def _commit(root: Path, tmp: Path, changes: list[_Change]) -> None:
     except BaseException as e:
         failed = _rollback(done, created_dirs)
         if failed:
-            raise OSError(f"{e}（元に戻せなかったファイル: {', '.join(failed)}）") from e
+            raise RollbackIncomplete(
+                f"{e}（元に戻せなかったファイル: {', '.join(failed)}。前の中身は {tmp} に残した）"
+            ) from e
         raise
-    for change in done:
-        if change.text is None:
-            _prune_empty_parents(root, change.target.parent)
 
 
 def _rollback(done: list[_Change], created_dirs: list[Path]) -> list[str]:
@@ -512,6 +545,9 @@ def _apply(repo_root: Path, plan: Mapping[str, Any], result: ApplyResult) -> Non
     result.bundle_generation = _check_repo(root, plan, lock)
     check_ops(ops)
     _check_lock(ops, lock)
+    for op in ops:
+        if op["op"] == "set_managed_block" and op.get("generation") != result.bundle_generation:
+            raise PreconditionFailed(f"{op['path']} の区画の世代が計画の世代と一致しない")
     lock_target = check_target(root, LOCK_PATH)
 
     changes: list[_Change] = []
@@ -522,33 +558,54 @@ def _apply(repo_root: Path, plan: Mapping[str, Any], result: ApplyResult) -> Non
         else:
             changes.append(change)
     lock_text = json.dumps(lock, ensure_ascii=False, indent=2) + "\n"
-    if _read_text(lock_target) == lock_text:
+    current_lock = _read_text(lock_target)
+    if current_lock == lock_text:
         result.unchanged.append(LOCK_PATH)
     else:
-        changes.append(_Change(LOCK_PATH, lock_target, lock_text))
+        changes.append(_Change(LOCK_PATH, lock_target, lock_text, original=current_lock))
     if not changes:
         return
 
     (root / ".speclino").mkdir(exist_ok=True)
     tmp = root / ".speclino" / f"{_TMP_PREFIX}{secrets.token_hex(8)}"
     tmp.mkdir()
+    keep_tmp = False
     try:
         _stage(tmp, changes)
-        # 段階書きの間に置き換えられていないか、置き換えの直前に確かめ直す
-        for change in changes:
-            if check_target(root, change.path) != change.target:
-                raise PreconditionFailed(f"書き出し先が変わった: {change.path}")
         _commit(root, tmp, changes)
+    except RollbackIncomplete:
+        keep_tmp = True  # 退避した前の中身を消さない（手で戻すため）
+        raise
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        if not keep_tmp:
+            shutil.rmtree(tmp, ignore_errors=True)
     for change in changes:
         (result.deleted if change.removes else result.written).append(change.path)
+    # 書き出しは済んでいる。空ディレクトリの片付けの失敗は警告にとどめる
+    for change in changes:
+        if change.text is None:
+            try:
+                _prune_empty_parents(root, change.target.parent)
+            except OSError as e:
+                result.warnings.append(
+                    f"{change.path} の親の空ディレクトリを消せなかった: {type(e).__name__}"
+                )
 
 
-def apply_plan(repo_root: Path, plan: Mapping[str, Any]) -> ApplyResult:
-    """計画を repo_root に当てる。終了コード 0 / 2（前提が崩れ何もしていない）/ 1（元に戻した）。"""
+def apply_plan(
+    repo_root: Path, plan: Mapping[str, Any], *, expect_generation: int | None = None
+) -> ApplyResult:
+    """計画を repo_root に当てる。終了コード 0 / 2（前提が崩れ何もしていない）/ 1（元に戻した）。
+
+    `expect_generation` があれば、計画の世代がそれと一致することも確かめる（`knowledge_pull` の
+    応答の `bundle_generation`）。
+    """
     result = ApplyResult(EXIT_OK)
     try:
+        if expect_generation is not None and (
+            not isinstance(plan, Mapping) or plan.get("bundle_generation") != expect_generation
+        ):
+            raise PreconditionFailed(f"計画の世代が {expect_generation} ではない")
         _apply(repo_root, plan, result)
     except PreconditionFailed as e:
         return ApplyResult(EXIT_PRECONDITION, result.bundle_generation, reason=str(e))
@@ -557,20 +614,77 @@ def apply_plan(repo_root: Path, plan: Mapping[str, Any]) -> ApplyResult:
     return result
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+        raise PreconditionFailed("計画の URL がリダイレクトした（辿らない）")
+
+
+def fetch_plan(url: str, *, allow_http: bool = False, timeout: float = 30.0) -> Any:
+    """計画を URL から取得して JSON で返す。https だけ（`allow_http` なら localhost の http）。"""
+    parsed = urllib.parse.urlsplit(url)
+    local = parsed.hostname in ("localhost", "127.0.0.1", "::1")
+    if parsed.scheme != "https" and not (parsed.scheme == "http" and allow_http and local):
+        raise PreconditionFailed(
+            "計画の URL は https だけ受け付ける（開発用の localhost の http は --allow-http）"
+        )
+    opener = urllib.request.build_opener(_NoRedirect)
+    request = urllib.request.Request(url, headers={"Accept": "application/json"})
+    try:
+        with opener.open(request, timeout=timeout) as res:
+            raw = res.read(MAX_PLAN_BYTES + 1)
+    except urllib.error.HTTPError as e:
+        raise PreconditionFailed(
+            f"計画を取得できない: HTTP {e.code}（URL は 1 回だけ・10 分で失効。"
+            "knowledge_pull からやり直す）"
+        ) from e
+    except (urllib.error.URLError, OSError) as e:
+        raise PreconditionFailed(f"計画を取得できない: {type(e).__name__}") from e
+    if len(raw) > MAX_PLAN_BYTES:
+        raise PreconditionFailed(f"計画が大きすぎる（{MAX_PLAN_BYTES} バイトを超える）")
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as e:
+        raise PreconditionFailed(f"計画の JSON を読めない: {e}") from e
+
+
+def _read_plan(args: argparse.Namespace) -> Any:
+    if args.plan_url:
+        return fetch_plan(args.plan_url, allow_http=args.allow_http)
+    try:
+        if args.plan == "-":
+            raw = sys.stdin.buffer.read(MAX_PLAN_BYTES + 1)
+        else:
+            with open(args.plan, "rb") as f:
+                raw = f.read(MAX_PLAN_BYTES + 1)
+        if len(raw) > MAX_PLAN_BYTES:
+            raise PreconditionFailed(f"計画が大きすぎる（{MAX_PLAN_BYTES} バイトを超える）")
+        return json.loads(raw.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
+        raise PreconditionFailed(f"計画の JSON を読めない: {e}") from e
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="speclino_apply.py", description="SpecLino の書き出し計画を checkout に当てる"
     )
-    parser.add_argument("plan", help="計画の JSON ファイル（- なら標準入力）")
+    parser.add_argument("plan", nargs="?", help="計画の JSON ファイル（- なら標準入力）")
+    parser.add_argument("--plan-url", help="knowledge_pull が返した計画の取得 URL（1 回だけ）")
+    parser.add_argument(
+        "--allow-http", action="store_true", help="開発用: localhost の http の URL を許す"
+    )
     parser.add_argument("--repo", default=".", help="checkout のルート（既定は現在のディレクトリ）")
+    parser.add_argument(
+        "--expect-generation", type=int, help="knowledge_pull の応答の bundle_generation"
+    )
     args = parser.parse_args(argv)
+    if bool(args.plan) == bool(args.plan_url):
+        parser.error("計画のファイルか --plan-url のどちらか一方を指定する")
     try:
-        raw = sys.stdin.read() if args.plan == "-" else Path(args.plan).read_text(encoding="utf-8")
-        plan = json.loads(raw)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
-        result = ApplyResult(EXIT_PRECONDITION, reason=f"計画の JSON を読めない: {e}")
+        plan = _read_plan(args)
+    except PreconditionFailed as e:
+        result = ApplyResult(EXIT_PRECONDITION, reason=str(e))
     else:
-        result = apply_plan(Path(args.repo), plan)
+        result = apply_plan(Path(args.repo), plan, expect_generation=args.expect_generation)
     print(result.to_json())
     return result.exit_code
 

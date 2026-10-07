@@ -15,10 +15,11 @@
   1 つのプロジェクトに限る（`verification_start` は拒否、他のプロジェクトは「無い」と同じ応答）。
   チームの知識を読む `sync_status` / `spec_get` / `skill_get` は承認済みの今の bundle から答え、
   取得を `knowledge_fetches` に残す
-- S75: `knowledge_pull`（書き出しの計画 `SyncPlan` を返す。エージェントはプラグインの
-  `scripts/speclino_apply.py` に渡して当てる）と、`sync_status` の `pull_needed` / `reasons`。
-  ワークスペースの MCP トークンと sync トークンのどちらでも呼べる（リポジトリは必ず
-  `_workspace_project` で引き、lock のリポジトリ ID は引いた Project から入れる）。計画は 2MB まで
+- S75: `knowledge_pull`（書き出しの計画を作って置き、使い捨ての取得 URL を返す。計画の本文は
+  応答で運ばない。エージェントはプラグインの `scripts/speclino_apply.py --plan-url` に渡す）と、
+  `sync_status` の `pull_needed` / `reasons`。ワークスペースの MCP トークンと sync トークンの
+  どちらでも呼べる（リポジトリは必ず `_workspace_project` で引き、lock のリポジトリ ID は引いた
+  Project から入れる）。計画の上限は CLI と同じ 8MB
 - S67: `spec_suggest`（AI の書き換え提案）。ワークスペースの MCP トークンだけが呼べる
   （sync トークンは読み取り専用なので拒否。LLM の費用を使うため）。
   返すのは本文の置換の提案と検証の要約だけで、IR は返さない
@@ -71,8 +72,9 @@ MCP_PATH = "/mcp"
 WORKSPACE_STATE_KEY = "mcp_workspace"
 # 同じく、トークンの身元（`Principal`）の置き場所
 PRINCIPAL_STATE_KEY = "mcp_principal"
-# `knowledge_pull` の 1 回の応答の上限（A10。超えれば CLI の `speclino sync` を案内する）
-MCP_PLAN_MAX_BYTES = 2 * 1024 * 1024
+# `sync_status` / `knowledge_pull` の引数の上限（lock の本文・申告のハッシュ）
+MAX_LOCK_JSON_BYTES = 1024 * 1024
+MAX_HASH_ENTRIES = 2000
 
 
 @dataclass(frozen=True)
@@ -209,6 +211,7 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
         `knowledge_pull` で取り込む。最終的な判定はゲートの照合（KNOWLEDGE-LOCK-001）。
         """
         principal = _principal(ctx)
+        _check_inputs(lock_json, local_hashes, managed_inner)
         project, resolved = await _resolve(get_state(), principal, repo_full_name)
         return _sync_status(project, resolved, lock_json or None, local_hashes, managed_inner)
 
@@ -216,37 +219,45 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
     async def knowledge_pull(
         repo_full_name: str, ctx: Context, lock_json: str = ""
     ) -> dict[str, Any]:
-        """このリポジトリに当たる承認済みの知識の書き出し計画（SyncPlan、サーバの署名つき）を返す。
+        """このリポジトリに当たる承認済みの知識の書き出し計画を作り、使い捨ての取得 URL を返す。
 
-        計画をそのまま JSON ファイルに保存し、
-        `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/speclino_apply.py <ファイル>` で当てる
-        （ファイルや lock を自分で書かない）。`lock_json` に手元の
-        `.speclino/lock.json` の本文を渡すと、サーバが確かめたうえで外れた知識の削除も計画する。
-        計画が 2MB を超えるときは断るので、CLI の `speclino sync` を使う。
+        `lock_json` に手元の `.speclino/lock.json` の本文を必ず渡す（サーバが確かめたうえで、
+        外れた知識の削除も計画する。渡さないと削除は計画されず古い知識が残りうる）。返すのは
+        `plan_url`（1 回だけ・10 分で失効）・`expires_at`・`bundle_generation`・`summary`。
+        リポジトリのルートで `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/speclino_apply.py --plan-url
+        <plan_url> --expect-generation <bundle_generation>` を実行する（計画やファイルを自分で
+        書かない）。
         """
         state = get_state()
         principal = _principal(ctx)
+        _check_inputs(lock_json, None, None)
         project = await _workspace_project(state, principal, repo_full_name)
         try:
             async with state.session_factory() as session, session.begin():
-                plan = await knowledge_sync.plan_for_project(
+                ticket = await knowledge_sync.issue_plan_ticket(
                     session,
                     workspace=principal.workspace,
                     project=project,
                     lock_json=lock_json or None,
                     channel=principal.channel,
                     token_id=principal.token_id,
-                    max_plan_bytes=MCP_PLAN_MAX_BYTES,
                 )
-        except knowledge_sync.PlanTooLarge as e:
-            raise ToolError(
-                f"{e}。MCP では取り込めないので、CLI の `speclino sync` で取り込んでください"
-            ) from e
         except LookupError as e:
             raise ToolError(f"{repo_full_name} はこのワークスペースに登録されていない") from e
         except ValueError as e:
             raise ToolError(f"知識を書き出せない: {e}") from e
-        return plan.model_dump(mode="json")
+        base = state.settings.public_url.rstrip("/")
+        return {
+            "plan_url": f"{base}/api/sync/plans/{ticket.token}",
+            "expires_at": ticket.expires_at.isoformat(),
+            "bundle_generation": ticket.bundle_generation,
+            "summary": {
+                "ops": ticket.ops,
+                "writes": ticket.writes,
+                "deletes": ticket.deletes,
+                "bytes": ticket.bytes,
+            },
+        }
 
     @mcp.tool()
     async def spec_get(repo_full_name: str, name: str, ctx: Context) -> dict[str, Any]:
@@ -355,6 +366,20 @@ async def _record_fetch(
             project_id=project.id,
             artifact_ids=[rev.artifact_id],
         )
+
+
+def _check_inputs(
+    lock_json: str, local_hashes: dict[str, str] | None, managed_inner: dict[str, str] | None
+) -> None:
+    """引数の大きさの上限（lock の本文 1MB、申告のハッシュは 2000 件・1MB まで）。"""
+    if len(lock_json.encode("utf-8")) > MAX_LOCK_JSON_BYTES:
+        raise ToolError(f"lock_json が大きすぎる（{MAX_LOCK_JSON_BYTES} バイトまで）")
+    for name, given in (("local_hashes", local_hashes), ("managed_inner", managed_inner)):
+        if given is None:
+            continue
+        size = sum(len(k.encode("utf-8")) + len(v.encode("utf-8")) for k, v in given.items())
+        if len(given) > MAX_HASH_ENTRIES or size > MAX_LOCK_JSON_BYTES:
+            raise ToolError(f"{name} が大きすぎる（{MAX_HASH_ENTRIES} 件・1MB まで）")
 
 
 def _normalize_hash(value: str) -> str:

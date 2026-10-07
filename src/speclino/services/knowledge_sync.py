@@ -28,8 +28,10 @@ design/2026-10-07-agent-sync.md）。
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import secrets
 import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -41,8 +43,8 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from speclino import sync_apply
-from speclino.db.models import Project
-from speclino.db.repositories.sync_tokens import KnowledgeFetchRepository
+from speclino.db.models import Project, SyncPlanRecord
+from speclino.db.repositories.sync_tokens import KnowledgeFetchRepository, SyncPlanRepository
 from speclino.domain.common import SourceRef
 from speclino.domain.finding import Category, Finding, Severity, Verdict
 from speclino.domain.knowledge import (
@@ -320,24 +322,16 @@ def build_plan(
 
 
 class PlanTooLarge(ValueError):
-    """計画が応答の上限を超えた（MCP は `speclino sync` を案内する）。"""
+    """計画が上限（`sync_apply.MAX_PLAN_BYTES`、CLI・MCP 共通）を超えた。"""
 
 
-async def plan_for_project(
-    session: AsyncSession,
-    *,
-    workspace: str,
-    project: Project,
-    lock_json: str | None,
-    channel: str,
-    token_id: uuid.UUID | None,
-    max_plan_bytes: int | None = None,
+PLAN_URL_TTL = timedelta(minutes=10)
+PLAN_TOKEN_PREFIX = "slplan_"
+
+
+async def _plan_for(
+    session: AsyncSession, *, workspace: str, project: Project, lock_json: str | None
 ) -> SyncPlan:
-    """project（呼び出し側がテナントを確かめたもの）に当たる今の bundle の計画を作り、記録する。
-
-    lock のリポジトリ ID は要求の値ではなく project のものを使う。`max_plan_bytes` を超えれば
-    `PlanTooLarge`（記録しない）。bundle を読めなければ ValueError / LookupError。
-    """
     if project.github_repo_id is None:
         raise ValueError("リポジトリ ID が未登録のため書き出せない")
     bundle = await kr.ensure_bundle(session, workspace)
@@ -351,19 +345,132 @@ async def plan_for_project(
         repo_full_name=project.repo_full_name,
         previous=previous,
     )
-    if max_plan_bytes is not None and plan_json_bytes(plan) > max_plan_bytes:
-        raise PlanTooLarge(
-            f"計画が {max_plan_bytes} バイトを超える（{plan_json_bytes(plan)} バイト）"
-        )
+    size = plan_json_bytes(plan)
+    if size > sync_apply.MAX_PLAN_BYTES:
+        raise PlanTooLarge(f"計画が {sync_apply.MAX_PLAN_BYTES} バイトを超える（{size} バイト）")
+    return plan
+
+
+async def plan_for_project(
+    session: AsyncSession,
+    *,
+    workspace: str,
+    project: Project,
+    lock_json: str | None,
+    channel: str,
+    token_id: uuid.UUID | None,
+) -> SyncPlan:
+    """project（呼び出し側がテナントを確かめたもの）に当たる今の bundle の計画を作り、記録する。
+
+    lock のリポジトリ ID は要求の値ではなく project のものを使う。上限を超えれば
+    `PlanTooLarge`（記録しない）。bundle を読めなければ ValueError / LookupError。
+    """
+    plan = await _plan_for(session, workspace=workspace, project=project, lock_json=lock_json)
     await KnowledgeFetchRepository(session).record(
         workspace=workspace,
         channel=channel,
         token_id=token_id,
-        bundle_generation=bundle.generation,
+        bundle_generation=plan.bundle_generation,
         project_id=project.id,
         artifact_ids=[m.artifact_id for m in plan.lock.members],
     )
     return plan
+
+
+@dataclass(frozen=True)
+class PlanTicket:
+    """`knowledge_pull` の応答。計画の本文は持たず、使い捨ての取得トークンを持つ。"""
+
+    token: str
+    expires_at: datetime
+    bundle_generation: int
+    ops: int
+    writes: int
+    deletes: int
+    bytes: int
+
+
+async def issue_plan_ticket(
+    session: AsyncSession,
+    *,
+    workspace: str,
+    project: Project,
+    lock_json: str | None,
+    channel: str,
+    token_id: uuid.UUID | None,
+    now: datetime | None = None,
+) -> PlanTicket:
+    """計画を作って `sync_plans` に置き、1 回だけ・10 分で失効する取得トークンを返す。
+
+    保存するのはトークンの SHA-256 だけ。取得の記録（`knowledge_fetches`）は実際に取得したとき
+    （`redeem_plan_ticket`）に残す。
+    """
+    plan = await _plan_for(session, workspace=workspace, project=project, lock_json=lock_json)
+    issued = now or datetime.now(UTC)
+    token = PLAN_TOKEN_PREFIX + secrets.token_urlsafe(32)
+    body = json.dumps(plan.model_dump(mode="json"), ensure_ascii=False)
+    assert project.github_repo_id is not None  # _plan_for が確かめた
+    await SyncPlanRepository(session).create(
+        SyncPlanRecord(
+            token_hash=_ticket_hash(token),
+            workspace=workspace,
+            project_id=project.id,
+            github_repo_id=project.github_repo_id,
+            bundle_generation=plan.bundle_generation,
+            channel=channel,
+            token_id=token_id,
+            artifact_ids=[m.artifact_id for m in plan.lock.members],
+            plan_json=body,
+            expires_at=issued + PLAN_URL_TTL,
+        ),
+        now=issued,
+    )
+    removes = {"delete", "remove_managed_block"}
+    return PlanTicket(
+        token=token,
+        expires_at=issued + PLAN_URL_TTL,
+        bundle_generation=plan.bundle_generation,
+        ops=len(plan.ops),
+        writes=sum(op.op not in removes for op in plan.ops),
+        deletes=sum(op.op in removes for op in plan.ops),
+        bytes=len(body.encode("utf-8")),
+    )
+
+
+def _ticket_hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+async def redeem_plan_ticket(
+    session: AsyncSession, token: str, *, now: datetime | None = None
+) -> str | None:
+    """取得トークンの計画（JSON の本文）。無い・期限切れ・取得済み・リポジトリが変わったなら None。
+
+    1 回だけ渡す（取得済みにしてから返す）。取得を `knowledge_fetches` に記録する。
+    """
+    if not token.startswith(PLAN_TOKEN_PREFIX) or len(token) > 100:
+        return None
+    record = await SyncPlanRepository(session).consume(
+        _ticket_hash(token), now=now or datetime.now(UTC)
+    )
+    if record is None:
+        return None
+    project = await session.get(Project, record.project_id)
+    if (
+        project is None
+        or project.team != record.workspace
+        or project.github_repo_id != record.github_repo_id
+    ):
+        return None
+    await KnowledgeFetchRepository(session).record(
+        workspace=record.workspace,
+        channel=record.channel,
+        token_id=record.token_id,
+        bundle_generation=record.bundle_generation,
+        project_id=record.project_id,
+        artifact_ids=list(record.artifact_ids),
+    )
+    return record.plan_json
 
 
 async def fetch_for_sync(
@@ -719,6 +826,8 @@ __all__ = [
     "LockAssessment",
     "ManagedBlock",
     "ManagedBlockError",
+    "PLAN_URL_TTL",
+    "PlanTicket",
     "PlanTooLarge",
     "SyncRejected",
     "assess_lock",
@@ -727,6 +836,8 @@ __all__ = [
     "check_lock",
     "check_lock_snapshot",
     "fetch_for_sync",
+    "issue_plan_ticket",
+    "redeem_plan_ticket",
     "file_hash",
     "issue_lock",
     "lock_payload",

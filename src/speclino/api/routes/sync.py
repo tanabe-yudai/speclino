@@ -7,6 +7,9 @@
   （`SyncPlan`、署名つき）を返す。`lock_json` は手元の lock で、サーバが署名・ワークスペース・
   リポジトリ ID を確かめたときだけ削除の根拠にする（S75）。トークンが無効なら 401、トークンの
   リポジトリでなければ 404（他のリポジトリの存在を漏らさない）
+- `GET /api/sync/plans/{token}`: MCP の `knowledge_pull` が返した使い捨ての取得 URL（S75）。
+  認証はトークン自体（1 回だけ、10 分で失効、ワークスペース・リポジトリに結び付く）。無い・
+  期限切れ・取得済みは区別せず 404。取得を `knowledge_fetches` に記録する
 """
 
 from __future__ import annotations
@@ -15,7 +18,7 @@ import logging
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
 
 from speclino.api.auth import require_user
@@ -138,6 +141,19 @@ async def plan_sync_bundle(
             409, "bundle_unavailable", "知識を配信できない。管理者に連絡してください"
         ) from e
     return plan.model_dump(mode="json")
+
+
+@bundle_router.get("/plans/{token}")
+async def get_sync_plan(token: str, state: AppState = Depends(get_state)) -> Response:
+    async with state.session_factory() as s, s.begin():
+        body = await knowledge_sync.redeem_plan_ticket(s, token)
+    if body is None:
+        raise api_error(404, "plan_not_found", "計画が無いか、期限切れか、取得済み")
+    return Response(
+        content=body.encode("utf-8"),
+        media_type="application/json",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 __all__ = ["bundle_router", "router"]

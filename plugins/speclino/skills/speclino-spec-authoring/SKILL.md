@@ -13,7 +13,8 @@ VERIFIED_IN_SCOPE / VIOLATED / UNKNOWN / REVIEW の 4 値を出す。実装の�
 行う（verdict を書き換える手段は無い）。承認は人が PR コメントで行う（`/speclino approve-spec`）。
 承認済みの判定は書き換えない。チームが承認したスキル・指示書・仕様は `skill_get` / `spec_get`
 で読む。作業の前に `sync_status` で手元の `.speclino/lock.json` の鮮度を確かめ、`pull_needed` なら
-`knowledge_pull` の計画を同梱の `speclino_apply.py` で当てて、lock ごと作業の PR にコミットする
+`knowledge_pull` が返す URL を同梱の `speclino_apply.py --plan-url` に渡して当て、lock ごと作業の
+PR にコミットする
 （手順はスキル `speclino-knowledge-sync`。ファイルや lock を手で書かない）。
 <!-- mcp-instructions:end -->
 
@@ -78,7 +79,8 @@ run_id: 00000000-0000-0000-0000-000000000000
 ## チームの知識を取り込む（`knowledge_pull` / `speclino sync`）
 
 チームが SpecLino で承認したスキル・指示書・仕様は、リポジトリごとに配信される。エージェントは
-MCP の `knowledge_pull` で計画を受け取り、プラグインの `scripts/speclino_apply.py` で当てる（手順は
+MCP の `knowledge_pull` で計画の取得 URL を受け取り、プラグインの `scripts/speclino_apply.py
+--plan-url` で当てる（手順は
 スキル `speclino-knowledge-sync`）。人が手元で取り込むときは CLI の `speclino sync` を使う。
 どちらも同じ計画と同じ実行スクリプトで書き出す。
 
@@ -97,7 +99,8 @@ MCP の `knowledge_pull` で計画を受け取り、プラグインの `scripts/
   止まって理由を出す
 - **MCP**: `sync_status(repo_full_name, lock_json)` に lock の本文を渡すと、今の承認済みの知識と
   比べて `pull_needed`・`reasons`・`verdict`・`changed`（変わった知識）を返す（判定はゲートと同じ）。
-  `knowledge_pull(repo_full_name, lock_json)` は署名つきの書き出し計画（2MB まで）を返す。
+  `knowledge_pull(repo_full_name, lock_json)` は署名つきの書き出し計画の使い捨ての取得 URL
+  （1 回だけ・10 分）を返す。lock を渡さないと削除は計画されない。
   `spec_get` / `skill_get(repo_full_name, name)` は承認済みの本文を返す。sync 用トークンでも
   呼べるが、検証の開始（`verification_start`）はできない
 - **MCP**: `spec_suggest(markdown, repo_full_name?)` は仕様の本文の書き換えの提案（本文の位置と置換・
