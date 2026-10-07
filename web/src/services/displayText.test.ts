@@ -29,3 +29,10 @@ describe('plainTerms と PR コメントの括弧', () => {
     expect(plainTerms('LLM による評価（LLM 3 回中 3 回）')).toBe('AI による評価（AI 3 回中 3 回）')
   })
 })
+
+describe('plainTerms の bundle', () => {
+  it('bundle 番号を配信版にする', () => {
+    expect(plainTerms('期待: bundle 5 → 実装: bundle 4')).toBe('期待: 配信版 5 → 実装: 配信版 4')
+    expect(plainTerms('bundle 6')).toBe('配信版 6')
+  })
+})

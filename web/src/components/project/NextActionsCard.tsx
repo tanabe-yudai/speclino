@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { Panel, PanelTitle } from '@/components/app/Panel'
 import { ToneBadge } from '@/components/app/ToneBadge'
 import { Button } from '@/components/ui/button'
+import { plainTerms } from '@/services/displayText'
 import { NEXT_ACTION_KIND } from '@/services/labels'
 import { paths } from '@/services/paths'
 import type { NextAction, ProjectRun } from '@/types/project'
@@ -23,8 +24,8 @@ export function NextActionsCard({ actions, run }: { actions: NextAction[]; run: 
                   <ToneBadge tone={NEXT_ACTION_KIND[a.kind].tone}>{NEXT_ACTION_KIND[a.kind].label}</ToneBadge>
                   <code className="truncate font-mono text-xs">{a.requirementId}</code>
                 </span>
-                {a.title && <span className="mt-1 block truncate text-sm">{a.title}</span>}
-                <span className="mt-0.5 block text-xs text-ink-3">{a.hint}</span>
+                {a.title && <span className="mt-1 block truncate text-sm">{plainTerms(a.title)}</span>}
+                <span className="mt-0.5 block text-xs text-ink-3">{plainTerms(a.hint)}</span>
               </Link>
             </li>
           ))}

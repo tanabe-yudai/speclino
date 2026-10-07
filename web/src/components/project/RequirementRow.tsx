@@ -8,6 +8,7 @@ import { LoadingState } from '@/components/LoadingState'
 import { cn } from '@/lib/utils'
 import { githubBlobUrl } from '@/services/github'
 import { APPROVAL_LABELS } from '@/services/labels'
+import { plainTerms } from '@/services/displayText'
 import { paths } from '@/services/paths'
 import type { Finding } from '@/types/finding'
 import type { ProjectRun, RequirementView } from '@/types/project'
@@ -45,13 +46,13 @@ export function RequirementRow({
         {req.removed && <ToneBadge tone="rev">削除</ToneBadge>}
         {req.approval !== 'approved' && <ToneBadge tone="rev">{APPROVAL_LABELS[req.approval]}</ToneBadge>}
         <span className="text-xs text-ink-3">テスト {req.tests_declared}</span>
-        {req.verdict ? <VerdictBadge verdict={req.verdict} /> : <span className="text-xs text-ink-3">未解析</span>}
+        {req.verdict ? <VerdictBadge verdict={req.verdict} /> : <span className="text-xs text-ink-3">未検証</span>}
       </span>
     </>
   )
 
   // 題は ID とバッジ（と開閉の矢印）の下の行に、省略せず折り返す（横に並べるとスマホで数文字しか見えない）
-  const title = <span className="w-full text-sm text-ink-2">{req.title ?? '（題なし）'}</span>
+  const title = <span className="w-full text-sm text-ink-2">{req.title ? plainTerms(req.title) : '（題なし）'}</span>
 
   if (!openable) {
     return (

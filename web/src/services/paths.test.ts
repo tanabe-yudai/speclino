@@ -9,7 +9,7 @@ describe('paths', () => {
   })
   it('設定のタブはクエリで指定する', () => {
     expect(paths.settings('ws')).toBe('/w/ws/settings')
-    expect(paths.settings('ws', 'tokens')).toBe('/w/ws/settings?tab=tokens')
+    expect(paths.settings('ws', 'integrations')).toBe('/w/ws/settings?tab=integrations')
   })
   it('slug と名前はエンコードする', () => {
     expect(paths.policies('a b')).toBe('/w/a%20b/policies')

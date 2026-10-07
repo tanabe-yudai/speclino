@@ -8,6 +8,7 @@ export function plainTerms(text: string): string {
   return text
     .replace(/\s*owner\s*\/\s*approver\s*/g, 'オーナーか承認者')
     .replace(/\bLLM\b/g, 'AI')
+    .replace(/\bbundle\s*(\d+)/gi, '配信版 $1')
 }
 
 /** 「`/speclino attest …`」のようなコマンドを消し、残った句読点を整える。読める文字が残らなければ null。 */

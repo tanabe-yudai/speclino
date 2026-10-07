@@ -12,7 +12,7 @@ import {
   SEVERITY_LABELS,
   TEST_OBSERVATION_LABELS,
 } from '../services/labels'
-import { stripCommands, stripCommandsFromList } from '../services/displayText'
+import { plainTerms, stripCommands, stripCommandsFromList } from '../services/displayText'
 import type { FindingCardProps } from '../types/components'
 import type { SourceRef } from '../types/finding'
 
@@ -97,8 +97,8 @@ export function FindingCard({ finding, repoFullName, headSha, cleared = false }:
 
       {(finding.expected || finding.actual) && (
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="仕様の期待">{finding.expected ?? '（記録なし）'}</Field>
-          <Field label="実装">{finding.actual ?? '（記録なし）'}</Field>
+          <Field label="仕様の期待">{finding.expected ? plainTerms(finding.expected) : '（記録なし）'}</Field>
+          <Field label="実装">{finding.actual ? plainTerms(finding.actual) : '（記録なし）'}</Field>
         </div>
       )}
 
