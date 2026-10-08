@@ -6,6 +6,7 @@ import { MermaidPreview } from "@/components/spec-editor/MermaidPreview";
 import { RequirementTrace } from "@/components/spec-editor/RequirementTrace";
 import { SuggestionPanel } from "@/components/spec-editor/SuggestionPanel";
 import { Label } from "@/components/ui/label";
+import { MarkdownPreview } from "@/components/knowledge/MarkdownPreview";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSuggestions } from "@/hooks/useSuggestions";
 import { focusLine } from "@/lib/textarea";
@@ -176,6 +177,7 @@ export function SpecEditorPane({
               <TabsTrigger value="diagnostics">
                 診断{preview ? `（${diagnostics.length}）` : ""}
               </TabsTrigger>
+              <TabsTrigger value="preview">プレビュー</TabsTrigger>
               <TabsTrigger value="diagrams">図</TabsTrigger>
               <TabsTrigger value="canonical">整形した本文</TabsTrigger>
               <TabsTrigger value="trace">要求の追跡</TabsTrigger>
@@ -190,6 +192,9 @@ export function SpecEditorPane({
                 本文を入力すると診断が出ます。
               </p>
             )}
+          </TabsContent>
+          <TabsContent value="preview" className="mt-3">
+            <MarkdownPreview markdown={content.markdown} mermaid />
           </TabsContent>
           <TabsContent value="diagrams" className="mt-3">
             <MermaidPreview markdown={content.markdown} onJump={jump} />

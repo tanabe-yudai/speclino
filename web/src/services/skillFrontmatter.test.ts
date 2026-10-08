@@ -1,5 +1,20 @@
 import { describe, expect, it } from 'vitest'
-import { checkSkillFrontmatter, checkSkillPath } from './skillFrontmatter'
+import { checkSkillFrontmatter, checkSkillPath, splitSkillMd } from './skillFrontmatter'
+
+describe('splitSkillMd', () => {
+  it('separates frontmatter from the body', () => {
+    expect(splitSkillMd('---\r\nname: a\r\ndescription: 説明\r\n---\r\n\r\n# 見出し\r\n本文')).toEqual({
+      name: 'a',
+      description: '説明',
+      body: '# 見出し\n本文',
+    })
+  })
+
+  it('returns everything as body without a readable frontmatter', () => {
+    expect(splitSkillMd('# だけ')).toEqual({ name: null, description: null, body: '# だけ' })
+    expect(splitSkillMd('---\nname: a\n本文').body).toBe('---\nname: a\n本文')
+  })
+})
 
 describe('checkSkillFrontmatter', () => {
   it('reads name and description', () => {
