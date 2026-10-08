@@ -54,7 +54,8 @@ from speclino.domain.knowledge_chat import (
 from speclino.domain.spec_ir import SpecIR
 from speclino.ports.text_llm import JsonGeneration, JsonStreamEvent, StreamingTextLlm, TextLlm
 from speclino.services.cost_guard import CostGuard
-from speclino.services.json_string_stream import TopLevelStringStream
+from speclino.services.draft_stream import DraftSnapshots
+from speclino.services.json_string_stream import JsonStringStream
 from speclino.services.knowledge_chat_budget import BudgetRefusal, ChatPurpose, ChatReservation
 from speclino.services.knowledge_chat_prompt import (
     SUMMARY_SCHEMA,
@@ -62,7 +63,12 @@ from speclino.services.knowledge_chat_prompt import (
     build_chat_prompt,
     build_summary_prompt,
 )
-from speclino.services.knowledge_chat_proposal import build_proposal, response_schema, text_hash
+from speclino.services.knowledge_chat_proposal import (
+    build_proposal,
+    draft_text_field,
+    response_schema,
+    text_hash,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -792,7 +798,9 @@ async def stream_message(
         return await _fail_turn(deps, workspace=workspace, owner=owner, cid=cid, ctx=ctx, code=code)
 
     yield ChatStreamEvent(type="status", state="thinking")
-    explanation_stream = TopLevelStringStream("explanation")
+    explanation_stream = JsonStringStream("explanation")
+    draft_field = draft_text_field(ctx.chat.kind)
+    drafts = DraftSnapshots("proposal", draft_field) if draft_field else None
     gen: JsonGeneration | None = None
     try:
         async for item in _stream_llm(
@@ -805,10 +813,15 @@ async def stream_message(
         ):
             if isinstance(item, JsonGeneration):
                 gen = item
-            elif piece := explanation_stream.feed(item):
-                yield ChatStreamEvent(type="delta", text=piece)
+            else:
+                if piece := explanation_stream.feed(item):
+                    yield ChatStreamEvent(type="delta", text=piece)
+                if drafts and draft_field and (snap := drafts.feed(item)) is not None:
+                    yield ChatStreamEvent(type="draft", field=draft_field, text=snap)
         if gen is None:
             raise ChatError("chat_failed")
+        if drafts and draft_field and (snap := drafts.finish()) is not None:
+            yield ChatStreamEvent(type="draft", field=draft_field, text=snap)
         turn = await _complete_turn(
             deps,
             workspace=workspace,

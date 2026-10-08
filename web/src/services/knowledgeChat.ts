@@ -197,6 +197,8 @@ export function parseChatStreamEvent(msg: SseMessage): ChatStreamEvent | null {
       return typeof d.state === 'string' ? { type: 'status', state: d.state } : null
     case 'delta':
       return typeof d.text === 'string' ? { type: 'delta', text: d.text } : null
+    case 'draft':
+      return typeof d.field === 'string' && typeof d.text === 'string' ? { type: 'draft', field: d.field, text: d.text } : null
     case 'done':
       return { type: 'done', turn: data as ChatTurn }
     case 'error':

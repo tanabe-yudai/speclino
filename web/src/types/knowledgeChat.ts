@@ -3,6 +3,7 @@
  * 会話は本人だけのもの。AI の返答は説明と下書きの提案で、提案は編集欄の本文のハッシュに結び付く。
  */
 
+import type { ChatDraft, ProposalOutcome } from './chatDraft'
 import type { PolicyRule } from './policy'
 
 export type KnowledgeChatKind = 'spec' | 'skill' | 'instructions' | 'policy'
@@ -80,6 +81,8 @@ export interface ChatTurn {
 export type ChatStreamEvent =
   | { type: 'status'; state: string }
   | { type: 'delta'; text: string }
+  /** 提案の本文のここまでの全文（増分ではなく置き換える。表示専用） */
+  | { type: 'draft'; field: string; text: string }
   | { type: 'done'; turn: ChatTurn }
   | { type: 'error'; code: string; message: string; status: number }
 
@@ -111,6 +114,24 @@ export interface ChatPanelProps {
   /** 差分の「後」: 提案を重ねた欄（skill の files が無ければ今の付属ファイルのまま） */
   afterText: (proposal: RawProposal) => string
   onApply: (proposal: RawProposal) => void
+  /**
+   * 知識の編集画面（仕様・スキル・指示書）のとき true。提案の本文は編集欄に流し込み、
+   * 会話には説明と 1 行の扱いだけを出す。規約の画面は従来どおり提案のカードを出す。
+   */
+  inline?: boolean
+  /** 送った時点の本文の欄（生成中の差分の「前」） */
+  bodyText?: string
+  /** 提案ごとの扱い（発言の ID が鍵） */
+  outcomes?: Record<string, ProposalOutcome>
+  /** 返答が確定したとき（生成中の表示を閉じる前に呼ぶ）。`sentEditorText` は送った時点の編集欄の本文 */
+  onReply?: (turn: ChatTurn, sentEditorText: string) => void
+}
+
+export interface ChatSendOptions {
+  /** 送った時点の本文の欄（途中経過の差分の「前」） */
+  bodyText?: string
+  /** 確定した返答を受けたとき。途中経過を閉じる前に同期で呼ぶ（表示が一瞬戻らない） */
+  onTurn?: (turn: ChatTurn) => void
 }
 
 export interface KnowledgeChatController {
@@ -119,6 +140,8 @@ export interface KnowledgeChatController {
   sending: boolean
   /** 返答の途中経過（送信中だけ。無ければ null） */
   streaming: ChatStreaming | null
+  /** 生成中の提案の本文（途中経過。送信中で、本文が届き始めてから） */
+  draft: ChatDraft | null
   /** 返答を待つのをやめる（サーバへの接続を閉じる） */
   stop: () => void
   error: string | null
@@ -126,7 +149,7 @@ export interface KnowledgeChatController {
   select: (id: string) => void
   startNew: () => void
   /** 返答（または確定した結果）を得たら true。失敗したら本文を残して再送できるように false */
-  send: (text: string, editorText: string) => Promise<boolean>
+  send: (text: string, editorText: string, opts?: ChatSendOptions) => Promise<boolean>
   remove: (id: string) => Promise<void>
   summarize: () => Promise<ChatSummaryDraft | null>
   bind: (artifactId: string) => Promise<KnowledgeChat | null>
