@@ -1,4 +1,4 @@
-"""途中までの JSON から、トップレベルの文字列キーの値を少しずつ取り出す（S74 ストリーム）。
+"""途中までの JSON から、キーの経路（入れ子の object を含む）にある文字列の値を少しずつ取り出す。
 
 LLM の応答は `{"explanation": "...", "proposal": {...}}` の形で、断片に分かれて届く。
 説明の文字列だけを、閉じる前から文字単位で取り出して利用者に見せる。値の確定（検証）は
@@ -32,11 +32,17 @@ class _Phase(Enum):
     DONE = auto()  # 値が閉じた、または形が想定と違う
 
 
-class TopLevelStringStream:
-    """`key` のトップレベルの文字列値を、feed した分だけ増えるテキストとして返す。"""
+class JsonStringStream:
+    """`path`（例: `("proposal", "markdown")`）の文字列値を、feed した分だけ増えるテキストで返す。
 
-    def __init__(self, key: str) -> None:
-        self._key = key
+    同じ経路のキーが複数あっても、最初に現れたものだけを取り出す。
+    """
+
+    def __init__(self, *path: str) -> None:
+        if not path:
+            raise ValueError("path must not be empty")
+        self._path = path
+        self._level = 0  # 経路のうち、見つけ終えたキーの数
         self._phase = _Phase.SEEK
         self._depth = 0
         self._in_str = False
@@ -65,7 +71,15 @@ class TopLevelStringStream:
                 elif not ch.isspace():
                     self._phase = _Phase.DONE
             elif self._phase is _Phase.VALUE:
-                if ch == '"':
+                if self._level < len(self._path) - 1:
+                    if ch == "{":  # 次の階層へ降りる
+                        self._level += 1
+                        self._depth += 1
+                        self._expect_key = True
+                        self._phase = _Phase.SEEK
+                    elif not ch.isspace():
+                        self._phase = _Phase.DONE
+                elif ch == '"':
                     self._phase = _Phase.IN_STRING
                 elif not ch.isspace():
                     self._phase = _Phase.DONE
@@ -83,11 +97,15 @@ class TopLevelStringStream:
                 self._esc = True
             elif ch == '"':
                 self._in_str = False
-                is_key = self._depth == 1 and self._expect_key and "".join(self._cur) == self._key
+                is_key = (
+                    self._depth == self._level + 1
+                    and self._expect_key
+                    and "".join(self._cur) == self._path[self._level]
+                )
                 self._expect_key = False
                 if is_key:
                     self._phase = _Phase.COLON
-            elif self._depth == 1 and len(self._cur) < _KEY_MAX:
+            elif self._depth == self._level + 1 and len(self._cur) < _KEY_MAX:
                 self._cur.append(ch)
             return
         if ch == '"':
@@ -95,11 +113,13 @@ class TopLevelStringStream:
             self._cur = []
         elif ch in "{[":
             self._depth += 1
-            self._expect_key = ch == "{" and self._depth == 1
+            self._expect_key = ch == "{" and self._depth == self._level + 1
         elif ch in "}]":
             self._depth -= 1
+            if self._depth < self._level + 1:  # 目的の object がキーの無いまま閉じた
+                self._phase = _Phase.DONE
         elif ch == ",":
-            self._expect_key = self._depth == 1
+            self._expect_key = self._depth == self._level + 1
 
     # --- 値の文字列のデコード
     def _value_char(self, ch: str, out: list[str]) -> None:
@@ -155,4 +175,4 @@ class TopLevelStringStream:
             out.append(_REPLACEMENT)
 
 
-__all__ = ["TopLevelStringStream"]
+__all__ = ["JsonStringStream"]

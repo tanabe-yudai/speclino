@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { MarkdownSplitInput } from '@/components/knowledge/MarkdownSplitInput'
 import { MarkdownInput } from '@/components/spec-editor/MarkdownInput'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -43,7 +44,8 @@ export function SkillEditorPane({ content, onChange, onInvalidChange, resetKey }
   return (
     <div className="space-y-6">
       <div className="space-y-2">
-        <MarkdownInput
+        <MarkdownSplitInput
+          skillMd
           id="skill-md"
           label="SKILL.md"
           value={content.skill_md}

@@ -1,4 +1,4 @@
-import { MarkdownInput } from '@/components/spec-editor/MarkdownInput'
+import { MarkdownSplitInput } from '@/components/knowledge/MarkdownSplitInput'
 import { Label } from '@/components/ui/label'
 import { TARGET_LABELS } from '@/services/knowledge'
 import type { InstructionsContent, InstructionsTarget } from '@/types/knowledge'
@@ -23,7 +23,7 @@ export function InstructionsEditorPane({ content, onChange }: ContentEditorProps
           ))}
         </select>
       </div>
-      <MarkdownInput id="instructions-body" label="本文" value={content.body} onChange={(body) => onChange({ ...content, body })} rows={24} />
+      <MarkdownSplitInput id="instructions-body" label="本文" value={content.body} onChange={(body) => onChange({ ...content, body })} rows={24} />
     </div>
   )
 }

@@ -23,19 +23,32 @@ test('チャットで指示書を作り、要約を説明にして保存する',
   await page.getByRole('region', { name: '指示書' }).getByRole('link', { name: 'AI と作る' }).click()
   await expect(page.getByText(NOTICE)).toBeVisible()
 
-  // 2. 話しかける → 説明と提案（差分）が返る
+  // 2. 話しかける → 本文が編集欄の場所に流れ込み（差分つき）、会話には説明だけが出る
   await page.getByLabel('AI への発言').fill('開発の手順を AGENTS.md に書きたい')
   await expect(page.getByText(/残り \d+ バイト/)).toBeVisible()
   await page.getByRole('button', { name: '送る' }).click()
+  const writing = page.getByRole('region', { name: 'AI が書いている本文' })
+  await expect(writing).toBeVisible()
+  await expect(writing.getByRole('button', { name: '止める' })).toBeVisible()
   await expect(page.getByText('下書きの案を作りました（台本の応答）')).toBeVisible()
-  await expect(page.getByRole('region', { name: '提案の差分' })).toContainText('変更の前にテストを書く')
 
-  // 3. 「エディタに反映」は編集欄だけを変える
-  const body = page.getByLabel('本文')
-  await page.getByRole('button', { name: 'エディタに反映' }).click()
+  // 3. 書き終えると本文が編集欄に入り、反映前後の差分と「元に戻す」が出る（保存はまだ）
+  const body = page.getByLabel('本文', { exact: true })
+  await expect(writing).toBeHidden()
   await expect(body).toHaveValue(/変更の前にテストを書く/)
-  // 反映の後は編集欄が変わったので、同じ提案は古くなり反映できない
-  await expect(page.getByRole('button', { name: 'エディタに反映' })).toBeDisabled()
+  const applied = page.getByRole('region', { name: 'AI が反映した差分' })
+  await expect(applied.getByRole('region', { name: '反映した差分' })).toContainText('変更の前にテストを書く')
+  await expect(page.getByTestId('proposal-line')).toContainText('本文に反映しました')
+
+  // 元に戻すと編集欄は元の本文に戻り、会話の「本文に反映」でもう一度入れられる
+  await applied.getByRole('button', { name: '元に戻す' }).click()
+  await expect(body).toHaveValue('')
+  await page.getByTestId('proposal-line').getByRole('button', { name: /^(もう一度反映|本文に反映)$/ }).click()
+  await expect(body).toHaveValue(/変更の前にテストを書く/)
+  // 反映の後に編集すると、もう戻せない
+  await body.fill(`${await body.inputValue()}\n追記`)
+  await expect(page.getByText('反映後に編集したため戻せません')).toBeVisible()
+  await expect(applied.getByRole('button', { name: '元に戻す' })).toBeDisabled()
 
   // 4. 会話の要約を説明に入れ、本人が直して保存する
   await page.getByLabel('名前').fill(name)
