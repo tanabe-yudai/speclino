@@ -57,6 +57,24 @@ export function checkSkillFrontmatter(skillMd: string): SkillFrontmatter {
   return { name, description, problems }
 }
 
+export interface SkillPreviewParts {
+  name: string | null
+  description: string | null
+  /** frontmatter を除いた本文 */
+  body: string
+}
+
+/** プレビュー用に SKILL.md を frontmatter と本文に分ける。frontmatter が読めなければ全体を本文として返す。 */
+export function splitSkillMd(skillMd: string): SkillPreviewParts {
+  const text = skillMd.replace(/\r\n?/g, '\n')
+  const lines = text.split('\n')
+  if (lines[0]?.trim() !== '---') return { name: null, description: null, body: text }
+  const end = lines.findIndex((l, i) => i > 0 && l.trim() === '---')
+  if (end < 0) return { name: null, description: null, body: text }
+  const { name, description } = checkSkillFrontmatter(text)
+  return { name, description, body: lines.slice(end + 1).join('\n').replace(/^\n+/, '') }
+}
+
 /** 付属ファイルの相対パスの検査。others は他のファイルのパス（大文字小文字違いの重複も拒否）。 */
 export function checkSkillPath(path: string, others: string[]): string | null {
   if (!path) return 'パスを入力してください'

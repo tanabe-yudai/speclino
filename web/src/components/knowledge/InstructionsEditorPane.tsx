@@ -1,4 +1,4 @@
-import { MarkdownInput } from '@/components/spec-editor/MarkdownInput'
+import { MarkdownSplitInput } from '@/components/knowledge/MarkdownSplitInput'
 import type { InstructionsContent } from '@/types/knowledge'
 import type { ContentEditorProps } from '@/types/specEditor'
 
@@ -6,7 +6,7 @@ import type { ContentEditorProps } from '@/types/specEditor'
 export function InstructionsEditorPane({ content, onChange }: ContentEditorProps<InstructionsContent>) {
   return (
     <div className="space-y-4">
-      <MarkdownInput id="instructions-body" label="本文" value={content.body} onChange={(body) => onChange({ ...content, body })} rows={24} />
+      <MarkdownSplitInput id="instructions-body" label="本文" value={content.body} onChange={(body) => onChange({ ...content, body })} rows={24} />
     </div>
   )
 }

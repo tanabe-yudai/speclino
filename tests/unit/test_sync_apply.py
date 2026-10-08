@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -853,3 +854,38 @@ def test_plan_url_failures_write_nothing(
     code, out = _main_json(capsys, "--plan-url", srv.url, "--allow-http", "--repo", str(tmp_path))
     assert code == 2 and out["ok"] is False, out
     assert tree(tmp_path) == {}
+
+
+# ---------------------------------------------------------------------------
+# git に無視されるパスの警告
+# ---------------------------------------------------------------------------
+
+
+def _git_init(root: Path) -> None:
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+
+
+@pytest.mark.skipif(not shutil.which("git"), reason="git が無い")
+def test_warns_when_written_files_are_ignored_by_git(tmp_path: Path) -> None:
+    _git_init(tmp_path)
+    (tmp_path / ".gitignore").write_text(".claude/\n")
+    result = sa.apply_plan(tmp_path, plan(*BASE))
+    assert result.ok, result
+    assert len(result.warnings) == 1 and SKILL in result.warnings[0], result.warnings
+    assert ".gitignore" in result.warnings[0]
+
+
+@pytest.mark.skipif(not shutil.which("git"), reason="git が無い")
+def test_warns_about_ignored_files_even_when_nothing_changes(tmp_path: Path) -> None:
+    _git_init(tmp_path)
+    p = plan(*BASE)
+    assert sa.apply_plan(tmp_path, p).warnings == []
+    (tmp_path / ".gitignore").write_text(".speclino/\n")
+    again = sa.apply_plan(tmp_path, p)
+    assert again.ok and again.written == []
+    assert any(sa.LOCK_PATH in w for w in again.warnings), again.warnings
+
+
+def test_no_warning_outside_a_git_repository(tmp_path: Path) -> None:
+    (tmp_path / ".gitignore").write_text(".claude/\n")
+    assert sa.apply_plan(tmp_path, plan(*BASE)).warnings == []

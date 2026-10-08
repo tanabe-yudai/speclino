@@ -16,6 +16,18 @@ export interface MarkdownInputProps {
   textareaRef?: React.Ref<HTMLTextAreaElement>
 }
 
+export interface MarkdownPreviewProps {
+  markdown: string
+  /** ```mermaid のブロックを図として描く */
+  mermaid?: boolean
+  /** スキルの SKILL.md: frontmatter を見出しとリード文にして出す */
+  skillMd?: boolean
+}
+
+export interface MarkdownSplitInputProps extends MarkdownInputProps {
+  skillMd?: boolean
+}
+
 export interface DiagnosticsListProps {
   diagnostics: SpecDiagnostic[]
   /** 場所のある診断を押したとき（1 始まりの行・列） */

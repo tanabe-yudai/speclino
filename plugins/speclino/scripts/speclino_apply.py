@@ -21,6 +21,8 @@ design/2026-10-07-agent-sync.md の A2–A6・3 章。標準ライブラリだ�
   （中身が変わっていたなら終了コード 2、それ以外は 1）。元に戻せなかったときは退避の一時
   ディレクトリを消さずに残し、その場所を理由に書く。lock は最後に書く
 - 消したファイルの親の空ディレクトリの片付けに失敗しても、書き出しは済んでいるので警告だけ
+- lock に載るパスと lock 自身が git に無視される（`.gitignore` の `.claude/` など）なら警告する。
+  コミットされず PR のゲートで UNKNOWN になるため。git が無い・リポジトリでなければ確かめない
 - 結果は JSON 1 行（書いた・消した・変えなかったパスと、止まった理由）
 
 op の種類:
@@ -48,6 +50,7 @@ import posixpath
 import re
 import secrets
 import shutil
+import subprocess
 import sys
 import urllib.error
 import urllib.parse
@@ -326,6 +329,27 @@ def origin_full_name(root: Path) -> str | None:
     return None
 
 
+def ignored_by_git(root: Path, paths: Sequence[str]) -> list[str]:
+    """git に無視されるパス（追跡済みのものは除く）。git が無い・リポジトリでなければ空。"""
+    if not paths:
+        return []
+    try:
+        proc = subprocess.run(
+            ["git", "-c", "core.fsmonitor=false", "-C", str(root), "check-ignore", "-z", "--stdin"],
+            input="\0".join(paths) + "\0",
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    # 0: 無視されるものがある / 1: 無い / 128: リポジトリでない等
+    if proc.returncode != 0:
+        return []
+    return sorted(p for p in proc.stdout.split("\0") if p)
+
+
 def _check_repo(root: Path, plan: Mapping[str, Any], lock: Mapping[str, Any]) -> int:
     generation = _require(plan.get("bundle_generation"), int, "bundle_generation")
     repo_id = _require(plan.get("github_repo_id"), int, "github_repo_id")
@@ -596,6 +620,11 @@ def _apply(repo_root: Path, plan: Mapping[str, Any], result: ApplyResult) -> Non
         result.unchanged.append(LOCK_PATH)
     else:
         changes.append(_Change(LOCK_PATH, lock_target, lock_text, original=current_lock))
+    for path in ignored_by_git(root, [*lock.get("files", {}), LOCK_PATH]):
+        result.warnings.append(
+            f"{path} は git に無視されていてコミットされない（ゲートで UNKNOWN になる）。"
+            ".gitignore を直す"
+        )
     if not changes:
         return
 

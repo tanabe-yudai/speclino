@@ -142,6 +142,8 @@ describe('ストリームの出来事', () => {
       status: 429,
     })
     expect(parseChatStreamEvent({ event: 'done', data: '{"reply":null}' })?.type).toBe('done')
+    expect(parseChatStreamEvent({ event: 'draft', data: '{"field":"body","text":"# a"}' })).toEqual({ type: 'draft', field: 'body', text: '# a' })
+    expect(parseChatStreamEvent({ event: 'draft', data: '{"field":"body"}' })).toBeNull()
     expect(parseChatStreamEvent({ event: 'delta', data: '{"text":1}' })).toBeNull()
     expect(parseChatStreamEvent({ event: 'delta', data: '{' })).toBeNull()
     expect(parseChatStreamEvent({ event: 'other', data: '{}' })).toBeNull()

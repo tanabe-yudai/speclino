@@ -6,8 +6,10 @@ import { createArtifact, getDraft, listArtifactRevisions, saveDraft } from '@/ap
 import { ToneBadge } from '@/components/app/ToneBadge'
 import { ErrorState } from '@/components/ErrorState'
 import { ApprovalPanel } from '@/components/knowledge/ApprovalPanel'
+import { AppliedDiffPanel } from '@/components/knowledge/AppliedDiffPanel'
 import { ChatPanel } from '@/components/knowledge/ChatPanel'
 import { ConflictDialog } from '@/components/knowledge/ConflictDialog'
+import { DraftOverlay } from '@/components/knowledge/DraftOverlay'
 import { InstructionsEditorPane } from '@/components/knowledge/InstructionsEditorPane'
 import { NoteField } from '@/components/knowledge/NoteField'
 import { NotFoundPanel } from '@/components/knowledge/NotFoundPanel'
@@ -37,11 +39,13 @@ import {
   type EditBase,
 } from '@/services/knowledge'
 import { backLink, findFromProject, scopeForProject } from '@/services/knowledgeNav'
-import { applyProposal, canSummarize, currentFieldText, editorText, proposalText } from '@/services/knowledgeChat'
+import { bodyText, canUndo, decideAutoApply, restoreApplied, touchesFiles } from '@/services/chatDraft'
+import { applyProposal, canSummarize, currentFieldText, editorText, proposalText, textHash } from '@/services/knowledgeChat'
 import { paths } from '@/services/paths'
 import { countErrors } from '@/services/specPreview'
 import type { ArtifactContent, ArtifactKind, ArtifactRevision, SpecPreviewRequest } from '@/types/knowledge'
-import type { NoteState, RawProposal } from '@/types/knowledgeChat'
+import type { AppliedEdit, ProposalOutcome } from '@/types/chatDraft'
+import type { ChatTurn, NoteState, RawProposal } from '@/types/knowledgeChat'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 
 const NAME_RE = /^[a-z0-9][a-z0-9-]*$/
@@ -112,6 +116,9 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
   // 改訂の説明（S73）。下書きを直すときは今の下書きの説明から始める
   const [note, setNote] = useState<NoteState>(() => ({ text: initial.draft?.note ?? '', source: initial.draft?.note_source ?? 'manual' }))
   const [chatOpen, setChatOpen] = useState(chatParam !== null)
+  // AI が本文に反映した記録（元に戻す・差分の表示）と、提案ごとの扱い（S76）
+  const [applied, setApplied] = useState<AppliedEdit | null>(null)
+  const [outcomes, setOutcomes] = useState<Record<string, ProposalOutcome>>({})
   const chat = useKnowledgeChat(slug, kind, id, chatParam && chatParam !== 'new' ? chatParam : null)
   // 保存の応答の時点の本文（送信後の入力を含む）を読むため
   const latest = useRef(content)
@@ -145,11 +152,60 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
   const noteChanged = note.text.trim() !== (draft?.note ?? '')
   const saveBlock = nameIssue ?? scopeIssue ?? (paneInvalid ? '読めない欄があります（赤い欄を直してください）' : null) ?? (id && !dirty && !noteChanged ? '変更はありません' : null)
 
-  function applyChatProposal(raw: RawProposal) {
-    setContent(applyProposal(content, raw))
+  /** 提案を編集欄に入れる。反映前の本文を覚え、差分の表示と「元に戻す」に使う。 */
+  function applyToEditor(raw: RawProposal, messageId: string | null): boolean {
+    const cur = latest.current
+    const next = applyProposal(cur, raw)
+    if (next === cur) return false
+    setContent(next)
     // スキルの付属ファイル・仕様の JSON 欄を、反映した内容から作り直す
     setResetKey((k) => k + 1)
-    toast.success('提案を編集欄に反映しました（まだ保存していません）')
+    setApplied({
+      messageId,
+      before: bodyText(cur),
+      after: bodyText(next),
+      afterEditorText: editorText(next),
+      ...(cur.kind === 'skill' && next.kind === 'skill' ? { beforeFiles: { ...cur.files }, afterFiles: { ...next.files } } : {}),
+    })
+    return true
+  }
+
+  function applyChatProposal(raw: RawProposal) {
+    if (applyToEditor(raw, null)) toast.success('提案を編集欄に反映しました（まだ保存していません）')
+  }
+
+  /**
+   * 確定した返答の提案を、条件が揃うときだけ本文に入れる。冪等の再送では提案が別の本文に向けた
+   * ものでありうるので、送った本文のハッシュが提案の土台と一致することも確かめる。
+   */
+  function onChatReply(turn: ChatTurn, sentEditorText: string) {
+    const reply = turn.reply
+    const proposal = reply?.proposal
+    if (!reply || !proposal) return
+    void textHash(sentEditorText).then((sentHash) => {
+      const cur = latest.current
+      const decision = decideAutoApply({
+        proposal,
+        sentEditorText,
+        currentEditorText: editorText(cur),
+        touchesFiles: touchesFiles(cur, proposal.raw_proposal),
+        baseMatches: sentHash === proposal.base_hash,
+      })
+      if (decision.action === 'skip') {
+        setOutcomes((o) => ({ ...o, [reply.id]: { status: 'skipped', reason: decision.reason } }))
+      } else if (applyToEditor(proposal.raw_proposal, reply.id)) {
+        setOutcomes((o) => ({ ...o, [reply.id]: { status: 'applied' } }))
+      }
+    })
+  }
+
+  /** 反映の取り消し。編集欄が反映した直後のままのときだけ（その後の編集を消さない）。 */
+  function undoApplied() {
+    const cur = latest.current
+    if (!applied || !canUndo(applied, editorText(cur), cur)) return
+    setContent(restoreApplied(cur, applied))
+    setResetKey((k) => k + 1)
+    setApplied(null)
   }
 
   function submit(e: FormEvent<HTMLFormElement>) {
@@ -227,6 +283,10 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
           beforeText={() => currentFieldText(content)}
           afterText={(raw) => proposalText(raw, content)}
           onApply={applyChatProposal}
+          inline
+          bodyText={bodyText(content)}
+          outcomes={outcomes}
+          onReply={onChatReply}
         />
       )}
 
@@ -263,6 +323,12 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
           </div>
         )}
         <ScopePicker kind={kind} scope={content.scope} onChange={(scope) => setContent({ ...content, scope })} projects={projects} error={projectsError} />
+        {applied && !chat.draft && (
+          <AppliedDiffPanel applied={applied} undoable={canUndo(applied, editorText(content), content)} onUndo={undoApplied} onClose={() => setApplied(null)} />
+        )}
+        {chat.draft && <DraftOverlay draft={chat.draft} onStop={chat.stop} />}
+        {/* 書いている間は本文の欄を隠す（編集欄の状態は残す） */}
+        <div className={chat.draft ? 'hidden' : 'space-y-6'}>
         {content.kind === 'spec' && (
           <SpecEditorPane
             slug={slug}
@@ -278,6 +344,7 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
         )}
         {content.kind === 'skill' && <SkillEditorPane content={content} onChange={setContent} onInvalidChange={setPaneInvalid} resetKey={resetKey} />}
         {content.kind === 'instructions' && <InstructionsEditorPane content={content} onChange={setContent} />}
+        </div>
 
         <div className="max-w-3xl">
           <NoteField id="revision-note" note={note} onChange={setNote} summarize={canSummarize(chat.current) ? chat.summarize : undefined} />

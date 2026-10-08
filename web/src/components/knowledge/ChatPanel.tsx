@@ -7,8 +7,10 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion'
 import { cn } from '@/lib/utils'
+import { skipMessage } from '@/services/chatDraft'
 import { formatDateTime } from '@/services/format'
 import { CHAT_NOTICE, MESSAGE_MAX_BYTES, errorCount, messageBytesLeft, textHash } from '@/services/knowledgeChat'
+import type { ProposalOutcome } from '@/types/chatDraft'
 import type { ChatMessage, ChatPanelProps, ChatProposal, ChatStreaming, RawProposal } from '@/types/knowledgeChat'
 
 /** 今の編集欄の本文のハッシュ（提案の土台と比べて、古い提案を反映させない）。計算中は null。 */
@@ -60,6 +62,58 @@ function ProposalView({
           ? 'この提案の後に編集欄が変わりました。今の本文で、もう一度頼んでください。'
           : '反映しても編集欄が変わるだけです。保存と承認はあなたが行います。'}
       </p>
+      {proposal.diagnostics.length > 0 && (
+        <ul className="space-y-0.5 text-xs" aria-label="提案の診断">
+          {proposal.diagnostics.map((d, i) => (
+            <li key={i} className={cn(d.severity === 'error' ? 'text-bad' : 'text-ink-2')}>
+              <span className="font-mono">{d.code}</span> {d.message}
+            </li>
+          ))}
+        </ul>
+      )}
+      {showDiff && <DiffView label="提案の差分" before={beforeText(proposal.raw_proposal)} after={afterText(proposal.raw_proposal)} />}
+    </div>
+  )
+}
+
+/**
+ * 知識の編集画面での提案の 1 行。本文は編集欄に流し込み済みか、理由つきで未反映。
+ * 再読込の後は扱いが分からないので、差分と「本文に反映」だけを出す。
+ */
+function ProposalLine({
+  proposal,
+  outcome,
+  currentHash,
+  beforeText,
+  afterText,
+  onApply,
+}: {
+  proposal: ChatProposal
+  outcome: ProposalOutcome | undefined
+  currentHash: string | null
+  beforeText: (raw: RawProposal) => string
+  afterText: (raw: RawProposal) => string
+  onApply: (raw: RawProposal) => void
+}) {
+  const [showDiff, setShowDiff] = useState(false)
+  const stale = currentHash !== null && currentHash !== proposal.base_hash
+  const applied = outcome?.status === 'applied'
+  const summary = applied ? '本文に反映しました' : outcome ? `反映していません（${skipMessage(outcome.reason, errorCount(proposal))}）` : '下書きの提案があります'
+  return (
+    <div className="mt-2 space-y-2 border-t pt-2" data-testid="proposal-line">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className={cn('font-semibold', outcome?.status === 'skipped' && 'text-unk')}>{summary}</span>
+        <Button type="button" size="sm" variant="ghost" onClick={() => setShowDiff(!showDiff)} aria-expanded={showDiff}>
+          {showDiff ? '差分を閉じる' : '差分を見る'}
+        </Button>
+        {/* 反映した直後は本文が提案の土台と違うのが当然なので、再反映の導線も「古い」の注記も出さない */}
+        {!(applied && stale) && (
+          <Button type="button" size="sm" variant="secondary" onClick={() => onApply(proposal.raw_proposal)} disabled={currentHash === null || stale}>
+            {applied ? 'もう一度反映' : '本文に反映'}
+          </Button>
+        )}
+        {stale && !applied && <span className="text-ink-3">編集欄が変わったため古い提案です</span>}
+      </div>
       {proposal.diagnostics.length > 0 && (
         <ul className="space-y-0.5 text-xs" aria-label="提案の診断">
           {proposal.diagnostics.map((d, i) => (
@@ -128,7 +182,7 @@ function StreamingMessages({ streaming }: { streaming: ChatStreaming }) {
  * 「エディタに反映」は編集欄だけを変える（保存・承認は人）。提案は送ったときの編集欄の本文に
  * 結び付き、本文が変わった後の古い提案は反映できない。
  */
-export function ChatPanel({ chat, editorText, beforeText, afterText, onApply }: ChatPanelProps) {
+export function ChatPanel({ chat, editorText, beforeText, afterText, onApply, inline, bodyText, outcomes, onReply }: ChatPanelProps) {
   const [text, setText] = useState('')
   const currentHash = useTextHash(editorText)
   const current = chat.current
@@ -139,7 +193,7 @@ export function ChatPanel({ chat, editorText, beforeText, afterText, onApply }: 
     const body = text.trim()
     if (!body || chat.sending || messageBytesLeft(body) < 0) return
     // 失敗したら本文を残す（同じ本文の再送は同じ冪等キーで送る）
-    chat.send(body, editorText).then((ok) => ok && setText(''))
+    chat.send(body, editorText, { bodyText, onTurn: (turn) => onReply?.(turn, editorText) }).then((ok) => ok && setText(''))
   }
 
   return (
@@ -191,7 +245,12 @@ export function ChatPanel({ chat, editorText, beforeText, afterText, onApply }: 
             <ol className="max-h-[36rem] space-y-2 overflow-auto" aria-label="会話" aria-live="polite">
               {current?.messages.map((m) => (
                 <Message key={m.id} m={m}>
-                  {m.proposal && <ProposalView proposal={m.proposal} currentHash={currentHash} beforeText={beforeText} afterText={afterText} onApply={onApply} />}
+                  {m.proposal &&
+                    (inline ? (
+                      <ProposalLine proposal={m.proposal} outcome={outcomes?.[m.id]} currentHash={currentHash} beforeText={beforeText} afterText={afterText} onApply={onApply} />
+                    ) : (
+                      <ProposalView proposal={m.proposal} currentHash={currentHash} beforeText={beforeText} afterText={afterText} onApply={onApply} />
+                    ))}
                 </Message>
               ))}
               {chat.streaming && <StreamingMessages streaming={chat.streaming} />}
