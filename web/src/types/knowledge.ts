@@ -24,7 +24,8 @@ export interface SkillContent {
 
 export interface InstructionsContent {
   kind: 'instructions'
-  target: InstructionsTarget
+  /** 旧データの互換のためだけ。書き出し先は取り込むエージェントが選ぶ（S76） */
+  target?: InstructionsTarget
   body: string
   scope: ArtifactScope
 }

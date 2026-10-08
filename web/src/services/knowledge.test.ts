@@ -22,7 +22,7 @@ const rev = (over: Partial<ArtifactRevision>): ArtifactRevision => ({
   name: 'agents',
   revision: 1,
   status: 'active',
-  content: { kind: 'instructions', target: 'agents_md', body: 'x', scope: { workspace: true, projects: [] } },
+  content: { kind: 'instructions', body: 'x', scope: { workspace: true, projects: [] } },
   content_hash: 'sha256:1',
   author: 'u1',
   approver: null,
@@ -47,7 +47,7 @@ describe('emptyContent', () => {
   it('gives each kind a starting content; spec starts with project scope', () => {
     expect(emptyContent('spec')).toMatchObject({ kind: 'spec', scope: { workspace: false, projects: [] }, compiled: null })
     expect(emptyContent('skill')).toMatchObject({ kind: 'skill', files: {}, scope: { workspace: true, projects: [] } })
-    expect(emptyContent('instructions')).toMatchObject({ kind: 'instructions', target: 'agents_md' })
+    expect(emptyContent('instructions')).toMatchObject({ kind: 'instructions' })
   })
 })
 
@@ -135,7 +135,7 @@ describe('toEditable', () => {
 describe('revisionText', () => {
   const names = new Map([['p1', 'org/a']])
   it('puts scope, target and every file into one text for the diff', () => {
-    expect(revisionText(rev({}).content, names)).toBe('スコープ: ワークスペース全体\n対象: AGENTS.md\n\nx')
+    expect(revisionText(rev({}).content, names)).toBe('スコープ: ワークスペース全体\n\nx')
     const skill = { kind: 'skill' as const, skill_md: 'S', files: { 'b.md': 'B', 'a.md': 'A' }, scope: { workspace: false, projects: ['p1', 'p2'] } }
     expect(revisionText(skill, names)).toBe('スコープ: org/a, p2\n\n=== SKILL.md\nS\n\n=== a.md\nA\n\n=== b.md\nB')
   })

@@ -36,7 +36,7 @@ from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast, get_args
 from urllib.parse import urlparse
 
 from mcp.server import MCPServer
@@ -60,6 +60,7 @@ from speclino.domain.knowledge import (
     SkillContent,
     SpecContent,
 )
+from speclino.domain.knowledge_sync import InstructionsFile, SkillsRoot, SyncLayout
 from speclino.domain.run import GitRef
 from speclino.services import knowledge_registry, knowledge_sync, mcp_tokens, sync_tokens
 from speclino.services.mcp_context import ContextUnavailable, InProcessContextSource
@@ -200,6 +201,8 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
         lock_json: str = "",
         local_hashes: dict[str, str] | None = None,
         managed_inner: dict[str, str] | None = None,
+        instructions_file: str = "",
+        skills_dir: str = "",
     ) -> dict[str, Any]:
         """作業を始める前に、手元の知識を取り込み直す必要があるか（`pull_needed`）を返す。
 
@@ -207,30 +210,57 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
         `local_hashes` は lock の `files` に載ったファイル（AGENTS.md / CLAUDE.md 以外）の
         今の sha256、`managed_inner` は AGENTS.md / CLAUDE.md の管理区画の中身の sha256（どちらも
         改行を LF に寄せた本文の `sha256:<hex>`、省略可）。`reasons` は no_lock / invalid_lock /
-        expired / other_repo / members_changed / policy_changed / files_modified。`pull_needed` なら
-        `knowledge_pull` で取り込む。最終的な判定はゲートの照合（KNOWLEDGE-LOCK-001）。
+        expired / other_repo / members_changed / policy_changed / files_modified / stale_copy /
+        layout_change。`pull_needed` なら `knowledge_pull` で取り込む。
+
+        `instructions_file`（AGENTS.md か CLAUDE.md）と `skills_dir`（.agents/skills か
+        .claude/skills）は `knowledge_pull` と同じ値を渡す。省略すると今の配置を保つ（初回は
+        AGENTS.md と .agents/skills）。Claude Code は初回や配置を変えるとき、両方に
+        instructions_file="CLAUDE.md", skills_dir=".claude/skills" を渡す。lock の配置と違えば
+        `layout_change` で `pull_needed` になる。最終的な判定はゲートの照合（KNOWLEDGE-LOCK-001）。
         """
         principal = _principal(ctx)
         _check_inputs(lock_json, local_hashes, managed_inner)
+        file_choice, root_choice = _check_layout(instructions_file, skills_dir)
         project, resolved = await _resolve(get_state(), principal, repo_full_name)
-        return _sync_status(project, resolved, lock_json or None, local_hashes, managed_inner)
+        return _sync_status(
+            project,
+            resolved,
+            lock_json or None,
+            local_hashes,
+            managed_inner,
+            file_choice,
+            root_choice,
+        )
 
     @mcp.tool()
     async def knowledge_pull(
-        repo_full_name: str, ctx: Context, lock_json: str = ""
+        repo_full_name: str,
+        ctx: Context,
+        lock_json: str = "",
+        instructions_file: str = "",
+        skills_dir: str = "",
     ) -> dict[str, Any]:
         """このリポジトリに当たる承認済みの知識の書き出し計画を作り、使い捨ての取得 URL を返す。
 
         `lock_json` に手元の `.speclino/lock.json` の本文を必ず渡す（サーバが確かめたうえで、
         外れた知識の削除も計画する。渡さないと削除は計画されず古い知識が残りうる）。返すのは
         `plan_url`（1 回だけ・10 分で失効）・`expires_at`・`bundle_generation`・`summary`。
-        リポジトリのルートで `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/speclino_apply.py --plan-url
-        <plan_url> --expect-generation <bundle_generation>` を実行する（計画やファイルを自分で
-        書かない）。
+        リポジトリのルートで `python3 <speclino_apply.py のパス> --plan-url <plan_url>
+        --expect-generation <bundle_generation>` を実行する（Claude Code のプラグインなら
+        `${CLAUDE_PLUGIN_ROOT}/scripts/speclino_apply.py`、リポジトリに置いたなら相対パス。
+        計画やファイルを自分で書かない）。
+
+        書き出し先は取り込む側が選ぶ。`instructions_file`（AGENTS.md か CLAUDE.md）と
+        `skills_dir`（.agents/skills か .claude/skills）は、省略すると今の配置を保つ
+        （初回は AGENTS.md と .agents/skills）。Claude Code は初回（lock が無い・旧い配置のとき）に
+        instructions_file="CLAUDE.md", skills_dir=".claude/skills" を指定する。それ以外の
+        エージェントは省略してよい。配置を変えるときだけ指定する。応答の `layout` が実際の配置。
         """
         state = get_state()
         principal = _principal(ctx)
         _check_inputs(lock_json, None, None)
+        file_choice, root_choice = _check_layout(instructions_file, skills_dir)
         project = await _workspace_project(state, principal, repo_full_name)
         try:
             async with state.session_factory() as session, session.begin():
@@ -241,6 +271,8 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
                     lock_json=lock_json or None,
                     channel=principal.channel,
                     token_id=principal.token_id,
+                    instructions_file=file_choice,
+                    skills_root=root_choice,
                 )
         except LookupError as e:
             raise ToolError(f"{repo_full_name} はこのワークスペースに登録されていない") from e
@@ -251,6 +283,10 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
             "plan_url": f"{base}/api/sync/plans/{ticket.token}",
             "expires_at": ticket.expires_at.isoformat(),
             "bundle_generation": ticket.bundle_generation,
+            "layout": {
+                "instructions_file": ticket.layout.instructions_file,
+                "skills_dir": ticket.layout.skills_root,
+            },
             "summary": {
                 "ops": ticket.ops,
                 "writes": ticket.writes,
@@ -382,6 +418,20 @@ def _check_inputs(
             raise ToolError(f"{name} が大きすぎる（{MAX_HASH_ENTRIES} 件・1MB まで）")
 
 
+def _check_layout(
+    instructions_file: str, skills_dir: str
+) -> tuple[InstructionsFile | None, SkillsRoot | None]:
+    """配置の引数（省略は空文字）。列挙の値以外は拒否する。"""
+    if instructions_file and instructions_file not in get_args(InstructionsFile):
+        raise ToolError("instructions_file は AGENTS.md か CLAUDE.md")
+    if skills_dir and skills_dir not in get_args(SkillsRoot):
+        raise ToolError("skills_dir は .agents/skills か .claude/skills")
+    return (
+        cast(InstructionsFile, instructions_file) if instructions_file else None,
+        cast(SkillsRoot, skills_dir) if skills_dir else None,
+    )
+
+
 def _normalize_hash(value: str) -> str:
     return value if value.startswith("sha256:") else "sha256:" + value.lower()
 
@@ -410,12 +460,31 @@ def _modified_files(
     return sorted(out)
 
 
+def _declared_stale_copies(
+    lock: KnowledgeLock | None,
+    local_hashes: dict[str, str] | None,
+    managed_inner: dict[str, str] | None,
+) -> list[str]:
+    """申告のハッシュに、lock が示す配置の外（別の指示書ファイル・別のルートの同名スキル）の
+    ものがあれば、古い写しが残っている（ゲートの `stale_copy` と同じ導き方）。"""
+    if lock is None:
+        return []
+    managed, dirs = knowledge_sync.stale_copy_probes(lock)
+    out = [p for p in managed if managed_inner is not None and p in managed_inner]
+    for d in dirs:
+        if local_hashes is not None and any(p.startswith(d + "/") for p in local_hashes):
+            out.append(d + "/")
+    return sorted(out)
+
+
 def _sync_status(
     project: Project,
     resolved: ResolvedKnowledge,
     lock_json: str | None,
     local_hashes: dict[str, str] | None = None,
     managed_inner: dict[str, str] | None = None,
+    instructions_file: InstructionsFile | None = None,
+    skills_root: SkillsRoot | None = None,
 ) -> dict[str, Any]:
     """ゲート（`KNOWLEDGE-LOCK-001`）と同じ `assess_lock` で判定し、申告のハッシュも照合する。"""
     generation = resolved.bundle.generation
@@ -427,6 +496,7 @@ def _sync_status(
             "pull_needed": False,
             "reasons": ["unregistered_repo"],
             "modified_files": [],
+            "stale_copies": [],
             "verdict": "UNKNOWN",
             "reason": "リポジトリ ID が未登録のため照合できない（取り込みもできない）",
             "changed": [],
@@ -438,20 +508,55 @@ def _sync_status(
         github_repo_id=project.github_repo_id,
     )
     modified = _modified_files(a.lock, local_hashes, managed_inner) if a.lock is not None else []
+    stale = _declared_stale_copies(a.lock, local_hashes, managed_inner)
     reasons = list(a.reasons)
     if modified and "files_modified" not in reasons:
         reasons.append("files_modified")
+    if stale and "stale_copy" not in reasons:
+        reasons.append("stale_copy")
+    if _layout_changes(a.lock, instructions_file, skills_root):
+        reasons.append("layout_change")
+    verdict, message = a.verdict, a.message
+    if stale and verdict == "VERIFIED_IN_SCOPE":  # ゲートと同じ（古い写しは REVIEW）
+        verdict = "REVIEW"
+        message = f"{knowledge_sync.STALE_COPY_MESSAGE}: {', '.join(stale)}"
     return {
         "current_generation": generation,
         "lock_generation": a.lock.bundle_generation if a.lock is not None else None,
-        "stale": a.verdict != "VERIFIED_IN_SCOPE",
+        "stale": verdict != "VERIFIED_IN_SCOPE",
         "pull_needed": bool(reasons),
         "reasons": reasons,
         "modified_files": modified,
-        "verdict": a.verdict,
-        "reason": a.message,
+        "stale_copies": stale,
+        "verdict": verdict,
+        "reason": message,
         "changed": a.changed,
     }
+
+
+def _layout_changes(
+    lock: KnowledgeLock | None,
+    instructions_file: InstructionsFile | None,
+    skills_root: SkillsRoot | None,
+) -> bool:
+    """明示した配置が lock の配置と違うか（`knowledge_pull` と同じ `resolve_layout` の規則）。
+
+    引数が無ければ今の配置を保つので変更ではない。lock が agents / claude でなければ（旧い配置・
+    食い違い）、明示した時点で変更として取り込み直す。lock に指示書もスキルも無ければ比べない。
+    """
+    if lock is None or (instructions_file is None and skills_root is None):
+        return False
+    kind = knowledge_sync.infer_layout(lock.files)
+    if kind == "unknown":
+        return False
+    desired = knowledge_sync.resolve_layout(
+        lock, instructions_file=instructions_file, skills_root=skills_root
+    )
+    current = {
+        "agents": knowledge_sync.DEFAULT_LAYOUT,
+        "claude": SyncLayout("CLAUDE.md", ".claude/skills"),
+    }.get(kind)
+    return desired != current
 
 
 def _principal(ctx: Context) -> Principal:

@@ -24,7 +24,7 @@ import typer
 from pydantic import ValidationError
 
 from speclino.domain.knowledge import KnowledgeLock
-from speclino.domain.knowledge_sync import SyncPlan
+from speclino.domain.knowledge_sync import InstructionsFile, SkillsRoot, SyncPlan
 from speclino.sync_apply import LOCK_PATH, apply_plan
 
 TOKEN_ENV = "SPECLINO_SYNC_TOKEN"
@@ -59,8 +59,20 @@ def _repo_id_from_lock(lock_json: str | None) -> int | None:
         return None
 
 
-def fetch_plan(url: str, token: str, repo_id: int, lock_json: str | None) -> SyncPlan:
+def fetch_plan(
+    url: str,
+    token: str,
+    repo_id: int,
+    lock_json: str | None,
+    instructions_file: InstructionsFile | None = None,
+    skills_dir: SkillsRoot | None = None,
+) -> SyncPlan:
     """`POST /api/sync/bundle` を呼んで計画を検証する。"""
+    body: dict[str, object] = {"repo_id": repo_id, "lock_json": lock_json}
+    if instructions_file is not None:
+        body["instructions_file"] = instructions_file
+    if skills_dir is not None:
+        body["skills_dir"] = skills_dir
     with httpx.Client(
         base_url=url.rstrip("/"),
         headers={"Authorization": f"Bearer {token}"},
@@ -68,7 +80,7 @@ def fetch_plan(url: str, token: str, repo_id: int, lock_json: str | None) -> Syn
         transport=transport_factory(),
     ) as client:
         try:
-            res = client.post("/api/sync/bundle", json={"repo_id": repo_id, "lock_json": lock_json})
+            res = client.post("/api/sync/bundle", json=body)
         except httpx.HTTPError as e:
             raise SyncFailed(f"接続に失敗した: {type(e).__name__}") from e
     if res.status_code == 401:
@@ -95,6 +107,20 @@ def sync(
         int | None,
         typer.Option("--repo-id", help="GitHub のリポジトリ ID（既定は手元の lock の値）"),
     ] = None,
+    instructions_file: Annotated[
+        InstructionsFile | None,
+        typer.Option(
+            "--instructions-file",
+            help="指示書の書き出し先（省略すると今の配置を保つ。初回は AGENTS.md）",
+        ),
+    ] = None,
+    skills_dir: Annotated[
+        SkillsRoot | None,
+        typer.Option(
+            "--skills-dir",
+            help="スキルの書き出し先（省略すると今の配置を保つ。初回は .agents/skills）",
+        ),
+    ] = None,
 ) -> None:
     """承認済みのスキル・指示書・仕様を取得して書き出し、.speclino/lock.json を更新する。"""
     token = os.environ.get(TOKEN_ENV, "")
@@ -118,7 +144,7 @@ def sync(
         typer.echo("--repo-id に GitHub のリポジトリ ID を指定してください（初回のみ）", err=True)
         raise typer.Exit(code=2)
     try:
-        plan = fetch_plan(base, token, target_id, lock_json)
+        plan = fetch_plan(base, token, target_id, lock_json, instructions_file, skills_dir)
     except SyncFailed as e:
         typer.echo(
             f"同期できなかった（手元のファイルと lock は前のまま）: {e}".replace(token, "***"),

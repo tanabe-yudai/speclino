@@ -111,7 +111,8 @@ class SkillContent(IRModel):
 
 class InstructionsContent(IRModel):
     kind: Literal["instructions"]
-    target: InstructionsTarget
+    # 旧データの互換のためだけに受け付ける。書き出し先は取り込むエージェントが選ぶ（S76）
+    target: InstructionsTarget | None = None
     body: str = Field(min_length=1)
     scope: ArtifactScope
 

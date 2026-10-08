@@ -31,7 +31,9 @@ op の種類:
   違えば、`expected_sha256`（前回の lock の記録）と一致するときだけ上書きする
 - `set_managed_block{path, inner, generation, expected_inner_sha256?}`: AGENTS.md / CLAUDE.md の
   管理区画の中だけを置き換える（無ければ末尾に足す）。区画の外は触らない
-- `remove_managed_block{path, expected_inner_sha256}`: 区画だけを取り除く
+- `remove_managed_block{path, expected_inner_sha256?}`: 区画だけを取り除く。
+  `expected_inner_sha256` が無いものは配置の片付け（S76）で、印が本物の 1 組なら中身を問わず
+  取り除く（lock の `absent` には載らない）
 - `delete{path, expected_sha256}`: 中身が記録どおりのときだけ消す
 
 ハッシュは改行を LF に寄せた本文の `sha256:<hex>`（Windows の autocrlf で偽の改変にしない）。
@@ -407,6 +409,8 @@ def _check_lock(ops: Sequence[Mapping[str, Any]], lock: Mapping[str, Any]) -> No
             files[op["path"]] = op.get("sha256")
         elif op["op"] == "set_managed_block":
             files[op["path"]] = file_hash(op["inner"])
+        elif op["op"] == "remove_managed_block" and op.get("expected_inner_sha256") is None:
+            continue  # 配置の片付け。lock の absent には載せない
         else:
             absent.append(op["path"])
     if lock.get("files") != files:
@@ -451,10 +455,10 @@ def _decide_op(op: Mapping[str, Any], target: Path, existing: str | None) -> _Ch
     try:
         block = split_managed(existing) if existing is not None else None
         if kind == "remove_managed_block":
-            expected = _hash_arg(op, "expected_inner_sha256", required=True)
+            expected = _hash_arg(op, "expected_inner_sha256", required=False)
             if existing is None or block is None:
                 return None
-            if file_hash(block.inner) != expected:
+            if expected is not None and file_hash(block.inner) != expected:
                 raise PreconditionFailed(f"{path} の管理区画が手元で変更されているため取り除かない")
             return _Change(path, target, remove_managed(existing), removes=True)
         inner = op["inner"]
@@ -559,6 +563,34 @@ def _prune_empty_parents(root: Path, directory: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _leftover_skill_dirs(root: Path, ops: Sequence[Mapping[str, Any]]) -> list[str]:
+    """書き出すスキルと同じ名前で、別のルートに残っているディレクトリ。
+
+    消すのは前回の lock が根拠になる場合だけなので、無い場合の古い写しは警告で知らせる。
+    """
+    written = {op["path"] for op in ops if op["op"] == "write"}
+    deleted = {op["path"] for op in ops if op["op"] == "delete"}
+    out: list[str] = []
+    for skill_root in SKILL_ROOTS:
+        names = sorted(
+            {
+                p.split("/")[2]
+                for p in written
+                if p.startswith(skill_root + "/") and p.count("/") >= 3
+            }
+        )
+        for other in (r for r in SKILL_ROOTS if r != skill_root):
+            for name in names:
+                if (root / other / name).is_dir() and not any(
+                    p.startswith(f"{other}/{name}/") for p in written | deleted
+                ):
+                    out.append(
+                        f"{other}/{name}/ に同じ名前のスキルが残っている"
+                        f"（{skill_root}/{name}/ に書き出した。古い写しなら手で消してください）"
+                    )
+    return out
+
+
 def _apply(repo_root: Path, plan: Mapping[str, Any], result: ApplyResult) -> None:
     _require(plan, Mapping, "計画が JSON のオブジェクトではない")
     ops = _require(plan.get("ops"), list, "ops")
@@ -573,6 +605,7 @@ def _apply(repo_root: Path, plan: Mapping[str, Any], result: ApplyResult) -> Non
         if op["op"] == "set_managed_block" and op.get("generation") != result.bundle_generation:
             raise PreconditionFailed(f"{op['path']} の区画の世代が計画の世代と一致しない")
     lock_target = check_target(root, LOCK_PATH)
+    result.warnings += _leftover_skill_dirs(root, ops)
 
     changes: list[_Change] = []
     for op in ops:

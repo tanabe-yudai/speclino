@@ -49,6 +49,10 @@ def remove_block(path: str, expected: str) -> dict[str, Any]:
     return {"op": "remove_managed_block", "path": path, "expected_inner_sha256": expected}
 
 
+def cleanup_block(path: str) -> dict[str, Any]:
+    return {"op": "remove_managed_block", "path": path}
+
+
 def delete(path: str, expected: str) -> dict[str, Any]:
     return {"op": "delete", "path": path, "expected_sha256": expected}
 
@@ -63,6 +67,8 @@ def plan(*ops: dict[str, Any], gen: int = 1, repo: str = "acme/app") -> dict[str
             files[op["path"]] = op["sha256"]
         elif op["op"] == "set_managed_block":
             files[op["path"]] = _h(op["inner"])
+        elif op["op"] == "remove_managed_block" and op.get("expected_inner_sha256") is None:
+            continue  # 配置の片付けは absent に載せない
         else:
             absent.append(op["path"])
     lock = {
@@ -164,6 +170,47 @@ def test_remove_managed_block_keeps_outside_text(tmp_path: Path) -> None:
     assert lock["absent"] == ["AGENTS.md"] and lock["files"] == {}
     # もう一度当てても区画は無いまま（変えない）
     assert sa.apply_plan(tmp_path, plan(remove_block("AGENTS.md", _h("共通\n")), gen=2)).ok
+
+
+def test_cleanup_block_removes_only_the_managed_block_without_expectation(tmp_path: Path) -> None:
+    claude = tmp_path / "CLAUDE.md"
+    claude.write_text("# 手書き\n<!-- speclino:begin bundle=1 -->\n古い\n<!-- speclino:end -->\n")
+    ops = (set_block("AGENTS.md", "共通\n"), cleanup_block("CLAUDE.md"))
+    result = sa.apply_plan(tmp_path, plan(*ops))
+    assert result.ok, result
+    assert claude.read_text() == "# 手書き\n" and "CLAUDE.md" in result.deleted
+    lock = json.loads((tmp_path / sa.LOCK_PATH).read_text())
+    assert lock["absent"] == []
+    # 区画が無い・ファイルが無いなら何もしない
+    again = sa.apply_plan(tmp_path, plan(*ops))
+    assert again.ok and "CLAUDE.md" in again.unchanged
+    claude.unlink()
+    assert sa.apply_plan(tmp_path, plan(*ops)).ok
+    # 印が壊れていれば止まる（何も変えない）
+    claude.write_text("<!-- speclino:end -->\n")
+    stopped(sa.apply_plan(tmp_path, plan(*ops)), "CLAUDE.md")
+    assert claude.read_text() == "<!-- speclino:end -->\n"
+
+
+def test_warns_about_same_name_skill_left_in_other_root(tmp_path: Path) -> None:
+    (tmp_path / ".claude/skills/review").mkdir(parents=True)
+    (tmp_path / ".claude/skills/review/SKILL.md").write_text("古い写し")
+    (tmp_path / ".claude/skills/mine").mkdir()
+    result = sa.apply_plan(tmp_path, plan(write(".agents/skills/review/SKILL.md", "新\n")))
+    assert result.ok, result
+    assert [w for w in result.warnings if ".claude/skills/review/" in w]
+    assert not [w for w in result.warnings if "mine" in w]
+    assert (tmp_path / ".claude/skills/review/SKILL.md").read_text() == "古い写し"  # 消さない
+    # 計画が消す（前回の lock が根拠）なら警告しない
+    gone = sa.apply_plan(
+        tmp_path,
+        plan(
+            write(".agents/skills/review/SKILL.md", "新\n"),
+            delete(".claude/skills/review/SKILL.md", _h("古い写し")),
+            gen=2,
+        ),
+    )
+    assert gone.ok and gone.warnings == []
 
 
 def test_crlf_managed_block_and_files(tmp_path: Path) -> None:

@@ -450,13 +450,17 @@ def _overlaps(a: ArtifactScope, b: ArtifactScope) -> bool:
 
 
 def _conflicts(actives: list[ArtifactRevision]) -> list[str]:
-    """同じスコープに当たる、同じ target の指示書・同名のスキル・同じ要求 ID の仕様。"""
+    """同じスコープに当たる同名のスキル・同じ要求 ID の仕様。
+
+    指示書は競合させない。書き出し先は 1 つのファイルで、ワークスペース全体 → プロジェクト、
+    それぞれ名前順に連結する（`knowledge_sync.render_files`）。
+    """
     groups: dict[str, list[ArtifactRevision]] = defaultdict(list)
     for rev in actives:
         c = rev.content
         if c.kind == "instructions":
-            groups[f"指示書 {c.target}"].append(rev)
-        elif c.kind == "skill":
+            continue
+        if c.kind == "skill":
             groups[f"スキル名 {skill_dir_name(rev).casefold()}"].append(rev)
         else:
             for rid in _requirement_ids(rev):

@@ -126,7 +126,14 @@ async def plan_sync_bundle(
         raise api_error(401, "unauthenticated", "sync トークンが必要")
     try:
         async with state.session_factory() as s, s.begin():
-            plan = await knowledge_sync.fetch_for_sync(s, identity, body.repo_id, body.lock_json)
+            plan = await knowledge_sync.fetch_for_sync(
+                s,
+                identity,
+                body.repo_id,
+                body.lock_json,
+                instructions_file=body.instructions_file,
+                skills_root=body.skills_dir,
+            )
     except LookupError as e:
         raise api_error(404, "repository_not_found", "このトークンのリポジトリではない") from e
     except ValueError as e:

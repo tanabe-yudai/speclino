@@ -148,7 +148,6 @@ async def _seed(w: World) -> None:
         "agents",
         InstructionsContent(
             kind="instructions",
-            target="agents_md",
             body="共通",
             scope=ArtifactScope(workspace=True),
         ),
@@ -406,9 +405,10 @@ async def test_knowledge_pull_returns_url_and_round_trip(world: World) -> None:
         status = _json(await c.call_tool("sync_status", {"repo_full_name": w.repo}))
         assert status["pull_needed"] is True and status["reasons"] == ["no_lock"]
         ticket = _json(await c.call_tool("knowledge_pull", {"repo_full_name": w.repo}))
-    assert set(ticket) == {"plan_url", "expires_at", "bundle_generation", "summary"}
+    assert set(ticket) == {"plan_url", "expires_at", "bundle_generation", "layout", "summary"}
+    assert ticket["layout"] == {"instructions_file": "AGENTS.md", "skills_dir": ".agents/skills"}
     assert ticket["plan_url"].startswith("http://localhost:8080/api/sync/plans/slplan_")
-    assert ticket["summary"]["ops"] == 6 and ticket["summary"]["deletes"] == 0
+    assert ticket["summary"]["ops"] == 5 and ticket["summary"]["deletes"] == 0
     assert await _fetch_channels(w) == []  # 取得したときに記録する
     gen = str(ticket["bundle_generation"])
     out = await _apply_url(w, ticket["plan_url"], repo, "--expect-generation", gen)
@@ -442,10 +442,10 @@ async def test_knowledge_pull_returns_url_and_round_trip(world: World) -> None:
         ticket = _json(
             await c.call_tool("knowledge_pull", {"repo_full_name": w.repo, "lock_json": lock_json})
         )
-    assert ticket["summary"]["deletes"] == 4
+    assert ticket["summary"]["deletes"] == 2
     out = await _apply_url(w, ticket["plan_url"], repo)
-    assert out["ok"] is True and ".claude/skills/review/SKILL.md" in out["deleted"]
-    assert not (repo / ".claude/skills/review").exists()
+    assert out["ok"] is True and ".agents/skills/review/SKILL.md" in out["deleted"]
+    assert not (repo / ".agents/skills/review").exists()
     assert await _check(w, repo, w.pid, w.repo) == "VERIFIED_IN_SCOPE"
     assert (repo / "AGENTS.md").read_text().startswith("# 手書き\n")
 
@@ -521,9 +521,18 @@ async def test_knowledge_pull_deletes_only_with_verified_lock(world: World) -> N
         _, plan = await _pull(w, c, {"repo_full_name": w.repo, "lock_json": lock_json})
     assert ks.verify_plan(SyncPlan.model_validate(plan))
     assert status["pull_needed"] is True and status["reasons"] == ["members_changed"]
-    assert {op["op"] for op in no_delete["ops"]} <= {"write", "set_managed_block"}
+    assert {op["op"] for op in no_delete["ops"]} <= {
+        "write",
+        "set_managed_block",
+        "remove_managed_block",  # 選ばれなかった側の片付け（期待ハッシュ無し）
+    }
+    assert all(
+        op.get("expected_inner_sha256") is None
+        for op in no_delete["ops"]
+        if op["op"] == "remove_managed_block"
+    )
     deletes = sorted(op["path"] for op in plan["ops"] if op["op"] == "delete")
-    assert ".claude/skills/review/SKILL.md" in deletes and ".agents/skills/review/ref.md" in deletes
+    assert ".agents/skills/review/SKILL.md" in deletes and ".agents/skills/review/ref.md" in deletes
     assert plan["lock"]["absent"] == deletes
     assert sync_apply.apply_plan(repo, plan).ok
     assert not (repo / ".claude/skills/review").exists()
@@ -586,7 +595,7 @@ async def test_sync_status_reports_modified_files(world: World) -> None:
     hashes = {p: h for p, h in lock["files"].items() if p not in ks.MANAGED_FILES}
     inner = {p: h for p, h in lock["files"].items() if p in ks.MANAGED_FILES}
     args = {"repo_full_name": w.repo, "lock_json": json.dumps(lock)}
-    tampered = {**hashes, ".claude/skills/review/SKILL.md": ks.file_hash("改ざん")}
+    tampered = {**hashes, ".agents/skills/review/SKILL.md": ks.file_hash("改ざん")}
     plain_hex = {p: h.removeprefix("sha256:") for p, h in hashes.items()}
     async with _client(w, token) as c:
         ok = _json(
@@ -602,7 +611,7 @@ async def test_sync_status_reports_modified_files(world: World) -> None:
         )
     assert ok["pull_needed"] is False
     assert bad["pull_needed"] is True and bad["reasons"] == ["files_modified"]
-    assert bad["modified_files"] == [".claude/skills/review/SKILL.md"]
+    assert bad["modified_files"] == [".agents/skills/review/SKILL.md"]
     assert missing["modified_files"] == ["AGENTS.md"]
 
 
@@ -669,3 +678,102 @@ async def test_expired_plans_are_purged_when_fetching(world: World) -> None:
             )
         ).scalar_one()
     assert left == 0
+
+
+async def test_knowledge_pull_layout_params(world: World) -> None:
+    """S76: 配置は取り込む側が選ぶ。省略は今の配置を保ち、列挙の外は拒否する。"""
+    w = world
+    await _seed(w)
+    token = await _sync_token(w)
+    repo = w.tmp / "checkout"
+    repo.mkdir()
+    claude = {"instructions_file": "CLAUDE.md", "skills_dir": ".claude/skills"}
+    async with _client(w, token) as c:
+        ticket, plan = await _pull(w, c, {"repo_full_name": w.repo, **claude})
+        assert ticket["layout"] == claude
+        assert sync_apply.apply_plan(repo, plan).ok
+        assert (repo / "CLAUDE.md").exists() and not (repo / "AGENTS.md").exists()
+        assert (repo / ".claude/skills/review/SKILL.md").exists()
+        assert await _check(w, repo, w.pid, w.repo) == "VERIFIED_IN_SCOPE"
+        lock_json = (repo / ks.LOCK_PATH).read_text()
+        # 省略すると今の配置（claude）を保つ
+        kept, _ = await _pull(w, c, {"repo_full_name": w.repo, "lock_json": lock_json})
+        assert kept["layout"] == claude
+        # 配置を変えるときだけ指定する。前の配置のパスは消える
+        agents = {"instructions_file": "AGENTS.md", "skills_dir": ".agents/skills"}
+        moved, switch = await _pull(
+            w, c, {"repo_full_name": w.repo, "lock_json": lock_json, **agents}
+        )
+        assert moved["layout"] == agents
+        bad_file = await c.call_tool(
+            "knowledge_pull", {"repo_full_name": w.repo, "instructions_file": "README.md"}
+        )
+        bad_dir = await c.call_tool(
+            "knowledge_pull", {"repo_full_name": w.repo, "skills_dir": ".github/skills"}
+        )
+    assert bad_file.is_error and "instructions_file" in _text(bad_file)
+    assert bad_dir.is_error and "skills_dir" in _text(bad_dir)
+    assert sync_apply.apply_plan(repo, switch).ok
+    assert "speclino:begin" in (repo / "AGENTS.md").read_text()
+    assert "speclino:begin" not in (repo / "CLAUDE.md").read_text()  # 区画だけが消える
+    assert not (repo / ".claude/skills/review").exists()
+    assert await _check(w, repo, w.pid, w.repo) == "VERIFIED_IN_SCOPE"
+
+
+async def test_sync_status_reports_stale_copy(world: World) -> None:
+    w = world
+    await _seed(w)
+    token = await _sync_token(w)
+    repo = w.tmp / "checkout"
+    repo.mkdir()
+    async with _client(w, token) as c:
+        _, plan = await _pull(w, c, {"repo_full_name": w.repo})
+        assert sync_apply.apply_plan(repo, plan).ok
+        lock = json.loads((repo / ks.LOCK_PATH).read_text())
+        args = {"repo_full_name": w.repo, "lock_json": json.dumps(lock)}
+        own = {p: h for p, h in lock["files"].items() if p not in ks.MANAGED_FILES}
+        own_inner = {p: h for p, h in lock["files"].items() if p in ks.MANAGED_FILES}
+        stale = _json(
+            await c.call_tool(
+                "sync_status",
+                {
+                    **args,
+                    "local_hashes": {**own, ".claude/skills/review/SKILL.md": ks.file_hash("古")},
+                    "managed_inner": {**own_inner, "CLAUDE.md": ks.file_hash("古")},
+                },
+            )
+        )
+        clean = _json(await c.call_tool("sync_status", args))
+    assert stale["pull_needed"] is True and stale["reasons"] == ["stale_copy"]
+    assert stale["stale_copies"] == [".claude/skills/review/", "CLAUDE.md"]
+    assert clean["pull_needed"] is False and clean["stale_copies"] == []
+
+
+async def test_sync_status_layout_change_and_stale_verdict(world: World) -> None:
+    w = world
+    await _seed(w)
+    token = await _sync_token(w)
+    repo = w.tmp / "checkout"
+    repo.mkdir()
+    async with _client(w, token) as c:
+        _, plan = await _pull(w, c, {"repo_full_name": w.repo})
+        assert sync_apply.apply_plan(repo, plan).ok
+        lock = json.loads((repo / ks.LOCK_PATH).read_text())
+        args = {"repo_full_name": w.repo, "lock_json": json.dumps(lock)}
+        claude = {"instructions_file": "CLAUDE.md", "skills_dir": ".claude/skills"}
+        same = _json(await c.call_tool("sync_status", {**args, "instructions_file": "AGENTS.md"}))
+        changed = _json(await c.call_tool("sync_status", {**args, **claude}))
+        bad = await c.call_tool("sync_status", {**args, "skills_dir": "other/skills"})
+        own = {p: h for p, h in lock["files"].items() if p not in ks.MANAGED_FILES}
+        inner = {p: h for p, h in lock["files"].items() if p in ks.MANAGED_FILES}
+        stale = _json(
+            await c.call_tool(
+                "sync_status",
+                {**args, "local_hashes": own, "managed_inner": {**inner, "CLAUDE.md": "x"}},
+            )
+        )
+    assert same["pull_needed"] is False
+    assert changed["pull_needed"] is True and changed["reasons"] == ["layout_change"]
+    assert bad.is_error and "skills_dir" in _text(bad)
+    assert stale["verdict"] == "REVIEW" and stale["stale"] is True
+    assert "古い写し" in stale["reason"]
