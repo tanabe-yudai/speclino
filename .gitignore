@@ -27,8 +27,9 @@ tfplan
 # Build output
 build/
 
-# Claude Code のセッション用（worktree など）
-.claude/
+# Claude Code のセッション用（worktree など）。SpecLino が書き出すスキルは管理対象
+.claude/*
+!.claude/skills/
 
 # ブレインストーミングのモック（superpowers）
 .superpowers/
