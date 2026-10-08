@@ -200,3 +200,12 @@ def test_lock_expiry_must_follow_issue() -> None:
             expires_at=now,
             signature="s",
         )
+
+
+def test_instructions_target_is_optional_and_old_data_still_loads() -> None:
+    new = InstructionsContent(kind="instructions", body="b", scope=_WS)
+    assert new.target is None
+    old = InstructionsContent.model_validate(
+        {"kind": "instructions", "target": "claude_md", "body": "b", "scope": {"workspace": True}}
+    )
+    assert old.target == "claude_md"

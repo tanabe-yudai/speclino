@@ -66,11 +66,15 @@ class SetManagedBlockOp(IRModel):
 
 
 class RemoveManagedBlockOp(IRModel):
-    """管理区画だけを取り除く（中身が前回の lock の記録どおりのときだけ）。"""
+    """管理区画だけを取り除く（中身が前回の lock の記録どおりのときだけ）。
+
+    `expected_inner_sha256` が None のものは配置の片付け（S76）。印が本物の 1 組だけなら
+    SpecLino のものとして、中身を問わず取り除く。lock の `absent` には載せない。
+    """
 
     op: Literal["remove_managed_block"] = "remove_managed_block"
     path: str
-    expected_inner_sha256: str
+    expected_inner_sha256: str | None = None
 
 
 class DeleteOp(IRModel):
@@ -84,6 +88,19 @@ class DeleteOp(IRModel):
 SyncOp = Annotated[
     WriteOp | SetManagedBlockOp | RemoveManagedBlockOp | DeleteOp, Field(discriminator="op")
 ]
+
+
+InstructionsFile = Literal["AGENTS.md", "CLAUDE.md"]
+SkillsRoot = Literal[".agents/skills", ".claude/skills"]
+LayoutKind = Literal["agents", "claude", "legacy_dual", "mixed", "unknown"]
+
+
+@dataclass(frozen=True)
+class SyncLayout:
+    """書き出し先の配置（S76）。指示書をどのファイルに、スキルをどのディレクトリに書くか。"""
+
+    instructions_file: InstructionsFile = "AGENTS.md"
+    skills_root: SkillsRoot = ".agents/skills"
 
 
 class SyncPlan(IRModel):
@@ -110,15 +127,22 @@ class SyncBundleRequest(IRModel):
 
     repo_id: int
     lock_json: str | None = Field(default=None, max_length=1024 * 1024)
+    # 省略すると今の配置を保つ（初回は AGENTS.md と .agents/skills）
+    instructions_file: InstructionsFile | None = None
+    skills_dir: SkillsRoot | None = None
 
 
 __all__ = [
     "DeleteOp",
+    "InstructionsFile",
     "IssuedSyncToken",
+    "LayoutKind",
     "RemoveManagedBlockOp",
     "SetManagedBlockOp",
+    "SkillsRoot",
     "SyncBundleRequest",
     "SyncIdentity",
+    "SyncLayout",
     "SyncOp",
     "SyncPlan",
     "SyncTokenInfo",

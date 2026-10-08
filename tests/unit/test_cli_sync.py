@@ -59,7 +59,7 @@ def test_sync_writes_bundle(
     assert seen[0].headers["authorization"] == f"Bearer {TOKEN}"
     assert seen[0].method == "POST" and seen[0].url.path == "/api/sync/bundle"
     assert json.loads(seen[0].content) == {"repo_id": 42, "lock_json": None}
-    assert (tmp_path / ".claude/skills/review/SKILL.md").exists()
+    assert (tmp_path / ".agents/skills/review/SKILL.md").exists()
     lock_json = (tmp_path / ks.LOCK_PATH).read_text()
     _, _, bundle = _payload(BASE)
     finding = ks.check_lock(
@@ -74,7 +74,7 @@ def test_sync_writes_bundle(
     # 2 回目はリポジトリ ID を lock から読み、手元の lock を送る（削除の根拠はサーバが確かめる）
     again = runner.invoke(cli.app, ["sync", "--repo", str(tmp_path)])
     assert again.exit_code == 0, again.output
-    assert "変更なし 5" in again.output
+    assert "変更なし 4" in again.output
     assert json.loads(seen[1].content) == {"repo_id": 42, "lock_json": lock_json}
 
 
@@ -145,3 +145,41 @@ def test_sync_stops_without_overwriting_user_files(
     assert ".speclino/specs/orders.md" in result.output and "前のまま" in result.output
     assert (tmp_path / ".speclino/specs/orders.md").read_text() == "user spec"
     assert not (tmp_path / ks.LOCK_PATH).exists()
+
+
+def test_sync_passes_layout_options(
+    tmp_path: Path, server: Callable[[int, bytes], list[httpx.Request]]
+) -> None:
+    seen = server(200, _body())
+    result = runner.invoke(
+        cli.app,
+        [
+            "sync",
+            "--repo",
+            str(tmp_path),
+            "--repo-id",
+            "42",
+            "--instructions-file",
+            "CLAUDE.md",
+            "--skills-dir",
+            ".claude/skills",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(seen[0].content) == {
+        "repo_id": 42,
+        "lock_json": None,
+        "instructions_file": "CLAUDE.md",
+        "skills_dir": ".claude/skills",
+    }
+
+
+@pytest.mark.parametrize("option", ["--instructions-file", "--skills-dir"])
+def test_sync_rejects_values_outside_the_enum(
+    tmp_path: Path, server: Callable[[int, bytes], list[httpx.Request]], option: str
+) -> None:
+    seen = server(200, _body())
+    result = runner.invoke(
+        cli.app, ["sync", "--repo", str(tmp_path), "--repo-id", "42", option, "README.md"]
+    )
+    assert result.exit_code == 2 and seen == []

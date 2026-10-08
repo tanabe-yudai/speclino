@@ -150,7 +150,6 @@ async def _seed(x: Ctx) -> dict[str, object]:
         "agents",
         {
             "kind": "instructions",
-            "target": "agents_md",
             "body": "共通",
             "scope": {"workspace": True},
         },
@@ -238,8 +237,8 @@ async def test_sync_bundle_writes_and_verifies(ctx: Ctx, tmp_path: Path) -> None
     ops = {op.path: op for op in plan.ops}
     assert ops["AGENTS.md"].op == "set_managed_block"
     assert ops["AGENTS.md"].inner == "共通\n"  # type: ignore[union-attr]
-    assert ops[".claude/skills/review/ref/check.md"].content == "チェック"  # type: ignore[union-attr]
-    assert ".agents/skills/review/SKILL.md" in ops
+    assert ops[".agents/skills/review/ref/check.md"].content == "チェック"  # type: ignore[union-attr]
+    assert ".claude/skills/review/SKILL.md" not in ops  # 既定は .agents/skills だけ
     assert plan.bundle_generation == plan.lock.bundle_generation == 2
     assert plan.github_repo_id == plan.lock.github_repo_id == repo_id_of(x.repo)
     assert plan.repo_full_name == x.repo
@@ -265,6 +264,32 @@ async def test_sync_bundle_writes_and_verifies(ctx: Ctx, tmp_path: Path) -> None
     assert len(row.artifact_ids) == 2
 
 
+async def test_sync_bundle_layout_params(ctx: Ctx) -> None:
+    x = ctx
+    await _seed(x)
+    token = (await _issue(x)).json()["token"]
+    res = await x.c.post(
+        "/api/sync/bundle",
+        json={
+            "repo_id": repo_id_of(x.repo),
+            "instructions_file": "CLAUDE.md",
+            "skills_dir": ".claude/skills",
+        },
+        headers=_bearer(token),
+    )
+    assert res.status_code == 200, res.text
+    paths = {op["path"] for op in res.json()["ops"]}
+    assert "CLAUDE.md" in paths and ".claude/skills/review/SKILL.md" in paths
+    assert not {p for p in paths if p.startswith(".agents/")}
+    for bad in ({"instructions_file": "README.md"}, {"skills_dir": "other/skills"}):
+        refused = await x.c.post(
+            "/api/sync/bundle",
+            json={"repo_id": repo_id_of(x.repo), **bad},
+            headers=_bearer(token),
+        )
+        assert refused.status_code == 422
+
+
 async def test_sync_bundle_other_repo_is_404(ctx: Ctx) -> None:
     x = ctx
     token = (await _issue(x)).json()["token"]
@@ -284,7 +309,10 @@ async def test_sync_bundle_without_knowledge_is_empty(ctx: Ctx) -> None:
     token = (await _issue(x)).json()["token"]
     res = await _post_bundle(x, token, repo_id_of(x.repo))
     assert res.status_code == 200, res.text
-    assert res.json()["ops"] == []
+    # 書くものは無い。選ばれなかった側（CLAUDE.md）の管理区画の片付けだけ
+    assert [(o["op"], o["path"]) for o in res.json()["ops"]] == [
+        ("remove_managed_block", "CLAUDE.md")
+    ]
     assert res.json()["lock"]["bundle_generation"] == 1
 
 
@@ -333,7 +361,7 @@ async def test_cli_sync_round_trip(
 
     await sync("--repo-id", str(repo_id_of(x.repo)))
     assert (await _check(x, repo)).verdict == "VERIFIED_IN_SCOPE"
-    assert (repo / ".claude/skills/review/ref/check.md").read_text() == "チェック"
+    assert (repo / ".agents/skills/review/ref/check.md").read_text() == "チェック"
 
     await _revise(x, review, _skill_content("新しい手順", x.project_id))
     assert (await _check(x, repo)).verdict == "REVIEW"
@@ -355,6 +383,6 @@ async def test_cli_sync_round_trip(
     assert not (repo / ".claude/skills/review").exists()
     assert not (repo / ".agents/skills/review").exists()
     lock = json.loads((repo / ks.LOCK_PATH).read_text())
-    assert ".claude/skills/review/SKILL.md" in lock["absent"]
+    assert ".agents/skills/review/SKILL.md" in lock["absent"]
     assert (await _check(x, repo)).verdict == "VERIFIED_IN_SCOPE"
     assert (repo / "AGENTS.md").read_text().startswith("# 手書きのメモ\n")

@@ -309,24 +309,21 @@ async def test_stale_hash_is_a_conflict(ws: Ws) -> None:
             )
 
 
-async def test_bundle_conflict_rejects_approval(ws: Ws) -> None:
+async def test_instructions_never_conflict(ws: Ws) -> None:
+    """指示書は 1 つのファイルに決まった順で連結するので、スコープが重なっても承認できる。"""
     first = await _create(ws, "instructions", "agents", _instr())
     await _approve(ws, first)
     second = await _create(ws, "instructions", "agents-a", _instr(scope=_projects(ws.p1)))
-    with pytest.raises(kr.BundleConflict, match="agents_md"):
-        await _approve(ws, second)
-    async with ws.f() as s:
-        current = await kr.current_bundle(s, ws.slug)
-        (rev,) = await kr.list_revisions(s, second)
-    assert current is not None and current.generation == 1
-    assert rev.status == "draft"
-
-    # 違う target ならぶつからない
+    await _approve(ws, second)
+    # 旧データの target が違っても同じ（書き出し先は取り込む側が選ぶ）
     claude = InstructionsContent(
         kind="instructions", target="claude_md", body="b", scope=_projects(ws.p1)
     )
     third = await _create(ws, "instructions", "claude", claude)
-    assert (await _approve(ws, third)).generation == 2
+    await _approve(ws, third)
+    async with ws.f() as s:
+        current = await kr.current_bundle(s, ws.slug)
+    assert current is not None and current.generation == 3
 
 
 async def test_skill_name_and_requirement_ids_conflict(ws: Ws) -> None:

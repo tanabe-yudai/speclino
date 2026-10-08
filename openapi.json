@@ -1062,17 +1062,23 @@
             "$ref": "#/components/schemas/ArtifactScope"
           },
           "target": {
-            "enum": [
-              "agents_md",
-              "claude_md"
+            "anyOf": [
+              {
+                "enum": [
+                  "agents_md",
+                  "claude_md"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Target",
-            "type": "string"
+            "title": "Target"
           }
         },
         "required": [
           "kind",
-          "target",
           "body",
           "scope"
         ],
@@ -2258,6 +2264,21 @@
         "additionalProperties": false,
         "description": "`POST /api/sync/bundle` の要求。`lock_json` は手元の `.speclino/lock.json`（削除の根拠）。",
         "properties": {
+          "instructions_file": {
+            "anyOf": [
+              {
+                "enum": [
+                  "AGENTS.md",
+                  "CLAUDE.md"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instructions File"
+          },
           "lock_json": {
             "anyOf": [
               {
@@ -2273,6 +2294,21 @@
           "repo_id": {
             "title": "Repo Id",
             "type": "integer"
+          },
+          "skills_dir": {
+            "anyOf": [
+              {
+                "enum": [
+                  ".agents/skills",
+                  ".claude/skills"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skills Dir"
           }
         },
         "required": [

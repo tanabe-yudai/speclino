@@ -275,12 +275,13 @@ async def test_errors_are_mapped(ctx: Ctx) -> None:
         headers=OWNER,
     )
     assert ok.status_code == 200, ok.text
-    conflict = await c.post(
+    # 指示書は競合させない（1 つのファイルに決まった順で連結する）ので、重なっても承認できる
+    second = await c.post(
         f"/api/workspaces/{slug}/artifacts/{a['artifact_id']}/approve",
         json={"expected_revision": 1, "expected_hash": b["content_hash"]},
         headers=OWNER,
     )
-    assert conflict.status_code == 409 and conflict.json()["error"]["code"] == "bundle_conflict"
+    assert second.status_code == 200, second.text
 
 
 async def test_policy_activation_conflict_is_409_and_seed_explains(

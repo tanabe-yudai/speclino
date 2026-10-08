@@ -250,9 +250,7 @@ async def _diagnose(
         if kind == "skill":
             SkillContent.model_validate({"kind": "skill", **raw, "scope": scope})
         elif kind == "instructions":
-            InstructionsContent.model_validate(
-                {"kind": "instructions", "target": "agents_md", **raw, "scope": scope}
-            )
+            InstructionsContent.model_validate({"kind": "instructions", **raw, "scope": scope})
     except ValidationError as e:
         return _from_validation(e)
     if kind == "policy":

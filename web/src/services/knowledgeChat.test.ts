@@ -26,7 +26,7 @@ import type { PolicyRule } from '@/types/policy'
 
 const scope = { workspace: true, projects: [] }
 const skill: ArtifactContent = { kind: 'skill', skill_md: '---\nname: a\n---\n', files: { 'b.md': 'B', 'a.md': 'A' }, scope }
-const instr: ArtifactContent = { kind: 'instructions', target: 'claude_md', body: '本文', scope }
+const instr: ArtifactContent = { kind: 'instructions', body: '本文', scope }
 const rule: PolicyRule = {
   id: 'R-1',
   version: '2',

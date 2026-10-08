@@ -15,9 +15,12 @@ design/2026-10-07-agent-sync.md）。
 
 書き出しの約束:
 
-- skill: `.claude/skills/<name>/` と `.agents/skills/<name>/` に `SKILL.md` と付属ファイル
-- instructions: `AGENTS.md` / `CLAUDE.md` の管理区画。workspace スコープ → プロジェクトスコープ、
-  それぞれ名前順に連結
+- skill: 配置（`SyncLayout`）の `skills_root`（`.agents/skills` か `.claude/skills`）の
+  `<name>/` に `SKILL.md` と付属ファイル
+- instructions: 配置の `instructions_file`（`AGENTS.md` か `CLAUDE.md`）の管理区画。全ての指示書を
+  workspace スコープ → プロジェクトスコープ、それぞれ名前順に連結
+- 配置は取り込むエージェントが選ぶ（S76）。省略すると手元の（検証済みの）lock が示す今の配置を保ち、
+  無ければ AGENTS.md と .agents/skills
 - spec: `.speclino/specs/<name>.md`（`markdown` の写し）
 
 - 管理区画は `<!-- speclino:begin bundle=<n> -->` 改行、中身、`<!-- speclino:end -->`。区画の外は
@@ -52,7 +55,6 @@ from speclino.domain.knowledge import (
     Bundle,
     BundleMember,
     InstructionsContent,
-    InstructionsTarget,
     KnowledgeLock,
     ResolvedKnowledge,
     SkillContent,
@@ -60,9 +62,13 @@ from speclino.domain.knowledge import (
 )
 from speclino.domain.knowledge_sync import (
     DeleteOp,
+    InstructionsFile,
+    LayoutKind,
     RemoveManagedBlockOp,
     SetManagedBlockOp,
+    SkillsRoot,
     SyncIdentity,
+    SyncLayout,
     SyncOp,
     SyncPlan,
     WriteOp,
@@ -86,7 +92,8 @@ from speclino.verifiers.snapshot import DirectorySnapshot
 
 LOCK_REQUIREMENT_ID = "KNOWLEDGE-LOCK-001"
 LOCK_TTL = timedelta(days=30)
-MANAGED_FILES: dict[str, InstructionsTarget] = {"AGENTS.md": "agents_md", "CLAUDE.md": "claude_md"}
+MANAGED_FILES = sync_apply.MANAGED_FILES
+DEFAULT_LAYOUT = SyncLayout()
 
 _NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 
@@ -142,32 +149,70 @@ def _with_newline(text: str) -> str:
     return text if text.endswith("\n") else text + "\n"
 
 
-def render_files(resolved: ResolvedKnowledge) -> dict[str, str]:
-    """プロジェクトに当たる知識から、書き出すファイル（相対パス → 本文）を作る。決定的な順序。"""
+def render_files(
+    resolved: ResolvedKnowledge, layout: SyncLayout = DEFAULT_LAYOUT
+) -> dict[str, str]:
+    """プロジェクトに当たる知識から、書き出すファイル（相対パス → 本文）を作る。決定的な順序。
+
+    指示書は全て `layout.instructions_file` に、スキルは `layout.skills_root` の下だけに書く。
+    """
     files: dict[str, str] = {}
     for rev in sorted(resolved.skills, key=lambda r: r.name):
         assert isinstance(rev.content, SkillContent)
         name = _skill_dir(rev)
-        for root in SKILL_ROOTS:
-            files[f"{root}/{name}/SKILL.md"] = rev.content.skill_md
-            for rel, body in sorted(rev.content.files.items()):
-                files[f"{root}/{name}/{rel}"] = body
-    for path, target in MANAGED_FILES.items():
-        bodies = [
-            _with_newline(r.content.body)
-            for r in sorted(
-                resolved.instructions, key=lambda r: (not r.content.scope.workspace, r.name)
-            )
-            if isinstance(r.content, InstructionsContent) and r.content.target == target
-        ]
-        if bodies:
-            files[path] = "\n".join(bodies)
+        files[f"{layout.skills_root}/{name}/SKILL.md"] = rev.content.skill_md
+        for rel, body in sorted(rev.content.files.items()):
+            files[f"{layout.skills_root}/{name}/{rel}"] = body
+    bodies = [
+        _with_newline(r.content.body)
+        for r in sorted(
+            resolved.instructions, key=lambda r: (not r.content.scope.workspace, r.name)
+        )
+        if isinstance(r.content, InstructionsContent)
+    ]
+    if bodies:
+        files[layout.instructions_file] = "\n".join(bodies)
     for rev in sorted(resolved.specs, key=lambda r: r.name):
         assert isinstance(rev.content, SpecContent)
         files[f"{SPEC_ROOT}/{rev.name}.md"] = rev.content.markdown
     for path in files:
         validate_rel_path(path)
     return files
+
+
+def infer_layout(paths: Iterable[str]) -> LayoutKind:
+    """検証済みの lock の `files` のパスから、今の配置を推定する（lock に配置の欄は足さない）。
+
+    - `agents` / `claude`: 指示書・スキルが片方の流儀だけ（片方しか無くてもよい）
+    - `legacy_dual`: スキルが両方のルートに、または指示書が両方のファイルにある（S76 より前）
+    - `mixed`: AGENTS.md と .claude/skills のように流儀が食い違う
+    - `unknown`: 指示書もスキルも無い
+    """
+    given = set(paths)
+    files = {f for f in MANAGED_FILES if f in given}
+    roots = {r for r in SKILL_ROOTS if any(p.startswith(r + "/") for p in given)}
+    if not files and not roots:
+        return "unknown"
+    if len(files) > 1 or len(roots) > 1:
+        return "legacy_dual"
+    styles = {f == "CLAUDE.md" for f in files} | {r == ".claude/skills" for r in roots}
+    if len(styles) > 1:
+        return "mixed"
+    return "claude" if styles == {True} else "agents"
+
+
+def resolve_layout(
+    previous: KnowledgeLock | None,
+    *,
+    instructions_file: InstructionsFile | None = None,
+    skills_root: SkillsRoot | None = None,
+) -> SyncLayout:
+    """取り込みの配置。明示した引数が優先。省略した側は、検証済みの前回の lock が agents / claude の
+    どちらかなら今の配置を保ち、それ以外（lock なし・legacy_dual・mixed・unknown）は既定。"""
+    kept = DEFAULT_LAYOUT
+    if previous is not None and infer_layout(previous.files) == "claude":
+        kept = SyncLayout("CLAUDE.md", ".claude/skills")
+    return SyncLayout(instructions_file or kept.instructions_file, skills_root or kept.skills_root)
 
 
 def project_members(resolved: ResolvedKnowledge) -> list[BundleMember]:
@@ -248,6 +293,7 @@ def plan_writes(
     previous: KnowledgeLock | None,
     *,
     repo_full_name: str,
+    cleanup: Iterable[str] = (),
 ) -> SyncPlan:
     """書き出しの計画を作って署名する（純粋）。`previous` は `verified_previous_lock` の結果だけ。
 
@@ -255,6 +301,9 @@ def plan_writes(
       記録があれば `expected_*` に入れる（実行スクリプトは記録どおりの手元のファイルだけ上書きする）
     - `lock.absent` の各パスは `delete`（AGENTS.md / CLAUDE.md は `remove_managed_block`）。根拠は
       前回の lock の記録だけ（`previous` が無ければ `absent` は空でなければならない）
+    - `cleanup` の AGENTS.md / CLAUDE.md（選ばれなかった側）は、期待ハッシュ無しの
+      `remove_managed_block`（印が本物なら SpecLino のものなので前回の lock が無くても取り除く。
+      lock の `absent` には載せない）
     - 上限・パスは実行スクリプトと同じ `sync_apply.check_ops` で確かめる（超えれば `SyncRejected`）
     """
     if set(files) != set(lock.files):
@@ -287,6 +336,10 @@ def plan_writes(
             ops.append(RemoveManagedBlockOp(path=path, expected_inner_sha256=before[path]))
         else:
             ops.append(DeleteOp(path=path, expected_sha256=before[path]))
+    for path in sorted(set(cleanup)):
+        if path not in MANAGED_FILES or path in files or path in lock.absent:
+            raise SyncRejected(f"片付けの対象にできない: {path}")
+        ops.append(RemoveManagedBlockOp(path=path))
     sync_apply.check_ops([op.model_dump(mode="json") for op in ops])
     unsigned = SyncPlan(
         workspace=lock.workspace,
@@ -307,10 +360,16 @@ def build_plan(
     github_repo_id: int,
     repo_full_name: str,
     previous: KnowledgeLock | None,
+    layout: SyncLayout | None = None,
     now: datetime | None = None,
 ) -> SyncPlan:
-    """プロジェクトに当たる知識から、書き出すファイル・lock（`absent` つき）・計画を作る。"""
-    files = render_files(resolved)
+    """プロジェクトに当たる知識から、書き出すファイル・lock（`absent` つき）・計画を作る。
+
+    `layout` が無ければ前回の lock から決める（`resolve_layout`）。選ばれなかった側の指示書
+    ファイルの管理区画は、前回の lock が消す対象にしていなければ（lock の有無を問わず）片付ける。
+    """
+    layout = layout or resolve_layout(previous)
+    files = render_files(resolved, layout)
     lock = issue_lock(
         resolved,
         github_repo_id=github_repo_id,
@@ -318,7 +377,8 @@ def build_plan(
         absent=removed_paths(files, previous),
         now=now,
     )
-    return plan_writes(files, lock, previous, repo_full_name=repo_full_name)
+    cleanup = [f for f in MANAGED_FILES if f != layout.instructions_file and f not in lock.absent]
+    return plan_writes(files, lock, previous, repo_full_name=repo_full_name, cleanup=cleanup)
 
 
 class PlanTooLarge(ValueError):
@@ -330,8 +390,14 @@ PLAN_TOKEN_PREFIX = "slplan_"
 
 
 async def _plan_for(
-    session: AsyncSession, *, workspace: str, project: Project, lock_json: str | None
-) -> SyncPlan:
+    session: AsyncSession,
+    *,
+    workspace: str,
+    project: Project,
+    lock_json: str | None,
+    instructions_file: InstructionsFile | None = None,
+    skills_root: SkillsRoot | None = None,
+) -> tuple[SyncPlan, SyncLayout]:
     if project.github_repo_id is None:
         raise ValueError("リポジトリ ID が未登録のため書き出せない")
     bundle = await kr.ensure_bundle(session, workspace)
@@ -339,16 +405,18 @@ async def _plan_for(
     previous = verified_previous_lock(
         lock_json, workspace=workspace, github_repo_id=project.github_repo_id
     )
+    layout = resolve_layout(previous, instructions_file=instructions_file, skills_root=skills_root)
     plan = build_plan(
         resolved,
         github_repo_id=project.github_repo_id,
         repo_full_name=project.repo_full_name,
         previous=previous,
+        layout=layout,
     )
     size = plan_json_bytes(plan)
     if size > sync_apply.MAX_PLAN_BYTES:
         raise PlanTooLarge(f"計画が {sync_apply.MAX_PLAN_BYTES} バイトを超える（{size} バイト）")
-    return plan
+    return plan, layout
 
 
 async def plan_for_project(
@@ -359,13 +427,22 @@ async def plan_for_project(
     lock_json: str | None,
     channel: str,
     token_id: uuid.UUID | None,
+    instructions_file: InstructionsFile | None = None,
+    skills_root: SkillsRoot | None = None,
 ) -> SyncPlan:
     """project（呼び出し側がテナントを確かめたもの）に当たる今の bundle の計画を作り、記録する。
 
     lock のリポジトリ ID は要求の値ではなく project のものを使う。上限を超えれば
     `PlanTooLarge`（記録しない）。bundle を読めなければ ValueError / LookupError。
     """
-    plan = await _plan_for(session, workspace=workspace, project=project, lock_json=lock_json)
+    plan, _ = await _plan_for(
+        session,
+        workspace=workspace,
+        project=project,
+        lock_json=lock_json,
+        instructions_file=instructions_file,
+        skills_root=skills_root,
+    )
     await KnowledgeFetchRepository(session).record(
         workspace=workspace,
         channel=channel,
@@ -388,6 +465,7 @@ class PlanTicket:
     writes: int
     deletes: int
     bytes: int
+    layout: SyncLayout = DEFAULT_LAYOUT
 
 
 async def issue_plan_ticket(
@@ -398,6 +476,8 @@ async def issue_plan_ticket(
     lock_json: str | None,
     channel: str,
     token_id: uuid.UUID | None,
+    instructions_file: InstructionsFile | None = None,
+    skills_root: SkillsRoot | None = None,
     now: datetime | None = None,
 ) -> PlanTicket:
     """計画を作って `sync_plans` に置き、1 回だけ・10 分で失効する取得トークンを返す。
@@ -405,7 +485,14 @@ async def issue_plan_ticket(
     保存するのはトークンの SHA-256 だけ。取得の記録（`knowledge_fetches`）は実際に取得したとき
     （`redeem_plan_ticket`）に残す。
     """
-    plan = await _plan_for(session, workspace=workspace, project=project, lock_json=lock_json)
+    plan, layout = await _plan_for(
+        session,
+        workspace=workspace,
+        project=project,
+        lock_json=lock_json,
+        instructions_file=instructions_file,
+        skills_root=skills_root,
+    )
     issued = now or datetime.now(UTC)
     token = PLAN_TOKEN_PREFIX + secrets.token_urlsafe(32)
     body = json.dumps(plan.model_dump(mode="json"), ensure_ascii=False)
@@ -425,15 +512,24 @@ async def issue_plan_ticket(
         ),
         now=issued,
     )
-    removes = {"delete", "remove_managed_block"}
+    # 期待ハッシュ無しの remove_managed_block は配置の片付け（書き込みでも削除でもない）
+    deletes = sum(
+        op.op == "delete"
+        or (op.op == "remove_managed_block" and op.expected_inner_sha256 is not None)
+        for op in plan.ops
+    )
+    cleanups = sum(
+        op.op == "remove_managed_block" and not op.expected_inner_sha256 for op in plan.ops
+    )
     return PlanTicket(
         token=token,
         expires_at=issued + PLAN_URL_TTL,
         bundle_generation=plan.bundle_generation,
         ops=len(plan.ops),
-        writes=sum(op.op not in removes for op in plan.ops),
-        deletes=sum(op.op in removes for op in plan.ops),
+        writes=len(plan.ops) - deletes - cleanups,
+        deletes=deletes,
         bytes=len(body.encode("utf-8")),
+        layout=layout,
     )
 
 
@@ -497,6 +593,8 @@ async def fetch_for_sync(
     identity: SyncIdentity,
     github_repo_id: int,
     lock_json: str | None = None,
+    instructions_file: InstructionsFile | None = None,
+    skills_root: SkillsRoot | None = None,
 ) -> SyncPlan:
     """sync トークンの要求に答える。トークンのプロジェクトのリポジトリでなければ `LookupError`。"""
     project = await session.get(Project, identity.project_id)
@@ -513,6 +611,8 @@ async def fetch_for_sync(
         lock_json=lock_json,
         channel="sync",
         token_id=identity.token_id,
+        instructions_file=instructions_file,
+        skills_root=skills_root,
     )
 
 
@@ -629,6 +729,63 @@ def _unlisted_skill_files(snapshot: Snapshot, lock: KnowledgeLock) -> list[str]:
     return sorted(set(extra))
 
 
+def stale_copy_probes(lock: KnowledgeLock) -> tuple[list[str], list[str]]:
+    """lock から導く、古い写しが残っていてはならない場所（S76）。
+
+    戻りは (管理区画があってはならない指示書ファイル, 存在してはならないスキルのディレクトリ)。
+    配置が `agents` / `claude` と推定できるときは（指示書でもスキルでも）、反対側の指示書ファイルと
+    スキルのルートを見る。legacy_dual / mixed / unknown は、lock が片側だけに載せているものの
+    反対側だけを見る（両方に載せているものは lock 自身が照合する）。
+    """
+    names: dict[str, set[str]] = {}
+    for path in lock.files:
+        for root in SKILL_ROOTS:
+            if path.startswith(root + "/") and path.count("/") >= 3:
+                names.setdefault(path.split("/")[2], set()).add(root)
+    kind = infer_layout(lock.files)
+    if kind in ("agents", "claude"):
+        own = "CLAUDE.md" if kind == "claude" else "AGENTS.md"
+        own_root = ".claude/skills" if kind == "claude" else ".agents/skills"
+        return (
+            [f for f in MANAGED_FILES if f != own],
+            [f"{r}/{n}" for n in sorted(names) for r in SKILL_ROOTS if r != own_root],
+        )
+    files = [f for f in MANAGED_FILES if f in lock.files]
+    managed = [f for f in MANAGED_FILES if f not in lock.files] if len(files) == 1 else []
+    dirs = [
+        f"{root}/{name}"
+        for name, roots in sorted(names.items())
+        if len(roots) == 1
+        for root in SKILL_ROOTS
+        if root not in roots
+    ]
+    return managed, dirs
+
+
+def _stale_copies(snapshot: Snapshot, lock: KnowledgeLock) -> list[str]:
+    """`stale_copy_probes` の場所に残っている古い写し。読めない・印が壊れていれば残っている扱い。"""
+    managed, dirs = stale_copy_probes(lock)
+    left = []
+    for path in managed:
+        try:
+            text = snapshot.read_text(path)
+            if text is None or split_managed(text) is None:
+                continue
+        except (UnicodeDecodeError, ManagedBlockError, OSError):
+            pass
+        left.append(path)
+    for d in dirs:
+        try:
+            if snapshot.glob(f"{d}/**/*"):
+                left.append(d + "/")
+        except OSError:
+            left.append(d + "/")
+    return left
+
+
+STALE_COPY_MESSAGE = "知識の古い写しが別の場所に残っています"
+
+
 @dataclass(frozen=True)
 class LockAssessment:
     """lock の鮮度の判定（ゲートの Finding と MCP の `sync_status` が同じものを使う）。"""
@@ -712,6 +869,7 @@ def assess_lock(
             lock=lock,
             reasons=["invalid_lock"],
         )
+    stale = _stale_copies(snapshot, lock) if snapshot is not None else []
     if snapshot is not None:
         changed_files = _changed_files(snapshot, lock)
         if changed_files:
@@ -762,6 +920,17 @@ def assess_lock(
             lock=lock,
             changed=changed,
             reasons=_change_reasons(changed),
+        )
+    if stale:
+        listed = ", ".join(stale[:20])
+        return LockAssessment(
+            "REVIEW",
+            f"{STALE_COPY_MESSAGE}: {listed}。`speclino sync` をやり直すか手で消してください",
+            expected="lock が示す配置のほかに、管理区画やスキルの写しが無い",
+            actual=listed,
+            lock=lock,
+            changed=changed,
+            reasons=[*_change_reasons(changed), "stale_copy"],
         )
     if changed:
         return LockAssessment(
@@ -849,6 +1018,8 @@ __all__ = [
     "PlanTicket",
     "PlanTooLarge",
     "SyncRejected",
+    "DEFAULT_LAYOUT",
+    "STALE_COPY_MESSAGE",
     "assess_lock",
     "build_plan",
     "changed_members",
@@ -858,6 +1029,7 @@ __all__ = [
     "issue_plan_ticket",
     "redeem_plan_ticket",
     "file_hash",
+    "infer_layout",
     "issue_lock",
     "lock_payload",
     "merge_managed",
@@ -869,6 +1041,8 @@ __all__ = [
     "remove_managed",
     "removed_paths",
     "render_files",
+    "resolve_layout",
+    "stale_copy_probes",
     "split_managed",
     "validate_rel_path",
     "verified_previous_lock",

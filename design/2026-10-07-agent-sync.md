@@ -46,7 +46,29 @@
 - 本文に管理区画の印が含まれる知識は、承認の時点で拒否されている（S62）
 - AGENTS.md / CLAUDE.md の区画の外は、実行スクリプトが触らない（ゲートでは照合しない。区画の外は利用者のもの）
 
-## 6. 非目標
+## 6. 書き出し先の配置（2026-10-08、S76）
+
+指示書を AGENTS.md と CLAUDE.md のどちらに、スキルを `.agents/skills` と `.claude/skills` のどちらに
+書くかは、SpecLino の画面ではなく、取り込むエージェントが選ぶ（`knowledge_pull` の
+`instructions_file` / `skills_dir`、`speclino sync --instructions-file / --skills-dir`）。既定は
+AGENTS.md と .agents/skills。指示書の `target` は廃止（旧データは読めるが使わない）。
+
+- 配置は `(instructions_file, skills_root)`。lock・計画に欄は足さず、検証済みの前回の lock の `files`
+  から推定する（`agents` / `claude` / `legacy_dual` / `mixed` / `unknown`）。省略した側は
+  agents / claude ならその配置を保ち、それ以外と lock なしは既定。応答の `layout` が実際の配置
+- 書き出しは全ての指示書を選ばれた 1 ファイルに、スキルを選ばれた 1 ルートにだけ。切り替えると、
+  前回の lock にあって今回は無いパスを消す（既存の `absent`）
+- 選ばれなかった側の指示書ファイルの SpecLino の管理区画は、前回の lock が無くても取り除く
+  （印で SpecLino のものと分かる。期待ハッシュ無しの `remove_managed_block`、lock の `absent`
+  には載せない）。lock の無い取り込みでは別ルートのスキルは消さず、実行スクリプトが `warnings` で知らせる
+- ゲート（KNOWLEDGE-LOCK-001）は lock から排他を導く: 指示書が片方のファイルだけなら、もう片方に
+  管理区画があってはならない。スキルが片方のルートだけなら、もう片方に同名のディレクトリがあっては
+  ならない。残っていれば REVIEW「知識の古い写しが別の場所に残っています」（読めなければ残っている扱い）。
+  `sync_status` は申告のハッシュから同じ導き方で `stale_copy` を返す
+- 古いクライアントの注意: 選ばれなかった側の片付けは期待ハッシュ無しの `remove_managed_block` を
+  含むので、旧い実行スクリプトは計画を拒否する（プラグインのスクリプトを更新する）
+
+## 7. 非目標
 
 - CI での自動 sync（エージェントが行うので当面は不要）
 - エージェントがコミット・PR を作ること自体の自動化（エージェント側の運用）

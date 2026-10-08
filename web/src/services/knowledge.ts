@@ -31,8 +31,6 @@ export const KIND_LABELS: Record<ArtifactKind, string> = {
   instructions: '指示書',
 }
 
-export const TARGET_LABELS = { agents_md: 'AGENTS.md', claude_md: 'CLAUDE.md' } as const
-
 export const STATUS_LABELS = { draft: '下書き', active: '有効', superseded: '置き換え済み' } as const
 
 export function parseSection(section: string | undefined): ArtifactKind | null {
@@ -51,7 +49,7 @@ export function emptyContent(kind: ArtifactKind): ArtifactContent {
         scope: { workspace: true, projects: [] },
       }
     case 'instructions':
-      return { kind, target: 'agents_md', body: '', scope: { workspace: true, projects: [] } }
+      return { kind, body: '', scope: { workspace: true, projects: [] } }
   }
 }
 
@@ -153,14 +151,14 @@ function scopeLine(scope: ArtifactScope, projectNames: Map<string, string>): str
   return `スコープ: ${scope.projects.map((p) => projectNames.get(p) ?? p).join(', ')}`
 }
 
-/** 改訂の差分に使う 1 つの本文（スコープ・対象・付属ファイルも行として並べ、変更が差分に出るようにする）。 */
+/** 改訂の差分に使う 1 つの本文（スコープ・付属ファイルも行として並べ、変更が差分に出るようにする）。 */
 export function revisionText(content: ArtifactContent, projectNames: Map<string, string>): string {
   const head = scopeLine(content.scope, projectNames)
   switch (content.kind) {
     case 'spec':
       return `${head}\n\n${content.markdown}`
     case 'instructions':
-      return `${head}\n対象: ${TARGET_LABELS[content.target]}\n\n${content.body}`
+      return `${head}\n\n${content.body}`
     case 'skill': {
       const files = Object.keys(content.files)
         .sort()
