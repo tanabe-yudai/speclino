@@ -139,6 +139,8 @@ def sync(
         f"（書き換え {len(result.written)}、削除 {len(result.deleted)}、"
         f"変更なし {len(result.unchanged)}、知識 {len(plan.lock.members)}）"
     )
+    for warning in result.warnings:
+        typer.echo(f"警告: {warning}", err=True)
 
 
 __all__ = ["SyncFailed", "fetch_plan", "sync"]
