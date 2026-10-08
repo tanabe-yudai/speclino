@@ -336,6 +336,8 @@ def _sse_event(ev: ChatStreamEvent) -> bytes:
         return _sse("status", {"state": ev.state})
     if ev.type == "delta":
         return _sse("delta", {"text": ev.text})
+    if ev.type == "draft":
+        return _sse("draft", {"field": ev.field, "text": ev.text})
     if ev.type == "done":
         assert ev.turn is not None
         return _sse("done", ev.turn.model_dump(mode="json"))

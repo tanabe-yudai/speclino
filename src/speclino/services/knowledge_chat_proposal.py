@@ -33,6 +33,14 @@ _TEXT_FIELDS: dict[KnowledgeChatKind, tuple[str, ...]] = {
     "skill": ("skill_md",),
 }
 _RULE_TEXT = ("id", "title", "text")
+
+
+def draft_text_field(kind: KnowledgeChatKind) -> str | None:
+    """途中経過として本文を見せる提案の欄（`proposal.<欄>`）。規約の提案には無い。"""
+    fields = _TEXT_FIELDS.get(kind)
+    return fields[0] if fields else None
+
+
 _LEVELS = ("mandatory", "advisory")
 _TIERS = ("deterministic", "llm_assisted")
 # 規約の提案に無い必須欄（編集中のルールにも無いとき）。承認時の検証は既存どおり独立に行う
@@ -301,4 +309,4 @@ async def build_proposal(
     )
 
 
-__all__ = ["build_proposal", "extract_proposal", "response_schema", "text_hash"]
+__all__ = ["build_proposal", "draft_text_field", "extract_proposal", "response_schema", "text_hash"]

@@ -397,8 +397,10 @@ async def test_stream_flow_matches_non_stream_shape(ctx: Ctx) -> None:
     events, _ = _parse_sse(res.text)
     kinds = [k for k, _ in events]
     assert kinds[0] == "status" and kinds[-1] == "done"
-    assert set(kinds[1:-1]) == {"delta"}
+    assert set(kinds[1:-1]) == {"delta", "draft"}
     assert "".join(d["text"] for k, d in events if k == "delta") == "了解しました"
+    drafts = [d for k, d in events if k == "draft"]
+    assert drafts and drafts[-1] == {"field": "markdown", "text": "# 仕様\n"}
     done = events[-1][1]
     assert done["reply"]["text"] == "了解しました"
     assert done["reply"]["proposal"]["raw_proposal"] == {"markdown": "# 仕様\n"}

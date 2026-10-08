@@ -541,6 +541,9 @@ async def test_stream_emits_status_deltas_then_done_same_as_post(ctx: Ctx) -> No
     assert events[-1].type == "done"
     deltas = [e.text for e in events if e.type == "delta"]
     assert len(deltas) >= 1 and "".join(t or "" for t in deltas) == "本文を足しました"
+    drafts = [e for e in events if e.type == "draft"]
+    assert drafts and all(e.field == "body" for e in drafts)
+    assert drafts[-1].text == "# 指示\n- テストを書く\n"  # 累積の全文（最後は確定値と同じ）
     turn = events[-1].turn
     assert turn is not None and turn.reply is not None
     assert turn.reply.text == "本文を足しました"

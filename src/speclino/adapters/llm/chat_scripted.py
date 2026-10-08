@@ -62,9 +62,11 @@ class ScriptedChatLlm:
         self, prompt: str, schema: dict[str, Any]
     ) -> AsyncIterator[JsonStreamEvent]:
         gen = await self.generate_json(prompt, schema)
-        size = max(1, len(gen.text) // 5)
+        size = max(
+            1, min(len(gen.text) // 5, 8)
+        )  # 提案の本文が途中経過として何度も届くように細かく切る
         for i in range(0, len(gen.text), size):
-            await asyncio.sleep(0.01)
+            await asyncio.sleep(0.1)
             yield gen.text[i : i + size]
         yield gen
 
