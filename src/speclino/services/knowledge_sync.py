@@ -13,14 +13,16 @@ design/2026-10-07-agent-sync.md）。
 - ゲート: `check_lock_snapshot` / `check_lock` が lock の署名・期限・ファイルのハッシュ・
   消したはずのファイル（`absent`）・世代を確かめ、`KNOWLEDGE-LOCK-001`（必須）の Finding を 1 つ返す
 
-書き出しの約束:
+書き出しの約束（S76・S77、design/2026-10-07-agent-sync.md 6 章）:
 
-- skill: 配置（`SyncLayout`）の `skills_root`（`.agents/skills` か `.claude/skills`）の
-  `<name>/` に `SKILL.md` と付属ファイル
-- instructions: 配置の `instructions_file`（`AGENTS.md` か `CLAUDE.md`）の管理区画。全ての指示書を
-  workspace スコープ → プロジェクトスコープ、それぞれ名前順に連結
-- 配置は取り込むエージェントが選ぶ（S76）。省略すると手元の（検証済みの）lock が示す今の配置を保ち、
-  無ければ AGENTS.md と .agents/skills
+- skill: 配置（`SyncLayout`）の `skill_roots`（`.agents/skills` と `.claude/skills` の部分集合）の
+  それぞれの `<name>/` に `SKILL.md` と付属ファイル（同じ内容）。ルートの集合は前回の lock の
+  `skill_roots`（無ければパスから推定）に取り込むエージェントの名乗りのルートを足したもの
+  （claude 系なら `.claude/skills`、それ以外・不明は `.agents/skills`）。`skills_dir` の明示は排他
+- instructions: 本文は `AGENTS.md` の管理区画（`instructions_file="CLAUDE.md"` の明示時だけ
+  `CLAUDE.md`）。全ての指示書を workspace スコープ → プロジェクトスコープ、それぞれ名前順に連結。
+  本文が AGENTS.md のときは、CLAUDE.md が手元にあれば管理区画に橋 `@AGENTS.md` を書く
+  （`if_exists` の op。作らない。lock の `files` には載せない）
 - spec: `.speclino/specs/<name>.md`（`markdown` の写し）
 
 - 管理区画は `<!-- speclino:begin bundle=<n> -->` 改行、中身、`<!-- speclino:end -->`。区画の外は
@@ -61,9 +63,9 @@ from speclino.domain.knowledge import (
     SpecContent,
 )
 from speclino.domain.knowledge_sync import (
+    AGENT_NAME_PATTERN,
     DeleteOp,
     InstructionsFile,
-    LayoutKind,
     RemoveManagedBlockOp,
     SetManagedBlockOp,
     SkillsRoot,
@@ -91,6 +93,11 @@ from speclino.verifiers.base import Snapshot
 from speclino.verifiers.snapshot import DirectorySnapshot
 
 LOCK_REQUIREMENT_ID = "KNOWLEDGE-LOCK-001"
+# CLAUDE.md の管理区画に書く橋（S77）。Claude Code は CLAUDE.md があると AGENTS.md を読まないので、
+# 既にある CLAUDE.md から import させる（HTML コメントの印は除去され、この行は有効）
+BRIDGE_PATH = "CLAUDE.md"
+BRIDGE_INNER = "@AGENTS.md\n"
+BRIDGE_HASH = sync_apply.file_hash(BRIDGE_INNER)
 LOCK_TTL = timedelta(days=30)
 MANAGED_FILES = sync_apply.MANAGED_FILES
 DEFAULT_LAYOUT = SyncLayout()
@@ -107,7 +114,7 @@ def plan_json_bytes(plan: SyncPlan) -> int:
 
 
 # 後から足した欄。None・空のときは署名の対象に含めない（欄の無い古い lock の署名を保つ）
-_OPTIONAL_LOCK_FIELDS = ("policy_revision", "policy_hash", "key_id", "absent")
+_OPTIONAL_LOCK_FIELDS = ("policy_revision", "policy_hash", "key_id", "absent", "skill_roots")
 
 
 def lock_payload(lock: KnowledgeLock) -> bytes:
@@ -154,15 +161,17 @@ def render_files(
 ) -> dict[str, str]:
     """プロジェクトに当たる知識から、書き出すファイル（相対パス → 本文）を作る。決定的な順序。
 
-    指示書は全て `layout.instructions_file` に、スキルは `layout.skills_root` の下だけに書く。
+    指示書は全て `layout.instructions_file` に、スキルは `layout.skill_roots` のそれぞれの下に書く。
+    橋（CLAUDE.md の `@AGENTS.md`）はここに含めない（`build_plan` が足す）。
     """
     files: dict[str, str] = {}
     for rev in sorted(resolved.skills, key=lambda r: r.name):
         assert isinstance(rev.content, SkillContent)
         name = _skill_dir(rev)
-        files[f"{layout.skills_root}/{name}/SKILL.md"] = rev.content.skill_md
-        for rel, body in sorted(rev.content.files.items()):
-            files[f"{layout.skills_root}/{name}/{rel}"] = body
+        for root in layout.skill_roots:
+            files[f"{root}/{name}/SKILL.md"] = rev.content.skill_md
+            for rel, body in sorted(rev.content.files.items()):
+                files[f"{root}/{name}/{rel}"] = body
     bodies = [
         _with_newline(r.content.body)
         for r in sorted(
@@ -180,25 +189,48 @@ def render_files(
     return files
 
 
-def infer_layout(paths: Iterable[str]) -> LayoutKind:
-    """検証済みの lock の `files` のパスから、今の配置を推定する（lock に配置の欄は足さない）。
+_SKILL_ROOTS = cast(tuple[SkillsRoot, ...], tuple(sorted(SKILL_ROOTS)))  # 昇順
 
-    - `agents` / `claude`: 指示書・スキルが片方の流儀だけ（片方しか無くてもよい）
-    - `legacy_dual`: スキルが両方のルートに、または指示書が両方のファイルにある（S76 より前）
-    - `mixed`: AGENTS.md と .claude/skills のように流儀が食い違う
-    - `unknown`: 指示書もスキルも無い
-    """
-    given = set(paths)
-    files = {f for f in MANAGED_FILES if f in given}
-    roots = {r for r in SKILL_ROOTS if any(p.startswith(r + "/") for p in given)}
-    if not files and not roots:
-        return "unknown"
-    if len(files) > 1 or len(roots) > 1:
-        return "legacy_dual"
-    styles = {f == "CLAUDE.md" for f in files} | {r == ".claude/skills" for r in roots}
-    if len(styles) > 1:
-        return "mixed"
-    return "claude" if styles == {True} else "agents"
+
+def lock_skill_roots(lock: KnowledgeLock | None) -> tuple[SkillsRoot, ...]:
+    """前回のスキルのルートの集合（昇順）。lock の `skill_roots`、欄の無い古い lock は `files` の
+    パスから推定する。推定できなければ（lock なし・スキルが無い古い lock）空。"""
+    if lock is None:
+        return ()
+    if lock.skill_roots:
+        return tuple(lock.skill_roots)  # 署名済みの lock は昇順・重複なしで書いている
+    return tuple(r for r in _SKILL_ROOTS if any(p.startswith(r + "/") for p in lock.files))
+
+
+def instructions_files(lock: KnowledgeLock) -> list[str]:
+    """lock が本文を載せている指示書のファイル（AGENTS.md / CLAUDE.md。旧い lock は両方もある）。"""
+    return [f for f in MANAGED_FILES if f in lock.files]
+
+
+_AGENT_NAME = re.compile(AGENT_NAME_PATTERN)
+
+
+def is_valid_agent(name: str) -> bool:
+    """引数で渡された名乗りが使える形か（`AGENT_NAME_PATTERN`。整形はしない）。"""
+    return _AGENT_NAME.match(name) is not None
+
+
+_AGENT_UNSAFE = re.compile(r"[^A-Za-z0-9._ -]")
+
+
+def normalize_agent(name: str | None) -> str | None:
+    """名乗り（MCP の clientInfo の name など）を応答に出せる形にする。使えない文字は落とし、
+    64 文字で切る。空なら None。"""
+    if not name:
+        return None
+    cleaned = _AGENT_UNSAFE.sub("", name).strip()[:64].strip()
+    return cleaned or None
+
+
+def agent_skills_root(agent: str | None) -> SkillsRoot:
+    """名乗りのスキルのルート。名前に claude を含めば（大小無視）`.claude/skills`、それ以外・
+    不明は `.agents/skills`。自己申告で信頼しないが、変わるのは書き出し先だけ。"""
+    return ".claude/skills" if agent and "claude" in agent.lower() else ".agents/skills"
 
 
 def resolve_layout(
@@ -206,13 +238,43 @@ def resolve_layout(
     *,
     instructions_file: InstructionsFile | None = None,
     skills_root: SkillsRoot | None = None,
+    agent: str | None = None,
 ) -> SyncLayout:
-    """取り込みの配置。明示した引数が優先。省略した側は、検証済みの前回の lock が agents / claude の
-    どちらかなら今の配置を保ち、それ以外（lock なし・legacy_dual・mixed・unknown）は既定。"""
-    kept = DEFAULT_LAYOUT
-    if previous is not None and infer_layout(previous.files) == "claude":
-        kept = SyncLayout("CLAUDE.md", ".claude/skills")
-    return SyncLayout(instructions_file or kept.instructions_file, skills_root or kept.skills_root)
+    """取り込みの配置（S77）。
+
+    - 指示書の本文: 明示があればそれ、無ければ AGENTS.md（前回の配置は保たない。CLAUDE.md は橋）
+    - スキル: `skills_root` の明示は排他（そのルートだけ）。無ければ前回のルート
+      （`lock_skill_roots`）に名乗りのルート（`agent_skills_root`）を足す（和集合。減らさない）
+    """
+    if skills_root is not None:
+        roots: tuple[SkillsRoot, ...] = (skills_root,)
+    else:
+        roots = tuple(sorted({*lock_skill_roots(previous), agent_skills_root(agent)}))
+    return SyncLayout(instructions_file or "AGENTS.md", roots, agent)
+
+
+def layout_changes(
+    lock: KnowledgeLock | None,
+    *,
+    instructions_file: InstructionsFile | None = None,
+    skills_root: SkillsRoot | None = None,
+    agent: str | None = None,
+) -> bool:
+    """取り込み直すと配置が変わるか（`sync_status` の `layout_change`。`resolve_layout` の規則）。
+
+    スキルは前回のルートが分かるときだけ比べる（スキルの無い古い lock は比べない。次の取り込みで
+    lock に残る）。指示書は lock が本文を載せていて、その置き場所が求める置き場所と違うとき。
+    """
+    if lock is None:
+        return False
+    desired = resolve_layout(
+        lock, instructions_file=instructions_file, skills_root=skills_root, agent=agent
+    )
+    current = lock_skill_roots(lock)
+    if current and current != desired.skill_roots:
+        return True
+    body = instructions_files(lock)
+    return bool(body) and body != [desired.instructions_file]
 
 
 def project_members(resolved: ResolvedKnowledge) -> list[BundleMember]:
@@ -229,11 +291,13 @@ def issue_lock(
     github_repo_id: int,
     files: dict[str, str],
     absent: Iterable[str] = (),
+    skill_roots: Iterable[SkillsRoot] = (),
     now: datetime | None = None,
 ) -> KnowledgeLock:
     """署名つきの lock。`files` は `render_files` の結果（ハッシュは書き出した中身のもの）。
 
     `absent` は前回あって今回は無いパス（`removed_paths`）。ゲートが残っていないことを照合する。
+    `skill_roots` は配置のスキルのルート（スキルが 0 件でも残し、次の取り込みで和集合を忘れない）。
     """
     issued = now or datetime.now(UTC)
     unsigned = KnowledgeLock(
@@ -245,6 +309,7 @@ def issue_lock(
         members=project_members(resolved),
         files={p: file_hash(body) for p, body in sorted(files.items())},
         absent=sorted(absent),
+        skill_roots=sorted(set(skill_roots)),
         issued_at=issued,
         expires_at=issued + LOCK_TTL,
         key_id=bundle_signing.current_key_id(),
@@ -294,6 +359,7 @@ def plan_writes(
     *,
     repo_full_name: str,
     cleanup: Iterable[str] = (),
+    bridge: bool = False,
 ) -> SyncPlan:
     """書き出しの計画を作って署名する（純粋）。`previous` は `verified_previous_lock` の結果だけ。
 
@@ -304,6 +370,9 @@ def plan_writes(
     - `cleanup` の AGENTS.md / CLAUDE.md（選ばれなかった側）は、期待ハッシュ無しの
       `remove_managed_block`（印が本物なら SpecLino のものなので前回の lock が無くても取り除く。
       lock の `absent` には載せない）
+    - `bridge` なら CLAUDE.md に橋（`if_exists` の `set_managed_block`、lock に載せない）。前回の
+      lock が CLAUDE.md に本文を載せていれば、そのハッシュを期待値にする（旧配置からの移行）
+    - CLAUDE.md に本文を書くときは、前回の記録が無くても区画の中身が橋なら置き換える
     - 上限・パスは実行スクリプトと同じ `sync_apply.check_ops` で確かめる（超えれば `SyncRejected`）
     """
     if set(files) != set(lock.files):
@@ -314,12 +383,13 @@ def plan_writes(
     ops: list[SyncOp] = []
     for path in sorted(files):
         if path in MANAGED_FILES:
+            expected = before.get(path) or (BRIDGE_HASH if path == BRIDGE_PATH else None)
             ops.append(
                 SetManagedBlockOp(
                     path=path,
                     inner=files[path],
                     generation=lock.bundle_generation,
-                    expected_inner_sha256=before.get(path),
+                    expected_inner_sha256=expected,
                 )
             )
         else:
@@ -337,9 +407,26 @@ def plan_writes(
         else:
             ops.append(DeleteOp(path=path, expected_sha256=before[path]))
     for path in sorted(set(cleanup)):
-        if path not in MANAGED_FILES or path in files or path in lock.absent:
+        if (
+            path not in MANAGED_FILES
+            or path in files
+            or path in lock.absent
+            or (bridge and path == BRIDGE_PATH)
+        ):
             raise SyncRejected(f"片付けの対象にできない: {path}")
         ops.append(RemoveManagedBlockOp(path=path))
+    if bridge:
+        if "AGENTS.md" not in files or BRIDGE_PATH in files or BRIDGE_PATH in lock.absent:
+            raise SyncRejected("橋は本文が AGENTS.md だけのときに限る")
+        ops.append(
+            SetManagedBlockOp(
+                path=BRIDGE_PATH,
+                inner=BRIDGE_INNER,
+                generation=lock.bundle_generation,
+                expected_inner_sha256=before.get(BRIDGE_PATH),
+                if_exists=True,
+            )
+        )
     sync_apply.check_ops([op.model_dump(mode="json") for op in ops])
     unsigned = SyncPlan(
         workspace=lock.workspace,
@@ -363,22 +450,47 @@ def build_plan(
     layout: SyncLayout | None = None,
     now: datetime | None = None,
 ) -> SyncPlan:
-    """プロジェクトに当たる知識から、書き出すファイル・lock（`absent` つき）・計画を作る。
+    """プロジェクトに当たる知識から、書き出すファイル・lock（`absent`・`skill_roots`）・計画を作る。
 
-    `layout` が無ければ前回の lock から決める（`resolve_layout`）。選ばれなかった側の指示書
-    ファイルの管理区画は、前回の lock が消す対象にしていなければ（lock の有無を問わず）片付ける。
+    `layout` が無ければ前回の lock から決める（`resolve_layout`）。
+
+    - 本文が AGENTS.md なら CLAUDE.md に橋を書く（手元にあるときだけ）。前回 CLAUDE.md に本文が
+      あっても `absent` に入れず、橋が前回の本文を置き換える（S77 の規則 8）
+    - それ以外で本文を書かない指示書ファイル（本文が CLAUDE.md なら AGENTS.md、指示書が 0 件なら
+      両方）の管理区画は、前回の lock が消す対象にしていなければ（lock の有無を問わず）片付ける
+    - 上限を超えたら、スキルを複数のルートに書くときは `skills_dir` で片側を指定するよう促す
     """
     layout = layout or resolve_layout(previous)
     files = render_files(resolved, layout)
+    bridge = layout.instructions_file == "AGENTS.md" and "AGENTS.md" in files
+    absent = [p for p in removed_paths(files, previous) if not (bridge and p == BRIDGE_PATH)]
     lock = issue_lock(
         resolved,
         github_repo_id=github_repo_id,
         files=files,
-        absent=removed_paths(files, previous),
+        absent=absent,
+        skill_roots=layout.skill_roots,
         now=now,
     )
-    cleanup = [f for f in MANAGED_FILES if f != layout.instructions_file and f not in lock.absent]
-    return plan_writes(files, lock, previous, repo_full_name=repo_full_name, cleanup=cleanup)
+    cleanup = [
+        f
+        for f in MANAGED_FILES
+        if f not in files and f not in lock.absent and not (bridge and f == BRIDGE_PATH)
+    ]
+    try:
+        return plan_writes(
+            files, lock, previous, repo_full_name=repo_full_name, cleanup=cleanup, bridge=bridge
+        )
+    except sync_apply.LimitExceeded as e:
+        if len(layout.skill_roots) < 2:
+            raise
+        raise sync_apply.LimitExceeded(f"{e}。{_TWO_ROOTS_HINT}") from e
+
+
+_TWO_ROOTS_HINT = (
+    "スキルを .agents/skills と .claude/skills の両方に書き出すため上限を超えた。"
+    "skills_dir（`speclino sync --skills-dir`）で片側を指定して取り込み直す"
+)
 
 
 class PlanTooLarge(ValueError):
@@ -397,6 +509,7 @@ async def _plan_for(
     lock_json: str | None,
     instructions_file: InstructionsFile | None = None,
     skills_root: SkillsRoot | None = None,
+    agent: str | None = None,
 ) -> tuple[SyncPlan, SyncLayout]:
     if project.github_repo_id is None:
         raise ValueError("リポジトリ ID が未登録のため書き出せない")
@@ -405,7 +518,9 @@ async def _plan_for(
     previous = verified_previous_lock(
         lock_json, workspace=workspace, github_repo_id=project.github_repo_id
     )
-    layout = resolve_layout(previous, instructions_file=instructions_file, skills_root=skills_root)
+    layout = resolve_layout(
+        previous, instructions_file=instructions_file, skills_root=skills_root, agent=agent
+    )
     plan = build_plan(
         resolved,
         github_repo_id=project.github_repo_id,
@@ -415,7 +530,10 @@ async def _plan_for(
     )
     size = plan_json_bytes(plan)
     if size > sync_apply.MAX_PLAN_BYTES:
-        raise PlanTooLarge(f"計画が {sync_apply.MAX_PLAN_BYTES} バイトを超える（{size} バイト）")
+        hint = f"。{_TWO_ROOTS_HINT}" if len(layout.skill_roots) > 1 else ""
+        raise PlanTooLarge(
+            f"計画が {sync_apply.MAX_PLAN_BYTES} バイトを超える（{size} バイト）{hint}"
+        )
     return plan, layout
 
 
@@ -429,6 +547,7 @@ async def plan_for_project(
     token_id: uuid.UUID | None,
     instructions_file: InstructionsFile | None = None,
     skills_root: SkillsRoot | None = None,
+    agent: str | None = None,
 ) -> SyncPlan:
     """project（呼び出し側がテナントを確かめたもの）に当たる今の bundle の計画を作り、記録する。
 
@@ -442,6 +561,7 @@ async def plan_for_project(
         lock_json=lock_json,
         instructions_file=instructions_file,
         skills_root=skills_root,
+        agent=agent,
     )
     await KnowledgeFetchRepository(session).record(
         workspace=workspace,
@@ -478,6 +598,7 @@ async def issue_plan_ticket(
     token_id: uuid.UUID | None,
     instructions_file: InstructionsFile | None = None,
     skills_root: SkillsRoot | None = None,
+    agent: str | None = None,
     now: datetime | None = None,
 ) -> PlanTicket:
     """計画を作って `sync_plans` に置き、1 回だけ・10 分で失効する取得トークンを返す。
@@ -492,6 +613,7 @@ async def issue_plan_ticket(
         lock_json=lock_json,
         instructions_file=instructions_file,
         skills_root=skills_root,
+        agent=agent,
     )
     issued = now or datetime.now(UTC)
     token = PLAN_TOKEN_PREFIX + secrets.token_urlsafe(32)
@@ -595,6 +717,7 @@ async def fetch_for_sync(
     lock_json: str | None = None,
     instructions_file: InstructionsFile | None = None,
     skills_root: SkillsRoot | None = None,
+    agent: str | None = None,
 ) -> SyncPlan:
     """sync トークンの要求に答える。トークンのプロジェクトのリポジトリでなければ `LookupError`。"""
     project = await session.get(Project, identity.project_id)
@@ -613,6 +736,7 @@ async def fetch_for_sync(
         token_id=identity.token_id,
         instructions_file=instructions_file,
         skills_root=skills_root,
+        agent=agent,
     )
 
 
@@ -729,61 +853,127 @@ def _unlisted_skill_files(snapshot: Snapshot, lock: KnowledgeLock) -> list[str]:
     return sorted(set(extra))
 
 
-def stale_copy_probes(lock: KnowledgeLock) -> tuple[list[str], list[str]]:
-    """lock から導く、古い写しが残っていてはならない場所（S76）。
+@dataclass(frozen=True)
+class CopyProbes:
+    """lock から導く、古い写しや橋の欠けを探す場所（S76・S77）。
 
-    戻りは (管理区画があってはならない指示書ファイル, 存在してはならないスキルのディレクトリ)。
-    配置が `agents` / `claude` と推定できるときは（指示書でもスキルでも）、反対側の指示書ファイルと
-    スキルのルートを見る。legacy_dual / mixed / unknown は、lock が片側だけに載せているものの
-    反対側だけを見る（両方に載せているものは lock 自身が照合する）。
+    - `no_block`: 管理区画があってはならない指示書ファイル（本文を載せていない側。指示書が 0 件の
+      lock は両方）
+    - `bridge`: 本文が AGENTS.md だけの lock の CLAUDE.md。区画があれば中身は橋でなければならず
+      （それ以外は古い写し）、ファイルがあるのに区画が無ければ橋の欠け
+    - `skill_dirs`: 存在してはならないスキルのディレクトリ（lock のスキルと同名で、そのスキルを
+      lock が載せていないルート。`skill_roots` の外のルートを含む）
     """
+
+    no_block: list[str]
+    bridge: str | None
+    skill_dirs: list[str]
+
+
+def stale_copy_probes(lock: KnowledgeLock) -> CopyProbes:
+    """lock から導く、古い写しが残っていてはならない場所（ゲートと `sync_status` が使う）。
+
+    本文を両方のファイルに載せた旧い lock は、lock 自身が両方を照合する（探す場所は無い）。
+    """
+    body = instructions_files(lock)
+    bridge = BRIDGE_PATH if body == ["AGENTS.md"] else None
+    no_block = [f for f in MANAGED_FILES if f not in body and f != bridge] if len(body) < 2 else []
     names: dict[str, set[str]] = {}
     for path in lock.files:
         for root in SKILL_ROOTS:
             if path.startswith(root + "/") and path.count("/") >= 3:
                 names.setdefault(path.split("/")[2], set()).add(root)
-    kind = infer_layout(lock.files)
-    if kind in ("agents", "claude"):
-        own = "CLAUDE.md" if kind == "claude" else "AGENTS.md"
-        own_root = ".claude/skills" if kind == "claude" else ".agents/skills"
-        return (
-            [f for f in MANAGED_FILES if f != own],
-            [f"{r}/{n}" for n in sorted(names) for r in SKILL_ROOTS if r != own_root],
-        )
-    files = [f for f in MANAGED_FILES if f in lock.files]
-    managed = [f for f in MANAGED_FILES if f not in lock.files] if len(files) == 1 else []
     dirs = [
         f"{root}/{name}"
         for name, roots in sorted(names.items())
-        if len(roots) == 1
-        for root in SKILL_ROOTS
+        for root in sorted(SKILL_ROOTS)
         if root not in roots
     ]
-    return managed, dirs
+    return CopyProbes(no_block, bridge, dirs)
 
 
-def _stale_copies(snapshot: Snapshot, lock: KnowledgeLock) -> list[str]:
-    """`stale_copy_probes` の場所に残っている古い写し。読めない・印が壊れていれば残っている扱い。"""
-    managed, dirs = stale_copy_probes(lock)
+def _block_inner(snapshot: Snapshot, path: str) -> tuple[bool, str | None]:
+    """(ファイルがあるか, 管理区画の中身)。読めない・印が壊れていれば `ManagedBlockError`。"""
+    try:
+        text = snapshot.read_text(path)
+    except (UnicodeDecodeError, OSError) as e:
+        raise ManagedBlockError(f"{path} を読めない") from e
+    if text is None:
+        return False, None
+    block = split_managed(text)
+    return True, block.inner if block is not None else None
+
+
+def _stale_copies(snapshot: Snapshot, lock: KnowledgeLock) -> tuple[list[str], bool]:
+    """`stale_copy_probes` の場所に残っている古い写しと、橋の欠け（CLAUDE.md があるのに区画が
+    無い）。読めない・印が壊れていれば残っている扱い（フェイルクローズ）。"""
+    probes = stale_copy_probes(lock)
     left = []
-    for path in managed:
+    bridge_missing = False
+    for path in probes.no_block:
         try:
-            text = snapshot.read_text(path)
-            if text is None or split_managed(text) is None:
+            if _block_inner(snapshot, path)[1] is None:
                 continue
-        except (UnicodeDecodeError, ManagedBlockError, OSError):
+        except ManagedBlockError:
             pass
         left.append(path)
-    for d in dirs:
+    if probes.bridge is not None:
+        try:
+            exists, inner = _block_inner(snapshot, probes.bridge)
+            if exists and inner is None:
+                bridge_missing = True
+            elif inner is not None and file_hash(inner) != BRIDGE_HASH:
+                left.append(probes.bridge)
+        except ManagedBlockError:
+            left.append(probes.bridge)
+    for d in probes.skill_dirs:
         try:
             if snapshot.glob(f"{d}/**/*"):
                 left.append(d + "/")
         except OSError:
             left.append(d + "/")
-    return left
+    return left, bridge_missing
+
+
+def declared_copies(
+    lock: KnowledgeLock | None,
+    local_hashes: dict[str, str] | None,
+    managed_inner: dict[str, str] | None,
+) -> tuple[list[str], bool]:
+    """エージェントの申告（`sync_status`）から、ゲートと同じ導き方で古い写しと橋の欠けを返す。
+
+    `managed_inner` のキーはファイルがあること、値は管理区画の中身のハッシュ（区画が無ければ空）。
+    申告が無い側は照合しない。
+    """
+    if lock is None:
+        return [], False
+    probes = stale_copy_probes(lock)
+    inner = {p: normalize_hash(h) for p, h in (managed_inner or {}).items()}
+    out = [p for p in probes.no_block if inner.get(p)]
+    bridge_missing = False
+    if probes.bridge is not None and managed_inner is not None and probes.bridge in inner:
+        declared = inner[probes.bridge]
+        if not declared:
+            bridge_missing = True
+        elif declared != BRIDGE_HASH:
+            out.append(probes.bridge)
+    for d in probes.skill_dirs:
+        if local_hashes is not None and any(p.startswith(d + "/") for p in local_hashes):
+            out.append(d + "/")
+    return sorted(out), bridge_missing
+
+
+def normalize_hash(value: str | None) -> str | None:
+    """申告のハッシュ（`sha256:` 無しも受ける）。空・None は「区画が無い」。"""
+    if not value:
+        return None
+    return value if value.startswith("sha256:") else "sha256:" + value.lower()
 
 
 STALE_COPY_MESSAGE = "知識の古い写しが別の場所に残っています"
+BRIDGE_MISSING_MESSAGE = (
+    "Claude Code が指示書を読めない: CLAUDE.md に @AGENTS.md の橋が無い。取り込み直す"
+)
 
 
 @dataclass(frozen=True)
@@ -804,6 +994,32 @@ def _change_reasons(changed: list[dict[str, Any]]) -> list[str]:
     kinds = {c["kind"] for c in changed}
     out = ["members_changed"] if kinds - {"policy"} else []
     return out + (["policy_changed"] if "policy" in kinds else [])
+
+
+def copies_assessment(
+    lock: KnowledgeLock, changed: list[dict[str, Any]], stale: list[str], bridge_missing: bool
+) -> LockAssessment:
+    """古い写し・橋の欠けの REVIEW（ゲートと `sync_status` で同じ文言）。"""
+    messages, reasons = [], _change_reasons(changed)
+    if stale:
+        listed = ", ".join(stale[:20])
+        messages.append(
+            f"{STALE_COPY_MESSAGE}: {listed}。`speclino sync` をやり直すか手で消してください"
+        )
+        reasons.append("stale_copy")
+    if bridge_missing:
+        messages.append(BRIDGE_MISSING_MESSAGE)
+        reasons.append("bridge_missing")
+    return LockAssessment(
+        "REVIEW",
+        "。".join(messages),
+        expected="lock が示す配置のほかに、管理区画やスキルの写しが無い"
+        + ("。CLAUDE.md があれば @AGENTS.md の橋がある" if bridge_missing else ""),
+        actual=", ".join([*stale[:20], *(["CLAUDE.md（橋なし）"] if bridge_missing else [])]),
+        lock=lock,
+        changed=changed,
+        reasons=reasons,
+    )
 
 
 def assess_lock(
@@ -869,7 +1085,7 @@ def assess_lock(
             lock=lock,
             reasons=["invalid_lock"],
         )
-    stale = _stale_copies(snapshot, lock) if snapshot is not None else []
+    stale, bridge_missing = _stale_copies(snapshot, lock) if snapshot is not None else ([], False)
     if snapshot is not None:
         changed_files = _changed_files(snapshot, lock)
         if changed_files:
@@ -921,17 +1137,8 @@ def assess_lock(
             changed=changed,
             reasons=_change_reasons(changed),
         )
-    if stale:
-        listed = ", ".join(stale[:20])
-        return LockAssessment(
-            "REVIEW",
-            f"{STALE_COPY_MESSAGE}: {listed}。`speclino sync` をやり直すか手で消してください",
-            expected="lock が示す配置のほかに、管理区画やスキルの写しが無い",
-            actual=listed,
-            lock=lock,
-            changed=changed,
-            reasons=[*_change_reasons(changed), "stale_copy"],
-        )
+    if stale or bridge_missing:
+        return copies_assessment(lock, changed, stale, bridge_missing)
     if changed:
         return LockAssessment(
             "REVIEW",
@@ -1029,7 +1236,17 @@ __all__ = [
     "issue_plan_ticket",
     "redeem_plan_ticket",
     "file_hash",
-    "infer_layout",
+    "instructions_files",
+    "layout_changes",
+    "is_valid_agent",
+    "lock_skill_roots",
+    "normalize_agent",
+    "normalize_hash",
+    "agent_skills_root",
+    "declared_copies",
+    "copies_assessment",
+    "CopyProbes",
+    "BRIDGE_INNER",
     "issue_lock",
     "lock_payload",
     "merge_managed",

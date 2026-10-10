@@ -66,7 +66,8 @@ def plan(*ops: dict[str, Any], gen: int = 1, repo: str = "acme/app") -> dict[str
         if op["op"] == "write":
             files[op["path"]] = op["sha256"]
         elif op["op"] == "set_managed_block":
-            files[op["path"]] = _h(op["inner"])
+            if not op.get("if_exists"):  # 橋（S77）は lock に載せない
+                files[op["path"]] = _h(op["inner"])
         elif op["op"] == "remove_managed_block" and op.get("expected_inner_sha256") is None:
             continue  # 配置の片付けは absent に載せない
         else:
@@ -889,3 +890,104 @@ def test_warns_about_ignored_files_even_when_nothing_changes(tmp_path: Path) -> 
 def test_no_warning_outside_a_git_repository(tmp_path: Path) -> None:
     (tmp_path / ".gitignore").write_text(".claude/\n")
     assert sa.apply_plan(tmp_path, plan(*BASE)).warnings == []
+
+
+# ---------------------------------------------------------------------------
+# S77: if_exists の区画（CLAUDE.md への橋）
+# ---------------------------------------------------------------------------
+
+BRIDGE = "@AGENTS.md\n"
+
+
+def bridge(gen: int = 1, expected: str | None = None) -> dict[str, Any]:
+    return {**set_block("CLAUDE.md", BRIDGE, gen, expected), "if_exists": True}
+
+
+def test_if_exists_block_is_not_created_without_the_file(tmp_path: Path) -> None:
+    p = plan(*BASE, bridge())
+    assert "CLAUDE.md" not in p["lock"]["files"]
+    result = sa.apply_plan(tmp_path, p)
+    assert result.ok, result
+    assert not (tmp_path / "CLAUDE.md").exists()
+    assert "CLAUDE.md" in result.unchanged and "CLAUDE.md" not in result.written
+    assert result.warnings == []
+
+
+def test_if_exists_block_is_added_to_existing_file(tmp_path: Path) -> None:
+    (tmp_path / "CLAUDE.md").write_text("# 手書き\n")
+    result = sa.apply_plan(tmp_path, plan(*BASE, bridge()))
+    assert result.ok and "CLAUDE.md" in result.written, result
+    assert (tmp_path / "CLAUDE.md").read_text() == (
+        "# 手書き\n\n<!-- speclino:begin bundle=1 -->\n@AGENTS.md\n<!-- speclino:end -->\n"
+    )
+    # 中身が同じなら世代が進んでも書き換えない（毎回の差分を作らない）
+    again = sa.apply_plan(tmp_path, plan(*BASE, bridge(2), gen=2))
+    assert again.ok and "CLAUDE.md" in again.unchanged, again
+    assert "bundle=1" in (tmp_path / "CLAUDE.md").read_text()
+
+
+def test_if_exists_replaces_old_body_only_when_expected_matches(tmp_path: Path) -> None:
+    old = "# 手書き\n<!-- speclino:begin bundle=1 -->\n旧い本文\n<!-- speclino:end -->\n後ろ\n"
+    (tmp_path / "CLAUDE.md").write_text(old)
+    stopped(sa.apply_plan(tmp_path, plan(*BASE, bridge(2, _h("別の本文\n")), gen=2)), "CLAUDE.md")
+    assert (tmp_path / "CLAUDE.md").read_text() == old
+    result = sa.apply_plan(tmp_path, plan(*BASE, bridge(2, _h("旧い本文\n")), gen=2))
+    assert result.ok, result
+    assert (tmp_path / "CLAUDE.md").read_text() == (
+        "# 手書き\n<!-- speclino:begin bundle=2 -->\n@AGENTS.md\n<!-- speclino:end -->\n後ろ\n"
+    )
+
+
+def test_if_exists_stops_when_expected_block_was_removed(tmp_path: Path) -> None:
+    # 前回の lock は CLAUDE.md の本文を記録しているが、利用者が区画を取り除いた
+    (tmp_path / "CLAUDE.md").write_text("# 手書きだけ\n")
+    stopped(sa.apply_plan(tmp_path, plan(*BASE, bridge(2, _h("旧い本文\n")), gen=2)), "取り除")
+    assert (tmp_path / "CLAUDE.md").read_text() == "# 手書きだけ\n"
+
+
+def test_if_exists_treats_crlf_bridge_as_the_same(tmp_path: Path) -> None:
+    crlf = "# 手書き\r\n<!-- speclino:begin bundle=1 -->\r\n@AGENTS.md\r\n<!-- speclino:end -->\r\n"
+    (tmp_path / "CLAUDE.md").write_bytes(crlf.encode())
+    result = sa.apply_plan(tmp_path, plan(*BASE, bridge(2, _h("旧い本文\n")), gen=2))
+    assert result.ok and "CLAUDE.md" in result.unchanged, result
+    assert (tmp_path / "CLAUDE.md").read_bytes() == crlf.encode()
+
+
+def test_if_exists_without_expectation_replaces_speclino_block(tmp_path: Path) -> None:
+    (tmp_path / "CLAUDE.md").write_text(
+        "<!-- speclino:begin bundle=1 -->\n古い\n<!-- speclino:end -->\n"
+    )
+    assert sa.apply_plan(tmp_path, plan(*BASE, bridge())).ok
+    assert "@AGENTS.md" in (tmp_path / "CLAUDE.md").read_text()
+    (tmp_path / "CLAUDE.md").write_text("<!-- speclino:begin bundle=1 -->\nA\n")  # 壊れた印
+    stopped(sa.apply_plan(tmp_path, plan(*BASE, bridge())), "管理区画")
+
+
+def test_if_exists_must_be_a_bool_on_set_managed_block(tmp_path: Path) -> None:
+    stopped(sa.apply_plan(tmp_path, plan(*BASE, {**bridge(), "if_exists": "yes"})), "if_exists")
+    bad = {**write(SPEC, "x"), "if_exists": True}
+    stopped(sa.apply_plan(tmp_path, plan(write(SKILL, "a"), bad)), "if_exists")
+
+
+def test_if_exists_block_listed_in_lock_is_rejected(tmp_path: Path) -> None:
+    p = plan(*BASE, bridge())
+    p["lock"]["files"]["CLAUDE.md"] = _h(BRIDGE)  # 橋を lock に載せた計画は食い違い
+    stopped(sa.apply_plan(tmp_path, p), "lock の files")
+
+
+@pytest.mark.parametrize("other", [".claude/CLAUDE.md", "CLAUDE.local.md"])
+def test_warns_when_only_other_claude_files_exist(tmp_path: Path, other: str) -> None:
+    (tmp_path / other).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / other).write_text("# 個人の指示\n")
+    result = sa.apply_plan(tmp_path, plan(*BASE, bridge()))
+    assert result.ok, result
+    assert any(other in w and "AGENTS.md" in w for w in result.warnings), result.warnings
+    assert not (tmp_path / "CLAUDE.md").exists()
+    # 橋の op が無い計画（指示書なし）では知らせない
+    assert sa.apply_plan(tmp_path, plan(write(SPEC, "# o\n"))).warnings == []
+
+
+def test_limit_errors_are_limit_exceeded(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sa, "MAX_FILES", 1)
+    with pytest.raises(sa.LimitExceeded):
+        sa.check_ops(list(BASE))

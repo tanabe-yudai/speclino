@@ -66,6 +66,7 @@ def fetch_plan(
     lock_json: str | None,
     instructions_file: InstructionsFile | None = None,
     skills_dir: SkillsRoot | None = None,
+    agent: str | None = None,
 ) -> SyncPlan:
     """`POST /api/sync/bundle` を呼んで計画を検証する。"""
     body: dict[str, object] = {"repo_id": repo_id, "lock_json": lock_json}
@@ -73,6 +74,8 @@ def fetch_plan(
         body["instructions_file"] = instructions_file
     if skills_dir is not None:
         body["skills_dir"] = skills_dir
+    if agent is not None:
+        body["agent"] = agent
     with httpx.Client(
         base_url=url.rstrip("/"),
         headers={"Authorization": f"Bearer {token}"},
@@ -111,14 +114,30 @@ def sync(
         InstructionsFile | None,
         typer.Option(
             "--instructions-file",
-            help="指示書の書き出し先（省略すると今の配置を保つ。初回は AGENTS.md）",
+            help=(
+                "指示書の本文の書き出し先（省略すると AGENTS.md。"
+                "CLAUDE.md があれば @AGENTS.md の橋）"
+            ),
         ),
     ] = None,
     skills_dir: Annotated[
         SkillsRoot | None,
         typer.Option(
             "--skills-dir",
-            help="スキルの書き出し先（省略すると今の配置を保つ。初回は .agents/skills）",
+            help=(
+                "スキルの書き出し先をこのルートだけにする"
+                "（省略すると前回のルートに --agent のルートを足す）"
+            ),
+        ),
+    ] = None,
+    agent: Annotated[
+        str | None,
+        typer.Option(
+            "--agent",
+            help=(
+                "使うエージェントの名前（claude を含めば .claude/skills、"
+                "それ以外は .agents/skills を足す）"
+            ),
         ),
     ] = None,
 ) -> None:
@@ -144,7 +163,7 @@ def sync(
         typer.echo("--repo-id に GitHub のリポジトリ ID を指定してください（初回のみ）", err=True)
         raise typer.Exit(code=2)
     try:
-        plan = fetch_plan(base, token, target_id, lock_json, instructions_file, skills_dir)
+        plan = fetch_plan(base, token, target_id, lock_json, instructions_file, skills_dir, agent)
     except SyncFailed as e:
         typer.echo(
             f"同期できなかった（手元のファイルと lock は前のまま）: {e}".replace(token, "***"),

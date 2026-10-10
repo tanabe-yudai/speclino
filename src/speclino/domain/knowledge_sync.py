@@ -10,7 +10,7 @@ from typing import Annotated, Literal
 from pydantic import Field
 
 from speclino.domain.common import IRModel
-from speclino.domain.knowledge import KnowledgeLock
+from speclino.domain.knowledge import KnowledgeLock, SkillsRoot
 
 
 @dataclass(frozen=True)
@@ -56,13 +56,18 @@ class WriteOp(IRModel):
 
 
 class SetManagedBlockOp(IRModel):
-    """AGENTS.md / CLAUDE.md の管理区画の中だけを置き換える（無ければ末尾に足す）。"""
+    """AGENTS.md / CLAUDE.md の管理区画の中だけを置き換える（無ければ末尾に足す）。
+
+    `if_exists` が真のもの（S77、CLAUDE.md への橋 `@AGENTS.md`）は、ファイルが無ければ何もしない
+    （作らない）。書くかどうかが手元の状態で決まるので、lock の `files` には載せない。
+    """
 
     op: Literal["set_managed_block"] = "set_managed_block"
     path: str
     inner: str
     generation: int = Field(ge=1)
     expected_inner_sha256: str | None = None
+    if_exists: bool = False
 
 
 class RemoveManagedBlockOp(IRModel):
@@ -91,16 +96,21 @@ SyncOp = Annotated[
 
 
 InstructionsFile = Literal["AGENTS.md", "CLAUDE.md"]
-SkillsRoot = Literal[".agents/skills", ".claude/skills"]
-LayoutKind = Literal["agents", "claude", "legacy_dual", "mixed", "unknown"]
+# 取り込むエージェントの名乗り（MCP の clientInfo か引数 `agent`）。自己申告で、変わるのは
+# スキルの書き出し先だけ
+AGENT_NAME_PATTERN = r"^[A-Za-z0-9._ -]{1,64}$"
 
 
 @dataclass(frozen=True)
 class SyncLayout:
-    """書き出し先の配置（S76）。指示書をどのファイルに、スキルをどのディレクトリに書くか。"""
+    """書き出し先の配置（S76・S77）。指示書の本文をどのファイルに、スキルをどのルートに書くか。
+
+    `skill_roots` は昇順で、それぞれに同じ内容を書く。`agent` は配置を決めた名乗り（応答に出す）。
+    """
 
     instructions_file: InstructionsFile = "AGENTS.md"
-    skills_root: SkillsRoot = ".agents/skills"
+    skill_roots: tuple[SkillsRoot, ...] = (".agents/skills",)
+    agent: str | None = None
 
 
 class SyncPlan(IRModel):
@@ -127,16 +137,18 @@ class SyncBundleRequest(IRModel):
 
     repo_id: int
     lock_json: str | None = Field(default=None, max_length=1024 * 1024)
-    # 省略すると今の配置を保つ（初回は AGENTS.md と .agents/skills）
+    # 指示書は省略すると AGENTS.md（CLAUDE.md があれば @AGENTS.md の橋）。スキルは省略すると
+    # 前回のルートに名乗り（agent）のルートを足す
     instructions_file: InstructionsFile | None = None
     skills_dir: SkillsRoot | None = None
+    agent: str | None = Field(default=None, pattern=AGENT_NAME_PATTERN)
 
 
 __all__ = [
+    "AGENT_NAME_PATTERN",
     "DeleteOp",
     "InstructionsFile",
     "IssuedSyncToken",
-    "LayoutKind",
     "RemoveManagedBlockOp",
     "SetManagedBlockOp",
     "SkillsRoot",

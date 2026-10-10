@@ -29,8 +29,13 @@ op の種類:
 
 - `write{path, content, sha256, expected_sha256?}`: ファイル全体。既存のファイルの中身が新しい中身と
   違えば、`expected_sha256`（前回の lock の記録）と一致するときだけ上書きする
-- `set_managed_block{path, inner, generation, expected_inner_sha256?}`: AGENTS.md / CLAUDE.md の
-  管理区画の中だけを置き換える（無ければ末尾に足す）。区画の外は触らない
+- `set_managed_block{path, inner, generation, expected_inner_sha256?, if_exists?}`: AGENTS.md /
+  CLAUDE.md の管理区画の中だけを置き換える（無ければ末尾に足す）。区画の外は触らない。
+  `if_exists` が真のもの（S77、CLAUDE.md への橋 `@AGENTS.md`）は、ファイルが無ければ何もしない
+  （作らない）。区画の中身が既に同じなら世代が違っても書き換えない。`expected_inner_sha256` が
+  あれば区画の中身がそれと一致するときだけ置き換え、無ければ印が本物の 1 組なら置き換える。
+  lock の `files` には載らない。ルートに CLAUDE.md が無く `.claude/CLAUDE.md` か
+  `CLAUDE.local.md` があれば、Claude Code が AGENTS.md を読まない可能性を警告する
 - `remove_managed_block{path, expected_inner_sha256?}`: 区画だけを取り除く。
   `expected_inner_sha256` が無いものは配置の片付け（S76）で、印が本物の 1 組なら中身を問わず
   取り除く（lock の `absent` には載らない）
@@ -97,6 +102,10 @@ class PreconditionFailed(ValueError):
 
 class RollbackIncomplete(OSError):
     """置き換えの途中で失敗し、元に戻せないファイルが残った（退避の一時ディレクトリを残す）。"""
+
+
+class LimitExceeded(PreconditionFailed):
+    """件数・合計の上限を超えた（スキルを複数のルートに書き出すと超えやすい）。"""
 
 
 class ManagedBlockError(ValueError):
@@ -367,7 +376,7 @@ def _check_repo(root: Path, plan: Mapping[str, Any], lock: Mapping[str, Any]) ->
 def check_ops(ops: Sequence[Mapping[str, Any]]) -> None:
     """op の形・パス・重複・上限（計画の作成時もサーバが同じ関数で確かめる）。"""
     if len(ops) > MAX_FILES:
-        raise PreconditionFailed(f"ファイルが多すぎる（{len(ops)} > {MAX_FILES}）")
+        raise LimitExceeded(f"ファイルが多すぎる（{len(ops)} > {MAX_FILES}）")
     seen: dict[str, str] = {}
     total = 0
     for op in ops:
@@ -379,6 +388,10 @@ def check_ops(ops: Sequence[Mapping[str, Any]]) -> None:
         managed = path in MANAGED_FILES
         if managed != (kind in ("set_managed_block", "remove_managed_block")):
             raise PreconditionFailed(f"{path} に {kind} は使えない")
+        if "if_exists" in op and (
+            kind != "set_managed_block" or not isinstance(op["if_exists"], bool)
+        ):
+            raise PreconditionFailed(f"{path} の if_exists が正しくない")
         folded = path.casefold()
         if folded in seen:
             raise PreconditionFailed(f"パスが重複している: {seen[folded]} と {path}")
@@ -391,7 +404,7 @@ def check_ops(ops: Sequence[Mapping[str, Any]]) -> None:
                 raise PreconditionFailed(f"{path} が大きすぎる（{size} バイト）")
             total += size
     if total > MAX_TOTAL_BYTES:
-        raise PreconditionFailed(f"合計が大きすぎる（{total} バイト）")
+        raise LimitExceeded(f"合計が大きすぎる（{total} バイト）")
     # 1 つの op のパスが別の op のパスの途中（ディレクトリ）になっていないか
     for path in seen.values():
         parts = path.split("/")
@@ -408,6 +421,8 @@ def _check_lock(ops: Sequence[Mapping[str, Any]], lock: Mapping[str, Any]) -> No
         if op["op"] == "write":
             files[op["path"]] = op.get("sha256")
         elif op["op"] == "set_managed_block":
+            if op.get("if_exists"):
+                continue  # 橋（S77）。手元に CLAUDE.md があるときだけ書くので lock に載せない
             files[op["path"]] = file_hash(op["inner"])
         elif op["op"] == "remove_managed_block" and op.get("expected_inner_sha256") is None:
             continue  # 配置の片付け。lock の absent には載せない
@@ -463,6 +478,8 @@ def _decide_op(op: Mapping[str, Any], target: Path, existing: str | None) -> _Ch
             return _Change(path, target, remove_managed(existing), removes=True)
         inner = op["inner"]
         generation = _require(op.get("generation"), int, f"{path} の generation")
+        if op.get("if_exists"):
+            return _decide_if_exists(op, target, existing, block)
         if block is not None:
             current = file_hash(block.inner)
             if current == file_hash(inner) and block.generation == generation:
@@ -474,6 +491,43 @@ def _decide_op(op: Mapping[str, Any], target: Path, existing: str | None) -> _Ch
         return _Change(path, target, merge_managed(existing, inner, generation))
     except ManagedBlockError as e:
         raise PreconditionFailed(f"{path} の管理区画が壊れているため書き出さない: {e}") from e
+
+
+def _decide_if_exists(
+    op: Mapping[str, Any], target: Path, existing: str | None, block: ManagedBlock | None
+) -> _Change | None:
+    """`if_exists` の区画（S77 の橋）。ファイルが無ければ作らない。中身が同じなら（改行を寄せて）
+    世代を問わずそのまま。`expected_inner_sha256` があれば、区画があり中身がそれと一致するときだけ
+    置き換える（利用者が区画を取り除いていれば止まる）。"""
+    path, inner = op["path"], op["inner"]
+    if existing is None:
+        return None
+    if block is not None and file_hash(block.inner) == file_hash(inner):
+        return None
+    expected = _hash_arg(op, "expected_inner_sha256", required=False)
+    if expected is not None:
+        if block is None:
+            raise PreconditionFailed(f"{path} の管理区画が手元で取り除かれているため書き出さない")
+        if file_hash(block.inner) != expected:
+            raise PreconditionFailed(f"{path} の管理区画が手元で変更されているため置き換えない")
+    return _Change(path, target, merge_managed(existing, inner, op["generation"]))
+
+
+def _hidden_claude_md(root: Path, ops: Sequence[Mapping[str, Any]]) -> list[str]:
+    """橋を書けなかった（ルートに CLAUDE.md が無い）のに、Claude Code が読む別の CLAUDE 系の
+    ファイルがあれば、AGENTS.md を読まない可能性を知らせる（自分では書かない）。"""
+    if not any(op["op"] == "set_managed_block" and op.get("if_exists") for op in ops):
+        return []
+    if (root / "CLAUDE.md").exists() or (root / "CLAUDE.md").is_symlink():
+        return []
+    others = [p for p in (".claude/CLAUDE.md", "CLAUDE.local.md") if (root / p).exists()]
+    if not others:
+        return []
+    return [
+        f"ルートに CLAUDE.md が無く {', '.join(others)} があるため、Claude Code が AGENTS.md の"
+        "指示書を読まない可能性がある。ルートに CLAUDE.md を作って取り込み直すか、"
+        "@AGENTS.md の行を書く"
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -606,6 +660,7 @@ def _apply(repo_root: Path, plan: Mapping[str, Any], result: ApplyResult) -> Non
             raise PreconditionFailed(f"{op['path']} の区画の世代が計画の世代と一致しない")
     lock_target = check_target(root, LOCK_PATH)
     result.warnings += _leftover_skill_dirs(root, ops)
+    result.warnings += _hidden_claude_md(root, ops)
 
     changes: list[_Change] = []
     for op in ops:

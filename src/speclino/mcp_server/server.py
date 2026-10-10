@@ -60,7 +60,7 @@ from speclino.domain.knowledge import (
     SkillContent,
     SpecContent,
 )
-from speclino.domain.knowledge_sync import InstructionsFile, SkillsRoot, SyncLayout
+from speclino.domain.knowledge_sync import InstructionsFile, SkillsRoot
 from speclino.domain.run import GitRef
 from speclino.services import knowledge_registry, knowledge_sync, mcp_tokens, sync_tokens
 from speclino.services.mcp_context import ContextUnavailable, InProcessContextSource
@@ -203,25 +203,28 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
         managed_inner: dict[str, str] | None = None,
         instructions_file: str = "",
         skills_dir: str = "",
+        agent: str = "",
     ) -> dict[str, Any]:
         """作業を始める前に、手元の知識を取り込み直す必要があるか（`pull_needed`）を返す。
 
         `lock_json` は手元の `.speclino/lock.json` の本文（文字列のまま。無ければ省く）。
         `local_hashes` は lock の `files` に載ったファイル（AGENTS.md / CLAUDE.md 以外）の
-        今の sha256、`managed_inner` は AGENTS.md / CLAUDE.md の管理区画の中身の sha256（どちらも
-        改行を LF に寄せた本文の `sha256:<hex>`、省略可）。`reasons` は no_lock / invalid_lock /
+        今の sha256。`managed_inner` は手元にある AGENTS.md / CLAUDE.md をキーに、管理区画の中身の
+        sha256（区画が無ければ空文字。ファイルが無ければキーを省く）。Claude Code は CLAUDE.md が
+        あれば必ずキーを入れる（橋 `@AGENTS.md` の有無を確かめるため）。ハッシュは改行を LF に
+        寄せた本文の `sha256:<hex>`、どちらの引数も省略可。`reasons` は no_lock / invalid_lock /
         expired / other_repo / members_changed / policy_changed / files_modified / stale_copy /
-        layout_change。`pull_needed` なら `knowledge_pull` で取り込む。
+        bridge_missing / layout_change。`pull_needed` なら `knowledge_pull` で取り込む。
 
-        `instructions_file`（AGENTS.md か CLAUDE.md）と `skills_dir`（.agents/skills か
-        .claude/skills）は `knowledge_pull` と同じ値を渡す。省略すると今の配置を保つ（初回は
-        AGENTS.md と .agents/skills）。Claude Code は初回や配置を変えるとき、両方に
-        instructions_file="CLAUDE.md", skills_dir=".claude/skills" を渡す。lock の配置と違えば
-        `layout_change` で `pull_needed` になる。最終的な判定はゲートの照合（KNOWLEDGE-LOCK-001）。
+        名乗り（スキルの書き出し先を決める）は MCP の clientInfo を使い、無ければ `agent`
+        （例 "claude-code"、"codex"。64 文字まで）。`instructions_file` / `skills_dir` は
+        `knowledge_pull` と同じ値を渡す（ふつうは省く）。取り込み直すと配置が変わるなら
+        `layout_change`。最終的な判定はゲートの照合（KNOWLEDGE-LOCK-001）。
         """
         principal = _principal(ctx)
         _check_inputs(lock_json, local_hashes, managed_inner)
         file_choice, root_choice = _check_layout(instructions_file, skills_dir)
+        name = _agent_name(ctx, agent)
         project, resolved = await _resolve(get_state(), principal, repo_full_name)
         return _sync_status(
             project,
@@ -231,6 +234,7 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
             managed_inner,
             file_choice,
             root_choice,
+            name,
         )
 
     @mcp.tool()
@@ -240,6 +244,7 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
         lock_json: str = "",
         instructions_file: str = "",
         skills_dir: str = "",
+        agent: str = "",
     ) -> dict[str, Any]:
         """このリポジトリに当たる承認済みの知識の書き出し計画を作り、使い捨ての取得 URL を返す。
 
@@ -251,16 +256,20 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
         `${CLAUDE_PLUGIN_ROOT}/scripts/speclino_apply.py`、リポジトリに置いたなら相対パス。
         計画やファイルを自分で書かない）。
 
-        書き出し先は取り込む側が選ぶ。`instructions_file`（AGENTS.md か CLAUDE.md）と
-        `skills_dir`（.agents/skills か .claude/skills）は、省略すると今の配置を保つ
-        （初回は AGENTS.md と .agents/skills）。Claude Code は初回（lock が無い・旧い配置のとき）に
-        instructions_file="CLAUDE.md", skills_dir=".claude/skills" を指定する。それ以外の
-        エージェントは省略してよい。配置を変えるときだけ指定する。応答の `layout` が実際の配置。
+        書き出し先: 指示書の本文は AGENTS.md（手元に CLAUDE.md があれば、その管理区画に
+        `@AGENTS.md` の橋を書く。CLAUDE.md は作らない）。スキルは前回のルートに、名乗りの
+        ルート（Claude Code なら .claude/skills、それ以外は .agents/skills）を足した全てに
+        同じ内容を書く（減らさない）。名乗りは MCP の clientInfo を使い、無ければ `agent`
+        （例 "claude-code"）。`instructions_file="CLAUDE.md"` は本文を CLAUDE.md だけに書く
+        旧い配置、`skills_dir` はそのルートだけに書く（どちらもふつうは省く）。応答の `layout`
+        （`instructions_file`・`skill_roots`・`agent`）が実際の配置。実行スクリプトは最新のもの
+        （`if_exists` の op を知るもの）を使う。
         """
         state = get_state()
         principal = _principal(ctx)
         _check_inputs(lock_json, None, None)
         file_choice, root_choice = _check_layout(instructions_file, skills_dir)
+        name = _agent_name(ctx, agent)
         project = await _workspace_project(state, principal, repo_full_name)
         try:
             async with state.session_factory() as session, session.begin():
@@ -273,6 +282,7 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
                     token_id=principal.token_id,
                     instructions_file=file_choice,
                     skills_root=root_choice,
+                    agent=name,
                 )
         except LookupError as e:
             raise ToolError(f"{repo_full_name} はこのワークスペースに登録されていない") from e
@@ -285,7 +295,8 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
             "bundle_generation": ticket.bundle_generation,
             "layout": {
                 "instructions_file": ticket.layout.instructions_file,
-                "skills_dir": ticket.layout.skills_root,
+                "skill_roots": list(ticket.layout.skill_roots),
+                "agent": ticket.layout.agent,
             },
             "summary": {
                 "ops": ticket.ops,
@@ -432,8 +443,17 @@ def _check_layout(
     )
 
 
-def _normalize_hash(value: str) -> str:
-    return value if value.startswith("sha256:") else "sha256:" + value.lower()
+def _agent_name(ctx: Context, agent: str) -> str | None:
+    """取り込むエージェントの名乗り。MCP の clientInfo（2026-07-28 以降は要求ごとの envelope に
+    載る。任意）を優先し、無ければ引数 `agent`（64 文字・英数字と `._ -`。それ以外は拒否）。"""
+    if agent and not knowledge_sync.is_valid_agent(agent):
+        raise ToolError("agent は 64 文字までの英数字と . _ - 空白")
+    try:
+        params = ctx.session.client_params
+        client = params.client_info.name if params is not None else None
+    except (AttributeError, LookupError, ValueError):
+        client = None
+    return knowledge_sync.normalize_agent(client) or knowledge_sync.normalize_agent(agent)
 
 
 def _modified_files(
@@ -450,30 +470,16 @@ def _modified_files(
     for given, managed in ((local_hashes, False), (managed_inner, True)):
         if given is None:
             continue
-        hashes = {p: _normalize_hash(h) for p, h in given.items()}
+        # 管理区画の申告の空値は「ファイルはあるが区画は無い」
+        hashes = {p: knowledge_sync.normalize_hash(h) for p, h in given.items()}
         for path, expected in lock.files.items():
             if (path in knowledge_sync.MANAGED_FILES) == managed and hashes.get(path) != expected:
                 out.add(path)
         out |= {
-            p for p in lock.absent if (p in knowledge_sync.MANAGED_FILES) == managed and p in hashes
+            p
+            for p in lock.absent
+            if (p in knowledge_sync.MANAGED_FILES) == managed and hashes.get(p)
         }
-    return sorted(out)
-
-
-def _declared_stale_copies(
-    lock: KnowledgeLock | None,
-    local_hashes: dict[str, str] | None,
-    managed_inner: dict[str, str] | None,
-) -> list[str]:
-    """申告のハッシュに、lock が示す配置の外（別の指示書ファイル・別のルートの同名スキル）の
-    ものがあれば、古い写しが残っている（ゲートの `stale_copy` と同じ導き方）。"""
-    if lock is None:
-        return []
-    managed, dirs = knowledge_sync.stale_copy_probes(lock)
-    out = [p for p in managed if managed_inner is not None and p in managed_inner]
-    for d in dirs:
-        if local_hashes is not None and any(p.startswith(d + "/") for p in local_hashes):
-            out.append(d + "/")
     return sorted(out)
 
 
@@ -485,6 +491,7 @@ def _sync_status(
     managed_inner: dict[str, str] | None = None,
     instructions_file: InstructionsFile | None = None,
     skills_root: SkillsRoot | None = None,
+    agent: str | None = None,
 ) -> dict[str, Any]:
     """ゲート（`KNOWLEDGE-LOCK-001`）と同じ `assess_lock` で判定し、申告のハッシュも照合する。"""
     generation = resolved.bundle.generation
@@ -508,18 +515,23 @@ def _sync_status(
         github_repo_id=project.github_repo_id,
     )
     modified = _modified_files(a.lock, local_hashes, managed_inner) if a.lock is not None else []
-    stale = _declared_stale_copies(a.lock, local_hashes, managed_inner)
+    stale, bridge_missing = knowledge_sync.declared_copies(a.lock, local_hashes, managed_inner)
     reasons = list(a.reasons)
     if modified and "files_modified" not in reasons:
         reasons.append("files_modified")
     if stale and "stale_copy" not in reasons:
         reasons.append("stale_copy")
-    if _layout_changes(a.lock, instructions_file, skills_root):
+    if bridge_missing and "bridge_missing" not in reasons:
+        reasons.append("bridge_missing")
+    if knowledge_sync.layout_changes(
+        a.lock, instructions_file=instructions_file, skills_root=skills_root, agent=agent
+    ):
         reasons.append("layout_change")
     verdict, message = a.verdict, a.message
-    if stale and verdict == "VERIFIED_IN_SCOPE":  # ゲートと同じ（古い写しは REVIEW）
-        verdict = "REVIEW"
-        message = f"{knowledge_sync.STALE_COPY_MESSAGE}: {', '.join(stale)}"
+    # ゲートと同じ（古い写し・橋の欠けは REVIEW）
+    if (stale or bridge_missing) and verdict == "VERIFIED_IN_SCOPE" and a.lock is not None:
+        review = knowledge_sync.copies_assessment(a.lock, a.changed, stale, bridge_missing)
+        verdict, message = review.verdict, review.message
     return {
         "current_generation": generation,
         "lock_generation": a.lock.bundle_generation if a.lock is not None else None,
@@ -532,31 +544,6 @@ def _sync_status(
         "reason": message,
         "changed": a.changed,
     }
-
-
-def _layout_changes(
-    lock: KnowledgeLock | None,
-    instructions_file: InstructionsFile | None,
-    skills_root: SkillsRoot | None,
-) -> bool:
-    """明示した配置が lock の配置と違うか（`knowledge_pull` と同じ `resolve_layout` の規則）。
-
-    引数が無ければ今の配置を保つので変更ではない。lock が agents / claude でなければ（旧い配置・
-    食い違い）、明示した時点で変更として取り込み直す。lock に指示書もスキルも無ければ比べない。
-    """
-    if lock is None or (instructions_file is None and skills_root is None):
-        return False
-    kind = knowledge_sync.infer_layout(lock.files)
-    if kind == "unknown":
-        return False
-    desired = knowledge_sync.resolve_layout(
-        lock, instructions_file=instructions_file, skills_root=skills_root
-    )
-    current = {
-        "agents": knowledge_sync.DEFAULT_LAYOUT,
-        "claude": SyncLayout("CLAUDE.md", ".claude/skills"),
-    }.get(kind)
-    return desired != current
 
 
 def _principal(ctx: Context) -> Principal:

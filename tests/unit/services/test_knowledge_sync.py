@@ -158,11 +158,16 @@ def test_render_files_per_layout_ignores_legacy_target() -> None:
         {"kind": "instructions", "target": "claude_md", "body": "C\n", "scope": {"workspace": True}}
     )
     revs = [_skill("review"), _rev("legacy", legacy), _instr("agents", "A\n")]
-    claude = ks.render_files(_resolved(revs), SyncLayout("CLAUDE.md", ".claude/skills"))
+    claude = ks.render_files(_resolved(revs), SyncLayout("CLAUDE.md", (".claude/skills",)))
     assert sorted(claude) == [".claude/skills/review/SKILL.md", "CLAUDE.md"]
     assert claude["CLAUDE.md"] == "A\n\nC\n"  # target に関係なく全部を 1 ファイルに連結
-    mixed = ks.render_files(_resolved(revs), SyncLayout("AGENTS.md", ".claude/skills"))
-    assert sorted(mixed) == [".claude/skills/review/SKILL.md", "AGENTS.md"]
+    both = ks.render_files(_resolved(revs), SyncLayout("AGENTS.md", ks._SKILL_ROOTS))
+    assert sorted(both) == [
+        ".agents/skills/review/SKILL.md",
+        ".claude/skills/review/SKILL.md",
+        "AGENTS.md",
+    ]
+    assert both[".agents/skills/review/SKILL.md"] == both[".claude/skills/review/SKILL.md"]
 
 
 def test_render_rejects_unsafe_skill_name() -> None:
@@ -215,10 +220,12 @@ def _resync(
     generation: int,
     repo_id: int = 42,
     layout: SyncLayout | None = None,
+    agent: str | None = None,
 ) -> sa.ApplyResult:
     """手元の lock を送ってサーバが計画を作り（削除の根拠は検証済みの lock だけ）、当てる。"""
     resolved = _resolved(revs, generation)
     previous = ks.verified_previous_lock(_local_lock(root), workspace=WS, github_repo_id=repo_id)
+    layout = layout or ks.resolve_layout(previous, agent=agent)
     plan = ks.build_plan(
         resolved,
         github_repo_id=repo_id,
@@ -303,8 +310,8 @@ def test_forged_or_foreign_previous_lock_plans_no_deletion(tamper: dict[str, obj
     plan = ks.build_plan(
         _resolved(BASE, 2), github_repo_id=42, repo_full_name=REPO, previous=previous, now=NOW
     )
-    # 前回の lock が無いので削除は計画しない（選ばれなかった側の管理区画の片付けだけ）
-    assert {op.op for op in plan.ops} == {"write", "set_managed_block", "remove_managed_block"}
+    # 前回の lock が無いので削除は計画しない（CLAUDE.md は片付けではなく橋）
+    assert {op.op for op in plan.ops} == {"write", "set_managed_block"}
     assert plan.lock.absent == []
     assert ks.verified_previous_lock("{not json", workspace=WS, github_repo_id=42) is None
     assert ks.verified_previous_lock(None, workspace=WS, github_repo_id=42) is None
@@ -932,107 +939,336 @@ def test_lock_after_rebundle_with_same_members_stays_verified_until_old_key_remo
 
 
 # ---------------------------------------------------------------------------
-# S76: 書き出し先の配置（推定・解決・切り替え・排他）
+# S76・S77: 書き出し先の配置（スキルのルートの和集合・指示書の橋・排他・ゲート）
 # ---------------------------------------------------------------------------
 
-CLAUDE_LAYOUT = SyncLayout("CLAUDE.md", ".claude/skills")
+AGENTS_ROOT, CLAUDE_ROOT = ".agents/skills", ".claude/skills"
+BOTH = (AGENTS_ROOT, CLAUDE_ROOT)
+CLAUDE_LAYOUT = SyncLayout("CLAUDE.md", (CLAUDE_ROOT,))
 SKILL_A = ".agents/skills/review/SKILL.md"
 SKILL_C = ".claude/skills/review/SKILL.md"
+BRIDGED = "<!-- speclino:begin bundle={g} -->\n@AGENTS.md\n<!-- speclino:end -->\n"
+
+
+def _lock_of(
+    layout: SyncLayout, revs: list[ArtifactRevision] = BASE, *, roots_field: bool = True
+) -> KnowledgeLock:
+    """配置どおりの lock。`roots_field=False` は S77 より前の lock（`skill_roots` 欄なし）。"""
+    resolved = _resolved(revs)
+    files = ks.render_files(resolved, layout)
+    roots = layout.skill_roots if roots_field else ()
+    return ks.issue_lock(resolved, github_repo_id=42, files=files, skill_roots=roots, now=NOW)
+
+
+def _lock_now(root: Path) -> KnowledgeLock:
+    return KnowledgeLock.model_validate_json((root / ks.LOCK_PATH).read_text())
 
 
 @pytest.mark.parametrize(
-    ("paths", "kind"),
+    ("paths", "roots"),
     [
-        (["AGENTS.md", SKILL_A, ".speclino/specs/x.md"], "agents"),
-        (["AGENTS.md"], "agents"),
-        ([SKILL_A], "agents"),
-        (["CLAUDE.md", SKILL_C], "claude"),
-        ([SKILL_C], "claude"),
-        (["AGENTS.md", SKILL_A, SKILL_C], "legacy_dual"),
-        (["AGENTS.md", "CLAUDE.md", SKILL_A], "legacy_dual"),
-        (["AGENTS.md", SKILL_C], "mixed"),
-        (["CLAUDE.md", SKILL_A], "mixed"),
-        ([".speclino/specs/x.md"], "unknown"),
-        ([], "unknown"),
+        (["AGENTS.md", SKILL_A, ".speclino/specs/x.md"], (AGENTS_ROOT,)),
+        ([SKILL_C, "CLAUDE.md"], (CLAUDE_ROOT,)),
+        ([SKILL_A, SKILL_C], BOTH),
+        ([".speclino/specs/x.md", "AGENTS.md"], ()),
     ],
 )
-def test_infer_layout(paths: list[str], kind: str) -> None:
-    assert ks.infer_layout(paths) == kind
+def test_lock_skill_roots_inferred_from_old_lock(paths: list[str], roots: tuple[str, ...]) -> None:
+    lock = _lock_of(SyncLayout(), roots_field=False).model_copy(
+        update={"files": dict.fromkeys(paths, "sha256:" + "0" * 64)}
+    )
+    assert ks.lock_skill_roots(lock) == roots
+    assert ks.lock_skill_roots(None) == ()
+    # 欄があれば欄が正（パスより優先）
+    assert ks.lock_skill_roots(lock.model_copy(update={"skill_roots": [CLAUDE_ROOT]})) == (
+        CLAUDE_ROOT,
+    )
 
 
-def _dual_files(resolved: ResolvedKnowledge) -> dict[str, str]:
-    """S76 より前の書き出し（スキルを両方のルートに）。"""
-    files = ks.render_files(resolved)
-    files.update(ks.render_files(resolved, CLAUDE_LAYOUT))
-    del files["CLAUDE.md"]
-    return files
+@pytest.mark.parametrize(
+    ("agent", "root"),
+    [
+        ("claude-code", CLAUDE_ROOT),
+        ("Claude Code", CLAUDE_ROOT),
+        ("CLAUDE", CLAUDE_ROOT),
+        ("codex", AGENTS_ROOT),
+        ("cursor-vscode", AGENTS_ROOT),
+        (None, AGENTS_ROOT),
+    ],
+)
+def test_agent_skills_root(agent: str | None, root: str) -> None:
+    assert ks.agent_skills_root(agent) == root
 
 
-def _lock_of(layout: SyncLayout | None, revs: list[ArtifactRevision] = BASE) -> KnowledgeLock:
-    resolved = _resolved(revs)
-    files = ks.render_files(resolved, layout) if layout else _dual_files(resolved)
-    return ks.issue_lock(resolved, github_repo_id=42, files=files, now=NOW)
+def test_normalize_agent() -> None:
+    assert ks.normalize_agent("claude-code") == "claude-code"
+    assert ks.normalize_agent("Cursor (via mcp-remote 0.1)") == "Cursor via mcp-remote 0.1"
+    assert ks.normalize_agent("x" * 100) == "x" * 64
+    assert ks.normalize_agent("") is None and ks.normalize_agent(None) is None
+    assert ks.normalize_agent("（日本語）") is None
 
 
-def test_resolve_layout_rules() -> None:
-    agents, claude, legacy = _lock_of(SyncLayout()), _lock_of(CLAUDE_LAYOUT), _lock_of(None)
+def test_resolve_layout_adds_the_agent_root_to_the_previous_roots() -> None:
+    agents_lock = _lock_of(SyncLayout())
+    claude_lock = _lock_of(CLAUDE_LAYOUT)
     assert ks.resolve_layout(None) == SyncLayout()
-    assert ks.resolve_layout(agents) == SyncLayout()
-    assert ks.resolve_layout(claude) == CLAUDE_LAYOUT  # 省略は今の配置を保つ
-    assert ks.resolve_layout(legacy) == SyncLayout()  # 旧い配置は既定に寄せる
-    assert ks.resolve_layout(claude, instructions_file="AGENTS.md") == SyncLayout(
-        "AGENTS.md", ".claude/skills"
+    assert ks.resolve_layout(None, agent="claude-code").skill_roots == (CLAUDE_ROOT,)
+    assert ks.resolve_layout(agents_lock).skill_roots == (AGENTS_ROOT,)
+    assert ks.resolve_layout(agents_lock, agent="claude-code").skill_roots == BOTH
+    assert ks.resolve_layout(claude_lock, agent="codex").skill_roots == BOTH
+    # 名乗りで減らさない
+    both_lock = _lock_of(SyncLayout("AGENTS.md", BOTH))
+    assert ks.resolve_layout(both_lock, agent="codex").skill_roots == BOTH
+    assert ks.resolve_layout(both_lock, agent="claude-code").skill_roots == BOTH
+    # skills_dir の明示は排他
+    assert ks.resolve_layout(both_lock, skills_root=AGENTS_ROOT).skill_roots == (AGENTS_ROOT,)
+    # 指示書の本文は前回の配置を保たず AGENTS.md（CLAUDE.md は明示したときだけ）
+    assert ks.resolve_layout(claude_lock).instructions_file == "AGENTS.md"
+    assert ks.resolve_layout(claude_lock, instructions_file="CLAUDE.md") == SyncLayout(
+        "CLAUDE.md", BOTH
     )
-    explicit = ks.resolve_layout(
-        agents, instructions_file="CLAUDE.md", skills_root=".claude/skills"
-    )
-    assert explicit == CLAUDE_LAYOUT
-    assert ks.resolve_layout(_lock_of(SyncLayout(), [_spec("o")])) == SyncLayout()  # unknown
+    assert ks.resolve_layout(None, agent="claude-code").agent == "claude-code"
 
 
-def test_switching_agents_to_claude_removes_old_paths_and_block(tmp_path: Path) -> None:
-    (tmp_path / "AGENTS.md").write_text("# 手書き\n")
-    _resync(tmp_path, BASE, 1)
-    assert (tmp_path / SKILL_A).exists()
-    result = _resync(tmp_path, BASE, 1, layout=CLAUDE_LAYOUT)
-    assert (tmp_path / SKILL_C).exists() and not (tmp_path / SKILL_A).exists()
-    assert "speclino" not in (tmp_path / "AGENTS.md").read_text()  # 区画だけが消える
-    assert (tmp_path / "AGENTS.md").read_text().startswith("# 手書き")
-    assert "<!-- speclino:begin" in (tmp_path / "CLAUDE.md").read_text()
-    assert SKILL_A in result.deleted
+def _this_repo_lock() -> KnowledgeLock:
+    """このリポジトリの .speclino/lock.json と同じ形（スキルが両ルート、指示書なし、
+    `skill_roots` 欄なし）。署名だけテストの鍵で付け直す。"""
+    data = json.loads((Path(__file__).resolve().parents[3] / ks.LOCK_PATH).read_text())
+    assert "skill_roots" not in data and not set(data["files"]) & set(ks.MANAGED_FILES)
+    data.pop("key_id", None)
+    unsigned = KnowledgeLock.model_validate({**data, "signature": "x"})
+    return unsigned.model_copy(update={"signature": bundle_signing.sign(ks.lock_payload(unsigned))})
+
+
+@pytest.mark.parametrize("agent", ["claude-code", "codex", "cursor", "gemini-cli", None])
+def test_this_repo_lock_needs_no_pull_for_any_agent(agent: str | None) -> None:
+    lock = _this_repo_lock()
+    assert ks.verify_lock(lock)
+    assert ks.lock_skill_roots(lock) == BOTH
+    assert ks.resolve_layout(lock, agent=agent).skill_roots == BOTH
+    assert ks.layout_changes(lock, agent=agent) is False
+    probes = ks.stale_copy_probes(lock)
+    assert probes.skill_dirs == [] and probes.bridge is None
+
+
+def test_layout_changes_rules() -> None:
+    agents_lock = _lock_of(SyncLayout())
+    assert ks.layout_changes(None, agent="claude-code") is False
+    assert ks.layout_changes(agents_lock, agent="codex") is False
+    assert ks.layout_changes(agents_lock, agent="claude-code") is True  # ルートが増える
+    assert ks.layout_changes(agents_lock, instructions_file="CLAUDE.md") is True
+    both_lock = _lock_of(SyncLayout("AGENTS.md", BOTH))
+    assert ks.layout_changes(both_lock, skills_root=CLAUDE_ROOT) is True  # 明示は排他
+    # 旧配置（本文が CLAUDE.md）は既定の取り込みで AGENTS.md へ移る
+    assert ks.layout_changes(_lock_of(CLAUDE_LAYOUT), agent="claude-code") is True
+    # 前回のルートが分からない（スキルの無い古い lock）ときは比べない
+    spec_only = _lock_of(SyncLayout(), [_spec("o")], roots_field=False)
+    assert ks.layout_changes(spec_only, agent="claude-code") is False
+
+
+def test_skill_roots_is_signed_and_old_locks_keep_their_signature() -> None:
+    lock = _lock_of(SyncLayout("AGENTS.md", BOTH))
+    assert lock.skill_roots == list(BOTH) and ks.verify_lock(lock)
+    assert not ks.verify_lock(lock.model_copy(update={"skill_roots": [AGENTS_ROOT]}))
+    old = _lock_of(SyncLayout(), roots_field=False)
+    assert "skill_roots" not in ks.lock_payload(old).decode() and ks.verify_lock(old)
+    data = json.loads(old.model_dump_json())
+    data.pop("skill_roots")
+    assert ks.verify_lock(KnowledgeLock.model_validate(data))
+
+
+def test_union_of_roots_grows_with_each_agent(tmp_path: Path) -> None:
+    _resync(tmp_path, BASE, 1, agent="codex")
+    assert (tmp_path / SKILL_A).exists() and not (tmp_path / SKILL_C).exists()
+    assert _lock_now(tmp_path).skill_roots == [AGENTS_ROOT]
+    _resync(tmp_path, BASE, 1, agent="claude-code")
+    assert (tmp_path / SKILL_A).exists() and (tmp_path / SKILL_C).exists()
+    assert _lock_now(tmp_path).skill_roots == list(BOTH)
+    result = _resync(tmp_path, BASE, 1, agent="codex")  # 減らさない
+    assert (tmp_path / SKILL_C).exists() and result.deleted == []
     lock_json = (tmp_path / ks.LOCK_PATH).read_text()
-    assert SKILL_A in KnowledgeLock.model_validate_json(lock_json).absent
     assert _check(tmp_path, lock_json, current=_bundle(BASE)).verdict == "VERIFIED_IN_SCOPE"
-    # 引数を省略すれば今の配置（claude）を保つ
+
+
+def test_roots_are_kept_even_without_skills(tmp_path: Path) -> None:
+    """仕様だけの bundle でもルートを lock に残し、後から増えたスキルを両方に書く。"""
+    _resync(tmp_path, [_spec("orders")], 1, agent="claude-code")
+    assert _lock_now(tmp_path).skill_roots == [CLAUDE_ROOT]
+    _resync(tmp_path, [_spec("orders")], 2, agent="codex")
+    assert _lock_now(tmp_path).skill_roots == list(BOTH)
+    _resync(tmp_path, [_spec("orders"), _skill("review")], 3, agent="codex")
+    assert (tmp_path / SKILL_A).exists() and (tmp_path / SKILL_C).exists()
+
+
+def test_explicit_skills_dir_is_exclusive(tmp_path: Path) -> None:
+    _resync(tmp_path, BASE, 1, layout=SyncLayout("AGENTS.md", BOTH))
+    result = _resync(tmp_path, BASE, 1, layout=SyncLayout("AGENTS.md", (AGENTS_ROOT,)))
+    assert not (tmp_path / SKILL_C).exists() and SKILL_C in result.deleted
+    lock = _lock_now(tmp_path)
+    assert lock.skill_roots == [AGENTS_ROOT] and SKILL_C in lock.absent
+    lock_json = (tmp_path / ks.LOCK_PATH).read_text()
+    assert _check(tmp_path, lock_json, current=_bundle(BASE)).verdict == "VERIFIED_IN_SCOPE"
+
+
+def test_two_roots_over_the_limit_suggest_skills_dir(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sa, "MAX_FILES", 3)
+    resolved = _resolved(BASE)
+    with pytest.raises(sa.LimitExceeded, match="skills_dir"):
+        ks.build_plan(
+            resolved,
+            github_repo_id=42,
+            repo_full_name=REPO,
+            previous=None,
+            layout=SyncLayout("AGENTS.md", BOTH),
+            now=NOW,
+        )
+    monkeypatch.setattr(sa, "MAX_FILES", 2)
+    with pytest.raises(sa.LimitExceeded) as single:
+        ks.build_plan(resolved, github_repo_id=42, repo_full_name=REPO, previous=None, now=NOW)
+    assert "skills_dir" not in str(single.value)
+
+
+# --- 指示書: AGENTS.md と CLAUDE.md の橋 ---
+
+
+def test_bridge_is_not_created_without_claude_md(tmp_path: Path) -> None:
+    result = _resync(tmp_path, BASE, 1, agent="claude-code")
+    assert not (tmp_path / "CLAUDE.md").exists() and "CLAUDE.md" in result.unchanged
+    lock = _lock_now(tmp_path)
+    assert "AGENTS.md" in lock.files and "CLAUDE.md" not in lock.files
+    lock_json = (tmp_path / ks.LOCK_PATH).read_text()
+    assert _check(tmp_path, lock_json, current=_bundle(BASE)).verdict == "VERIFIED_IN_SCOPE"
+
+
+def test_bridge_is_written_into_existing_claude_md(tmp_path: Path) -> None:
+    (tmp_path / "CLAUDE.md").write_text("# 手書き\n")
     _resync(tmp_path, BASE, 1)
-    assert (tmp_path / SKILL_C).exists() and not (tmp_path / SKILL_A).exists()
+    assert (tmp_path / "CLAUDE.md").read_text() == "# 手書き\n\n" + BRIDGED.format(g=1)
+    assert "共通の指示" in (tmp_path / "AGENTS.md").read_text()
+    lock = _lock_now(tmp_path)
+    assert "CLAUDE.md" not in lock.files and "CLAUDE.md" not in lock.absent
+    lock_json = (tmp_path / ks.LOCK_PATH).read_text()
+    assert _check(tmp_path, lock_json, current=_bundle(BASE)).verdict == "VERIFIED_IN_SCOPE"
+    # 次の世代でも橋は書き換えない
+    revs2 = [BASE[0], _instr("agents", "新しい指示\n"), BASE[2]]
+    result = _resync(tmp_path, revs2, 2)
+    assert "CLAUDE.md" in result.unchanged
+    assert (tmp_path / "CLAUDE.md").read_text() == "# 手書き\n\n" + BRIDGED.format(g=1)
 
 
-def test_pull_without_lock_removes_managed_block_of_the_other_file(tmp_path: Path) -> None:
+def test_bridge_is_removed_when_instructions_are_gone(tmp_path: Path) -> None:
+    (tmp_path / "CLAUDE.md").write_text("# 手書き\n")
+    _resync(tmp_path, BASE, 1)
+    _resync(tmp_path, [BASE[0], BASE[2]], 2)
+    assert (tmp_path / "CLAUDE.md").read_text() == "# 手書き\n\n"  # 区画だけを取り除く
+    assert "speclino" not in (tmp_path / "AGENTS.md").read_text()
+    lock_json = (tmp_path / ks.LOCK_PATH).read_text()
+    assert _check(tmp_path, lock_json, current=_bundle([BASE[0], BASE[2]], 2)).verdict == (
+        "VERIFIED_IN_SCOPE"
+    )
+
+
+def test_migration_from_claude_md_body_to_bridge(tmp_path: Path) -> None:
+    """規則 8: 前回の本文が CLAUDE.md なら、absent に入れず橋で置き換える。"""
+    (tmp_path / "CLAUDE.md").write_text("# 手書き\n")
+    _resync(tmp_path, BASE, 1, layout=CLAUDE_LAYOUT)
+    assert "共通の指示" in (tmp_path / "CLAUDE.md").read_text()
+    previous = _lock_now(tmp_path)
+    plan = ks.build_plan(
+        _resolved(BASE, 2),
+        github_repo_id=42,
+        repo_full_name=REPO,
+        previous=previous,
+        layout=ks.resolve_layout(previous, agent="claude-code"),
+        now=NOW,
+    )
+    claude_ops = [op for op in plan.ops if op.path == "CLAUDE.md"]
+    assert len(claude_ops) == 1 and claude_ops[0].op == "set_managed_block"
+    assert claude_ops[0].if_exists is True  # type: ignore[union-attr]
+    assert claude_ops[0].expected_inner_sha256 == previous.files["CLAUDE.md"]  # type: ignore[union-attr]
+    assert "CLAUDE.md" not in plan.lock.absent and "CLAUDE.md" not in plan.lock.files
+    assert sa.apply_plan(tmp_path, plan.model_dump(mode="json")).ok
+    assert (tmp_path / "CLAUDE.md").read_text() == "# 手書き\n\n" + BRIDGED.format(g=2)
+    assert "共通の指示" in (tmp_path / "AGENTS.md").read_text()
+    lock_json = (tmp_path / ks.LOCK_PATH).read_text()
+    assert _check(tmp_path, lock_json, current=_bundle(BASE, 2)).verdict == "VERIFIED_IN_SCOPE"
+
+
+def test_migration_stops_when_old_body_was_edited(tmp_path: Path) -> None:
+    _resync(tmp_path, BASE, 1, layout=CLAUDE_LAYOUT)
+    text = (tmp_path / "CLAUDE.md").read_text().replace("共通の指示", "手で直した")
+    (tmp_path / "CLAUDE.md").write_text(text)
+    before = _snapshot(tmp_path)
+    with pytest.raises(ks.SyncRejected, match="CLAUDE.md"):
+        _resync(tmp_path, BASE, 2)
+    assert _snapshot(tmp_path) == before
+
+
+def test_migration_does_not_recreate_deleted_claude_md(tmp_path: Path) -> None:
+    _resync(tmp_path, BASE, 1, layout=CLAUDE_LAYOUT)
+    (tmp_path / "CLAUDE.md").unlink()
+    _resync(tmp_path, BASE, 2)
+    assert not (tmp_path / "CLAUDE.md").exists()
+    lock_json = (tmp_path / ks.LOCK_PATH).read_text()
+    assert _check(tmp_path, lock_json, current=_bundle(BASE, 2)).verdict == "VERIFIED_IN_SCOPE"
+
+
+def test_explicit_claude_md_replaces_the_bridge(tmp_path: Path) -> None:
+    """後方互換: instructions_file="CLAUDE.md" は本文を CLAUDE.md に書き、AGENTS.md を片付ける。"""
+    (tmp_path / "CLAUDE.md").write_text("# 手書き\n")
+    _resync(tmp_path, BASE, 1)
+    _resync(tmp_path, BASE, 1, layout=SyncLayout("CLAUDE.md", (AGENTS_ROOT,)))
+    assert "共通の指示" in (tmp_path / "CLAUDE.md").read_text()
+    assert "@AGENTS.md" not in (tmp_path / "CLAUDE.md").read_text()
+    assert "speclino" not in (tmp_path / "AGENTS.md").read_text()
+    lock_json = (tmp_path / ks.LOCK_PATH).read_text()
+    assert _check(tmp_path, lock_json, current=_bundle(BASE)).verdict == "VERIFIED_IN_SCOPE"
+
+
+def test_pull_without_lock_replaces_old_block_of_claude_md(tmp_path: Path) -> None:
     (tmp_path / "CLAUDE.md").write_text(
         "# 手書き\n<!-- speclino:begin bundle=1 -->\n古い\n<!-- speclino:end -->\n"
     )
     (tmp_path / ".claude/skills/review").mkdir(parents=True)
     (tmp_path / SKILL_C).write_text("古い写し")
     result = _resync(tmp_path, BASE, 1)
-    assert (tmp_path / "CLAUDE.md").read_text() == "# 手書き\n"
-    assert (tmp_path / "AGENTS.md").exists()
+    assert (tmp_path / "CLAUDE.md").read_text() == "# 手書き\n" + BRIDGED.format(g=1)
     # 別ルートのスキルは lock が無いので消さず、警告で知らせる
     assert (tmp_path / SKILL_C).read_text() == "古い写し"
     assert any(".claude/skills/review/" in w for w in result.warnings)
-    lock = KnowledgeLock.model_validate_json((tmp_path / ks.LOCK_PATH).read_text())
-    assert lock.absent == []  # 片付けは absent に載せない
+    assert _lock_now(tmp_path).absent == []
 
 
-def test_cleanup_is_noop_when_other_file_has_no_block(tmp_path: Path) -> None:
+def test_cleanup_without_instructions_is_noop_when_no_block(tmp_path: Path) -> None:
     (tmp_path / "CLAUDE.md").write_text("# 利用者のもの\n")
-    result = _resync(tmp_path, BASE, 1)
+    result = _resync(tmp_path, [BASE[0], BASE[2]], 1)
     assert (tmp_path / "CLAUDE.md").read_text() == "# 利用者のもの\n"
     assert "CLAUDE.md" in result.unchanged
 
 
-def test_gate_flags_leftover_block_in_other_file(tmp_path: Path) -> None:
-    lock_json, bundle = _synced(tmp_path)
+def test_plan_cleanup_rejects_non_managed_or_written_path() -> None:
+    files, lock, _ = _payload(BASE)
+    with pytest.raises(ks.SyncRejected):
+        ks.plan_writes(files, lock, None, repo_full_name=REPO, cleanup=["AGENTS.md"])
+    with pytest.raises(ks.SyncRejected):
+        ks.plan_writes(files, lock, None, repo_full_name=REPO, cleanup=[".speclino/lock.json"])
+    with pytest.raises(ks.SyncRejected):
+        ks.plan_writes(files, lock, None, repo_full_name=REPO, cleanup=["CLAUDE.md"], bridge=True)
+
+
+# --- ゲート（KNOWLEDGE-LOCK-001） ---
+
+
+def test_gate_bridge_rules(tmp_path: Path) -> None:
+    lock_json, bundle = _synced(tmp_path)  # 本文は AGENTS.md
+    assert _check(tmp_path, lock_json, current=bundle).verdict == "VERIFIED_IN_SCOPE"
+    (tmp_path / "CLAUDE.md").write_text("# 利用者の本文だけ\n")  # 橋が無い
+    f = _check(tmp_path, lock_json, current=bundle)
+    assert f.verdict == "REVIEW" and "Claude Code が指示書を読めない" in f.message
+    (tmp_path / "CLAUDE.md").write_text("# 手書き\n" + BRIDGED.format(g=7))  # 世代は問わない
+    assert _check(tmp_path, lock_json, current=bundle).verdict == "VERIFIED_IN_SCOPE"
+    crlf = ("# 手書き\n" + BRIDGED.format(g=7)).replace("\n", "\r\n")  # 改行の違いは問わない
+    (tmp_path / "CLAUDE.md").write_bytes(crlf.encode())
     assert _check(tmp_path, lock_json, current=bundle).verdict == "VERIFIED_IN_SCOPE"
     (tmp_path / "CLAUDE.md").write_text(
         "<!-- speclino:begin bundle=1 -->\n古い\n<!-- speclino:end -->\n"
@@ -1040,14 +1276,37 @@ def test_gate_flags_leftover_block_in_other_file(tmp_path: Path) -> None:
     f = _check(tmp_path, lock_json, current=bundle)
     assert f.verdict == "REVIEW" and "古い写しが別の場所に残っています" in f.message
     assert f.actual == "CLAUDE.md"
-    (tmp_path / "CLAUDE.md").write_text("利用者の本文だけ\n")  # 区画の外は利用者のもの
-    assert _check(tmp_path, lock_json, current=bundle).verdict == "VERIFIED_IN_SCOPE"
     (tmp_path / "CLAUDE.md").write_text("<!-- speclino:end -->\n")  # 読めない印は残っている扱い
     assert _check(tmp_path, lock_json, current=bundle).verdict == "REVIEW"
 
 
-def test_gate_flags_leftover_skill_dir_in_other_root(tmp_path: Path) -> None:
-    lock_json, bundle = _synced(tmp_path)
+def test_gate_flags_agents_block_when_body_is_in_claude_md(tmp_path: Path) -> None:
+    _resync(tmp_path, BASE, 1, layout=CLAUDE_LAYOUT)
+    lock_json = (tmp_path / ks.LOCK_PATH).read_text()
+    assert _check(tmp_path, lock_json, current=_bundle(BASE)).verdict == "VERIFIED_IN_SCOPE"
+    (tmp_path / "AGENTS.md").write_text(
+        "<!-- speclino:begin bundle=1 -->\n古い\n<!-- speclino:end -->\n"
+    )
+    f = _check(tmp_path, lock_json, current=_bundle(BASE))
+    assert f.verdict == "REVIEW" and f.actual == "AGENTS.md"
+
+
+def test_gate_flags_blocks_when_lock_has_no_instructions(tmp_path: Path) -> None:
+    revs = [_skill("review")]
+    lock_json, bundle = _synced(tmp_path, revs)
+    (tmp_path / "CLAUDE.md").write_text("# 利用者のもの\n")  # 区画が無ければ問題にしない
+    assert _check(tmp_path, lock_json, current=bundle).verdict == "VERIFIED_IN_SCOPE"
+    for name in ks.MANAGED_FILES:
+        (tmp_path / name).write_text(
+            "<!-- speclino:begin bundle=1 -->\n古い\n<!-- speclino:end -->\n"
+        )
+        f = _check(tmp_path, lock_json, current=bundle)
+        assert f.verdict == "REVIEW" and f.actual == name
+        (tmp_path / name).unlink()
+
+
+def test_gate_flags_leftover_skill_dir_outside_the_roots(tmp_path: Path) -> None:
+    lock_json, bundle = _synced(tmp_path)  # .agents/skills だけ
     (tmp_path / ".claude/skills/review").mkdir(parents=True)
     assert _check(tmp_path, lock_json, current=bundle).verdict == "VERIFIED_IN_SCOPE"  # 空の dir
     (tmp_path / SKILL_C).write_text("古い写し")
@@ -1060,45 +1319,41 @@ def test_gate_flags_leftover_skill_dir_in_other_root(tmp_path: Path) -> None:
     assert _check(tmp_path, lock_json, current=bundle).verdict == "VERIFIED_IN_SCOPE"
 
 
-def test_old_dual_lock_still_verifies(tmp_path: Path) -> None:
+def test_old_dual_lock_still_verifies_and_keeps_both_roots(tmp_path: Path) -> None:
     resolved = _resolved(BASE)
-    files = _dual_files(resolved)
-    lock = ks.issue_lock(resolved, github_repo_id=42, files=files, now=NOW)
+    files = ks.render_files(resolved, SyncLayout("AGENTS.md", BOTH))
+    lock = ks.issue_lock(resolved, github_repo_id=42, files=files, now=NOW)  # 欄なし
     _write(tmp_path, files, lock)
     lock_json = (tmp_path / ks.LOCK_PATH).read_text()
-    assert ks.infer_layout(lock.files) == "legacy_dual"
     assert _check(tmp_path, lock_json, current=resolved.bundle).verdict == "VERIFIED_IN_SCOPE"
-    # 旧い配置からの取り込みは既定（AGENTS.md と .agents/skills）に寄り、.claude/skills を消す
+    # 名乗りが無くても両方のルートを保つ（S76 では .claude/skills が消えていた）
     result = _resync(tmp_path, BASE, 1)
-    assert not (tmp_path / SKILL_C).exists() and (tmp_path / SKILL_A).exists()
-    assert SKILL_C in result.deleted
+    assert (tmp_path / SKILL_C).exists() and (tmp_path / SKILL_A).exists()
+    assert result.deleted == [] and _lock_now(tmp_path).skill_roots == list(BOTH)
 
 
 def test_stale_copy_probes() -> None:
-    agents = _lock_of(SyncLayout())
-    assert ks.stale_copy_probes(agents) == (["CLAUDE.md"], [".claude/skills/review"])
-    # 旧い配置のスキルは両方のルートを lock 自身が照合する
-    assert ks.stale_copy_probes(_lock_of(None)) == (["CLAUDE.md"], [])
-    assert ks.stale_copy_probes(_lock_of(SyncLayout(), [_spec("o")])) == ([], [])
+    agents = ks.stale_copy_probes(_lock_of(SyncLayout()))
+    assert agents == ks.CopyProbes([], "CLAUDE.md", [".claude/skills/review"])
+    claude = ks.stale_copy_probes(_lock_of(CLAUDE_LAYOUT))
+    assert claude == ks.CopyProbes(["AGENTS.md"], None, [".agents/skills/review"])
+    both = ks.stale_copy_probes(_lock_of(SyncLayout("AGENTS.md", BOTH)))
+    assert both == ks.CopyProbes([], "CLAUDE.md", [])
+    spec_only = ks.stale_copy_probes(_lock_of(SyncLayout(), [_spec("o")]))
+    assert spec_only == ks.CopyProbes(["AGENTS.md", "CLAUDE.md"], None, [])
 
 
-def test_plan_cleanup_rejects_non_managed_or_written_path() -> None:
-    files, lock, _ = _payload(BASE)
-    with pytest.raises(ks.SyncRejected):
-        ks.plan_writes(files, lock, None, repo_full_name=REPO, cleanup=["AGENTS.md"])
-    with pytest.raises(ks.SyncRejected):
-        ks.plan_writes(files, lock, None, repo_full_name=REPO, cleanup=[".speclino/lock.json"])
-
-
-def test_gate_probes_by_inferred_layout_even_with_skills_only(tmp_path: Path) -> None:
-    """指示書が lock に無くても、スキルが .agents/skills だけなら CLAUDE.md の区画を見る。"""
-    revs = [_skill("review")]
-    lock_json, bundle = _synced(tmp_path, revs)
-    assert _check(tmp_path, lock_json, current=bundle).verdict == "VERIFIED_IN_SCOPE"
-    (tmp_path / "CLAUDE.md").write_text(
-        "<!-- speclino:begin bundle=1 -->\n古い\n<!-- speclino:end -->\n"
+def test_declared_copies_for_sync_status() -> None:
+    lock = _lock_of(SyncLayout())
+    inner = {"AGENTS.md": lock.files["AGENTS.md"]}
+    assert ks.declared_copies(lock, None, inner) == ([], False)  # CLAUDE.md が無い
+    assert ks.declared_copies(lock, None, {**inner, "CLAUDE.md": ""}) == ([], True)
+    bridged = {**inner, "CLAUDE.md": ks.file_hash(ks.BRIDGE_INNER)}
+    assert ks.declared_copies(lock, None, bridged) == ([], False)
+    stale = {**inner, "CLAUDE.md": ks.file_hash("古")}
+    assert ks.declared_copies(lock, None, stale) == (["CLAUDE.md"], False)
+    assert ks.declared_copies(lock, {SKILL_C: ks.file_hash("x")}, None) == (
+        [".claude/skills/review/"],
+        False,
     )
-    f = _check(tmp_path, lock_json, current=bundle)
-    assert f.verdict == "REVIEW" and f.actual == "CLAUDE.md"
-    claude = _lock_of(CLAUDE_LAYOUT, revs)
-    assert ks.stale_copy_probes(claude) == (["AGENTS.md"], [".agents/skills/review"])
+    assert ks.declared_copies(None, {SKILL_C: "x"}, {"CLAUDE.md": ""}) == ([], False)
