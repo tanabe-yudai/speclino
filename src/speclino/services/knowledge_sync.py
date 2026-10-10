@@ -977,6 +977,8 @@ def normalize_hash(value: str | None) -> str | None:
 
 
 STALE_COPY_MESSAGE = "知識の古い写しが別の場所に残っています"
+# 取り込み直しの案内（ゲートと sync_status で共有）
+_PULL_AGAIN = "MCP の `knowledge_pull`（CLI なら `speclino sync`）で取り込み直"
 BRIDGE_MISSING_MESSAGE = (
     "Claude Code が指示書を読めない: CLAUDE.md に @AGENTS.md の橋が無い。取り込み直す"
 )
@@ -1009,9 +1011,7 @@ def copies_assessment(
     messages, reasons = [], _change_reasons(changed)
     if stale:
         listed = ", ".join(stale[:20])
-        messages.append(
-            f"{STALE_COPY_MESSAGE}: {listed}。`speclino sync` をやり直すか手で消してください"
-        )
+        messages.append(f"{STALE_COPY_MESSAGE}: {listed}。{_PULL_AGAIN}すか、手で消してください")
         reasons.append("stale_copy")
     if bridge_missing:
         messages.append(BRIDGE_MISSING_MESSAGE)
@@ -1077,7 +1077,7 @@ def assess_lock(
     if (now or datetime.now(UTC)) >= lock.expires_at:
         return LockAssessment(
             "UNKNOWN",
-            f"{LOCK_PATH} の期限が切れています。`speclino sync` をやり直してください",
+            f"{LOCK_PATH} の期限が切れています。{_PULL_AGAIN}してください",
             actual=f"期限 {lock.expires_at.isoformat()}",
             lock=lock,
             reasons=["expired"],
@@ -1148,7 +1148,7 @@ def assess_lock(
     if changed:
         return LockAssessment(
             "REVIEW",
-            "古い知識で作業した可能性があります。`speclino sync` で最新にしてください",
+            f"古い知識で作業した可能性があります。{_PULL_AGAIN}してください",
             expected=f"bundle {current.generation}",
             actual=f"bundle {lock.bundle_generation}",
             lock=lock,

@@ -61,7 +61,10 @@ class ProposalDiagnostic(IRModel):
 
 
 class ChatProposal(IRModel):
-    """下書きの提案。`raw_proposal` は許可リストの欄だけ（型に合わなくても返す）。"""
+    """下書きの提案。`raw_proposal` は許可リストの欄だけ（型に合わなくても返す）。
+
+    新規作成の会話（規約を除く）では、規則に合う名前の案 `name` が本文の欄に添うことがある（C4）。
+    """
 
     base_hash: str = Field(
         pattern=r"^sha256:[0-9a-f]{64}$", description="提案の土台にした編集欄の本文のハッシュ"

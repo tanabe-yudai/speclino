@@ -52,9 +52,12 @@ class ScriptedChatLlm:
         else:
             fields = props.get("proposal", {}).get("properties", {})
             key = next((k for k in _PROPOSALS if k in fields), "body")
+            proposal = dict(_PROPOSALS[key])
+            if "name" in fields:  # 新規作成の会話では名前の案も返す（S79）
+                proposal["name"] = "scripted-draft"
             body = {
                 "explanation": "下書きの案を作りました（台本の応答）",
-                "proposal": _PROPOSALS[key],
+                "proposal": proposal,
             }
         return JsonGeneration(json.dumps(body, ensure_ascii=False), 0, 0)
 

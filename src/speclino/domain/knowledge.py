@@ -25,6 +25,9 @@ SkillsRoot = Literal[".agents/skills", ".claude/skills"]
 MANAGED_BEGIN = "<!-- speclino:begin"
 MANAGED_END = "<!-- speclino:end -->"
 BODY_MAX_BYTES = 256 * 1024
+# 知識の名前の規則（作成の API と、会話の名前の提案の検証で同じものを使う）
+ARTIFACT_NAME_PATTERN = r"^[a-z0-9][a-z0-9-]*$"
+ARTIFACT_NAME_MAX_CHARS = 64
 SKILL_FILE_MAX_BYTES = 256 * 1024
 SKILL_TOTAL_MAX_BYTES = 1024 * 1024
 
@@ -157,7 +160,9 @@ class ArtifactRevision(IRModel):
     artifact_id: str = Field(min_length=1)
     workspace: str = Field(min_length=1)
     kind: ArtifactKind
-    name: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9-]*$")
+    name: str = Field(
+        min_length=1, max_length=ARTIFACT_NAME_MAX_CHARS, pattern=ARTIFACT_NAME_PATTERN
+    )
     revision: int = Field(ge=1)
     status: ArtifactStatus
     content: ArtifactContent
@@ -301,6 +306,8 @@ class SpecSuggestions(IRModel):
 
 
 __all__ = [
+    "ARTIFACT_NAME_MAX_CHARS",
+    "ARTIFACT_NAME_PATTERN",
     "BODY_MAX_BYTES",
     "MANAGED_BEGIN",
     "MANAGED_END",

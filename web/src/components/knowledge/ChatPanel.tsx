@@ -2,15 +2,17 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Panel, PanelTitle } from '@/components/app/Panel'
 import { ToneBadge } from '@/components/app/ToneBadge'
 import { DiffView } from '@/components/knowledge/DiffView'
+import { DraftOverlay } from '@/components/knowledge/DraftOverlay'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { useFollowBottom } from '@/hooks/useFollowBottom'
 import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion'
 import { cn } from '@/lib/utils'
 import { skipMessage } from '@/services/chatDraft'
 import { formatDateTime } from '@/services/format'
 import { CHAT_NOTICE, MESSAGE_MAX_BYTES, errorCount, messageBytesLeft, textHash } from '@/services/knowledgeChat'
-import type { ProposalOutcome } from '@/types/chatDraft'
+import type { ChatDraft, ProposalOutcome } from '@/types/chatDraft'
 import type { ChatMessage, ChatPanelProps, ChatProposal, ChatStreaming, RawProposal } from '@/types/knowledgeChat'
 
 /** 今の編集欄の本文のハッシュ（提案の土台と比べて、古い提案を反映させない）。計算中は null。 */
@@ -161,8 +163,8 @@ function ThinkingDots() {
   )
 }
 
-/** 送った発言と、届いている途中の返答（返答が届くまでは「考えています」）。 */
-function StreamingMessages({ streaming }: { streaming: ChatStreaming }) {
+/** 送った発言と、届いている途中の返答（返答が届くまでは「考えています」）と、書いている本文の差分。 */
+function StreamingMessages({ streaming, draft, onStop }: { streaming: ChatStreaming; draft: ChatDraft | null; onStop: () => void }) {
   return (
     <>
       <li className="ml-6 rounded-md bg-muted px-3 py-2 text-sm" aria-live="off">
@@ -172,6 +174,7 @@ function StreamingMessages({ streaming }: { streaming: ChatStreaming }) {
       <li className="mr-6 rounded-md border bg-background px-3 py-2 text-sm" aria-live="off" aria-busy="true">
         <div className="mb-1 text-xs font-semibold text-ink-3">AI</div>
         {streaming.reply ? <p className="break-words whitespace-pre-wrap">{streaming.reply}</p> : <ThinkingDots />}
+        {draft && <DraftOverlay draft={draft} onStop={onStop} />}
       </li>
     </>
   )
@@ -187,17 +190,24 @@ export function ChatPanel({ chat, editorText, beforeText, afterText, onApply, in
   const currentHash = useTextHash(editorText)
   const current = chat.current
   const left = messageBytesLeft(text.trim())
+  // 新しい発言・返答の伸び・書いている本文の伸びで、一覧の末尾を追う（読み戻しているときは追わない）
+  const { ref: listRef, onScroll: onListScroll, follow: followList } = useFollowBottom<HTMLOListElement>(
+    `${current?.messages.length ?? 0}:${chat.streaming?.userText ?? ''}:${chat.streaming?.reply.length ?? -1}:${chat.draft?.text.length ?? -1}`,
+    current?.id ?? null,
+  )
 
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const body = text.trim()
     if (!body || chat.sending || messageBytesLeft(body) < 0) return
+    followList()
     // 失敗したら本文を残す（同じ本文の再送は同じ冪等キーで送る）
     chat.send(body, editorText, { bodyText, onTurn: (turn) => onReply?.(turn, editorText) }).then((ok) => ok && setText(''))
   }
 
   return (
-    <Panel className="space-y-4" aria-labelledby="chat-heading">
+    // 返答や差分が伸びても、ブラウザがページのスクロールを合わせて動かさない（S79）
+    <Panel className="space-y-4 [overflow-anchor:none]" aria-labelledby="chat-heading">
       <div className="space-y-1">
         <PanelTitle id="chat-heading">AI と作る</PanelTitle>
         <p className="text-xs text-ink-2">{CHAT_NOTICE}</p>
@@ -242,7 +252,7 @@ export function ChatPanel({ chat, editorText, beforeText, afterText, onApply, in
 
         <div className="min-w-0 space-y-3">
           {(current && current.messages.length > 0) || chat.streaming ? (
-            <ol className="max-h-[36rem] space-y-2 overflow-auto" aria-label="会話" aria-live="polite">
+            <ol ref={listRef} onScroll={onListScroll} className="max-h-[min(36rem,60dvh)] space-y-2 overflow-auto" aria-label="会話" aria-live="polite">
               {current?.messages.map((m) => (
                 <Message key={m.id} m={m}>
                   {m.proposal &&
@@ -253,7 +263,7 @@ export function ChatPanel({ chat, editorText, beforeText, afterText, onApply, in
                     ))}
                 </Message>
               ))}
-              {chat.streaming && <StreamingMessages streaming={chat.streaming} />}
+              {chat.streaming && <StreamingMessages streaming={chat.streaming} draft={chat.draft} onStop={chat.stop} />}
             </ol>
           ) : (
             <p className="text-sm text-ink-3">作りたいものを書いて送ってください。例: 「社内の CLI ツール foo の使い方をスキルにしたい」</p>
@@ -270,7 +280,8 @@ export function ChatPanel({ chat, editorText, beforeText, afterText, onApply, in
               aria-describedby="chat-input-left"
               aria-invalid={left < 0 || undefined}
               placeholder="AI への発言（今の編集欄の本文も一緒に送ります）"
-              disabled={chat.sending}
+              // 送信中も disabled にしない（スマホでキーボードが閉じて画面が動く）。書き換えだけ止める
+              readOnly={chat.sending}
             />
             <div className="flex flex-wrap items-center gap-3">
               <Button type="submit" size="sm" disabled={chat.sending || !text.trim() || left < 0}>

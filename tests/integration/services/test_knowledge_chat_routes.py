@@ -155,7 +155,8 @@ async def test_full_flow(ctx: Ctx) -> None:
     turn = res.json()
     assert turn["reply"]["text"] == "了解しました"
     proposal = turn["reply"]["proposal"]
-    assert proposal["raw_proposal"] == {"markdown": "# 仕様\n"}  # 名前は捨てる
+    # 新規作成の会話（まだ知識に結び付かない）では、規則に合う名前の案を返す（C4）
+    assert proposal["raw_proposal"] == {"markdown": "# 仕様\n", "name": "x"}
     assert proposal["base_hash"].startswith("sha256:")
     assert "diagnostics" in proposal
 
@@ -210,6 +211,14 @@ async def test_bind_new_chat_after_first_save(ctx: Ctx) -> None:
     assert res.status_code == 200 and res.json()["artifact_id"] == aid
     listed = (await ctx.client.get(_url(ctx.slug, f"?artifact_id={aid}"), headers=ALICE)).json()
     assert [c["id"] for c in listed] == [chat["id"]]
+
+    # 結び付いた後は名前の案を返さない（名前は作成時に人が決めたもの）
+    ctx.llm.response = json.dumps({"explanation": "了解", "proposal": {"body": "y", "name": "z"}})
+    sent = await ctx.client.post(
+        _url(ctx.slug, f"/{chat['id']}/messages"), json=_msg(), headers=ALICE
+    )
+    assert sent.status_code == 200, sent.text
+    assert sent.json()["reply"]["proposal"]["raw_proposal"] == {"body": "y"}
 
 
 async def test_owner_of_the_workspace_cannot_read_my_chat(ctx: Ctx) -> None:
@@ -403,7 +412,7 @@ async def test_stream_flow_matches_non_stream_shape(ctx: Ctx) -> None:
     assert drafts and drafts[-1] == {"field": "markdown", "text": "# 仕様\n"}
     done = events[-1][1]
     assert done["reply"]["text"] == "了解しました"
-    assert done["reply"]["proposal"]["raw_proposal"] == {"markdown": "# 仕様\n"}
+    assert done["reply"]["proposal"]["raw_proposal"] == {"markdown": "# 仕様\n", "name": "x"}
 
     # 非ストリームの結果と同じ形（同じ発言の再送は前の結果をそのまま返す）
     again = await ctx.client.post(_url(ctx.slug, f"/{cid}/messages"), json=_msg(), headers=ALICE)

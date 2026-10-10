@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createChat, deleteChat, getChat, listChats, patchChat, postMessageStream, summarizeChat } from '@/api/knowledgeChat'
 import { ApiError, StreamInterruptedError } from '@/api/errors'
-import { chatsFor, describeChatError, idempotencyKeyFor } from '@/services/knowledgeChat'
+import { chatsFor, describeChatError, idempotencyKeyFor, settleTurn } from '@/services/knowledgeChat'
 import type { ChatDraft } from '@/types/chatDraft'
 import type { ChatSendOptions, ChatStreaming, ChatSummaryDraft, ChatTurn, KnowledgeChat, KnowledgeChatController, KnowledgeChatKind, KnowledgeChatSummary } from '@/types/knowledgeChat'
 
@@ -111,9 +111,14 @@ export function useKnowledgeChat(
       // 結果が確定した（返答あり、または前の失敗の再送）。次の発言は新しいキーで送る
       retry.current = null
       if (alive.current) {
-        setCurrent(done.chat)
-        // 途中経過を閉じる前に、確定した提案を反映させる（同じ描画にまとまり、表示が一瞬戻らない）
-        if (!done.replayed || done.reply) opts.onTurn?.(done)
+        // 確定した提案の反映（非同期）が終わってから会話を差し替え、途中経過を閉じる
+        // （同じ描画にまとまり、表示が一瞬戻らない・高さが 2 回変わらない）
+        await settleTurn(done, !done.replayed || done.reply ? opts.onTurn : undefined, () => {
+          if (!alive.current) return
+          setCurrent(done.chat)
+          setStreaming(null)
+          setDraft(null)
+        })
       }
       if (done.replayed && !done.reply && alive.current) setError('この発言は前に失敗しています。もう一度送ると新しい発言として送ります')
       return !done.replayed || !!done.reply

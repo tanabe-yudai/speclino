@@ -83,3 +83,17 @@ def test_names_are_capped() -> None:
 def test_summary_prompt_contains_only_conversation() -> None:
     p = build_summary_prompt("spec", [_m(0, "注文の取消を足したい"), _m(1, "了解")])
     assert "注文の取消を足したい" in p and "what" in p
+
+
+def test_name_is_proposed_only_when_creating() -> None:
+    new = build_chat_prompt(
+        "skill", message="x", editor_text="", names=[], history=[], propose_name=True
+    )
+    assert "proposal.name" in new
+    for kind in ("skill", "policy"):
+        p = build_chat_prompt(kind, message="x", editor_text="", names=[], history=[])  # type: ignore[arg-type]
+        assert "proposal.name" not in p and "名前・スコープ" in p
+    policy = build_chat_prompt(
+        "policy", message="x", editor_text="", names=[], history=[], propose_name=True
+    )
+    assert "proposal.name" not in policy

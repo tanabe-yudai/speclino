@@ -589,6 +589,7 @@ async def _complete_turn(
         base_hash=text_hash(editor_text),
         spec_domain=ctx.spec_domain,
         spec_legacy=ctx.spec_legacy,
+        propose_name=_proposes_name(ctx),
     )
     reply = ChatMessage(
         id=uuid.uuid4().hex,
@@ -617,6 +618,11 @@ async def _complete_turn(
     return turn
 
 
+def _proposes_name(ctx: _Context) -> bool:
+    """新規作成の会話（まだ知識に結び付かない。規約を除く）では、名前の案も出させる（C4）。"""
+    return ctx.chat.kind != "policy" and ctx.chat.artifact_id is None
+
+
 def _chat_prompt(ctx: _Context, text: str, editor_text: str) -> str:
     return build_chat_prompt(
         ctx.chat.kind,
@@ -624,6 +630,7 @@ def _chat_prompt(ctx: _Context, text: str, editor_text: str) -> str:
         editor_text=editor_text,
         names=ctx.names,
         history=ctx.chat.messages,
+        propose_name=_proposes_name(ctx),
     )
 
 
@@ -656,7 +663,7 @@ async def post_message(
             workspace=workspace,
             owner=owner,
             prompt=_chat_prompt(ctx, text, editor_text),
-            schema=response_schema(ctx.chat.kind),
+            schema=response_schema(ctx.chat.kind, propose_name=_proposes_name(ctx)),
             purpose="chat_message",
         )
         return await _complete_turn(
@@ -808,7 +815,7 @@ async def stream_message(
             workspace=workspace,
             owner=owner,
             prompt=_chat_prompt(ctx, text, editor_text),
-            schema=response_schema(ctx.chat.kind),
+            schema=response_schema(ctx.chat.kind, propose_name=_proposes_name(ctx)),
             purpose="chat_message",
         ):
             if isinstance(item, JsonGeneration):

@@ -9,7 +9,6 @@ import { ApprovalPanel } from '@/components/knowledge/ApprovalPanel'
 import { AppliedDiffPanel } from '@/components/knowledge/AppliedDiffPanel'
 import { ChatPanel } from '@/components/knowledge/ChatPanel'
 import { ConflictDialog } from '@/components/knowledge/ConflictDialog'
-import { DraftOverlay } from '@/components/knowledge/DraftOverlay'
 import { InstructionsEditorPane } from '@/components/knowledge/InstructionsEditorPane'
 import { NoteField } from '@/components/knowledge/NoteField'
 import { NotFoundPanel } from '@/components/knowledge/NotFoundPanel'
@@ -40,7 +39,7 @@ import {
 } from '@/services/knowledge'
 import { backLink, findFromProject, scopeForProject } from '@/services/knowledgeNav'
 import { bodyText, canUndo, decideAutoApply, restoreApplied, touchesFiles } from '@/services/chatDraft'
-import { applyProposal, canSummarize, currentFieldText, editorText, proposalText, textHash } from '@/services/knowledgeChat'
+import { applyProposal, canSummarize, currentFieldText, editorText, proposalText, proposedName, textHash } from '@/services/knowledgeChat'
 import { paths } from '@/services/paths'
 import { countErrors } from '@/services/specPreview'
 import type { ArtifactContent, ArtifactKind, ArtifactRevision, SpecPreviewRequest } from '@/types/knowledge'
@@ -171,18 +170,26 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
   }
 
   function applyChatProposal(raw: RawProposal) {
+    suggestName(raw)
     if (applyToEditor(raw, null)) toast.success('提案を編集欄に反映しました（まだ保存していません）')
+  }
+
+  /** 新規作成で名前の欄が空のときだけ、AI の名前の案を入れる（人が直せる。保存時の検査はサーバ）。 */
+  function suggestName(raw: RawProposal) {
+    setName((cur) => proposedName(cur, raw, !id))
   }
 
   /**
    * 確定した返答の提案を、条件が揃うときだけ本文に入れる。冪等の再送では提案が別の本文に向けた
    * ものでありうるので、送った本文のハッシュが提案の土台と一致することも確かめる。
+   * 返す Promise が終わるまで、会話は生成中の表示を閉じない（S79）。
    */
-  function onChatReply(turn: ChatTurn, sentEditorText: string) {
+  function onChatReply(turn: ChatTurn, sentEditorText: string): Promise<void> | undefined {
     const reply = turn.reply
     const proposal = reply?.proposal
     if (!reply || !proposal) return
-    void textHash(sentEditorText).then((sentHash) => {
+    suggestName(proposal.raw_proposal)
+    return textHash(sentEditorText).then((sentHash) => {
       const cur = latest.current
       const decision = decideAutoApply({
         proposal,
@@ -323,12 +330,10 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
           </div>
         )}
         <ScopePicker kind={kind} scope={content.scope} onChange={(scope) => setContent({ ...content, scope })} projects={projects} error={projectsError} />
-        {applied && !chat.draft && (
+        {applied && (
           <AppliedDiffPanel applied={applied} undoable={canUndo(applied, editorText(content), content)} onUndo={undoApplied} onClose={() => setApplied(null)} />
         )}
-        {chat.draft && <DraftOverlay draft={chat.draft} onStop={chat.stop} />}
-        {/* 書いている間は本文の欄を隠す（編集欄の状態は残す） */}
-        <div className={chat.draft ? 'hidden' : 'space-y-6'}>
+        {/* AI が書いている間も本文の欄は出したまま（途中経過は会話の中。ページの高さを変えない） */}
         {content.kind === 'spec' && (
           <SpecEditorPane
             slug={slug}
@@ -344,7 +349,6 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
         )}
         {content.kind === 'skill' && <SkillEditorPane content={content} onChange={setContent} onInvalidChange={setPaneInvalid} resetKey={resetKey} />}
         {content.kind === 'instructions' && <InstructionsEditorPane content={content} onChange={setContent} />}
-        </div>
 
         <div className="max-w-3xl">
           <NoteField id="revision-note" note={note} onChange={setNote} summarize={canSummarize(chat.current) ? chat.summarize : undefined} />

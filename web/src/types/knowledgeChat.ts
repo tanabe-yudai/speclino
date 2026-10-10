@@ -28,6 +28,8 @@ export interface RawProposal {
   files?: Record<string, string>
   body?: string
   rule?: ProposedRule
+  /** 新規作成の会話だけ: 名前の案（規則に合うものだけ。名前の欄が空のときだけ入れる） */
+  name?: string
 }
 
 export interface ChatProposal {
@@ -123,15 +125,18 @@ export interface ChatPanelProps {
   bodyText?: string
   /** 提案ごとの扱い（発言の ID が鍵） */
   outcomes?: Record<string, ProposalOutcome>
-  /** 返答が確定したとき（生成中の表示を閉じる前に呼ぶ）。`sentEditorText` は送った時点の編集欄の本文 */
-  onReply?: (turn: ChatTurn, sentEditorText: string) => void
+  /**
+   * 返答が確定したとき。`sentEditorText` は送った時点の編集欄の本文。Promise を返せば、
+   * それが終わるまで生成中の表示を閉じない（反映と表示の差し替えを 1 回の描画にまとめる）
+   */
+  onReply?: (turn: ChatTurn, sentEditorText: string) => void | Promise<void>
 }
 
 export interface ChatSendOptions {
   /** 送った時点の本文の欄（途中経過の差分の「前」） */
   bodyText?: string
-  /** 確定した返答を受けたとき。途中経過を閉じる前に同期で呼ぶ（表示が一瞬戻らない） */
-  onTurn?: (turn: ChatTurn) => void
+  /** 確定した返答を受けたとき。これ（Promise なら完了）を待ってから途中経過を閉じる（表示が一瞬戻らない） */
+  onTurn?: (turn: ChatTurn) => void | Promise<void>
 }
 
 export interface KnowledgeChatController {

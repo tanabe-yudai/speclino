@@ -177,3 +177,42 @@ def test_response_schema_has_explanation_and_kind_specific_proposal() -> None:
         text = json.dumps(schema)
         for banned in ('"scope"', '"name"', '"target"', '"domain"', '"legacy_ir"', '"compiled"'):
             assert banned not in text
+
+
+def test_name_is_allowed_only_for_new_artifacts_and_valid_names() -> None:
+    data = {"markdown": "# x", "name": "order-checkout"}
+    assert extract_proposal("spec", data) == ({"markdown": "# x"}, 1)
+    assert extract_proposal("spec", data, propose_name=True) == (data, 0)
+    for bad in ("Order", "-x", "a_b", "a" * 65, 3, "valid-name\n"):
+        raw, dropped = extract_proposal(
+            "instructions", {"body": "b", "name": bad}, propose_name=True
+        )
+        assert raw == {"body": "b"} and dropped == 1, bad
+    # 名前だけの提案は返さない。規約には名前の欄が無い
+    assert extract_proposal("skill", {"name": "a"}, propose_name=True) == (None, 0)
+    raw, dropped = extract_proposal(
+        "policy",
+        {"rule": {"id": "R", "title": "t", "text": "x", "level": "advisory"}, "name": "a"},
+        propose_name=True,
+    )
+    assert raw is not None and "name" not in raw and dropped == 1
+
+
+async def test_proposed_name_does_not_break_content_diagnostics() -> None:
+    p = await build_proposal(
+        "skill",
+        {"skill_md": "---\nname: a\ndescription: d\n---\n", "name": "my-skill"},
+        editor_text="",
+        base_hash=BASE,
+        propose_name=True,
+    )
+    assert p is not None and p.valid, p
+    assert p.raw_proposal["name"] == "my-skill"
+
+
+def test_response_schema_has_name_only_when_proposing() -> None:
+    for kind in ("spec", "skill", "instructions"):
+        props = response_schema(kind, propose_name=True)["properties"]["proposal"]["properties"]  # type: ignore[arg-type]
+        assert "name" in props
+    policy = response_schema("policy", propose_name=True)["properties"]["proposal"]["properties"]
+    assert "name" not in policy
