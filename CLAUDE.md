@@ -55,3 +55,7 @@ GCP プロジェクト作成・課金紐付け・`terraform apply`・GitHub App 
 ## 日程
 
 締切 2026-10-15 23:59。M0 9/22–23、M1 〜9/27、M2 〜10/1、M3 〜10/5（Must 完了）、M4 〜10/9（Should、10/9 夜に切捨て）、10/13 コードフリーズ、10/14 提出。12/1 までデプロイ維持。
+
+<!-- speclino:begin bundle=6 -->
+@AGENTS.md
+<!-- speclino:end -->
