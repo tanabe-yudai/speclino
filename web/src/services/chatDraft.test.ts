@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { FOLLOW_SLACK_PX, bodyText, canUndo, decideAutoApply, draftDiff, nearBottom, restoreApplied, skipMessage, touchesFiles, withBodyText } from './chatDraft'
+import { FOLLOW_SLACK_PX, bodyText, canUndo, decideAutoApply, nearBottom, restoreApplied, skipMessage, touchesFiles, withBodyText } from './chatDraft'
 import type { ArtifactContent } from '@/types/knowledge'
 import type { ChatProposal } from '@/types/knowledgeChat'
 
@@ -68,20 +68,6 @@ describe('skipMessage', () => {
     expect(skipMessage('edited', 0)).toBe('編集中のため反映していません')
     expect(skipMessage('invalid', 2)).toContain('2 件')
     expect(skipMessage('files', 0)).toContain('付属ファイル')
-  })
-})
-
-describe('draftDiff', () => {
-  it('diffs the snapshot against the partial draft and anchors at the last addition', () => {
-    const d = draftDiff('a\nb\nc', 'a\nX\nY')
-    expect(d?.lines.map((l) => l.op)).toEqual(['same', 'del', 'del', 'add', 'add'])
-    expect(d?.anchor).toBe(4)
-  })
-  it('has no anchor when nothing is added yet, and returns null when too large', () => {
-    expect(draftDiff('a\nb', 'a\nb')?.anchor).toBe(-1)
-    const big = Array.from({ length: 3000 }, (_, i) => `x${i}`).join('\n')
-    const other = Array.from({ length: 3000 }, (_, i) => `y${i}`).join('\n')
-    expect(draftDiff(big, other)).toBeNull()
   })
 })
 

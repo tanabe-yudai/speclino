@@ -9,7 +9,7 @@ import type { ArtifactRowData } from '@/types/navigation'
 import { ArtifactRows } from './ArtifactRows'
 
 /**
- * ある種類の一覧と「作る」「AI と作る」。rows が null の間は読み込み中。
+ * ある種類の一覧と「作る」。rows が null の間は読み込み中。
  * from はプロジェクトのタブから開いたときの戻り先（owner/repo）。
  */
 export function ArtifactSection({
@@ -34,10 +34,7 @@ export function ArtifactSection({
     <section className="space-y-3" aria-label={label}>
       <div className="flex flex-wrap items-center gap-3">
         {heading && <h2 className="text-sm font-semibold text-ink-2">{heading}</h2>}
-        <Button asChild size="sm" variant="outline" className="ml-auto">
-          <Link to={paths.knowledgeNewWithChat(slug, kind, from)}>AI と作る</Link>
-        </Button>
-        <Button asChild size="sm" className="bg-brand text-white">
+        <Button asChild size="sm" className="ml-auto bg-brand text-white">
           <Link to={paths.knowledgeNew(slug, kind, from)}>{label}を作る</Link>
         </Button>
       </div>

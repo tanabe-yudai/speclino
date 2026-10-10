@@ -1,8 +1,8 @@
+import { Loader2 } from 'lucide-react'
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Panel, PanelTitle } from '@/components/app/Panel'
 import { ToneBadge } from '@/components/app/ToneBadge'
 import { DiffView } from '@/components/knowledge/DiffView'
-import { DraftOverlay } from '@/components/knowledge/DraftOverlay'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -163,7 +163,21 @@ function ThinkingDots() {
   )
 }
 
-/** 送った発言と、届いている途中の返答（返答が届くまでは「考えています」）と、書いている本文の差分。 */
+/** 本文を書いている間の状態表示。差分は出さず、書き終えてから反映する（編集欄はまだ変わらない）。 */
+function WritingStatus({ onStop }: { onStop: () => void }) {
+  const reduced = usePrefersReducedMotion()
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2 border-t pt-2 text-sm text-ink-2" role="status">
+      <Loader2 aria-hidden="true" className={cn('size-4', !reduced && 'animate-spin')} />
+      <span>本文を編集中…</span>
+      <Button type="button" size="sm" variant="secondary" className="ml-auto" onClick={onStop}>
+        止める
+      </Button>
+    </div>
+  )
+}
+
+/** 送った発言と、届いている途中の返答（返答が届くまでは「考えています」）と、本文を書いている間の状態。 */
 function StreamingMessages({ streaming, draft, onStop }: { streaming: ChatStreaming; draft: ChatDraft | null; onStop: () => void }) {
   return (
     <>
@@ -174,7 +188,7 @@ function StreamingMessages({ streaming, draft, onStop }: { streaming: ChatStream
       <li className="mr-6 rounded-md border bg-background px-3 py-2 text-sm" aria-live="off" aria-busy="true">
         <div className="mb-1 text-xs font-semibold text-ink-3">AI</div>
         {streaming.reply ? <p className="break-words whitespace-pre-wrap">{streaming.reply}</p> : <ThinkingDots />}
-        {draft && <DraftOverlay draft={draft} onStop={onStop} />}
+        {draft && <WritingStatus onStop={onStop} />}
       </li>
     </>
   )
