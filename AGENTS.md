@@ -1,4 +1,4 @@
-<!-- speclino:begin bundle=6 -->
+<!-- speclino:begin bundle=7 -->
 # 開発エージェント共通指示書
 
 リポジトリ固有の指示書・規約と食い違いがある場合は、そちらを優先してください。

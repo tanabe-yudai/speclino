@@ -2,7 +2,7 @@
   "schema_version": "0.1",
   "workspace": "tanabe-yudai",
   "github_repo_id": 1380076715,
-  "bundle_generation": 6,
+  "bundle_generation": 7,
   "policy_revision": 2,
   "policy_hash": "sha256:a4eced43c42285e7bc020bef1548de6b03b05e27bb05b368993b9e5337fe778c",
   "members": [
@@ -19,6 +19,13 @@
       "name": "spec-write",
       "revision": 1,
       "content_hash": "sha256:b84c39848956068be995391bbb02886363e3d8a8a4c3b2240540cd8e96e90144"
+    },
+    {
+      "artifact_id": "61c44e3d-a748-49c7-84a4-29ec7c65cc11",
+      "kind": "skill",
+      "name": "speclino-mcp-guide",
+      "revision": 1,
+      "content_hash": "sha256:84b4dcbceca45b5dc78fe52f73b5a1d5f92b615b6194fefd732739a5ca38daa1"
     },
     {
       "artifact_id": "5e971919-fe55-404b-ad29-2f059fa1e06d",
@@ -50,7 +57,9 @@
     }
   ],
   "files": {
+    ".agents/skills/speclino-mcp-guide/SKILL.md": "sha256:5b4d3d5019370d9bb72bf3371a8aa5d478bfbbf922c292ec6f636da20be6ac8b",
     ".agents/skills/speclino-specification-guide/SKILL.md": "sha256:88d71ca734e4f4f5b1df26093c393185fad97c699b482f74912b858a819a3ce8",
+    ".claude/skills/speclino-mcp-guide/SKILL.md": "sha256:5b4d3d5019370d9bb72bf3371a8aa5d478bfbbf922c292ec6f636da20be6ac8b",
     ".claude/skills/speclino-specification-guide/SKILL.md": "sha256:88d71ca734e4f4f5b1df26093c393185fad97c699b482f74912b858a819a3ce8",
     ".speclino/specs/spec-gate-001.md": "sha256:59bf62bc9e4a95894e5d8fe4c3e478d40c01615032dcf0d0dd4e1ca85787a43a",
     ".speclino/specs/spec-run-001.md": "sha256:87d7af4744271f4eacceb20fb585621880995822afef01a6c3e52caee3c5e39c",
@@ -63,8 +72,8 @@
     ".agents/skills",
     ".claude/skills"
   ],
-  "issued_at": "2026-10-10T14:42:56.483586Z",
-  "expires_at": "2026-11-09T14:42:56.483586Z",
+  "issued_at": "2026-10-10T18:35:27.298829Z",
+  "expires_at": "2026-11-09T18:35:27.298829Z",
   "key_id": "d2ca695a75fba22d",
-  "signature": "hmac-sha256:11ff722926f385c9a6446bfc46f09fda80ba7f6f258f701668f3b609d4646979"
+  "signature": "hmac-sha256:31d106b11a90ae1b393cb415d312b5d6ace46ea019ef6d14948aeefa1ab592ae"
 }
