@@ -23,18 +23,25 @@ test('チャットで指示書を作り、要約を説明にして保存する',
   await page.getByRole('region', { name: '指示書' }).getByRole('link', { name: 'AI と作る' }).click()
   await expect(page.getByText(NOTICE)).toBeVisible()
 
-  // 2. 話しかける → 本文が編集欄の場所に流れ込み（差分つき）、会話には説明だけが出る
-  await page.getByLabel('AI への発言').fill('開発の手順を AGENTS.md に書きたい')
+  // 2. 話しかける → 書いている本文が会話の返答の下に流れ（差分つき）、編集欄は出たまま（S79）
+  const input = page.getByLabel('AI への発言')
+  await input.fill('開発の手順を AGENTS.md に書きたい')
   await expect(page.getByText(/残り \d+ バイト/)).toBeVisible()
   await page.getByRole('button', { name: '送る' }).click()
-  const writing = page.getByRole('region', { name: 'AI が書いている本文' })
+  const writing = page.getByRole('list', { name: '会話' }).getByRole('region', { name: 'AI が書いている本文' })
   await expect(writing).toBeVisible()
   await expect(writing.getByRole('button', { name: '止める' })).toBeVisible()
+  // 送信中も入力欄は無効にしない（読み取り専用。スマホでキーボードを閉じない）
+  await expect(input).toBeEditable({ editable: false })
+  await expect(input).toBeEnabled()
+  const body = page.getByLabel('本文', { exact: true })
+  await expect(body).toBeVisible()
   await expect(page.getByText('下書きの案を作りました（台本の応答）')).toBeVisible()
 
-  // 3. 書き終えると本文が編集欄に入り、反映前後の差分と「元に戻す」が出る（保存はまだ）
-  const body = page.getByLabel('本文', { exact: true })
+  // 3. 書き終えると本文が編集欄に入り、反映前後の差分と「元に戻す」が出る（保存はまだ）。
+  //    新規作成で名前の欄が空なので、名前の案も入る
   await expect(writing).toBeHidden()
+  await expect(page.getByLabel('名前')).toHaveValue('scripted-draft')
   await expect(body).toHaveValue(/変更の前にテストを書く/)
   const applied = page.getByRole('region', { name: 'AI が反映した差分' })
   await expect(applied.getByRole('region', { name: '反映した差分' })).toContainText('変更の前にテストを書く')

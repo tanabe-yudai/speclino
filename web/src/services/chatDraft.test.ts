@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { bodyText, canUndo, decideAutoApply, draftDiff, restoreApplied, skipMessage, touchesFiles, withBodyText } from './chatDraft'
+import { FOLLOW_SLACK_PX, bodyText, canUndo, decideAutoApply, draftDiff, nearBottom, restoreApplied, skipMessage, touchesFiles, withBodyText } from './chatDraft'
 import type { ArtifactContent } from '@/types/knowledge'
 import type { ChatProposal } from '@/types/knowledgeChat'
 
@@ -82,5 +82,16 @@ describe('draftDiff', () => {
     const big = Array.from({ length: 3000 }, (_, i) => `x${i}`).join('\n')
     const other = Array.from({ length: 3000 }, (_, i) => `y${i}`).join('\n')
     expect(draftDiff(big, other)).toBeNull()
+  })
+})
+
+describe('nearBottom', () => {
+  it('follows only while the list is within the slack of its end', () => {
+    expect(nearBottom({ scrollTop: 500, scrollHeight: 1000, clientHeight: 500 })).toBe(true)
+    expect(nearBottom({ scrollTop: 500 - FOLLOW_SLACK_PX, scrollHeight: 1000, clientHeight: 500 })).toBe(true)
+    // 上へ読み戻しているときは追わない
+    expect(nearBottom({ scrollTop: 500 - FOLLOW_SLACK_PX - 1, scrollHeight: 1000, clientHeight: 500 })).toBe(false)
+    // 一覧が短く、スクロールしないときは追う
+    expect(nearBottom({ scrollTop: 0, scrollHeight: 300, clientHeight: 500 })).toBe(true)
   })
 })

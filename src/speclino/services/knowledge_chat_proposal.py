@@ -1,8 +1,10 @@
 """会話の提案の許可リストと診断（S73、design/2026-10-06-knowledge-chat.md C4・C5）。
 
-- 提案できる欄は種類ごとの許可リストだけ。名前・scope・target・domain・legacy_ir・compiled・
+- 提案できる欄は種類ごとの許可リストだけ。scope・target・domain・legacy_ir・compiled・
   承認の情報は応答の型（`response_schema`）にも、返す提案（`raw_proposal`）にも入れない。
   余分な欄は捨て、捨てた件数だけを診断に出す（欄の名前は出さない）
+- 名前（`name`）は新規作成の会話（まだ知識に結び付かない。規約を除く）だけの許可リストの欄で、
+  名前の規則に合うときだけ返す。画面は名前の欄が空のときだけ入れる。作成時の検査は別に行う
 - 提案は返す前に診断する: 仕様は `compile_spec`（スレッドで）、スキル・指示書は
   `domain/knowledge.py` の型、規約は `PolicyRule` と検査器の一覧（`validate_package`）。
   型に合わない提案も `raw_proposal` と診断で返す（`ArtifactContent` にはしない）
@@ -14,12 +16,18 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 from typing import Any
 
 from pydantic import ValidationError
 
 from speclino.domain.domain_spec import DomainSpec
-from speclino.domain.knowledge import InstructionsContent, SkillContent
+from speclino.domain.knowledge import (
+    ARTIFACT_NAME_MAX_CHARS,
+    ARTIFACT_NAME_PATTERN,
+    InstructionsContent,
+    SkillContent,
+)
 from speclino.domain.knowledge_chat import ChatProposal, KnowledgeChatKind, ProposalDiagnostic
 from speclino.domain.policy import PolicyPackage, PolicyRule
 from speclino.domain.spec_ir import SpecIR
@@ -33,6 +41,7 @@ _TEXT_FIELDS: dict[KnowledgeChatKind, tuple[str, ...]] = {
     "skill": ("skill_md",),
 }
 _RULE_TEXT = ("id", "title", "text")
+_NAME = re.compile(ARTIFACT_NAME_PATTERN)
 
 
 def draft_text_field(kind: KnowledgeChatKind) -> str | None:
@@ -60,7 +69,7 @@ def _string_list(schema_desc: str) -> dict[str, Any]:
     return {"type": "array", "items": {"type": "string"}, "description": schema_desc}
 
 
-def _proposal_schema(kind: KnowledgeChatKind) -> dict[str, Any]:
+def _proposal_schema(kind: KnowledgeChatKind, *, propose_name: bool) -> dict[str, Any]:
     if kind == "spec":
         props: dict[str, Any] = {"markdown": {"type": "string", "description": "仕様の本文の全文"}}
     elif kind == "instructions":
@@ -111,19 +120,25 @@ def _proposal_schema(kind: KnowledgeChatKind) -> dict[str, Any]:
                 "required": ["id", "title", "text", "level"],
             }
         }
+    if propose_name and kind != "policy":
+        props["name"] = {
+            "type": "string",
+            "description": "新規作成時の名前の案（英小文字・数字・ハイフン、64 文字以内）",
+        }
     return {"type": "object", "properties": props}
 
 
-def response_schema(kind: KnowledgeChatKind) -> dict[str, Any]:
+def response_schema(kind: KnowledgeChatKind, *, propose_name: bool = False) -> dict[str, Any]:
     """AI の返答の JSON Schema（説明の文と、任意の提案）。
 
     キーの順（explanation → proposal）が生成の順になる。ストリームで説明を先に見せるため崩さない。
+    `propose_name` は新規作成の会話のとき（提案に名前の案を足す）。
     """
     return {
         "type": "object",
         "properties": {
             "explanation": {"type": "string", "description": "利用者への説明（日本語）"},
-            "proposal": _proposal_schema(kind),
+            "proposal": _proposal_schema(kind, propose_name=propose_name),
         },
         "required": ["explanation"],
     }
@@ -173,8 +188,14 @@ def _extract_rule(rule: Any) -> tuple[dict[str, Any] | None, int]:
     return (out or None), dropped
 
 
-def extract_proposal(kind: KnowledgeChatKind, data: Any) -> tuple[dict[str, Any] | None, int]:
-    """許可リストの欄だけを取り出す。(提案、捨てた欄の数)。提案が無ければ None。"""
+def extract_proposal(
+    kind: KnowledgeChatKind, data: Any, *, propose_name: bool = False
+) -> tuple[dict[str, Any] | None, int]:
+    """許可リストの欄だけを取り出す。(提案、捨てた欄の数)。提案が無ければ None。
+
+    名前は `propose_name` のとき（新規作成）だけ、規則に合えば本文の提案に添えて返す。
+    名前だけの提案は返さない。
+    """
     if not isinstance(data, dict):
         return None, 0
     if kind == "policy":
@@ -183,7 +204,13 @@ def extract_proposal(kind: KnowledgeChatKind, data: Any) -> tuple[dict[str, Any]
         return ({"rule": rule} if rule is not None else None), dropped
     fields = _TEXT_FIELDS[kind] + (("files",) if kind == "skill" else ())
     out: dict[str, Any] = {k: data[k] for k in _TEXT_FIELDS[kind] if isinstance(data.get(k), str)}
-    dropped = sum(1 for k in data if k not in fields)
+    dropped = sum(1 for k in data if k not in fields and k != "name")
+    name = data.get("name")
+    if name is not None:
+        if propose_name and _valid_name(name):
+            out["name"] = name
+        else:
+            dropped += 1
     if kind == "skill" and isinstance(data.get("files"), list):
         files: dict[str, str] = {}
         for item in data["files"]:
@@ -194,9 +221,17 @@ def extract_proposal(kind: KnowledgeChatKind, data: Any) -> tuple[dict[str, Any]
             ):
                 files[item["path"]] = item["body"]
         out["files"] = files
-    if kind == "skill" and "skill_md" not in out:
+    if not any(k in out for k in _TEXT_FIELDS[kind]):
         return None, dropped
-    return (out or None), dropped
+    return out, dropped
+
+
+def _valid_name(name: Any) -> bool:
+    return (
+        isinstance(name, str)
+        and len(name) <= ARTIFACT_NAME_MAX_CHARS
+        and _NAME.fullmatch(name) is not None  # match は `$` が末尾の改行を許す
+    )
 
 
 def _from_validation(e: ValidationError) -> list[ProposalDiagnostic]:
@@ -254,11 +289,12 @@ async def _diagnose(
             for d in result.diagnostics
         ]
     scope = {"workspace": True}
+    body = {k: v for k, v in raw.items() if k != "name"}
     try:
         if kind == "skill":
-            SkillContent.model_validate({"kind": "skill", **raw, "scope": scope})
+            SkillContent.model_validate({"kind": "skill", **body, "scope": scope})
         elif kind == "instructions":
-            InstructionsContent.model_validate({"kind": "instructions", **raw, "scope": scope})
+            InstructionsContent.model_validate({"kind": "instructions", **body, "scope": scope})
     except ValidationError as e:
         return _from_validation(e)
     if kind == "policy":
@@ -274,9 +310,10 @@ async def build_proposal(
     base_hash: str,
     spec_domain: DomainSpec | None = None,
     spec_legacy: list[SpecIR] | None = None,
+    propose_name: bool = False,
 ) -> ChatProposal | None:
     """LLM の `proposal` から返す提案を作る。提案が無ければ None。"""
-    raw, dropped = extract_proposal(kind, data)
+    raw, dropped = extract_proposal(kind, data, propose_name=propose_name)
     if raw is None:
         return None
     diagnostics = await _diagnose(

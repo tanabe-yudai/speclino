@@ -16,7 +16,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from speclino.api.auth import require_user
 from speclino.api.deps import AppState, get_state
 from speclino.api.errors import api_error, error_responses
-from speclino.domain.knowledge import ArtifactContent, ArtifactKind
+from speclino.domain.knowledge import (
+    ARTIFACT_NAME_MAX_CHARS,
+    ARTIFACT_NAME_PATTERN,
+    ArtifactContent,
+    ArtifactKind,
+)
 from speclino.domain.knowledge_chat import NOTE_MAX_CHARS, NoteSource
 from speclino.domain.knowledge_view import ApproveResult
 from speclino.domain.workspace import AuthUser
@@ -33,7 +38,9 @@ class CreateArtifactRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: ArtifactKind
-    name: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9-]*$")
+    name: str = Field(
+        min_length=1, max_length=ARTIFACT_NAME_MAX_CHARS, pattern=ARTIFACT_NAME_PATTERN
+    )
     content: ArtifactContent
     # 改訂の説明（S73）。note_source は本人の申告（会話の要約から入れたか）
     note: str = Field(default="", max_length=NOTE_MAX_CHARS)

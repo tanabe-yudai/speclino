@@ -13,6 +13,8 @@ import {
   editorText,
   noteFromSummary,
   parseChatStreamEvent,
+  proposedName,
+  settleTurn,
   proposalText,
   ruleEditorText,
   idempotencyKeyFor,
@@ -21,7 +23,7 @@ import {
   utf8Bytes,
 } from './knowledgeChat'
 import type { ArtifactContent } from '@/types/knowledge'
-import type { KnowledgeChat } from '@/types/knowledgeChat'
+import type { ChatTurn, KnowledgeChat } from '@/types/knowledgeChat'
 import type { PolicyRule } from '@/types/policy'
 
 const scope = { workspace: true, projects: [] }
@@ -151,5 +153,37 @@ describe('ストリームの出来事', () => {
 
   it('途中で切れたときの文言', () => {
     expect(describeChatError(new StreamInterruptedError())).toBe('応答が途中で切れました。もう一度送ってください')
+  })
+})
+
+describe('proposedName', () => {
+  it('fills the name only when creating and the field is empty', () => {
+    expect(proposedName('', { body: 'b', name: 'dev-rules' }, true)).toBe('dev-rules')
+    expect(proposedName('mine', { body: 'b', name: 'dev-rules' }, true)).toBe('mine')
+    expect(proposedName('', { body: 'b', name: 'dev-rules' }, false)).toBe('')
+    expect(proposedName('', { body: 'b' }, true)).toBe('')
+  })
+})
+
+describe('settleTurn', () => {
+  const turn = { chat: {}, user_message_id: 'u', reply: null, replayed: false } as unknown as ChatTurn
+
+  it('closes the in-progress view only after the (async) apply has finished', async () => {
+    const order: string[] = []
+    await settleTurn(
+      turn,
+      () =>
+        Promise.resolve()
+          .then(() => undefined)
+          .then(() => void order.push('apply')),
+      () => void order.push('close'),
+    )
+    expect(order).toEqual(['apply', 'close'])
+  })
+
+  it('closes right away when there is nothing to apply', async () => {
+    const order: string[] = []
+    await settleTurn(turn, undefined, () => void order.push('close'))
+    expect(order).toEqual(['close'])
   })
 })

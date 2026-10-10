@@ -141,6 +141,20 @@ export function applyProposal(content: ArtifactContent, raw: RawProposal): Artif
   }
 }
 
+/** 新規作成で名前の欄が空のときだけ、提案の名前の案を使う（S79）。それ以外は今の名前のまま。 */
+export function proposedName(current: string, raw: RawProposal, creating: boolean): string {
+  return creating && !current && raw.name ? raw.name : current
+}
+
+/**
+ * 確定した返答を出す順（S79）: 提案の反映（非同期のことがある）を待ってから会話を差し替え、
+ * 途中経過を閉じる。旧本文の編集欄が一瞬出るなど、ページの高さが 2 回変わるのを避ける。
+ */
+export async function settleTurn(turn: ChatTurn, onTurn: ((turn: ChatTurn) => void | Promise<void>) | undefined, show: () => void): Promise<void> {
+  await onTurn?.(turn)
+  show()
+}
+
 /** 規約の提案をルールに重ねる。版・対象が無いときの扱い・例外の可否は今の値を残す。 */
 export function applyRuleProposal(rule: PolicyRule, raw: RawProposal): PolicyRule {
   const p = raw.rule

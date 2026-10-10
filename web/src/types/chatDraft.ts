@@ -59,6 +59,13 @@ export interface DraftDiff {
   anchor: number
 }
 
+/** 一覧のスクロールの位置（末尾を追うかの判断に使う）。 */
+export interface ScrollMetrics {
+  scrollTop: number
+  scrollHeight: number
+  clientHeight: number
+}
+
 export interface DraftOverlayProps {
   draft: ChatDraft
   onStop: () => void

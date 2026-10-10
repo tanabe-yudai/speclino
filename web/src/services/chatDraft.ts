@@ -7,7 +7,7 @@
  */
 
 import { diffLines } from '@/services/textDiff'
-import type { AppliedEdit, ApplyDecision, DecideApplyInput, DraftDiff, SkipReason } from '@/types/chatDraft'
+import type { AppliedEdit, ApplyDecision, DecideApplyInput, DraftDiff, ScrollMetrics, SkipReason } from '@/types/chatDraft'
 import type { ArtifactContent } from '@/types/knowledge'
 import type { RawProposal } from '@/types/knowledgeChat'
 
@@ -89,4 +89,12 @@ export function draftDiff(before: string, draft: string): DraftDiff | null {
     if (l.op === 'add') anchor = i
   })
   return { lines, anchor }
+}
+
+/** 会話の一覧の末尾からこの距離（px）までなら、新しい発言や返答の伸びを追う。 */
+export const FOLLOW_SLACK_PX = 48
+
+/** 末尾を追ってよいか（上へ読み戻しているときは追わない）。 */
+export function nearBottom(m: ScrollMetrics, slack = FOLLOW_SLACK_PX): boolean {
+  return m.scrollHeight - m.scrollTop - m.clientHeight <= slack
 }
