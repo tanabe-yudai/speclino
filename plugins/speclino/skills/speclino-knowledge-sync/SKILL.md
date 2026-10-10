@@ -6,7 +6,7 @@ description: チームが SpecLino で承認したスキル・指示書（AGENTS
 # チームの知識を取り込む（MCP）
 
 人は知識を承認するだけで、取り込みはエージェント（あなた）が行う。ファイルを自分で書かず、
-サーバが署名した計画を同梱の実行スクリプトに渡す。
+サーバが署名した計画を、サーバが配る実行スクリプトに渡す。
 
 ## 手順
 
@@ -31,13 +31,48 @@ description: チームが SpecLino で承認したスキル・指示書（AGENTS
      `.claude/skills`、それ以外は `.agents/skills`）を足した全てに同じ内容を書く（減らさない）
    - `skills_dir` はそのルートだけに書く（上限を超えたと言われたときなど）。
      `instructions_file="CLAUDE.md"` は本文を CLAUDE.md だけに書く旧い配置
-3. **当てる**: リポジトリのルートで、**最新の実行スクリプト**を使って
+3. **当てる**: 実行スクリプトは `knowledge_pull` の `apply_script`（`url` と `sha256`）でサーバが
+   最新のものを配る（プラグインの更新に依存しない）。リポジトリのルートで、下の Python を
+   `python3 - <apply_script.url> <apply_script.sha256> <plan_url> <bundle_generation>` に heredoc で
+   渡して実行する。取得 → sha256 の確認 → 一時ファイルに書いて実行 → 削除までを行い、
+   終了コードは実行スクリプトのものをそのまま返す（一致しなければ実行しない）。結果は JSON 1 行
+   （`written` / `deleted` / `unchanged` / `warnings` / `reason`）
+
+   ```python
+   import hashlib, os, subprocess, sys, tempfile, urllib.request as u
+   from urllib.parse import urlparse
+
+   url, sha, plan, gen = sys.argv[1:5]
+   scheme, host = urlparse(url).scheme, urlparse(url).hostname
+   local = scheme == "http" and host in ("localhost", "127.0.0.1")
+   if scheme != "https" and not local:
+       sys.exit("実行スクリプトの URL は https だけ")
+
+
+   class NoRedirect(u.HTTPRedirectHandler):
+       def redirect_request(self, *args, **kwargs):
+           raise RuntimeError("リダイレクトは辿らない")
+
+
+   body = u.build_opener(NoRedirect).open(url, timeout=30).read(1024 * 1024 + 1)
+   if len(body) > 1024 * 1024 or hashlib.sha256(body).hexdigest() != sha:
+       sys.exit("サイズか sha256 が合わない。実行しない")
+   fd, path = tempfile.mkstemp(suffix=".py")
+   try:
+       with os.fdopen(fd, "wb") as f:
+           f.write(body)
+       cmd = [sys.executable, path, "--plan-url", plan, "--expect-generation", gen]
+       sys.exit(subprocess.run(cmd + (["--allow-http"] if local else [])).returncode)
+   finally:
+       os.unlink(path)
+   ```
+
+   取得できない・sha256 が合わないときは、予備としてプラグイン同梱の
    `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/speclino_apply.py --plan-url <plan_url> --expect-generation <bundle_generation>`
-   を実行する（別の場所からなら `--repo <ルート>`）。リポジトリに
-   `plugins/speclino/scripts/speclino_apply.py` があればそちらを使う（サーバと同じ版）。
-   旧い実行スクリプトは新しい計画（橋の `if_exists`）を「lock の files が計画の書き出しと一致しない」
-   で拒否する（終了コード 2）ので、プラグインを更新する。スクリプトが URL から計画を取得して当てる。
-   結果は JSON 1 行（`written` / `deleted` / `unchanged` / `warnings` / `reason`）
+   を使う（リポジトリに `plugins/speclino/scripts/speclino_apply.py` があればそちら。別の場所からなら
+   `--repo <ルート>`）。旧い実行スクリプトは新しい計画を「lock の files が計画の書き出しと一致しない」
+   などで拒否する（終了コード 2、何も書かない）ので、その場合はプラグインを更新する。
+   実行スクリプトの URL も `plan_url` と同じトークンを含む。ログや PR に書かない
 4. **結果を確かめる**:
    - 終了コード 0: 取り込めた。`warnings` があれば利用者に伝える。「git に無視されていて
      コミットされない」の警告は、そのままだとゲートで UNKNOWN になるので、`.gitignore` の直し方
@@ -64,5 +99,6 @@ description: チームが SpecLino で承認したスキル・指示書（AGENTS
   `warnings` に出たディレクトリは、SpecLino の写しなら手で消す
 - CLAUDE.md があるのに `@AGENTS.md` の橋が無いと、ゲートが REVIEW にする（`bridge_missing`）。
   取り込み直せば橋が入る
-- 計画を自分で取得したり、中身をファイルに書き写したりしない。URL を実行スクリプトに渡すだけ
+- 計画を自分で取得したり、中身をファイルに書き写したりしない。URL を実行スクリプトに渡すだけ。
+  実行スクリプトも、取得して sha256 が一致したものだけを上の Python で実行する（手で書き直さない）
 - `plan_url` はトークンを含む。ログや PR・コミットに書かない

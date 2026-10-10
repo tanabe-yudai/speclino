@@ -25,6 +25,7 @@
 | A9 | 認可は既存のワークスペース単位の MCP トークン（同じワークスペースのどのリポジトリの文脈も既に読めるので、見えるものは増えない）と sync 専用のトークン（自分のリポジトリだけ）。リポジトリは必ず `_workspace_project` で引き、lock のリポジトリ ID は要求の値ではなく引いた Project から入れる | テナントの境界を既存どおりに保つ |
 | A10 | 分割はしない。計画は MCP の応答で運ばない: `knowledge_pull` は計画を作ってサーバに置き、使い捨ての取得 URL（`GET /api/sync/plans/{token}`、1 回だけ・10 分で失効・ワークスペースとリポジトリに結び付く、トークンはハッシュだけ保存）を返す。実行スクリプトが `--plan-url` で取得する（https だけ、開発用に localhost の http を `--allow-http`）。計画の上限は CLI と同じ 8MB（fix round 1 のコントローラ裁定 40） | エージェントに大きな JSON を書き写させない。ページの混在を作らない |
 | A11 | 取得は `knowledge_fetches` に記録する。手順はプラグインの新しいスキル `speclino-knowledge-sync` と MCP の説明文に書く: 作業を始める前に `sync_status`、`pull_needed` なら `knowledge_pull` → `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/speclino_apply.py --plan-url <plan_url>` → 結果を確かめて作業の変更と一緒にコミット | エージェントの読み込みの仕組みに乗る |
+| A12 | 実行スクリプトもサーバが配る（S78）: `knowledge_pull` の応答に `apply_script: {url, sha256}`。`GET /api/sync/scripts/{script_id}/speclino_apply.py`（`script_id` は使い捨てトークンの sha256。トークンを URL に載せないので、消費しない取得の URL がログに残っても計画を先取りされない）は、計画の取得と同じ検証（期限・発行元トークンの失効・リポジトリの付け替え）を**消費せずに**行って `speclino.sync_apply` のモジュールファイルのバイト列を返す（不成立は理由を区別せず 404、`no-store`）。手順書の標準ライブラリだけの Python が、https のみ・リダイレクト禁止・30 秒・1MB 上限で取得し、sha256（素の hex）が一致したときだけ一時ファイルで実行する。プラグイン同梱の写しは予備（plugin 0.2.0） | プラグインの更新（マーケットプレイス任せ）に依存せず、計画の形が変わっても最新の実行スクリプトで当てる。信頼境界は計画・lock と同じサーバ |
 
 ## 3. 実行スクリプトの約束
 

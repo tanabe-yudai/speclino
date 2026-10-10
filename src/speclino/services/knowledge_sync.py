@@ -676,6 +676,18 @@ async def _issuer_still_valid(session: AsyncSession, record: SyncPlanRecord) -> 
     return mcp is not None and mcp.revoked_at is None and mcp.team == record.workspace
 
 
+async def _ticket_still_valid(session: AsyncSession, record: SyncPlanRecord) -> bool:
+    """計画の取得と実行スクリプトの配信が共有する検証（リポジトリが付け替わっていない・
+    発行元のトークンが有効）。"""
+    project = await session.get(Project, record.project_id)
+    return (
+        project is not None
+        and project.team == record.workspace
+        and project.github_repo_id == record.github_repo_id
+        and await _issuer_still_valid(session, record)
+    )
+
+
 async def redeem_plan_ticket(
     session: AsyncSession, token: str, *, now: datetime | None = None
 ) -> str | None:
@@ -691,13 +703,7 @@ async def redeem_plan_ticket(
     )
     if record is None:
         return None
-    project = await session.get(Project, record.project_id)
-    if (
-        project is None
-        or project.team != record.workspace
-        or project.github_repo_id != record.github_repo_id
-        or not await _issuer_still_valid(session, record)
-    ):
+    if not await _ticket_still_valid(session, record):
         return None
     await KnowledgeFetchRepository(session).record(
         workspace=record.workspace,
@@ -1211,6 +1217,37 @@ def check_lock(
     return _finding(snapshot, a.verdict, a.message, expected=a.expected, actual=a.actual)
 
 
+_APPLY_SCRIPT = Path(sync_apply.__file__).read_bytes()
+_APPLY_SCRIPT_SHA256 = hashlib.sha256(_APPLY_SCRIPT).hexdigest()
+
+
+def apply_script_sha256() -> str:
+    """配る実行スクリプト（`speclino.sync_apply` のモジュールファイル）の sha256（素の hex）。"""
+    return _APPLY_SCRIPT_SHA256
+
+
+_SCRIPT_ID = re.compile(r"[0-9a-f]{64}")
+
+
+def apply_script_id(token: str) -> str:
+    """実行スクリプトの取得 URL に載せる ID（取得トークンのハッシュ）。URL がログに残っても、
+    ハッシュからトークンは戻せないので計画を先取りされない（スクリプトの取得は消費しないため）。"""
+    return _ticket_hash(token)
+
+
+async def apply_script_for_id(
+    session: AsyncSession, script_id: str, *, now: datetime | None = None
+) -> bytes | None:
+    """取得トークンが有効なら実行スクリプトのバイト列。計画の取得と同じ検証を、消費せずに行う
+    （取得の前後どちらでも期限内なら取れる）。無効なら理由を区別せず None。"""
+    if not _SCRIPT_ID.fullmatch(script_id):
+        return None
+    record = await SyncPlanRepository(session).peek(script_id, now=now or datetime.now(UTC))
+    if record is None or not await _ticket_still_valid(session, record):
+        return None
+    return _APPLY_SCRIPT
+
+
 __all__ = [
     "LOCK_PATH",
     "LOCK_REQUIREMENT_ID",
@@ -1227,6 +1264,9 @@ __all__ = [
     "SyncRejected",
     "DEFAULT_LAYOUT",
     "STALE_COPY_MESSAGE",
+    "apply_script_for_id",
+    "apply_script_id",
+    "apply_script_sha256",
     "assess_lock",
     "build_plan",
     "changed_members",

@@ -10,6 +10,10 @@
 - `GET /api/sync/plans/{token}`: MCP の `knowledge_pull` が返した使い捨ての取得 URL（S75）。
   認証はトークン自体（1 回だけ、10 分で失効、ワークスペース・リポジトリに結び付く）。無い・
   期限切れ・取得済みは区別せず 404。取得を `knowledge_fetches` に記録する
+- `GET /api/sync/scripts/{script_id}/speclino_apply.py`（S78）: 取得トークンのハッシュを ID にして、
+  実行スクリプト（`speclino.sync_apply` のモジュールファイルそのまま）を返す。トークンそのものを
+  URL に載せないので、URL がログに残っても計画を先取りされない。計画の取得と同じ検証を、消費せずに
+  行う（期限内なら計画の取得の前後どちらでも取れる）。不成立は区別せず 404
 """
 
 from __future__ import annotations
@@ -160,6 +164,19 @@ async def get_sync_plan(token: str, state: AppState = Depends(get_state)) -> Res
     return Response(
         content=body.encode("utf-8"),
         media_type="application/json",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@bundle_router.get("/scripts/{script_id}/speclino_apply.py")
+async def get_apply_script(script_id: str, state: AppState = Depends(get_state)) -> Response:
+    async with state.session_factory() as s:
+        script = await knowledge_sync.apply_script_for_id(s, script_id)
+    if script is None:
+        raise api_error(404, "plan_not_found", "計画が無いか、期限切れ")
+    return Response(
+        content=script,
+        media_type="text/x-python; charset=utf-8",
         headers={"Cache-Control": "no-store"},
     )
 

@@ -209,6 +209,7 @@ def test_knowledge_sync_skill_has_front_matter_and_steps() -> None:
     order = [
         "sync_status",
         "knowledge_pull",
+        "apply_script",
         "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/speclino_apply.py --plan-url",
         "コミットする",
     ]
