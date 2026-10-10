@@ -250,11 +250,13 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
 
         `lock_json` に手元の `.speclino/lock.json` の本文を必ず渡す（サーバが確かめたうえで、
         外れた知識の削除も計画する。渡さないと削除は計画されず古い知識が残りうる）。返すのは
-        `plan_url`（1 回だけ・10 分で失効）・`expires_at`・`bundle_generation`・`summary`。
-        リポジトリのルートで `python3 <speclino_apply.py のパス> --plan-url <plan_url>
-        --expect-generation <bundle_generation>` を実行する（Claude Code のプラグインなら
-        `${CLAUDE_PLUGIN_ROOT}/scripts/speclino_apply.py`、リポジトリに置いたなら相対パス。
-        計画やファイルを自分で書かない）。
+        `plan_url`（1 回だけ・10 分で失効）・`apply_script`（`url` と `sha256`）・`expires_at`・
+        `bundle_generation`・`summary`。実行スクリプトはサーバが最新を配るので、プラグインの更新に
+        依存しない。スキル `speclino-knowledge-sync` の手順（`apply_script.url` から取得し、
+        `sha256` が一致したときだけ、リポジトリのルートで `--plan-url <plan_url>
+        --expect-generation <bundle_generation>` を付けて実行する）に従う。取得できないときだけ
+        プラグイン同梱の `${CLAUDE_PLUGIN_ROOT}/scripts/speclino_apply.py` を予備にする。
+        計画やファイルを自分で書かない。
 
         書き出し先: 指示書の本文は AGENTS.md（手元に CLAUDE.md があれば、その管理区画に
         `@AGENTS.md` の橋を書く。CLAUDE.md は作らない）。スキルは前回のルートに、名乗りの
@@ -262,8 +264,7 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
         同じ内容を書く（減らさない）。名乗りは MCP の clientInfo を使い、無ければ `agent`
         （例 "claude-code"）。`instructions_file="CLAUDE.md"` は本文を CLAUDE.md だけに書く
         旧い配置、`skills_dir` はそのルートだけに書く（どちらもふつうは省く）。応答の `layout`
-        （`instructions_file`・`skill_roots`・`agent`）が実際の配置。実行スクリプトは最新のもの
-        （`if_exists` の op を知るもの）を使う。
+        （`instructions_file`・`skill_roots`・`agent`）が実際の配置。
         """
         state = get_state()
         principal = _principal(ctx)
@@ -291,6 +292,11 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
         base = state.settings.public_url.rstrip("/")
         return {
             "plan_url": f"{base}/api/sync/plans/{ticket.token}",
+            "apply_script": {
+                "url": f"{base}/api/sync/scripts/"
+                f"{knowledge_sync.apply_script_id(ticket.token)}/speclino_apply.py",
+                "sha256": knowledge_sync.apply_script_sha256(),
+            },
             "expires_at": ticket.expires_at.isoformat(),
             "bundle_generation": ticket.bundle_generation,
             "layout": {

@@ -414,7 +414,19 @@ async def test_knowledge_pull_returns_url_and_round_trip(world: World) -> None:
         status = _json(await c.call_tool("sync_status", {"repo_full_name": w.repo}))
         assert status["pull_needed"] is True and status["reasons"] == ["no_lock"]
         ticket = _json(await c.call_tool("knowledge_pull", {"repo_full_name": w.repo}))
-    assert set(ticket) == {"plan_url", "expires_at", "bundle_generation", "layout", "summary"}
+    assert set(ticket) == {
+        "plan_url",
+        "apply_script",
+        "expires_at",
+        "bundle_generation",
+        "layout",
+        "summary",
+    }
+    token_part = ticket["plan_url"].rsplit("/", 1)[1]
+    assert ticket["apply_script"]["url"].endswith(
+        f"/api/sync/scripts/{hashlib.sha256(token_part.encode()).hexdigest()}/speclino_apply.py"
+    )
+    assert token_part not in ticket["apply_script"]["url"]  # トークンそのものは載せない
     # テストの MCP クライアントの clientInfo は SDK の既定（"mcp"）。claude 系ではない
     assert ticket["layout"] == {
         "instructions_file": "AGENTS.md",
@@ -510,6 +522,103 @@ async def test_plan_url_expires_and_is_bound_to_the_repository(world: World) -> 
         )
     assert expired.status_code == rebound.status_code == unknown.status_code == 404
     assert await _fetch_channels(w) == []
+
+
+async def test_apply_script_is_served_without_consuming_the_plan(world: World) -> None:
+    """S78: 同じトークンで実行スクリプトを配る。計画の取得の前後どちらでも取れ、消費しない。"""
+    w = world
+    await _seed(w)
+    token = await _sync_token(w)
+    async with _client(w, token) as c:
+        ticket = _json(await c.call_tool("knowledge_pull", {"repo_full_name": w.repo}))
+    script_path = urlsplit(ticket["apply_script"]["url"]).path
+    plan_path = urlsplit(ticket["plan_url"]).path
+    expected = Path(sync_apply.__file__).read_bytes()
+    async with _http(w) as http:
+        before = await http.get(script_path)
+        again = await http.get(script_path)
+        plan = await http.get(plan_path)  # 消費されていないので取れる
+        after = await http.get(script_path)
+        plan_again = await http.get(plan_path)  # 計画は 1 回だけ
+    assert plan.status_code == 200 and plan_again.status_code == 404
+    for res in (before, again, after):
+        assert res.status_code == 200
+        assert res.content == expected
+        assert res.headers["content-type"] == "text/x-python; charset=utf-8"
+        assert res.headers["cache-control"] == "no-store"
+    assert hashlib.sha256(before.content).hexdigest() == ticket["apply_script"]["sha256"]
+    # 配信は取得の記録（knowledge_fetches）に載せない（計画の取得だけ）
+    assert await _fetch_channels(w) == ["sync"]
+
+
+async def test_apply_script_is_404_for_invalid_tickets(world: World) -> None:
+    w = world
+    await _seed(w)
+    async with w.f() as s:
+        project = await s.get(Project, uuid.UUID(w.pid))
+    assert project is not None
+    token = await _sync_token(w)
+    async with w.f() as s:
+        token_id = (
+            await s.execute(
+                text("SELECT id FROM sync_tokens WHERE token_hash = :h"),
+                {"h": hashlib.sha256(token.encode()).hexdigest()},
+            )
+        ).scalar_one()
+    # 期限だけが切れたもの（発行元のトークンは有効）
+    async with w.f() as s, s.begin():
+        old = await ks.issue_plan_ticket(
+            s,
+            workspace=w.slug,
+            project=project,
+            lock_json=None,
+            channel="sync",
+            token_id=token_id,
+            now=datetime.now(UTC) - timedelta(minutes=11),
+        )
+    async with w.f() as s, s.begin():
+        fresh = await ks.issue_plan_ticket(
+            s,
+            workspace=w.slug,
+            project=project,
+            lock_json=None,
+            channel="sync",
+            token_id=token_id,
+        )
+    async with _http(w) as http:  # 同じ発行元で期限内なら取れる（期限の検査だけが差）
+        ok = await http.get(
+            f"/api/sync/scripts/{ks.apply_script_id(fresh.token)}/speclino_apply.py"
+        )
+        expired = await http.get(
+            f"/api/sync/scripts/{ks.apply_script_id(old.token)}/speclino_apply.py"
+        )
+    assert (ok.status_code, expired.status_code) == (200, 404)
+    async with _client(w, token) as c:
+        revoked = _json(await c.call_tool("knowledge_pull", {"repo_full_name": w.repo}))
+    async with w.engine.begin() as conn:
+        await conn.execute(
+            text("UPDATE sync_tokens SET revoked_at = now() WHERE token_hash = :h"),
+            {"h": hashlib.sha256(token.encode()).hexdigest()},
+        )
+    async with _http(w) as http:
+        results = [
+            await http.get(f"/api/sync/scripts/{'0' * 64}/speclino_apply.py"),
+            await http.get(f"/api/sync/scripts/{old.token}/speclino_apply.py"),  # トークンは不可
+            await http.get(urlsplit(revoked["apply_script"]["url"]).path),  # 発行元の失効
+        ]
+    assert [r.status_code for r in results] == [404, 404, 404]
+    # リポジトリの付け替え（発行元は有効なトークンで確かめる）
+    token2 = await _sync_token(w)
+    async with _client(w, token2) as c:
+        moved = _json(await c.call_tool("knowledge_pull", {"repo_full_name": w.repo}))
+    async with w.engine.begin() as conn:
+        await conn.execute(
+            text("UPDATE projects SET github_repo_id = github_repo_id + 100000 WHERE id = :p"),
+            {"p": w.pid},
+        )
+    async with _http(w) as http:
+        rebound = await http.get(urlsplit(moved["apply_script"]["url"]).path)
+    assert rebound.status_code == 404
 
 
 async def test_knowledge_pull_deletes_only_with_verified_lock(world: World) -> None:

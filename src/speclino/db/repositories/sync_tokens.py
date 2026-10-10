@@ -160,6 +160,16 @@ class SyncPlanRepository:
         record.plan_json = row[1]
         return record
 
+    async def peek(self, token_hash: str, *, now: datetime) -> SyncPlanRecord | None:
+        """期限内の行（取得済みも含む）を、消費せずに返す。"""
+        return (
+            await self._session.execute(
+                select(SyncPlanRecord).where(
+                    SyncPlanRecord.token_hash == token_hash, SyncPlanRecord.expires_at > now
+                )
+            )
+        ).scalar_one_or_none()
+
     async def _purge(self, now: datetime) -> None:
         await self._session.execute(
             delete(SyncPlanRecord).where(SyncPlanRecord.expires_at < now - timedelta(days=1))

@@ -13,7 +13,7 @@ VERIFIED_IN_SCOPE / VIOLATED / UNKNOWN / REVIEW の 4 値を出す。実装の�
 行う（verdict を書き換える手段は無い）。承認は人が PR コメントで行う（`/speclino approve-spec`）。
 承認済みの判定は書き換えない。チームが承認したスキル・指示書・仕様は `skill_get` / `spec_get`
 で読む。作業の前に `sync_status` で手元の `.speclino/lock.json` の鮮度を確かめ、`pull_needed` なら
-`knowledge_pull` が返す URL を同梱の `speclino_apply.py --plan-url` に渡して当て、lock ごと作業の
+`knowledge_pull` が返す最新の実行スクリプト（`apply_script`）に `--plan-url` を渡して当て、lock ごと作業の
 PR にコミットする
 （手順はスキル `speclino-knowledge-sync`。ファイルや lock を手で書かない）。
 <!-- mcp-instructions:end -->
@@ -79,8 +79,8 @@ run_id: 00000000-0000-0000-0000-000000000000
 ## チームの知識を取り込む（`knowledge_pull` / `speclino sync`）
 
 チームが SpecLino で承認したスキル・指示書・仕様は、リポジトリごとに配信される。エージェントは
-MCP の `knowledge_pull` で計画の取得 URL を受け取り、プラグインの `scripts/speclino_apply.py
---plan-url` で当てる（手順は
+MCP の `knowledge_pull` で計画の取得 URL と最新の実行スクリプト（`apply_script`）を受け取り、
+`--plan-url` を渡して当てる（手順は
 スキル `speclino-knowledge-sync`）。人が手元で取り込むときは CLI の `speclino sync` を使う。
 どちらも同じ計画と同じ実行スクリプトで書き出す。
 
