@@ -1,0 +1,56 @@
+{
+  "schema_version": "0.1",
+  "workspace": "tanabe-yudai",
+  "github_repo_id": 1380076715,
+  "bundle_generation": 5,
+  "policy_revision": 2,
+  "policy_hash": "sha256:a4eced43c42285e7bc020bef1548de6b03b05e27bb05b368993b9e5337fe778c",
+  "members": [
+    {
+      "artifact_id": "cb6371f4-5e7c-4757-951c-c28b9ce737a9",
+      "kind": "skill",
+      "name": "spec-write",
+      "revision": 1,
+      "content_hash": "sha256:b84c39848956068be995391bbb02886363e3d8a8a4c3b2240540cd8e96e90144"
+    },
+    {
+      "artifact_id": "5e971919-fe55-404b-ad29-2f059fa1e06d",
+      "kind": "spec",
+      "name": "spec-gate-001",
+      "revision": 1,
+      "content_hash": "sha256:18e9daca6be38ba4f681e791dea6c4ba5132bd906398e09d4290297a25eda34c"
+    },
+    {
+      "artifact_id": "a92c803a-d2fe-407f-9f01-cf8aab05c1c6",
+      "kind": "spec",
+      "name": "spec-run-001",
+      "revision": 1,
+      "content_hash": "sha256:8b1fb063640d1cdf19d1f9761ef84b43e1e17c13cf862b106b9cf217132fe9f7"
+    },
+    {
+      "artifact_id": "94ba6a9b-8e0f-46b9-bead-175a6a55ef07",
+      "kind": "spec",
+      "name": "spec-test-002",
+      "revision": 1,
+      "content_hash": "sha256:d066c5370da8fec4e23d6ee096d7f1229ba95bd224c0a498ce31ad242cacb094"
+    },
+    {
+      "artifact_id": "15d3957f-f990-4e3f-9ed3-6ad88563b7f5",
+      "kind": "spec",
+      "name": "spec-tool-001",
+      "revision": 1,
+      "content_hash": "sha256:615042c07f4e18165d784a0167eb75037adab655476884889f22b54849bdb3fe"
+    }
+  ],
+  "files": {
+    ".agents/skills/speclino-specification-guide/SKILL.md": "sha256:88d71ca734e4f4f5b1df26093c393185fad97c699b482f74912b858a819a3ce8",
+    ".claude/skills/speclino-specification-guide/SKILL.md": "sha256:88d71ca734e4f4f5b1df26093c393185fad97c699b482f74912b858a819a3ce8",
+    ".speclino/specs/spec-gate-001.md": "sha256:59bf62bc9e4a95894e5d8fe4c3e478d40c01615032dcf0d0dd4e1ca85787a43a",
+    ".speclino/specs/spec-run-001.md": "sha256:87d7af4744271f4eacceb20fb585621880995822afef01a6c3e52caee3c5e39c",
+    ".speclino/specs/spec-test-002.md": "sha256:8ee5df3cebd36faabef4100ad8ea4af366175d2c5b1afe274a052f8415762490",
+    ".speclino/specs/spec-tool-001.md": "sha256:88dc040b2f64bfb8d4c792f28d444a5d8d3a1ecce45a2bfbd3f858f72ca4479f"
+  },
+  "absent": [],
+  "issued_at": "2026-10-08T11:56:58.574187Z",
+  "expires_at": "2026-11-07T11:56:58.574187Z"
+}

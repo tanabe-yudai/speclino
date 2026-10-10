@@ -1031,11 +1031,11 @@ def test_resolve_layout_adds_the_agent_root_to_the_previous_roots() -> None:
 
 
 def _this_repo_lock() -> KnowledgeLock:
-    """このリポジトリの .speclino/lock.json と同じ形（スキルが両ルート、指示書なし、
-    `skill_roots` 欄なし）。署名だけテストの鍵で付け直す。"""
-    data = json.loads((Path(__file__).resolve().parents[3] / ks.LOCK_PATH).read_text())
+    """このリポジトリの S77 より前の .speclino/lock.json（2026-10-08、bundle 5）の凍結コピー。
+    スキルが両ルート、指示書なし、`skill_roots` 欄なし。署名だけテストの鍵で付け直す。"""
+    path = Path(__file__).resolve().parents[2] / "fixtures/knowledge_sync/repo-lock-2026-10-08.json"
+    data = json.loads(path.read_text())
     assert "skill_roots" not in data and not set(data["files"]) & set(ks.MANAGED_FILES)
-    data.pop("key_id", None)
     unsigned = KnowledgeLock.model_validate({**data, "signature": "x"})
     return unsigned.model_copy(update={"signature": bundle_signing.sign(ks.lock_payload(unsigned))})
 
