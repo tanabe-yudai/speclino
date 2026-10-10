@@ -281,7 +281,24 @@ async def test_sync_bundle_layout_params(ctx: Ctx) -> None:
     paths = {op["path"] for op in res.json()["ops"]}
     assert "CLAUDE.md" in paths and ".claude/skills/review/SKILL.md" in paths
     assert not {p for p in paths if p.startswith(".agents/")}
-    for bad in ({"instructions_file": "README.md"}, {"skills_dir": "other/skills"}):
+    # S77: 名乗り（agent）が claude 系なら .claude/skills を足す。本文は AGENTS.md と橋
+    named = await x.c.post(
+        "/api/sync/bundle",
+        json={"repo_id": repo_id_of(x.repo), "agent": "claude-code"},
+        headers=_bearer(token),
+    )
+    assert named.status_code == 200, named.text
+    ops = {op["path"]: op for op in named.json()["ops"]}
+    assert ".claude/skills/review/SKILL.md" in ops and "AGENTS.md" in ops
+    assert ops["CLAUDE.md"]["if_exists"] is True and ops["CLAUDE.md"]["inner"] == "@AGENTS.md\n"
+    assert named.json()["lock"]["skill_roots"] == [".claude/skills"]
+    assert "CLAUDE.md" not in named.json()["lock"]["files"]
+    for bad in (
+        {"instructions_file": "README.md"},
+        {"skills_dir": "other/skills"},
+        {"agent": "a/b"},
+        {"agent": "x" * 65},
+    ):
         refused = await x.c.post(
             "/api/sync/bundle",
             json={"repo_id": repo_id_of(x.repo), **bad},
@@ -309,11 +326,13 @@ async def test_sync_bundle_without_knowledge_is_empty(ctx: Ctx) -> None:
     token = (await _issue(x)).json()["token"]
     res = await _post_bundle(x, token, repo_id_of(x.repo))
     assert res.status_code == 200, res.text
-    # 書くものは無い。選ばれなかった側（CLAUDE.md）の管理区画の片付けだけ
+    # 書くものは無い。指示書が 0 件なので両方のファイルの管理区画の片付けだけ（S77）
     assert [(o["op"], o["path"]) for o in res.json()["ops"]] == [
-        ("remove_managed_block", "CLAUDE.md")
+        ("remove_managed_block", "AGENTS.md"),
+        ("remove_managed_block", "CLAUDE.md"),
     ]
     assert res.json()["lock"]["bundle_generation"] == 1
+    assert res.json()["lock"]["skill_roots"] == [".agents/skills"]
 
 
 class _Bridge(httpx.BaseTransport):

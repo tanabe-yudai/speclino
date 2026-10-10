@@ -19,6 +19,8 @@ from speclino.domain.uml import CompiledSpec, SpecDiagnostic
 ArtifactKind = Literal["skill", "instructions", "spec"]
 ArtifactStatus = Literal["draft", "active", "superseded"]
 InstructionsTarget = Literal["agents_md", "claude_md"]
+# スキルの書き出し先のルート（S76・S77）。lock の `skill_roots` と配置の型
+SkillsRoot = Literal[".agents/skills", ".claude/skills"]
 
 MANAGED_BEGIN = "<!-- speclino:begin"
 MANAGED_END = "<!-- speclino:end -->"
@@ -222,6 +224,12 @@ class KnowledgeLock(IRModel):
     absent: list[str] = Field(
         default_factory=list, description="消したファイル・取り除いた管理区画の相対パス"
     )
+    # S77: スキルを書き出すルートの集合（昇順）。取り込むエージェントの名乗りで足していき、次の
+    # 取り込みで忘れないよう署名の対象にする。欄の無い古い lock は files のパスから推定する
+    # （空のときは署名の対象から外す）
+    skill_roots: list[SkillsRoot] = Field(
+        default_factory=list, description="スキルを書き出すルート（昇順）"
+    )
     issued_at: datetime
     expires_at: datetime
     # 署名した鍵の ID（#114、鍵の更新）。欄の無い古い lock も読めるよう既定は None
@@ -312,6 +320,7 @@ __all__ = [
     "KnowledgeLock",
     "RebundleOutcome",
     "SkillContent",
+    "SkillsRoot",
     "SpecContent",
     "SpecSuggestions",
 ]

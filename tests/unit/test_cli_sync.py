@@ -163,6 +163,8 @@ def test_sync_passes_layout_options(
             "CLAUDE.md",
             "--skills-dir",
             ".claude/skills",
+            "--agent",
+            "claude-code",
         ],
     )
     assert result.exit_code == 0, result.output
@@ -171,6 +173,7 @@ def test_sync_passes_layout_options(
         "lock_json": None,
         "instructions_file": "CLAUDE.md",
         "skills_dir": ".claude/skills",
+        "agent": "claude-code",
     }
 
 

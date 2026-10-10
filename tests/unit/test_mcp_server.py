@@ -240,3 +240,31 @@ def test_mcp_input_limits() -> None:
         server._check_inputs("", {**full, "extra": "h"}, None)
     with pytest.raises(ToolError, match="managed_inner"):
         server._check_inputs("", None, {"AGENTS.md": "h" * server.MAX_LOCK_JSON_BYTES})
+
+
+def _ctx(client_name: str | None) -> object:
+    """`ctx.session.client_params.client_info.name` だけを持つ偽の Context。"""
+    from types import SimpleNamespace
+
+    params = (
+        None
+        if client_name is None
+        else SimpleNamespace(client_info=SimpleNamespace(name=client_name))
+    )
+    return SimpleNamespace(session=SimpleNamespace(client_params=params))
+
+
+def test_agent_name_prefers_client_info_and_falls_back_to_argument() -> None:
+    """S77: 名乗りは MCP の clientInfo を優先し、無ければ引数 `agent`。"""
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from speclino.mcp_server import server
+
+    assert server._agent_name(_ctx("claude-code"), "codex") == "claude-code"  # type: ignore[arg-type]
+    assert server._agent_name(_ctx(None), "codex") == "codex"  # type: ignore[arg-type]
+    assert server._agent_name(_ctx(None), "") is None  # type: ignore[arg-type]
+    assert server._agent_name(object(), "Claude Code") == "Claude Code"  # type: ignore[arg-type]
+    with pytest.raises(ToolError, match="agent"):
+        server._agent_name(_ctx(None), "x" * 65)  # type: ignore[arg-type]
+    with pytest.raises(ToolError, match="agent"):
+        server._agent_name(_ctx(None), "a/b")  # type: ignore[arg-type]

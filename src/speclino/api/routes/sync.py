@@ -133,6 +133,7 @@ async def plan_sync_bundle(
                 body.lock_json,
                 instructions_file=body.instructions_file,
                 skills_root=body.skills_dir,
+                agent=body.agent,
             )
     except LookupError as e:
         raise api_error(404, "repository_not_found", "このトークンのリポジトリではない") from e

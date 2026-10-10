@@ -28,6 +28,7 @@ import pytest
 import pytest_asyncio
 from mcp.client import Client
 from mcp.client.streamable_http import streamable_http_client
+from mcp.types import Implementation
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
@@ -174,8 +175,12 @@ def _app(w: World) -> Any:
 
 
 @asynccontextmanager
-async def _client(w: World, token: str) -> AsyncIterator[Client]:
+async def _client(
+    w: World, token: str, *, name: str | None = None, mode: str = "auto"
+) -> AsyncIterator[Client]:
+    """MCP クライアント。`name` は clientInfo の名前（既定は SDK の "mcp"）。"""
     app = _app(w)
+    info = Implementation(name=name, version="1.0") if name else None
     async with (
         app.router.lifespan_context(app),
         httpx2.AsyncClient(
@@ -183,7 +188,11 @@ async def _client(w: World, token: str) -> AsyncIterator[Client]:
             base_url="http://localhost",
             headers={"Authorization": f"Bearer {token}"},
         ) as http,
-        Client(streamable_http_client("http://localhost/mcp", http_client=http)) as client,
+        Client(
+            streamable_http_client("http://localhost/mcp", http_client=http),
+            client_info=info,
+            mode=mode,  # type: ignore[arg-type]
+        ) as client,
     ):
         yield client
 
@@ -406,8 +415,14 @@ async def test_knowledge_pull_returns_url_and_round_trip(world: World) -> None:
         assert status["pull_needed"] is True and status["reasons"] == ["no_lock"]
         ticket = _json(await c.call_tool("knowledge_pull", {"repo_full_name": w.repo}))
     assert set(ticket) == {"plan_url", "expires_at", "bundle_generation", "layout", "summary"}
-    assert ticket["layout"] == {"instructions_file": "AGENTS.md", "skills_dir": ".agents/skills"}
+    # テストの MCP クライアントの clientInfo は SDK の既定（"mcp"）。claude 系ではない
+    assert ticket["layout"] == {
+        "instructions_file": "AGENTS.md",
+        "skill_roots": [".agents/skills"],
+        "agent": "mcp",
+    }
     assert ticket["plan_url"].startswith("http://localhost:8080/api/sync/plans/slplan_")
+    # 4 件の書き出しと CLAUDE.md への橋（CLAUDE.md が無ければ何もしない）
     assert ticket["summary"]["ops"] == 5 and ticket["summary"]["deletes"] == 0
     assert await _fetch_channels(w) == []  # 取得したときに記録する
     gen = str(ticket["bundle_generation"])
@@ -680,43 +695,142 @@ async def test_expired_plans_are_purged_when_fetching(world: World) -> None:
     assert left == 0
 
 
-async def test_knowledge_pull_layout_params(world: World) -> None:
-    """S76: 配置は取り込む側が選ぶ。省略は今の配置を保ち、列挙の外は拒否する。"""
+async def test_knowledge_pull_layout_follows_the_agent(world: World) -> None:
+    """S77: 指示書は AGENTS.md と CLAUDE.md の橋。スキルは名乗り（clientInfo）のルートを足す。"""
     w = world
     await _seed(w)
     token = await _sync_token(w)
     repo = w.tmp / "checkout"
     repo.mkdir()
-    claude = {"instructions_file": "CLAUDE.md", "skills_dir": ".claude/skills"}
-    async with _client(w, token) as c:
-        ticket, plan = await _pull(w, c, {"repo_full_name": w.repo, **claude})
-        assert ticket["layout"] == claude
+    (repo / "CLAUDE.md").write_text("# 手書き\n")
+    async with _client(w, token, name="claude-code") as c:
+        ticket, plan = await _pull(w, c, {"repo_full_name": w.repo, "agent": "codex"})
+    assert ticket["layout"] == {
+        "instructions_file": "AGENTS.md",
+        "skill_roots": [".claude/skills"],
+        "agent": "claude-code",  # clientInfo が引数より優先
+    }
+    assert sync_apply.apply_plan(repo, plan).ok
+    assert "@AGENTS.md" in (repo / "CLAUDE.md").read_text()
+    assert "共通" in (repo / "AGENTS.md").read_text()
+    assert (repo / ".claude/skills/review/SKILL.md").exists()
+    assert not (repo / ".agents/skills").exists()
+    assert await _check(w, repo, w.pid, w.repo) == "VERIFIED_IN_SCOPE"
+
+    lock_json = (repo / ks.LOCK_PATH).read_text()
+    async with _client(w, token, name="codex-cli") as c:
+        args = {"repo_full_name": w.repo, "lock_json": lock_json}
+        status = _json(await c.call_tool("sync_status", args))
+        assert status["reasons"] == ["layout_change"] and status["pull_needed"] is True
+        ticket, plan = await _pull(w, c, args)
+        assert ticket["layout"]["skill_roots"] == [".agents/skills", ".claude/skills"]
         assert sync_apply.apply_plan(repo, plan).ok
-        assert (repo / "CLAUDE.md").exists() and not (repo / "AGENTS.md").exists()
-        assert (repo / ".claude/skills/review/SKILL.md").exists()
-        assert await _check(w, repo, w.pid, w.repo) == "VERIFIED_IN_SCOPE"
         lock_json = (repo / ks.LOCK_PATH).read_text()
-        # 省略すると今の配置（claude）を保つ
-        kept, _ = await _pull(w, c, {"repo_full_name": w.repo, "lock_json": lock_json})
-        assert kept["layout"] == claude
-        # 配置を変えるときだけ指定する。前の配置のパスは消える
-        agents = {"instructions_file": "AGENTS.md", "skills_dir": ".agents/skills"}
-        moved, switch = await _pull(
-            w, c, {"repo_full_name": w.repo, "lock_json": lock_json, **agents}
+        fresh = _json(
+            await c.call_tool("sync_status", {"repo_full_name": w.repo, "lock_json": lock_json})
         )
-        assert moved["layout"] == agents
+    assert fresh["pull_needed"] is False
+    assert (repo / ".agents/skills/review/SKILL.md").exists()
+    assert (repo / ".claude/skills/review/SKILL.md").exists()
+    assert await _check(w, repo, w.pid, w.repo) == "VERIFIED_IN_SCOPE"
+
+    async with _client(w, token, name="claude-code") as c:
+        # 名乗りで減らさない。両方なら誰が名乗っても取り込みは要らない
+        same = _json(
+            await c.call_tool("sync_status", {"repo_full_name": w.repo, "lock_json": lock_json})
+        )
+        assert same["pull_needed"] is False
+        # skills_dir の明示は排他。外れたルートは消える
+        only, plan = await _pull(
+            w, c, {"repo_full_name": w.repo, "lock_json": lock_json, "skills_dir": ".agents/skills"}
+        )
+        assert only["layout"]["skill_roots"] == [".agents/skills"]
         bad_file = await c.call_tool(
             "knowledge_pull", {"repo_full_name": w.repo, "instructions_file": "README.md"}
         )
         bad_dir = await c.call_tool(
             "knowledge_pull", {"repo_full_name": w.repo, "skills_dir": ".github/skills"}
         )
+        bad_agent = await c.call_tool("knowledge_pull", {"repo_full_name": w.repo, "agent": "a/b"})
     assert bad_file.is_error and "instructions_file" in _text(bad_file)
     assert bad_dir.is_error and "skills_dir" in _text(bad_dir)
-    assert sync_apply.apply_plan(repo, switch).ok
-    assert "speclino:begin" in (repo / "AGENTS.md").read_text()
-    assert "speclino:begin" not in (repo / "CLAUDE.md").read_text()  # 区画だけが消える
+    assert bad_agent.is_error and "agent" in _text(bad_agent)
+    assert sync_apply.apply_plan(repo, plan).ok
     assert not (repo / ".claude/skills/review").exists()
+    assert await _check(w, repo, w.pid, w.repo) == "VERIFIED_IN_SCOPE"
+
+
+async def test_knowledge_pull_explicit_claude_md_keeps_the_old_layout(world: World) -> None:
+    w = world
+    await _seed(w)
+    token = await _sync_token(w)
+    repo = w.tmp / "checkout"
+    repo.mkdir()
+    async with _client(w, token) as c:
+        ticket, plan = await _pull(
+            w, c, {"repo_full_name": w.repo, "instructions_file": "CLAUDE.md"}
+        )
+    assert ticket["layout"]["instructions_file"] == "CLAUDE.md"
+    assert sync_apply.apply_plan(repo, plan).ok
+    assert "共通" in (repo / "CLAUDE.md").read_text() and not (repo / "AGENTS.md").exists()
+    assert await _check(w, repo, w.pid, w.repo) == "VERIFIED_IN_SCOPE"
+
+
+async def test_agent_argument_is_used_without_client_info(world: World) -> None:
+    """clientInfo が届かない要求（旧いプロトコルの stateless など）は引数 `agent` で名乗る。"""
+    w = world
+    await _seed(w)
+    token = await _sync_token(w)
+    async with _client(w, token, mode="legacy") as c:
+        ticket = _json(
+            await c.call_tool("knowledge_pull", {"repo_full_name": w.repo, "agent": "claude-code"})
+        )
+    assert ticket["layout"] == {
+        "instructions_file": "AGENTS.md",
+        "skill_roots": [".claude/skills"],
+        "agent": "claude-code",
+    }
+
+
+async def test_sync_status_reports_missing_bridge(world: World) -> None:
+    """規則 9: lock の本文が AGENTS.md で、CLAUDE.md があるのに橋が無ければ bridge_missing。"""
+    w = world
+    await _seed(w)
+    token = await _sync_token(w)
+    repo = w.tmp / "checkout"
+    repo.mkdir()
+    async with _client(w, token) as c:
+        _, plan = await _pull(w, c, {"repo_full_name": w.repo})
+        assert sync_apply.apply_plan(repo, plan).ok
+        lock = json.loads((repo / ks.LOCK_PATH).read_text())
+        args = {"repo_full_name": w.repo, "lock_json": json.dumps(lock)}
+        own = {p: h for p, h in lock["files"].items() if p not in ks.MANAGED_FILES}
+        inner = {"AGENTS.md": lock["files"]["AGENTS.md"]}
+        missing = _json(
+            await c.call_tool(
+                "sync_status",
+                {**args, "local_hashes": own, "managed_inner": {**inner, "CLAUDE.md": ""}},
+            )
+        )
+        bridged = _json(
+            await c.call_tool(
+                "sync_status",
+                {
+                    **args,
+                    "local_hashes": own,
+                    "managed_inner": {**inner, "CLAUDE.md": ks.file_hash("@AGENTS.md\n")},
+                },
+            )
+        )
+    assert missing["pull_needed"] is True and missing["reasons"] == ["bridge_missing"]
+    assert missing["verdict"] == "REVIEW" and "Claude Code" in missing["reason"]
+    assert bridged["pull_needed"] is False and bridged["verdict"] == "VERIFIED_IN_SCOPE"
+    # ゲートも同じ（CLAUDE.md を置いて橋が無ければ REVIEW、取り込み直せば橋が入る）
+    (repo / "CLAUDE.md").write_text("# 手書き\n")
+    assert await _check(w, repo, w.pid, w.repo) == "REVIEW"
+    async with _client(w, token) as c:
+        _, plan = await _pull(w, c, {**args, "lock_json": (repo / ks.LOCK_PATH).read_text()})
+    assert sync_apply.apply_plan(repo, plan).ok
     assert await _check(w, repo, w.pid, w.repo) == "VERIFIED_IN_SCOPE"
 
 
@@ -763,6 +877,7 @@ async def test_sync_status_layout_change_and_stale_verdict(world: World) -> None
         claude = {"instructions_file": "CLAUDE.md", "skills_dir": ".claude/skills"}
         same = _json(await c.call_tool("sync_status", {**args, "instructions_file": "AGENTS.md"}))
         changed = _json(await c.call_tool("sync_status", {**args, **claude}))
+        joined = _json(await c.call_tool("sync_status", {**args, "agent": "claude-code"}))
         bad = await c.call_tool("sync_status", {**args, "skills_dir": "other/skills"})
         own = {p: h for p, h in lock["files"].items() if p not in ks.MANAGED_FILES}
         inner = {p: h for p, h in lock["files"].items() if p in ks.MANAGED_FILES}
@@ -774,6 +889,8 @@ async def test_sync_status_layout_change_and_stale_verdict(world: World) -> None
         )
     assert same["pull_needed"] is False
     assert changed["pull_needed"] is True and changed["reasons"] == ["layout_change"]
+    # clientInfo（"mcp"）が引数より優先されるので、引数の名乗りでは変わらない
+    assert joined["pull_needed"] is False
     assert bad.is_error and "skills_dir" in _text(bad)
     assert stale["verdict"] == "REVIEW" and stale["stale"] is True
     assert "古い写し" in stale["reason"]
