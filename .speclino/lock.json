@@ -2,10 +2,17 @@
   "schema_version": "0.1",
   "workspace": "tanabe-yudai",
   "github_repo_id": 1380076715,
-  "bundle_generation": 5,
+  "bundle_generation": 6,
   "policy_revision": 2,
   "policy_hash": "sha256:a4eced43c42285e7bc020bef1548de6b03b05e27bb05b368993b9e5337fe778c",
   "members": [
+    {
+      "artifact_id": "2f318cd0-51b3-4416-a15c-5d4d0843574d",
+      "kind": "instructions",
+      "name": "agents-global",
+      "revision": 1,
+      "content_hash": "sha256:c8ef0846cf493ffad333a50793228e3baa25a110f2297ae94d0927f701289076"
+    },
     {
       "artifact_id": "cb6371f4-5e7c-4757-951c-c28b9ce737a9",
       "kind": "skill",
@@ -48,15 +55,16 @@
     ".speclino/specs/spec-gate-001.md": "sha256:59bf62bc9e4a95894e5d8fe4c3e478d40c01615032dcf0d0dd4e1ca85787a43a",
     ".speclino/specs/spec-run-001.md": "sha256:87d7af4744271f4eacceb20fb585621880995822afef01a6c3e52caee3c5e39c",
     ".speclino/specs/spec-test-002.md": "sha256:8ee5df3cebd36faabef4100ad8ea4af366175d2c5b1afe274a052f8415762490",
-    ".speclino/specs/spec-tool-001.md": "sha256:88dc040b2f64bfb8d4c792f28d444a5d8d3a1ecce45a2bfbd3f858f72ca4479f"
+    ".speclino/specs/spec-tool-001.md": "sha256:88dc040b2f64bfb8d4c792f28d444a5d8d3a1ecce45a2bfbd3f858f72ca4479f",
+    "AGENTS.md": "sha256:1af7f8077666cafcade7aadda7ac2f99ed82d9e6d95b29b9de7afbf8b4a8841e"
   },
   "absent": [],
   "skill_roots": [
     ".agents/skills",
     ".claude/skills"
   ],
-  "issued_at": "2026-10-10T09:44:37.509233Z",
-  "expires_at": "2026-11-09T09:44:37.509233Z",
+  "issued_at": "2026-10-10T14:42:56.483586Z",
+  "expires_at": "2026-11-09T14:42:56.483586Z",
   "key_id": "d2ca695a75fba22d",
-  "signature": "hmac-sha256:ee2f74c1d192689cab1594e79a04b2c254d0749467706bebab9f558b315df0d4"
+  "signature": "hmac-sha256:11ff722926f385c9a6446bfc46f09fda80ba7f6f258f701668f3b609d4646979"
 }
