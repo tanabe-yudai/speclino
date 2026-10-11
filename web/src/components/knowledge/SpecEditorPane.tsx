@@ -41,9 +41,12 @@ export function SpecEditorPane({
   resetKey,
 }: SpecPaneProps & PaneValidity) {
   const textarea = useRef<HTMLTextAreaElement>(null);
-  const [tab, setTab] = useState("diagnostics");
   const [view, setView] = useState<PaneView>(() =>
     initialPaneView(content.markdown),
+  );
+  // 本文がある仕様は描いた本文から見せる（狭い画面でプレビューに切り替えたときも本文が出る）
+  const [tab, setTab] = useState(() =>
+    view === "preview" ? "preview" : "diagnostics",
   );
   const [domainText, setDomainText] = useState(() => pretty(content.domain));
   const [legacyText, setLegacyText] = useState(() => pretty(content.legacy_ir));
@@ -109,7 +112,10 @@ export function SpecEditorPane({
     <div className="space-y-4 lg:space-y-0">
       <PaneViewSwitch
         view={view}
-        onChange={setView}
+        onChange={(next) => {
+          setView(next);
+          if (next === "preview") setTab("preview");
+        }}
         diagnosticCount={preview ? diagnostics.length : null}
       />
       <div className="grid gap-6 lg:grid-cols-2">
