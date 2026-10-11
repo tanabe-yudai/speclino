@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from speclino.domain.uml import ClassOperation
 from speclino.spec.uml._parse import DIRECTIONS, Ctx, Cursor, LineError, register_id
 from speclino.spec.uml.types import DiagramResult, RawAttribute, RawClass, Token
 
 _VISIBILITY = frozenset({"+", "-", "#", "~"})
+_STEREOTYPES: dict[str, Literal["enumeration", "module"]] = {
+    "enumeration": "enumeration",
+    "module": "module",
+}
 
 
 class _State:
@@ -30,7 +36,9 @@ def parse_class_diagram(ctx: Ctx, lines: list[list[Token]], result: DiagramResul
 
 
 def _check_class(ctx: Ctx, cls: RawClass, tok: Token) -> None:
-    if cls.enumeration:
+    if cls.stereotype == "module" and (cls.attributes or cls.enum_values):
+        ctx.error("E_MODULE_MEMBER", f"モジュール {cls.name} は属性・列挙値を持てない", tok)
+    if cls.stereotype == "enumeration":
         if cls.attributes or cls.operations:
             ctx.error("E_ENUM_MEMBER", f"列挙 {cls.name} は属性・操作を持てない", tok)
         if not cls.enum_values:
@@ -60,7 +68,7 @@ def _line(ctx: Ctx, cur: Cursor, st: _State, result: DiagramResult) -> None:
     register_id(st.class_ids, name)
     cls = RawClass(
         name=name.text,
-        enumeration=False,
+        stereotype="class",
         attributes=[],
         operations=[],
         enum_values=[],
@@ -87,9 +95,18 @@ def _member(ctx: Ctx, cur: Cursor, st: _State) -> None:
         return
     if head.text == "<<":
         cur.take("ir")
-        cur.take("ir", text="enumeration", what="enumeration", code="E_UNSUPPORTED_SYNTAX")
+        kind = cur.take(
+            "ir", kind="NAME", what="enumeration か module", code="E_UNSUPPORTED_SYNTAX"
+        )
+        stereotype = _STEREOTYPES.get(kind.text)
+        if stereotype is None:
+            raise LineError("E_UNSUPPORTED_SYNTAX", "ステレオタイプは enumeration か module", kind)
         cur.take("ir", text=">>", what="`>>`")
-        cls.enumeration = True
+        if cls.stereotype not in ("class", stereotype):
+            raise LineError(
+                "E_UNSUPPORTED_SYNTAX", f"クラス {cls.name} のステレオタイプは 1 つだけ", head
+            )
+        cls.stereotype = stereotype
         return
     if head.kind == "PUNCT" and head.text in _VISIBILITY:
         cur.take("ignored")
@@ -109,7 +126,9 @@ def _member(ctx: Ctx, cur: Cursor, st: _State) -> None:
         cls.operations.append(ClassOperation(name=first.text, params=params))
         return
     if cur.at_end():
-        if not cls.enumeration:
+        if cls.stereotype == "module":
+            raise LineError("E_MODULE_MEMBER", f"モジュールは列挙値 {first.text} を持てない", first)
+        if cls.stereotype != "enumeration":
             raise LineError(
                 "E_UNEXPECTED_TOKEN",
                 f"{first.text} は型の無い属性（列挙値は <<enumeration>> の後に書く）",
@@ -119,6 +138,8 @@ def _member(ctx: Ctx, cur: Cursor, st: _State) -> None:
         cls.enum_values.append(first.text)
         return
     name = cur.take_name("ir", "属性名")
+    if cls.stereotype == "module":
+        raise LineError("E_MODULE_MEMBER", f"モジュールは属性 {name.text} を持てない", first)
     if "." in first.text:
         raise LineError("E_UNKNOWN_TYPE", f"属性の型 {first.text} は読めない", first)
     register_id(st.member_ids, name)

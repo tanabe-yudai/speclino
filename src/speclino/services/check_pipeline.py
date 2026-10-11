@@ -57,8 +57,8 @@ from pydantic import ValidationError
 from speclino import __version__
 from speclino.analysis.limits import DEFAULT_LIMITS, clamp
 from speclino.analysis.path_analyzer import ANALYZER_VERSION, analyze_repo
-from speclino.analysis.reachability import reachable_source_hash
-from speclino.analysis.structure_check import check_structure
+from speclino.analysis.reachability import attribute_writes, reachable_source_hash
+from speclino.analysis.structure_check import SymbolLocator, check_structure
 from speclino.conformance.engine import ENGINE_VERSION, EngineConfig, EngineInputError, evaluate
 from speclino.conformance.exceptions import (
     RejectedWaiver,
@@ -91,6 +91,8 @@ from speclino.domain.policy import PolicyExceptions, PolicyPackage, PolicyRevisi
 from speclino.domain.run import BehaviorAnalysis, RunInputs, RunManifest, RunVersions
 from speclino.domain.semantic_diff import SemanticDiff
 from speclino.domain.spec_ir import RuleLevel, SpecIR
+from speclino.domain.uml import CallLabel, CompiledSpec
+from speclino.frontend.python.index import RepoIndex
 from speclino.reporter.json_out import write_artifacts
 from speclino.services.attestations import (
     CONFIG_CHANGE_REQUIREMENT_ID,
@@ -110,6 +112,7 @@ from speclino.spec import (
     rules_content_hash,
     validate_spec_ir,
 )
+from speclino.spec.uml.compile import check_domain
 from speclino.verifiers.base import Snapshot
 from speclino.verifiers.catalog import policy_registry
 from speclino.verifiers.exceptions import load_policy_exceptions
@@ -613,19 +616,31 @@ def _uml_findings(
 ) -> tuple[dict[str, list[Finding]], dict[str, RuleLevel]]:
     """UML の義務（構造・順序・包含・遷移）を S64 の検査に通す。戻り値は spec（artifact 名）ごと。
 
-    - 順序・包含: 入口の操作 → behavior（`OperationResolver.behavior`）。無ければ UNKNOWN
-    - 遷移: 入口を持たないので bindings の全 behavior の Code IR で検査する（behavior ごと）。
-      属性への代入が無い behavior の VERIFIED は数えない。どの behavior にも代入が無ければ UNKNOWN
-    - Code IR は (behavior, domain) ごとに 1 回だけ作る。解析の例外はその義務を UNKNOWN にする
+    - 型環境は仕様の domain にクラス図の列挙・属性の変数を足したもの（`check_domain`）
+    - 図の操作・入口は bindings、無ければ名前の一致で見つけたコードの関数（`_implicit_names`）に写す
+    - 順序・包含: 入口の操作 → behavior（`OperationResolver.behavior`）。無ければ UNKNOWN。
+      ガードの変数がその behavior の対応（variables）に無ければ UNKNOWN
+    - 遷移: 入口を持たないので、状態の属性を対応（variables）に持つ behavior の Code IR で検査する
+      （behavior ごと）。属性への代入が無い behavior の VERIFIED は数えない。どの behavior にも
+      代入が無ければ UNKNOWN
+    - Code IR は (behavior, domain, 名前の一致の対応) ごとに 1 回だけ作る。解析の例外はその義務を
+      UNKNOWN にする
     - 検査器の例外も UNKNOWN（黙って落とさない。偽の VERIFIED にしない）
     """
-    resolver = OperationResolver(inputs.bindings)
     by_unit: dict[str, list[Finding]] = {}
     levels: dict[str, RuleLevel] = {}
     failures: dict[tuple[str, str], str] = {}
+    locator = SymbolLocator(req.repo_root, req.source_roots, inputs.bindings.modules)
+    index = RepoIndex(req.repo_root, req.source_roots)
 
-    def code_for(behavior_id: str, domain: DomainSpec, domain_hash: str) -> CodeIR | str:
-        key = (behavior_id, domain_hash)
+    def code_for(
+        behavior_id: str,
+        domain: DomainSpec,
+        cache_key: str,
+        bindings: Bindings,
+        expand: frozenset[str] = frozenset(),
+    ) -> CodeIR | str:
+        key = (behavior_id, cache_key)
         if key in codes:
             return codes[key]
         if key in failures:
@@ -635,11 +650,12 @@ def _uml_findings(
                 req.repo_root,
                 behavior_id,
                 domain,
-                inputs.bindings,
+                bindings,
                 inputs.contracts,
                 limits,
                 snapshot,
                 req.source_roots,
+                expand,
             )
         except Exception as e:  # noqa: BLE001 - 解析できないものは UNKNOWN にする
             failures[key] = f"{type(e).__name__}: {e}"
@@ -652,6 +668,13 @@ def _uml_findings(
             return check()
         except Exception as e:  # noqa: BLE001 - 検査器の例外は UNKNOWN（設計 5.2）
             return [ctx.unknown(f"検査器の例外で判定できない（{type(e).__name__}: {e}）")]
+
+    writes: dict[str, list[str]] = {}
+
+    def writers_of(attr: str) -> list[str]:
+        if attr not in writes:
+            writes[attr] = attribute_writes(req.repo_root, attr, req.source_roots)
+        return writes[attr]
 
     for unit in inputs.spec_units:
         findings = by_unit.setdefault(unit.name, [])
@@ -668,12 +691,37 @@ def _uml_findings(
             )
             continue
         levels.update(obligation_levels(compiled))
-        domain = unit.domain or DomainSpec()
-        domain_hash = content_hash(_canonical(domain.model_dump(mode="json")))
+        domain = check_domain(compiled, unit.domain)
+        implicit = _implicit_names(compiled, inputs.bindings, locator, index)
+        resolver = OperationResolver(inputs.bindings, implicit)
+        bindings = resolver.analysis_bindings()
+        expand = resolver.implicit_operations()
+        # 旧形式の解析（codes の初期値）と同じ domain・対応なら同じキーで再利用する
+        cache_key = content_hash(_canonical(domain.model_dump(mode="json")))
+        if implicit:
+            cache_key += "|" + content_hash(_canonical(dict(sorted(implicit.items()))))
+        stereotypes = {c.name: c.stereotype for c in compiled.classes}
+
+        def bound(
+            behavior_id: str, bindings: Bindings = bindings, domain: DomainSpec = domain
+        ) -> frozenset[str]:
+            b = bindings.behaviors[behavior_id]
+            return frozenset(v for v in b.variables if v in domain.variables)
+
         for st in compiled.structure:
             ctx = ObligationContext(st.id, st.id.split("#", 1)[0], st.level, "command_invocation")
             findings.extend(
-                guarded(ctx, partial(check_structure, st, req.repo_root, req.source_roots))
+                guarded(
+                    ctx,
+                    partial(
+                        check_structure,
+                        st,
+                        req.repo_root,
+                        req.source_roots,
+                        module=stereotypes.get(st.class_name) == "module",
+                        modules=inputs.bindings.modules,
+                    ),
+                )
             )
         for tr in compiled.traces:
             behavior_id = resolver.behavior(tr.entry_operation)
@@ -684,12 +732,13 @@ def _uml_findings(
                 findings.append(
                     ctx.unknown(
                         f"入口の操作 {tr.entry_operation} に対応する振る舞いが無い（bindings.yaml"
-                        " の behaviors に同名のキーも、entrypoint の名前の一致も無い）",
+                        " の behaviors に同名のキーも、entrypoint の名前の一致も、名前の一致する"
+                        "コードの関数も無い）",
                         ["bindings.yaml の behaviors に入口の操作名をキーにした対応を書く"],
                     )
                 )
                 continue
-            code = code_for(behavior_id, domain, domain_hash)
+            code = code_for(behavior_id, domain, cache_key, bindings, expand)
             if isinstance(code, str):
                 findings.append(ctx.unknown(f"振る舞い {behavior_id} を解析できない（{code}）"))
                 continue
@@ -704,18 +753,47 @@ def _uml_findings(
                         domain=domain,
                         resolve_operation=resolver.operation,
                         known_operations=resolver.known_operations([code]),
+                        bound_variables=bound(behavior_id),
                     ),
                 )
             )
         for sm in compiled.state_machines:
             writers = 0
-            for behavior_id in sorted(inputs.bindings.behaviors):
+            for behavior_id in sorted(bindings.behaviors):
                 ctx = ObligationContext(sm.id, behavior_id, sm.level, "memory_state")
-                code = code_for(behavior_id, domain, domain_hash)
+                if sm.attribute not in bound(behavior_id):
+                    # 状態の変数の対応が無い振る舞いは、その属性への代入をイベントにできない。
+                    # 同じ名前の属性に代入し得るなら、図に無い遷移を見逃さないよう UNKNOWN にする
+                    where = writers_of(sm.attribute.rsplit(".", 1)[-1])
+                    if where:
+                        findings.append(
+                            ctx.unknown(
+                                f"リポジトリに {sm.attribute} に当たり得る属性への代入があるが"
+                                f"（{', '.join(where[:5])}{' ほか' if len(where) > 5 else ''}）、"
+                                f"振る舞い {behavior_id} に状態の変数の対応が無い"
+                                "（その代入を検査できない）",
+                                [
+                                    f"bindings.yaml の behaviors.{behavior_id}.variables に"
+                                    f" {sm.attribute} の対応を書く"
+                                ],
+                            )
+                        )
+                    continue
+                code = code_for(behavior_id, domain, cache_key, bindings, expand)
                 if isinstance(code, str):
                     findings.append(ctx.unknown(f"振る舞い {behavior_id} を解析できない（{code}）"))
                     continue
-                result = guarded(ctx, partial(check_state_machine, sm, code, config, domain=domain))
+                result = guarded(
+                    ctx,
+                    partial(
+                        check_state_machine,
+                        sm,
+                        code,
+                        config,
+                        domain=domain,
+                        bound_variables=bound(behavior_id),
+                    ),
+                )
                 if _writes_attribute(code, sm.attribute):
                     writers += 1
                 else:
@@ -732,6 +810,42 @@ def _uml_findings(
                     )
                 )
     return by_unit, levels
+
+
+def _implicit_names(
+    compiled: CompiledSpec, bindings: Bindings, locator: SymbolLocator, index: RepoIndex
+) -> dict[str, str]:
+    """bindings に対応の無い図の操作・入口（`<Class>.<method>`）を、名前の一致でコードに写す。
+
+    `<Class>` をクラス図のステレオタイプに従って一意なクラス（`<<module>>` なら一意なモジュール）
+    として探し、そこに `<method>` が定義されていれば完全修飾名にする（D9: 名前の一致が既定）。
+    見つからない・一意でないものは写さない（その要素は UNKNOWN になる）。
+    """
+    stereotypes = {c.name: c.stereotype for c in compiled.classes}
+    base = OperationResolver(bindings)
+    names: set[str] = set()
+    for tr in compiled.traces:
+        if base.explicit_behavior(tr.entry_operation) is None:
+            names.add(tr.entry_operation)
+        for t in tr.automaton.transitions:
+            if (
+                isinstance(t.label, CallLabel)
+                and base.explicit_operation(t.label.operation) is None
+            ):
+                names.add(t.label.operation)
+    out: dict[str, str] = {}
+    for name in sorted(names):
+        owner, _, method = name.rpartition(".")
+        kind = stereotypes.get(owner)
+        if kind not in ("class", "module"):
+            continue
+        located = locator.locate(owner, module=kind == "module")
+        if located.qualname is None or located.problem is not None:
+            continue
+        symbol = f"{located.qualname}.{method}"
+        if index.is_function(symbol):
+            out[name] = symbol
+    return out
 
 
 def _writes_attribute(code: CodeIR, attribute: str) -> bool:

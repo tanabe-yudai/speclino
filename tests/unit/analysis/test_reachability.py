@@ -281,3 +281,23 @@ def test_unknown_entrypoint_is_reported_not_raised(tmp_path: Path) -> None:
     )
     assert digest.functions == []
     assert digest.unresolved_calls == ["<entrypoint を解決できない: pkg.mod.missing>"]
+
+
+def test_attribute_writes_finds_dynamic_writes(tmp_path: Path) -> None:
+    from speclino.analysis.reachability import attribute_writes
+
+    src = tmp_path / "src" / "app"
+    src.mkdir(parents=True)
+    (src / "a.py").write_text("def f(r):\n    r.status = 'x'\n")
+    (src / "b.py").write_text("def g(r):\n    object.__setattr__(r, 'status', 1)\n")
+    (src / "c.py").write_text("def h(r):\n    r.__dict__['status'] = 1\n")
+    (src / "d.py").write_text("def k(r, n):\n    setattr(r, n, 1)\n")
+    (src / "e.py").write_text("def m(r):\n    r.other = 1\n")
+    found = attribute_writes(tmp_path, "status", ("src",))
+    assert [w.split(":")[0] for w in found] == [
+        "src/app/a.py",
+        "src/app/b.py",
+        "src/app/c.py",
+        "src/app/d.py",
+    ]
+    assert "名前が定数でない" in found[3]

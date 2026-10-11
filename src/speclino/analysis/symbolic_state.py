@@ -9,6 +9,7 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass, field
 
+from speclino.analysis.static_types import StaticTypes
 from speclino.conformance.typing import IRTypeError, TypeEnv, infer_type
 from speclino.domain.bindings import BehaviorBinding
 from speclino.domain.domain_spec import DomainSpec
@@ -50,6 +51,10 @@ class RootAlias:
 LocalValue = Expr | Unresolved | RootAlias
 
 
+class AmbiguousBinding(ValueError):
+    """1 つの実装の参照に、検査の domain の変数が複数対応している。"""
+
+
 @dataclass
 class SymState:
     domain: DomainSpec
@@ -57,18 +62,25 @@ class SymState:
     values: dict[str, Expr] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        self.impl_to_var = {
-            impl: var
-            for var, impl in self.binding.variables.items()
-            if not impl.startswith("pure_call:")
-        }
+        # 対応（bindings の variables）のうち、この検査の domain が宣言する変数だけを使う。
+        # 仕様ごとに domain が違う（旧形式の `has_findings` と図の `triage.has_findings` を
+        # 同じ実装 `t.has_findings` に対応づける）ため。domain に無い変数の対応は無いものとして
+        # 扱い、その参照は未解決（経路は UNKNOWN）になる。1 つの実装に domain の変数が 2 つ
+        # 対応すると経路条件とガードが別の変数になり得るので、解析できないとする
+        self.impl_to_var: dict[str, str] = {}
         # 契約済みの純粋な呼出し結果を名前付き変数として扱う
         # （例 self.permissions.allows → permitted）
-        self.pure_call_vars = {
-            impl.removeprefix("pure_call:"): var
-            for var, impl in self.binding.variables.items()
-            if impl.startswith("pure_call:")
-        }
+        self.pure_call_vars: dict[str, str] = {}
+        for var, impl in self.binding.variables.items():
+            if var not in self.domain.variables:
+                continue
+            table = self.pure_call_vars if impl.startswith("pure_call:") else self.impl_to_var
+            key = impl.removeprefix("pure_call:")
+            if table.get(key, var) != var:
+                raise AmbiguousBinding(
+                    f"実装 {impl} に domain の変数 {table[key]} と {var} が対応している"
+                )
+            table[key] = var
         for var in self.domain.variables:
             self.values.setdefault(var, ref(f"before.{var}"))
 
@@ -87,13 +99,22 @@ class SymState:
 
 @dataclass
 class Frame:
-    """関数 1 つ分の名前解決環境。"""
+    """関数 1 つ分の名前解決環境。types はローカル名 → 宣言型（static_types）。"""
 
     module: ModuleInfo
     locals: dict[str, LocalValue] = field(default_factory=dict)
+    types: dict[str, str] = field(default_factory=dict)
+
+    def bind(self, name: str, value: LocalValue, ty: str | None = None) -> None:
+        """ローカルへの代入。型は代入した値のものだけを持つ（再代入で前の型を捨てる）。"""
+        self.locals[name] = value
+        if ty is None:
+            self.types.pop(name, None)
+        else:
+            self.types[name] = ty
 
     def copy(self) -> Frame:
-        return Frame(self.module, dict(self.locals))
+        return Frame(self.module, dict(self.locals), dict(self.types))
 
 
 class ExprBuilder:
@@ -101,6 +122,7 @@ class ExprBuilder:
         self.index = index
         self.domain = domain
         self.env = TypeEnv(domain)
+        self.types = StaticTypes(index)
 
     # ---------------------------------------------------------------- helpers
     def attribute_chain(self, node: ast.expr) -> list[str] | None:
@@ -120,6 +142,52 @@ class ExprBuilder:
             return None
         head = frame.module.resolve_name(chain[0])
         return ".".join([head, *chain[1:]])
+
+    def body_target(
+        self, call: ast.Call, frame: Frame, cands: list[str], *, typed_ok: bool
+    ) -> tuple[str, LocalValue | None] | None:
+        """呼出し先の本体を展開・走査するときの (関数, self に束縛する値)。
+
+        名前で解決した関数（`callee_qualname`）は引数をそのまま合わせる（self は無いか、
+        `Cls.m(obj, ...)` の形で実引数にある）。宣言型で解決したメソッドは typed_ok のときだけで、
+        self には受け手の値（入口の引数を根に持つ属性チェーンなら別名、ほかは未解決）を束縛する。
+        どちらでもなければ None（本体を見られない）。
+        """
+        qual = self.callee_qualname(call.func, frame)
+        if qual is not None and cands and cands[0] == qual and self.index.is_function(qual):
+            return qual, None
+        chain = self.attribute_chain(call.func)
+        typed = cands[-1] if cands and cands[-1] != qual else None
+        if not typed_ok or typed is None or chain is None or not self.index.is_function(typed):
+            return None
+        root = frame.locals.get(chain[0])
+        receiver: LocalValue
+        if isinstance(root, RootAlias):
+            receiver = RootAlias(".".join([root.root, *chain[1:-1]]))
+        else:
+            receiver = Unresolved(
+                "unresolved_attribute",
+                f"{'.'.join(chain[:-1])} は入口の引数を根に持たない",
+                call.lineno,
+            )
+        return typed, receiver
+
+    def callee_candidates(self, func: ast.expr, frame: Frame) -> list[str]:
+        """呼出し先の候補: `callee_qualname` と、宣言型で解決した完全修飾名（あれば）。
+
+        bindings の symbol はどちらの書き方でもよい（`self.registry.execute` と
+        `pkg.mod.ToolRegistry.execute`）。照合はこの候補のどれかとの一致で行う。
+        """
+        out: list[str] = []
+        qual = self.callee_qualname(func, frame)
+        if qual is not None:
+            out.append(qual)
+        chain = self.attribute_chain(func)
+        if chain is not None and chain[0] in frame.locals:
+            typed = self.types.typed_callee(chain, frame.types)
+            if typed is not None and typed not in out:
+                out.append(typed)
+        return out
 
     def type_of(self, expr: Expr) -> str | None:
         try:

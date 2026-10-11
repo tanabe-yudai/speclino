@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from speclino.analysis.structure_check import check_structure
+import pytest
+
+from speclino.analysis.structure_check import (
+    check_structure,
+    locate_class,
+    locate_module,
+    module_qualname,
+)
 from speclino.domain.finding import Finding
 from speclino.domain.uml import ClassOperation, StructureObligation
 
@@ -203,3 +210,198 @@ def test_base_with_conditional_definition_is_unknown(tmp_path: Path) -> None:
     )
     root = _repo(tmp_path, {"src/app/c.py": body})
     assert _one(_ob(("run", []), cls="C"), root).verdict == "UNKNOWN"
+
+
+# ---------------------------------------------------------------- <<module>>
+
+REGISTRY = """
+def approve(revision_id, actor):
+    ...
+
+async def publish(bundle, *, force):
+    ...
+
+def helper(a):
+    ...
+"""
+
+
+def _mod_check(
+    root: Path,
+    *ops: tuple[str, list[str]],
+    name: str = "registry",
+    modules: dict[str, str] | None = None,
+) -> Finding:
+    ob = _ob(*ops, cls=name)
+    fs = check_structure(ob, root, ("src",), module=True, modules=modules)
+    assert len(fs) == 1 and fs[0].requirement_id == ob.id
+    return fs[0]
+
+
+def test_module_matching_functions_verified(tmp_path: Path) -> None:
+    root = _repo(tmp_path, {"src/app/registry.py": REGISTRY})
+    f = _mod_check(root, ("approve", ["revision_id", "actor"]), ("publish", ["bundle", "force"]))
+    assert f.verdict == "VERIFIED_IN_SCOPE", f.message
+    assert "モジュール registry と 2 個の関数" in f.message
+    assert f.code_refs[0].path == "src/app/registry.py"
+
+
+def test_module_argument_mismatch_violated(tmp_path: Path) -> None:
+    root = _repo(tmp_path, {"src/app/registry.py": REGISTRY})
+    f = _mod_check(root, ("approve", ["revision_id"]))
+    assert f.verdict == "VIOLATED" and f.category == "argument_mismatch"
+
+
+def test_module_missing_function_violated(tmp_path: Path) -> None:
+    root = _repo(tmp_path, {"src/app/registry.py": REGISTRY})
+    f = _mod_check(root, ("revoke", ["x"]))
+    assert f.verdict == "VIOLATED" and f.category == "missing_effect"
+    assert "registry.revoke が定義されていない" in f.message
+
+
+def test_module_missing_module_violated(tmp_path: Path) -> None:
+    root = _repo(tmp_path, {"src/app/other.py": REGISTRY})
+    f = _mod_check(root, ("approve", ["a"]))
+    assert f.verdict == "VIOLATED" and "モジュール registry が source_roots に無い" in f.message
+
+
+def test_module_varargs_unknown(tmp_path: Path) -> None:
+    root = _repo(tmp_path, {"src/app/registry.py": "def approve(*args):\n    ...\n"})
+    assert _mod_check(root, ("approve", ["a"])).verdict == "UNKNOWN"
+
+
+def test_module_ambiguous_name_unknown_and_bindings_resolve(tmp_path: Path) -> None:
+    root = _repo(
+        tmp_path,
+        {"src/a/registry.py": "def approve(x):\n    ...\n", "src/b/registry.py": REGISTRY},
+    )
+    f = _mod_check(root, ("approve", ["x"]))
+    assert f.verdict == "UNKNOWN"
+    assert "src/a/registry.py" in f.message and "modules" in f.message
+    ok = _mod_check(root, ("approve", ["x"]), modules={"registry": "a.registry"})
+    assert ok.verdict == "VERIFIED_IN_SCOPE", ok.message
+
+
+def test_module_bindings_missing_module_violated(tmp_path: Path) -> None:
+    root = _repo(tmp_path, {"src/app/registry.py": REGISTRY})
+    f = _mod_check(root, ("approve", ["a"]), modules={"registry": "app.nowhere"})
+    assert f.verdict == "VIOLATED" and "app.nowhere" in f.message
+
+
+def test_module_bindings_package_init(tmp_path: Path) -> None:
+    root = _repo(tmp_path, {"src/app/server/__init__.py": "def serve(port):\n    ...\n"})
+    f = _mod_check(root, ("serve", ["port"]), name="server", modules={"server": "app.server"})
+    assert f.verdict == "VERIFIED_IN_SCOPE", f.message
+    assert f.code_refs[0].path == "src/app/server/__init__.py"
+    # 名前だけでもパッケージの __init__.py に解決する
+    assert _mod_check(root, ("serve", ["port"]), name="server").verdict == "VERIFIED_IN_SCOPE"
+
+
+def test_module_syntax_error_unknown(tmp_path: Path) -> None:
+    root = _repo(tmp_path, {"src/app/registry.py": "def approve(:\n"})
+    assert _mod_check(root, ("approve", ["a"])).verdict == "UNKNOWN"
+
+
+DYNAMIC = {
+    "getattr": "def __getattr__(name):\n    ...\n",
+    "import": "from other import approve\n",
+    "import_as": "import other as approve\n",
+    "assign": "approve = make()\n",
+    "if": "import os\nif os.name:\n    def approve(a):\n        ...\n",
+    "exec": "exec('def approve(a): pass')\n",
+    "globals": "globals()['approve'] = 1\n",
+    "global": "def f():\n    global approve\n    approve = 1\n",
+}
+
+
+@pytest.mark.parametrize("body", DYNAMIC.values(), ids=DYNAMIC.keys())
+def test_module_dynamic_definition_unknown(tmp_path: Path, body: str) -> None:
+    root = _repo(tmp_path, {"src/app/registry.py": body})
+    f = _mod_check(root, ("approve", ["a"]))
+    assert f.verdict == "UNKNOWN", f.message
+
+
+def test_module_later_definition_wins(tmp_path: Path) -> None:
+    root = _repo(
+        tmp_path, {"src/app/registry.py": "def approve(a):\n    ...\n\ndef approve(b):\n    ...\n"}
+    )
+    assert _mod_check(root, ("approve", ["b"])).verdict == "VERIFIED_IN_SCOPE"
+
+
+def test_module_qualname() -> None:
+    roots = ("src", "src/speclino")
+    assert module_qualname("src/speclino/services/x.py", ("src",)) == "speclino.services.x"
+    assert module_qualname("src/speclino/services/x.py", roots) == "services.x"
+    assert module_qualname("src/speclino/mcp/__init__.py", ("src",)) == "speclino.mcp"
+    assert module_qualname("tools/x.py", ("src",)) is None
+    assert module_qualname("x.py", (".",)) == "x"
+    assert module_qualname("src/__init__.py", ("src",)) is None
+
+
+def test_locate_module_and_class(tmp_path: Path) -> None:
+    root = _repo(
+        tmp_path,
+        {
+            "src/app/orders.py": SERVICE,
+            "src/app/registry.py": REGISTRY,
+            "src/app/dup1.py": "class Dup:\n    ...\n",
+            "src/app/dup2.py": "class Dup:\n    ...\n",
+            "src/app/hidden.py": "def f():\n    class Inner:\n        ...\n",
+        },
+    )
+    m = locate_module("registry", root, ("src",))
+    assert (m.qualname, m.path, m.problem, m.missing) == (
+        "app.registry",
+        "src/app/registry.py",
+        None,
+        False,
+    )
+    gone = locate_module("nothing", root, ("src",))
+    assert gone.missing and gone.problem is not None and gone.qualname is None
+    bound = locate_module("anything", root, ("src",), {"anything": "app.orders"})
+    assert bound.qualname == "app.orders" and bound.path == "src/app/orders.py"
+    c = locate_class("OrderService", root, ("src",))
+    assert (c.qualname, c.path, c.missing) == (
+        "app.orders.OrderService",
+        "src/app/orders.py",
+        False,
+    )
+    assert locate_class("Nope", root, ("src",)).missing
+    dup = locate_class("Dup", root, ("src",))
+    assert not dup.missing and dup.problem is not None and dup.qualname is None
+    inner = locate_class("Inner", root, ("src",))
+    assert not inner.missing and inner.problem is not None
+
+
+def test_bindings_modules_validation() -> None:
+    from pydantic import ValidationError
+
+    from speclino.domain.bindings import Bindings
+
+    assert Bindings().modules == {}
+    assert Bindings(modules={"server": "speclino.mcp_server.server"}).modules["server"]
+    for bad in ({"a.b": "x.y"}, {"1a": "x"}, {"a": "x..y"}, {"a": "x-y"}):
+        with pytest.raises(ValidationError):
+            Bindings(modules=bad)
+
+
+def test_module_function_rebound_or_decorated_is_unknown(tmp_path: Path) -> None:
+    from speclino.domain.uml import ClassOperation, StructureObligation
+
+    pkg = tmp_path / "src" / "app"
+    pkg.mkdir(parents=True)
+    (pkg / "reg.py").write_text(
+        "import functools\n\n"
+        "def approve(a):\n    pass\n\napprove = functools.partial(approve, 1)\n\n"
+        "@functools.cache\ndef build(a):\n    pass\n"
+    )
+    for op, word in (("approve", "代入"), ("build", "デコレーター")):
+        ob = StructureObligation(
+            id=f"v#reg.{op}",
+            class_name="reg",
+            operations=[ClassOperation(name=op, params=["a"])],
+            level="mandatory",
+        )
+        [f] = check_structure(ob, tmp_path, ("src",), module=True)
+        assert f.verdict == "UNKNOWN", f.message
+        assert word in f.message

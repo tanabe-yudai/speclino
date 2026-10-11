@@ -99,7 +99,7 @@ class RawAttribute:
 @dataclass
 class RawClass:
     name: str
-    enumeration: bool
+    stereotype: Literal["class", "enumeration", "module"]
     attributes: list[RawAttribute]
     operations: list[ClassOperation]
     enum_values: list[str]

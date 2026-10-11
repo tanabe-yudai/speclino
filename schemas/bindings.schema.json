@@ -98,6 +98,14 @@
       "title": "Operations",
       "type": "object"
     },
+    "modules": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "<<module>> の名前 → 完全修飾のモジュール名（例 speclino.mcp_server.server）",
+      "title": "Modules",
+      "type": "object"
+    },
     "known_pure": {
       "description": "副作用が無く結果を検査に使わない外部呼出し（例 time.monotonic）",
       "items": {

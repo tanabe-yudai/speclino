@@ -121,7 +121,7 @@ class_diagram = "classDiagram" NL { class_stmt } ;
 class_stmt    = "direction" DIR NL
               | "class" NAME NL
               | "class" NAME "{" NL { member } "}" NL ;
-member        = "<<" "enumeration" ">>" NL
+member        = "<<" ( "enumeration" | "module" ) ">>" NL      (* 1 クラスに 1 種類。同じものの重ね書きは可 *)
               | [ visibility ] NAME NL                         (* 列挙値（enumeration のとき） *)
               | [ visibility ] attr_type NAME NL               (* 属性 *)
               | [ visibility ] NAME "(" [ NAME { "," NAME } ] ")" NL ;   (* 操作 *)
@@ -133,7 +133,13 @@ DIR           = "TB" | "TD" | "BT" | "LR" | "RL" ;
 - **要素 ID はクラス名**（クラス名は識別子として厳格で、表示ラベルではない）。クラス名は文書全体で一意（`E_DUPLICATE_ID`）
 - `<<enumeration>>` のクラスは列挙値だけを持つ（属性・操作はエラー）。値は 1 つ以上で重複なし。
   `domain.enums` にも同名があれば値の集合が一致しなければならない（`E_ENUM_MISMATCH`）
-- 属性の型 `NAME` は列挙型として解決する（文書のクラス図か `domain.enums`）。解決できなければ `E_UNKNOWN_TYPE`
+- `<<module>>` のクラスは Python のモジュールを表す。クラス名はモジュール名（モジュールパスの最後の要素。例 `knowledge_registry`）、
+  操作はモジュール直下の関数（`def` / `async def`）。属性・列挙値は持てない（`E_MODULE_MEMBER`）。
+  ステレオタイプは 1 クラスに 1 つ（2 つ目は `E_UNSUPPORTED_SYNTAX`）。参加者・処理ノードの持ち主としては通常のクラスと同じに使える
+- モジュールの照合（構造の検査）: モジュールは `bindings.yaml` の `modules`（モジュール名 → 完全修飾名）で解決し、無ければ
+  source_roots の `<名前>.py` / `<名前>/__init__.py` が 1 つだけあればそれ（複数あれば UNKNOWN）。関数が無いと確定できない
+  動的な定義（`__getattr__`、`exec`、`globals()`、その名前への代入・import、複合文の中の同名の定義）があれば UNKNOWN
+- 属性の型 `NAME` は列挙型として解決する（文書のクラス図か `domain.enums`）。解決できなければ `E_UNKNOWN_TYPE`（`<<module>>` のクラスは型にできない）
 - 操作の引数は名前だけ（型・既定値・戻り値の型はエラー）
 - 操作を 1 つ以上持つクラスごとに `StructureObligation`（id `<図 ID>#<クラス名>`）を作る
 - 関係線（`<|--`、`-->`、`..>` など）、`Class : member` の書式、注記、`class X["label"]`、ジェネリクスはエラー
@@ -295,7 +301,8 @@ markdown-it-py のブロック解析だけ（インラインは二次の時間�
 - シーケンス図の参加者のクラスはクラス図に必要（`E_UNKNOWN_CLASS`）。呼出しの `<受け手のクラス>.<メソッド>`、`%%@ entry`、
   アクティビティ図の処理ノードの操作は、そのクラスの操作として宣言されていなければならない（`E_UNKNOWN_CLASS` / `E_UNKNOWN_OPERATION`）
 - **変数名の規則**: クラス `C` の属性 `a` は変数 `c.a` で参照する。`c` はクラス名の**先頭の 1 文字だけを小文字にしたもの**
-  （`Order` → `order`、`InventoryService` → `inventoryService`、先頭が小文字のクラス名はそのまま）。`domain` が渡されたら
+  （`Order` → `order`、`InventoryService` → `inventoryService`、先頭が小文字のクラス名はそのまま）。
+  `<<module>>` のクラスは属性を持てないので変数を持たない。`domain` が渡されたら
   `domain.variables` の変数でも補う（クラス図が優先）
 - 状態遷移図の `%%@ attribute` はこの規則で属性に解決できなければ `E_UNKNOWN_REFERENCE`。型が列挙でなければ
   `E_STATE_ATTRIBUTE_TYPE`、状態の集合が列挙値の部分集合でなければ `E_UNKNOWN_STATE`
@@ -306,3 +313,5 @@ markdown-it-py のブロック解析だけ（インラインは二次の時間�
   処理ノードの無いアクティビティ図
 - Mermaid の予約語（`end` など。`_parse.RESERVED_SEQUENCE` / `RESERVED_FLOWCHART`）を参加者・ノード ID に使うと
   警告 `W_RESERVED_WORD`（IR には影響しない。描画できるかの判断はエディタ側）
+- 図の名前（操作・入口・変数・`<<module>>`）とコードの対応は parser の外（検査器）の規則で決める。
+  `design/2026-10-05-team-knowledge-registry.md` 5.1.1

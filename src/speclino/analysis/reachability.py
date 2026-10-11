@@ -78,6 +78,73 @@ def reachable_source_hash(
     return _digest(modules, functions, unresolved)
 
 
+def attribute_writes(
+    root: Path, attr: str, source_roots: tuple[str, ...] = (".", "src")
+) -> list[str]:
+    """source_roots の全モジュールの中で、名前 attr の属性に書き得る場所（`path:line`）。
+
+    状態遷移の検査で、状態の変数を対応に持たない behavior がその属性を書き得るかの過大近似に使う
+    （どの behavior から到達するかは見ない。確実に広めに見積もる）。拾うもの:
+    `<式>.attr = …`（累算・注釈つき・分解代入の中を含む）、`setattr(x, "attr", v)`・
+    `object.__setattr__(x, "attr", v)`、`x.__dict__["attr"] = v`。名前が定数でない `setattr` と
+    `__dict__` への代入は、どの属性にも書き得るので「（名前が定数でない）」として拾う。
+    """
+    from speclino.analysis.structure_check import iter_source_files
+
+    resolved = root.resolve()
+    out: list[str] = []
+    for f in iter_source_files(root, source_roots):
+        try:
+            tree = ast.parse(f.read_text(encoding="utf-8"))
+        except (SyntaxError, UnicodeDecodeError, ValueError):
+            out.append(f"{f.relative_to(resolved)}（構文エラーで読めない）")
+            continue
+        rel = str(f.relative_to(resolved))
+        for node in ast.walk(tree):
+            line = getattr(node, "lineno", 0)
+            if isinstance(node, ast.Call):
+                name = _setattr_name(node)
+                if name is not None and name in (attr, ""):
+                    suffix = "" if name else "（名前が定数でない）"
+                    out.append(f"{rel}:{line}{suffix}")
+                continue
+            targets: list[ast.expr] = []
+            if isinstance(node, ast.Assign):
+                targets = list(node.targets)
+            elif isinstance(node, ast.AnnAssign | ast.AugAssign):
+                targets = [node.target]
+            for t in targets:
+                for x in ast.walk(t):
+                    if isinstance(x, ast.Attribute) and x.attr == attr:
+                        out.append(f"{rel}:{line}")
+                    elif (
+                        isinstance(x, ast.Subscript)
+                        and isinstance(x.value, ast.Attribute)
+                        and x.value.attr == "__dict__"
+                    ):
+                        key = x.slice
+                        if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
+                            out.append(f"{rel}:{line}（名前が定数でない）")
+                        elif key.value == attr:
+                            out.append(f"{rel}:{line}")
+    return sorted(set(out))
+
+
+def _setattr_name(call: ast.Call) -> str | None:
+    """`setattr(x, n, v)` / `object.__setattr__(x, n, v)` の n。
+
+    定数でなければ ""、該当しなければ None。
+    """
+    func = call.func
+    is_setattr = (isinstance(func, ast.Name) and func.id == "setattr") or (
+        isinstance(func, ast.Attribute) and func.attr == "__setattr__"
+    )
+    if not is_setattr or len(call.args) < 2:
+        return None
+    n = call.args[1]
+    return n.value if isinstance(n, ast.Constant) and isinstance(n.value, str) else ""
+
+
 def _walk(
     fn: FunctionInfo,
     index: RepoIndex,
@@ -192,4 +259,4 @@ def _digest(
     )
 
 
-__all__ = ["reachable_source_hash"]
+__all__ = ["attribute_writes", "reachable_source_hash"]

@@ -14,15 +14,18 @@ from pathlib import Path as FsPath
 from typing import cast, get_args
 
 from speclino.analysis.limits import DEFAULT_LIMITS
+from speclino.analysis.static_types import has_effectful_arguments
 from speclino.analysis.structural import (
     OPAQUE_STMTS,
     OUTCOME_CHANNEL,
     RegionScanner,
-    binding_candidates,
+    is_pure_function_call,
+    module_may_rebind,
 )
 from speclino.analysis.symbolic_state import (
     ExprBuilder,
     Frame,
+    LocalValue,
     RootAlias,
     SymState,
     Unresolved,
@@ -46,7 +49,7 @@ from speclino.frontend.python.adapters.fastapi_outcome import (
     outcome_of_raise,
     outcome_of_return_call,
 )
-from speclino.frontend.python.index import FunctionInfo, ModuleInfo, RepoIndex, SymbolNotFound
+from speclino.frontend.python.index import FunctionInfo, RepoIndex, SymbolNotFound
 from speclino.frontend.python.subset import Unsupported, function_decorators, unsupported_stmt
 
 ANALYZER_VERSION = "0.1.0"
@@ -148,30 +151,6 @@ def _has_break_or_continue(body: list[ast.stmt]) -> bool:
     return False
 
 
-_BUILTINS_MODULE_NAMES = ("builtins", "__builtins__")
-
-
-def _module_may_rebind(mod: ModuleInfo, name: str) -> bool:
-    """モジュールのどこか（最上位に限らず、if/try/with/for/関数・クラス・match 本体の中も
-    含む）で name が再束縛され得るか。分からなければ True（安全側）。
-
-    束縛の構文を1つずつ列挙しない（MatchAs のキャプチャのような Name ノードにならない特殊な
-    形も見落とさないため）。``binding_candidates``（structural.py、S29 の RegionScanner と
-    共有）が ast.iter_fields で全フィールドを汎用に見て、識別子を束縛し得る文字列を返す。
-    ``from x import *`` はどの名前を束縛するか静的に分からないので無条件に対象とし、
-    ``builtins``/``__builtins__`` への参照は setattr 等で外から書き換えられ得るため
-    1 つでもあれば無条件に対象とする（この 2 つは「name と一致するか」では判定できない）。
-    """
-    for node in ast.walk(mod.tree):
-        if isinstance(node, ast.alias) and node.name == "*":
-            return True
-        if isinstance(node, ast.Name) and node.id in _BUILTINS_MODULE_NAMES:
-            return True
-        if name in binding_candidates(node):
-            return True
-    return False
-
-
 def _for_elements(it: ast.expr, frame: Frame) -> list[ast.expr] | str:
     """反復要素を式の列として返す（要素は評価しない）。展開できなければ理由を返す。
 
@@ -190,7 +169,7 @@ def _for_elements(it: ast.expr, frame: Frame) -> list[ast.expr] | str:
         and it.func.id == "range"
         and "range" not in frame.locals
     ):
-        if _module_may_rebind(frame.module, "range"):
+        if module_may_rebind(frame.module, "range"):
             return "range が組込みと確定できない（モジュールのどこかで再定義され得る）"
         if it.keywords or any(isinstance(a, ast.Starred) for a in it.args):
             return "range の引数の形が対応外（キーワード引数・展開）"
@@ -231,8 +210,12 @@ class PathAnalyzer:
         contracts: dict[str, OperationContract] | None = None,
         limits: AnalysisLimits = DEFAULT_LIMITS,
         snapshot: SnapshotRef | None = None,
+        expand_operations: frozenset[str] = frozenset(),
     ) -> None:
         self.index = index
+        # 呼出しイベントを出したうえで本体も展開する操作（名前の一致で対応づけた操作。
+        # bindings で宣言した操作と違い、本体の効果を「無い」と仮定しない）
+        self.expand_operations = expand_operations
         self.domain = domain
         self.bindings = bindings
         self.contracts = contracts or {}
@@ -250,6 +233,7 @@ class PathAnalyzer:
             self.contracts,
             self._known_pure,
             limits.depth,
+            expand_operations,
         )
 
     # ------------------------------------------------------------------ public
@@ -271,8 +255,9 @@ class PathAnalyzer:
         module = self.index.module(fn.module)
         assert module is not None
         frame = Frame(module)
-        for arg in fn.node.args.args:
-            frame.locals[arg.arg] = RootAlias(arg.arg)
+        types = self.builder.types.param_types(fn)
+        for arg in _params(fn.node):
+            frame.bind(arg, RootAlias(arg), types.get(arg))
         self._path_count = 0
         self._unroll_seq = 0
         start = Draft([], SymState(self.domain, binding))
@@ -317,6 +302,20 @@ class PathAnalyzer:
                 unroll_reason = outcome.reason
             elif isinstance(stmt, ast.While):
                 unroll_reason = "while は定数回の反復として展開できない"
+            if isinstance(stmt, ast.Assert):
+                # `assert t, m` は「t が偽なら AssertionError で抜ける」分岐と同じ（純粋な AST の
+                # 書き換え。python -O で assert を外す実行はモデルの外）
+                fail = ast.Raise(
+                    exc=ast.Call(
+                        func=ast.Name(id="AssertionError", ctx=ast.Load()), args=[], keywords=[]
+                    ),
+                    cause=None,
+                )
+                branch = ast.If(test=stmt.test, body=[ast.Pass()], orelse=[fail])
+                ast.copy_location(branch, stmt)
+                ast.fix_missing_locations(branch)
+                stmts = stmts[:i] + [branch] + rest
+                continue
             d.lines.append(stmt.lineno)
             if (u := unsupported_stmt(stmt)) is not None:
                 if unroll_reason:
@@ -327,6 +326,19 @@ class PathAnalyzer:
                 self._unknown(d, "unsupported_syntax", u.detail, fn, u.lineno)
                 d.ended, d.outcome = "unresolved", Outcome(kind="unresolved")
                 return [self._finish(d)]
+            if self._returns_expanded_operation(stmt, frame):
+                # `return <展開する操作の呼出し>` は `$ret = <呼出し>; return $ret` と同じ（本体を
+                # 展開した後で呼出し元が戻る）。純粋な AST の書き換えで、意味論は足さない
+                assert isinstance(stmt, ast.Return) and stmt.value is not None
+                tmp = f"$ret{self._unroll_seq}"
+                self._unroll_seq += 1
+                assign = ast.copy_location(
+                    ast.Assign(targets=[ast.Name(id=tmp, ctx=ast.Store())], value=stmt.value), stmt
+                )
+                ret = ast.copy_location(ast.Return(value=ast.Name(id=tmp, ctx=ast.Load())), stmt)
+                stmts = stmts[:i] + [assign, ret] + rest
+                d.lines.pop()
+                continue
             match stmt:
                 case ast.If():
                     cond = self.builder.to_expr(stmt.test, frame, d.state, "boolean")
@@ -347,8 +359,21 @@ class PathAnalyzer:
                     ended = self._call(call, fn, frame, d, depth, rest)
                     if ended is not None:
                         return ended
+                case ast.Expr(value=ast.Await(value=ast.Call() as call)):
+                    ended = self._call(call, fn, frame, d, depth, rest, awaited=True)
+                    if ended is not None:
+                        return ended
+                case ast.Expr(value=ast.Await()):
+                    self._unknown(
+                        d,
+                        "unresolved_call",
+                        f"呼出し以外の await は対応外: {ast.unparse(stmt.value)}",
+                        fn,
+                        stmt.lineno,
+                    )
                 case ast.Expr():
-                    pass
+                    # `cond and op()` のような式文の中の呼出しは順序を追えない
+                    self._record_expression_calls(stmt.value, fn, frame, d)
                 case ast.Raise():
                     self._raise(stmt, fn, frame, d)
                     return [self._finish(d)]
@@ -388,10 +413,13 @@ class PathAnalyzer:
             may_affect=sorted(scope.channels),
         )
         for name in scope.assigned_locals:
-            frame.locals[name] = Unresolved(
-                "unsupported_syntax",
-                f"{name} は対応外の領域（行 {u.lineno}）で代入される",
-                u.lineno,
+            frame.bind(
+                name,
+                Unresolved(
+                    "unsupported_syntax",
+                    f"{name} は対応外の領域（行 {u.lineno}）で代入される",
+                    u.lineno,
+                ),
             )
         return True
 
@@ -463,15 +491,21 @@ class PathAnalyzer:
             if stmt.value is None:
                 return None
             target, value_node = stmt.target, stmt.value
+        if isinstance(target, ast.Tuple | ast.List):
+            return self._unpack(target, value_node, fn, frame, d, depth, rest)
         if isinstance(target, ast.Name):
+            awaited = isinstance(value_node, ast.Await) and isinstance(value_node.value, ast.Call)
+            if isinstance(value_node, ast.Await) and isinstance(value_node.value, ast.Call):
+                value_node = value_node.value
             if isinstance(value_node, ast.Call):
-                qual = self.builder.callee_qualname(value_node.func, frame)
-                pure_var = d.state.pure_call_vars.get(qual or "")
-                if pure_var is not None:
+                cands = self.builder.callee_candidates(value_node.func, frame)
+                pure_vars = {
+                    d.state.pure_call_vars[c] for c in cands if c in d.state.pure_call_vars
+                }
+                if len(pure_vars) == 1 and not awaited:
                     # 純粋な呼出しの結果は名前付き変数（副作用なし、イベントなし）
-                    frame.locals[target.id] = d.state.value(pure_var)
+                    frame.bind(target.id, d.state.value(next(iter(pure_vars))))
                     return None
-                ended = self._call(value_node, fn, frame, d, depth, rest)
                 # code は UnknownCode の正当な値にする（_unknown 経由で UnknownCause.code に
                 # そのまま渡り得るため。例えばこの変数を後で if の条件に使うと、その時点の
                 # cond.code がそのまま _unknown へ渡る）。analyzed_call=True は「_call を通して
@@ -479,15 +513,28 @@ class PathAnalyzer:
                 # がサービス層の戻り値として経路は完全」と判定する。下記参照）。式の中の未解析の
                 # 呼出し（ExprBuilder.to_expr の ast.Call() 分岐）は同じ code を使うが
                 # analyzed_call は False のまま、というのが両者を区別する唯一の手段
-                frame.locals[target.id] = Unresolved(
-                    "unresolved_call",
-                    f"呼出し結果: {ast.unparse(value_node)}",
-                    value_node.lineno,
-                    analyzed_call=True,
+                result: list[_Binding] = [
+                    (
+                        target.id,
+                        Unresolved(
+                            "unresolved_call",
+                            f"呼出し結果: {ast.unparse(value_node)}",
+                            value_node.lineno,
+                            analyzed_call=True,
+                        ),
+                        self._result_type(cands),
+                    )
+                ]
+                # 展開（_inline）したときは残りの文を呼出し先の中で続けるので、結果の束縛も渡す
+                ended = self._call(
+                    value_node, fn, frame, d, depth, rest, awaited=awaited, result=result
                 )
+                for b in result:
+                    frame.bind(*b)
                 return ended
+            self._record_expression_calls(value_node, fn, frame, d)
             value = self.builder.to_expr(value_node, frame, d.state)
-            frame.locals[target.id] = value
+            frame.bind(target.id, value)
             return None
         chain = self.builder.attribute_chain(target)
         if chain is None or chain[0] not in frame.locals:
@@ -546,10 +593,18 @@ class PathAnalyzer:
         d: Draft,
         depth: int,
         rest: list[ast.stmt],
+        *,
+        awaited: bool = False,
+        result: list[_Binding] | None = None,
     ) -> list[Draft] | None:
-        """呼出し文。経路が終了（呼出し先で raise）したときは終了済み Draft 群を返す。"""
-        qual = self.builder.callee_qualname(call.func, frame)
-        if qual is None:
+        """呼出し文。経路が終了（呼出し先で raise）したときは終了済み Draft 群を返す。
+
+        `await f(...)` は f の呼出しとして扱う（呼出し元の処理の順序は変わらない。await の間に
+        他のタスクが入口の引数の属性を書き換えることはモデルの外）。async def を await せずに
+        呼ぶ（coroutine を作るだけで本体を実行しない）と、効果を確定できないので未解決にする。
+        """
+        cands = self.builder.callee_candidates(call.func, frame)
+        if not cands:
             self._unknown(
                 d,
                 "unresolved_call",
@@ -558,15 +613,225 @@ class PathAnalyzer:
                 call.lineno,
             )
             return None
-        if qual in self._op_by_symbol:
-            op_id, ob = self._op_by_symbol[qual]
+        qual = cands[0]
+        matched = self._match_operation(cands)
+        if len(matched) > 1:
+            ops = sorted(matched)
+            self._unknown(
+                d,
+                "unresolved_call",
+                f"呼出し {ast.unparse(call.func)} が複数の操作 {', '.join(ops)} に対応する"
+                "（bindings の対応が重なっている）",
+                fn,
+                call.lineno,
+                may_affect=[f"call:{op}" for op in ops],
+            )
+            return None
+        if matched:
+            op_id, ob = next(iter(matched.values()))
+            if not awaited and self._is_async(cands):
+                self._unknown(
+                    d,
+                    "unresolved_call",
+                    f"async の操作 {op_id} を await せずに呼んでいる（実行の有無を確定できない）",
+                    fn,
+                    call.lineno,
+                    may_affect=[f"call:{op_id}"],
+                )
+                return None
             self._emit_operation(op_id, ob, call, fn, frame, d)
+            if op_id not in self.expand_operations:
+                return None
+            target = self.builder.body_target(call, frame, cands, typed_ok=True)
+            if target is None or self.index.function(target[0]).is_async != awaited:
+                self._unknown(
+                    d,
+                    "unresolved_call",
+                    f"名前の一致で対応づけた操作 {op_id} の本体を展開できない"
+                    "（効果を確定できない）",
+                    fn,
+                    call.lineno,
+                )
+                return None
+            return self._inline(target[0], call, fn, frame, d, depth, rest, result, target[1])
+        if any(c in self._known_pure for c in cands):
             return None
-        if qual in self._known_pure:
+        if not awaited and self._pure_function(call, frame):
             return None
-        if self.index.is_function(qual):
-            return self._inline(qual, call, fn, frame, d, depth, rest)
+        if not awaited and self._trivial_construction(call, frame):
+            return None  # 副作用の無い構築（static_types の「自明な構築」）
+        # 展開するのは名前で解決した関数だけ（宣言型で解決したメソッドは self の束縛を持たない
+        # ので展開しない。操作の照合にだけ使う）
+        if qual == self.builder.callee_qualname(call.func, frame) and self.index.is_function(qual):
+            callee_async = self.index.function(qual).is_async
+            if callee_async != awaited:
+                self._unknown(
+                    d,
+                    "unresolved_call",
+                    f"{qual} の呼出しと await が対応しない（async def を await しない、"
+                    "または同期関数の結果を await する）",
+                    fn,
+                    call.lineno,
+                )
+                return None
+            return self._inline(qual, call, fn, frame, d, depth, rest, result)
         self._unknown(d, "unresolved_call", f"契約の無い外部呼出し: {qual}", fn, call.lineno)
+        return None
+
+    def _unpack(
+        self,
+        target: ast.Tuple | ast.List,
+        value_node: ast.expr,
+        fn: FunctionInfo,
+        frame: Frame,
+        d: Draft,
+        depth: int,
+        rest: list[ast.stmt],
+    ) -> list[Draft] | None:
+        """分解代入 `a, b = ...`。対象は名前だけ（`*` なし）。
+
+        右辺が同じ長さのタプル・リストなら要素ごとの代入（右辺を先に全部評価するので、値はどれも
+        代入前の状態で作る）。右辺が呼出しなら呼出しを解析し、各名前は値の分からない結果にする。
+        それ以外は対応外。
+        """
+        names = [e.id for e in target.elts if isinstance(e, ast.Name)]
+        if len(names) != len(target.elts) or len(set(names)) != len(names):
+            self._unknown(
+                d,
+                "unsupported_syntax",
+                f"分解代入の形が対応外: {ast.unparse(target)}",
+                fn,
+                target.lineno,
+            )
+            return None
+        if isinstance(value_node, ast.Tuple | ast.List) and len(value_node.elts) == len(names):
+            if any(isinstance(e, ast.Starred) for e in value_node.elts):
+                self._unknown(d, "unsupported_syntax", "右辺の展開（*）は対応外", fn, target.lineno)
+                return None
+            for e in value_node.elts:
+                self._record_expression_calls(e, fn, frame, d)
+            values = [self.builder.to_expr(e, frame, d.state) for e in value_node.elts]
+            for name, value in zip(names, values, strict=True):
+                frame.bind(name, value)
+            return None
+        awaited = isinstance(value_node, ast.Await) and isinstance(value_node.value, ast.Call)
+        call = value_node.value if isinstance(value_node, ast.Await) else value_node
+        if not isinstance(call, ast.Call):
+            self._unknown(
+                d,
+                "unsupported_syntax",
+                f"分解代入の右辺が対応外: {ast.unparse(value_node)}",
+                fn,
+                target.lineno,
+            )
+            return None
+        result: list[_Binding] = [
+            (
+                name,
+                Unresolved(
+                    "unresolved_call",
+                    f"呼出し結果の要素: {ast.unparse(call)}",
+                    call.lineno,
+                    analyzed_call=True,
+                ),
+                None,
+            )
+            for name in names
+        ]
+        ended = self._call(call, fn, frame, d, depth, rest, awaited=awaited, result=result)
+        for b in result:
+            frame.bind(*b)
+        return ended
+
+    def _returns_expanded_operation(self, stmt: ast.stmt, frame: Frame) -> bool:
+        if not self.expand_operations or not isinstance(stmt, ast.Return):
+            return False
+        value = stmt.value
+        if isinstance(value, ast.Await):
+            value = value.value
+        if not isinstance(value, ast.Call):
+            return False
+        cands = self.builder.callee_candidates(value.func, frame)
+        return any(op in self.expand_operations for op in self._match_operation(cands))
+
+    def _record_expression_calls(
+        self, node: ast.expr, fn: FunctionInfo, frame: Frame, d: Draft
+    ) -> None:
+        """式の中の呼出し（文として解析しないもの）を未解決として記録する。
+
+        操作に当たる呼出しは、呼ばれるか・何回かを経路で追えないので、その操作に触れる観測を
+        妨げる。解決できない呼出し・呼出し以外の await は効果が分からないので全てを妨げる。
+        純粋な標準の関数・自明な構築・既知の純粋な呼出し・解決できて操作でもない関数は従来どおり
+        （式の値が未解決になり、使えば経路が打ち切られる）。
+        """
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Await) and not isinstance(sub.value, ast.Call):
+                self._unknown(
+                    d, "unresolved_call", f"式の中の await: {ast.unparse(sub)}", fn, sub.lineno
+                )
+                continue
+            if not isinstance(sub, ast.Call):
+                continue
+            cands = self.builder.callee_candidates(sub.func, frame)
+            ops = sorted(self._match_operation(cands))
+            if ops:
+                self._unknown(
+                    d,
+                    "unresolved_call",
+                    f"式の中の操作の呼出し {ast.unparse(sub.func)}（順序と回数を追えない）",
+                    fn,
+                    sub.lineno,
+                    may_affect=[f"call:{op}" for op in ops],
+                )
+                continue
+            if (
+                any(c in self._known_pure for c in cands)
+                or self._pure_function(sub, frame)
+                or self._trivial_construction(sub, frame)
+                or (cands and self.index.is_function(cands[0]))
+            ):
+                continue
+            self._unknown(
+                d,
+                "unresolved_call",
+                f"式の中の解決できない呼出し: {ast.unparse(sub.func)}",
+                fn,
+                sub.lineno,
+            )
+
+    def _pure_function(self, call: ast.Call, frame: Frame) -> bool:
+        return is_pure_function_call(self.builder, call, frame)
+
+    def _trivial_construction(self, call: ast.Call, frame: Frame) -> bool:
+        chain = self.builder.attribute_chain(call.func)
+        if chain is None or chain[0] in frame.locals:
+            return False
+        ctor = self.builder.types.class_of(call.func, frame.module)
+        return (
+            ctor is not None
+            and self.builder.types.trivial_class(ctor)
+            and not has_effectful_arguments(call)
+        )
+
+    def _match_operation(self, cands: list[str]) -> dict[str, tuple[str, OperationBinding]]:
+        """候補のどれかに束縛された操作（操作 ID → (ID, 束縛)）。2 つ以上なら対応が重なっている。"""
+        return {
+            self._op_by_symbol[c][0]: self._op_by_symbol[c]
+            for c in cands
+            if c in self._op_by_symbol
+        }
+
+    def _is_async(self, cands: list[str]) -> bool:
+        return any(self.index.is_function(c) and self.index.function(c).is_async for c in cands)
+
+    def _result_type(self, cands: list[str]) -> str | None:
+        """呼出し結果の宣言型: 構築ならそのクラス、関数ならの戻り値の注釈。"""
+        for c in cands:
+            if self.index.class_def(c) is not None:
+                return c
+            ty = self.builder.types.return_type(c)
+            if ty is not None:
+                return ty
         return None
 
     def _emit_operation(
@@ -621,7 +886,24 @@ class PathAnalyzer:
         d: Draft,
         depth: int,
         rest: list[ast.stmt],
+        result: list[_Binding] | None = None,
+        receiver: LocalValue | None = None,
     ) -> list[Draft] | None:
+        """呼出し先の本体を展開する。
+
+        receiver があればメソッドの self に束縛し、実引数は残りの引数に合わせる。
+        """
+        if any(isinstance(a, ast.Starred) for a in call.args) or any(
+            k.arg is None for k in call.keywords
+        ):
+            self._unknown(
+                d,
+                "unsupported_syntax",
+                f"{qual} の呼出しの実引数の展開（* / **）は対応外",
+                fn,
+                call.lineno,
+            )
+            return None
         if depth + 1 > self.limits.depth:
             self._unknown(
                 d,
@@ -640,17 +922,25 @@ class PathAnalyzer:
         cmodule = self.index.module(callee.module)
         assert cmodule is not None
         cframe = Frame(cmodule)
-        params = [a.arg for a in callee.node.args.args]
+        types = self.builder.types.param_types(callee)
+        positional = [a.arg for a in [*callee.node.args.posonlyargs, *callee.node.args.args]]
+        params = _params(callee.node)
+        if receiver is not None:
+            if not positional:
+                self._unknown(d, "unsupported_syntax", f"{qual} に self が無い", fn, call.lineno)
+                return None
+            cframe.bind(positional[0], receiver, types.get(positional[0]))
+            params, positional = params[1:], positional[1:]
         for i, p in enumerate(params):
-            node = call.args[i] if i < len(call.args) else _keyword(call, p)
+            node = call.args[i] if i < len(positional) and i < len(call.args) else _keyword(call, p)
             if node is None:
-                cframe.locals[p] = Unresolved(
-                    "unresolved_attribute", f"引数 {p} が渡されていない", call.lineno
+                cframe.bind(
+                    p, Unresolved("unresolved_attribute", f"引数 {p} が渡されていない", call.lineno)
                 )
             elif isinstance(node, ast.Name) and isinstance(frame.locals.get(node.id), RootAlias):
-                cframe.locals[p] = frame.locals[node.id]
+                cframe.bind(p, frame.locals[node.id], types.get(p))
             else:
-                cframe.locals[p] = self.builder.to_expr(node, frame, d.state)
+                cframe.bind(p, self.builder.to_expr(node, frame, d.state), types.get(p))
         sub = Draft(
             list(d.conds),
             d.state,
@@ -668,7 +958,10 @@ class PathAnalyzer:
                 continue
             # return / fallthrough: 呼出し元へ戻り、残りの文を続ける
             cont = Draft(r.conds, r.state, r.updates, r.events, r.unknowns, r.lines, r.unroll_used)
-            ended.extend(self._explore(list(rest), fn, frame.copy(), cont, depth))
+            cont_frame = frame.copy()
+            for b in result or []:
+                cont_frame.bind(*b)
+            ended.extend(self._explore(list(rest), fn, cont_frame, cont, depth))
         return ended
 
     def _raise(self, stmt: ast.Raise, fn: FunctionInfo, frame: Frame, d: Draft) -> None:
@@ -690,22 +983,33 @@ class PathAnalyzer:
     def _return(self, stmt: ast.Return, fn: FunctionInfo, frame: Frame, d: Draft) -> None:
         d.ended = "return"
         src = self._src(fn, stmt.lineno)
-        if stmt.value is None:
+        if stmt.value is None or (
+            isinstance(stmt.value, ast.Constant) and stmt.value.value is None
+        ):
+            # `return None` は `return` と同じ（値を返さない）
             d.outcome = Outcome(kind="return", source_ref=src)
             return
-        if isinstance(stmt.value, ast.Call):
-            qual = self.builder.callee_qualname(stmt.value.func, frame) or ast.unparse(
-                stmt.value.func
-            )
-            outcome = outcome_of_return_call(stmt.value, qual)
+        returned = stmt.value
+        awaited = isinstance(returned, ast.Await) and isinstance(returned.value, ast.Call)
+        if isinstance(returned, ast.Await) and isinstance(returned.value, ast.Call):
+            returned = returned.value
+        if isinstance(returned, ast.Call):
+            cands = self.builder.callee_candidates(returned.func, frame)
+            qual = cands[0] if cands else ast.unparse(returned.func)
+            outcome = None if awaited else outcome_of_return_call(returned, qual)
             if outcome is not None:
                 d.outcome = outcome.model_copy(update={"source_ref": src})
                 return
-            if qual in self._op_by_symbol:
+            matched = self._match_operation(cands)
+            if len(matched) == 1 and (awaited or not self._is_async(cands)):
                 # 契約済み操作の結果を返す（例 return ToolResult.denied(...)）:
                 # 呼出しイベントを記録して return
-                op_id, ob = self._op_by_symbol[qual]
-                self._emit_operation(op_id, ob, stmt.value, fn, frame, d)
+                op_id, ob = next(iter(matched.values()))
+                self._emit_operation(op_id, ob, returned, fn, frame, d)
+                d.outcome = Outcome(kind="return", source_ref=src)
+                return
+            if not awaited and self._trivial_construction(returned, frame):
+                # 副作用の無い構築を返す（値は持たないが経路は完全）
                 d.outcome = Outcome(kind="return", source_ref=src)
                 return
             self._unknown(
@@ -832,6 +1136,15 @@ def _negate(e: Expr) -> Expr:
     return Not(op="not", arg=e)
 
 
+_Binding = tuple[str, LocalValue, str | None]
+
+
+def _params(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]:
+    """引数名（位置専用・通常・キーワード専用の順）。"""
+    a = node.args
+    return [x.arg for x in [*a.posonlyargs, *a.args, *a.kwonlyargs]]
+
+
 def _pick_arg(call: ast.Call, spec: str) -> ast.expr | None:
     kind, _, key = spec.partition(":")
     if kind == "positional":
@@ -856,6 +1169,9 @@ def analyze_repo(
     limits: AnalysisLimits = DEFAULT_LIMITS,
     snapshot: SnapshotRef | None = None,
     source_roots: tuple[str, ...] = (".", "src"),
+    expand_operations: frozenset[str] = frozenset(),
 ) -> CodeIR:
     index = RepoIndex(root, source_roots)
-    return PathAnalyzer(index, domain, bindings, contracts, limits, snapshot).analyze(behavior_id)
+    return PathAnalyzer(
+        index, domain, bindings, contracts, limits, snapshot, expand_operations
+    ).analyze(behavior_id)

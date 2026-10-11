@@ -477,3 +477,17 @@ def test_closed_activity_out_of_range_path_without_calls_is_violated() -> None:
     assert f.verdict == "VIOLATED"
     assert f.counterexample is not None and f.counterexample.path_id == "p2"
     assert "範囲外" in f.message
+
+
+# ---------------------------------------------------------------- 変数の対応
+def test_guard_variable_without_binding_is_unknown() -> None:
+    # 対応の無い変数は経路条件と無関係な自由変数になる（偽の VIOLATED を出さない）
+    missing = _path("p2", NORMAL, ["Inventory.reserve", "Mailer.notify"])
+    f = _one(SEQ, _code(GOOD_EXPRESS, missing), bound_variables=frozenset())
+    assert f.verdict == "UNKNOWN"
+    assert "order.express" in f.message and "対応していない" in f.message
+
+
+def test_guard_variable_with_binding_is_checked() -> None:
+    f = _one(SEQ, _code(GOOD_EXPRESS, GOOD_NORMAL), bound_variables=frozenset({"order.express"}))
+    assert f.verdict == "VERIFIED_IN_SCOPE", f.message

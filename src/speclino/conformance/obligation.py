@@ -55,6 +55,8 @@ def scope_text(code: CodeIR) -> str:
         f"{len(code.paths)} 経路（うち完全 {exact}、呼出し深さ {lim.depth}、"
         f"経路上限 {lim.max_paths}、"
         f"ソルバー {lim.solver_timeout_ms}ms、解析器 {code.analyzer_version}）"
+        "。前提: 型の注釈は実行時の値と整合する（mypy strict）、属性の読み出しは純粋、"
+        "await の間に他のタスクが入口の引数の属性を書き換えない"
     )
 
 
@@ -78,6 +80,27 @@ def guard_channels(guards: Iterable[Expr]) -> set[str]:
         for r in refs_in(g):
             out.add("outcome" if r.namespace == "outcome" else f"write:{r.variable}")
     return out
+
+
+def unbound_guard_variables(guards: Iterable[Expr], bound: frozenset[str] | None) -> list[str]:
+    """ガードが参照する変数（before./after.）のうち、コードの値に対応づいていないもの。
+
+    対応の無い変数は経路条件と無関係な自由変数になり、「コードがその条件で分岐しない」と
+    読めてしまう（偽の VIOLATED / VERIFIED）。bound が None なら検査しない（呼び出し側が
+    対応を持たないとき）。
+    """
+    if bound is None:
+        return []
+    return sorted(
+        {r.variable for g in guards for r in refs_in(g) if r.namespace != "outcome"} - bound
+    )
+
+
+def unbound_unknown(ctx: ObligationContext, names: list[str], behavior_id: str) -> Finding:
+    return ctx.unknown(
+        f"ガードの変数 {', '.join(names)} が振る舞い {behavior_id} のコードの値に対応していない",
+        [f"bindings.yaml の behaviors.{behavior_id}.variables に図の変数名で対応を書く"],
+    )
 
 
 @dataclass(frozen=True)

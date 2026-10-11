@@ -397,3 +397,90 @@ def test_reserved_word_is_warning() -> None:
     res = compile_spec(CLASSES + act, domain=None, legacy_ir=[])
     assert res.compiled is not None
     assert {d.code for d in res.diagnostics} == {"W_RESERVED_WORD"}
+
+
+# ---------------------------------------------------------------- <<module>>
+
+
+def _module_classes(*members: str, extra: str = "") -> str:
+    return block(
+        "%%@ id: mods",
+        "classDiagram",
+        "    class knowledge_registry {",
+        "        <<module>>",
+        *(f"        {m}" for m in members),
+        "    }",
+        *([extra] if extra else []),
+    )
+
+
+def test_module_class_accepted() -> None:
+    c = _ok(_module_classes("approve(revision_id, actor)", "+list_bundles()"))
+    mod = c.classes[0]
+    assert mod.stereotype == "module"
+    assert [(o.name, o.params) for o in mod.operations] == [
+        ("approve", ["revision_id", "actor"]),
+        ("list_bundles", []),
+    ]
+    assert [(s.id, s.class_name) for s in c.structure] == [
+        ("mods#knowledge_registry", "knowledge_registry")
+    ]
+
+
+def test_module_without_operations_has_no_obligation() -> None:
+    c = _ok(_module_classes())
+    assert c.classes[0].stereotype == "module" and c.structure == []
+
+
+def test_module_rejects_attribute_and_enum_value() -> None:
+    assert "E_MODULE_MEMBER" in _codes(_module_classes("int qty"))
+    assert "E_MODULE_MEMBER" in _codes(_module_classes("PENDING"))
+
+
+def test_module_rejects_second_stereotype() -> None:
+    # 同じステレオタイプの重ね書きは従来（<<enumeration>> の 2 回）どおり受け付ける
+    assert _ok(_module_classes("<<module>>")).classes[0].stereotype == "module"
+    assert "E_UNSUPPORTED_SYNTAX" in _codes(_module_classes("<<enumeration>>"))
+    assert "E_UNSUPPORTED_SYNTAX" in _codes(_module_classes("<<interface>>"))
+
+
+def test_module_cannot_be_attribute_type() -> None:
+    md = block(
+        "%%@ id: mods",
+        "classDiagram",
+        "    class knowledge_registry {",
+        "        <<module>>",
+        "        approve(a)",
+        "    }",
+        "    class Order {",
+        "        knowledge_registry reg",
+        "    }",
+    )
+    assert "E_UNKNOWN_TYPE" in _codes(md)
+
+
+def test_module_can_own_sequence_calls() -> None:
+    md = block(
+        "%%@ id: mods",
+        "classDiagram",
+        "    class OrderService {",
+        "        checkout(order)",
+        "    }",
+        "    class knowledge_registry {",
+        "        <<module>>",
+        "        approve(order)",
+        "    }",
+    ) + block(
+        "%%@ id: s",
+        "%%@ entry: OrderService.checkout",
+        "sequenceDiagram",
+        "    participant S as OrderService",
+        "    participant K as knowledge_registry",
+        "    S->>K: [m1] approve(order)",
+    )
+    c = _ok(md)
+    assert any(
+        isinstance(t.label, CallLabel) and t.label.operation == "knowledge_registry.approve"
+        for tr in c.traces
+        for t in tr.automaton.transitions
+    )
