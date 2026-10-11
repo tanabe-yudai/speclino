@@ -92,10 +92,18 @@ class ChatBudget:
         return ChatReservation(today, model, worst_usd, workspace, uid), None
 
     async def settle(
-        self, reservation: ChatReservation, input_tokens: int, output_tokens: int
+        self,
+        reservation: ChatReservation,
+        input_tokens: int,
+        output_tokens: int,
+        extra_usd: Decimal = Decimal("0"),
     ) -> None:
-        """予約を実費に直す。失敗・取り消しのときは (0, 0) で予約を丸ごと戻す。"""
-        actual = self._guard.estimate(reservation.model, input_tokens, output_tokens)
+        """予約を実費に直す。失敗・取り消しのときは (0, 0) で予約を丸ごと戻す。
+
+        `extra_usd` はトークンで数えない費用（Google 検索の問い合わせ、使用量の分からない途中の
+        呼出しの最悪の額）。
+        """
+        actual = self._guard.estimate(reservation.model, input_tokens, output_tokens) + extra_usd
         async with self._session_factory() as session, session.begin():
             await CostLedgerRepository(session).add(
                 reservation.day,

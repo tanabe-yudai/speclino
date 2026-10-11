@@ -346,3 +346,48 @@ async def test_branch_head_returns_the_tip_sha() -> None:
     assert await client.branch_head("acme/widgets", "main") == sha
     assert await client.branch_head("acme/widgets", "gone") is None
     assert await client.branch_head("acme/widgets", "../x") is None
+
+
+# ---------------------------------------------------------------- tree / blob（会話の調査）
+
+
+@respx.mock
+async def test_tree_lists_blobs_and_blob_decodes() -> None:
+    sha = "a" * 40
+    respx.get(f"{BASE_URL}/repos/acme/widgets/git/trees/{sha}?recursive=1").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "tree": [
+                    {"path": "src", "mode": "040000", "type": "tree", "sha": "d" * 40},
+                    {
+                        "path": "src/a.py",
+                        "mode": "100644",
+                        "type": "blob",
+                        "sha": "b" * 40,
+                        "size": 3,
+                    },
+                    {"path": "link", "mode": "120000", "type": "blob", "sha": "c" * 40, "size": 4},
+                ],
+                "truncated": True,
+            },
+        )
+    )
+    respx.get(f"{BASE_URL}/repos/acme/widgets/git/blobs/{'b' * 40}").mock(
+        return_value=httpx.Response(200, json={"content": "eDEK\n", "encoding": "base64"})
+    )
+    client = _client()
+    tree = await client.tree("acme/widgets", sha)
+    assert [(e.path, e.mode) for e in tree.entries] == [("src/a.py", "100644"), ("link", "120000")]
+    assert tree.truncated
+    assert await client.blob("acme/widgets", "b" * 40) == b"x1\n"
+
+
+async def test_tree_and_blob_reject_values_outside_the_shape() -> None:
+    client = _client()
+    with pytest.raises(ValueError):
+        await client.tree("acme/widgets", "main")
+    with pytest.raises(ValueError):
+        await client.blob("acme/../x", "b" * 40)
+    with pytest.raises(ValueError):
+        await client.blob("acme/widgets", "../../x")

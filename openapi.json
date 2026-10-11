@@ -1554,6 +1554,38 @@
         "title": "Ref",
         "type": "object"
       },
+      "RepoRequest": {
+        "properties": {
+          "op": {
+            "enum": [
+              "id",
+              "head",
+              "tree",
+              "blob"
+            ],
+            "title": "Op",
+            "type": "string"
+          },
+          "ref": {
+            "default": "",
+            "maxLength": 255,
+            "title": "Ref",
+            "type": "string"
+          },
+          "repo": {
+            "maxLength": 201,
+            "minLength": 3,
+            "title": "Repo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op",
+          "repo"
+        ],
+        "title": "RepoRequest",
+        "type": "object"
+      },
       "RequirementRow": {
         "additionalProperties": false,
         "properties": {
@@ -5061,7 +5093,7 @@
     },
     "/api/workspaces/{slug}/knowledge/chats/{chat_id}/messages/stream": {
       "post": {
-        "description": "post_message のストリーム版（text/event-stream）。\n\nevent は status / delta（説明の増えた分）/ done（post_message と同じ ChatTurn）/ error。\nストリームを始める前の失敗（認証・メンバー・body・LLM が無い）は通常の HTTP エラー。",
+        "description": "post_message のストリーム版（text/event-stream）。\n\nevent は status / delta（説明の増えた分）/ draft（提案の本文の途中）/ thought（思考の要約の\n増えた分）/ tool（調べていること）/ done（post_message と同じ ChatTurn）/ error。\nストリームを始める前の失敗（認証・メンバー・body・LLM が無い）は通常の HTTP エラー。",
         "operationId": "stream_message_api_workspaces__slug__knowledge_chats__chat_id__messages_stream_post",
         "parameters": [
           {
@@ -7208,6 +7240,59 @@
           }
         },
         "summary": "Health"
+      }
+    },
+    "/internal/github/repo": {
+      "post": {
+        "operationId": "github_repo_internal_github_repo_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RepoRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Github Repo Internal Github Repo Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Github Repo",
+        "tags": [
+          "internal"
+        ]
       }
     },
     "/internal/github/user-id": {

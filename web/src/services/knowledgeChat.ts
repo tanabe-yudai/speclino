@@ -12,6 +12,7 @@ import type { SseMessage } from '@/types/sse'
 import type {
   ChatProposal,
   ChatStreamEvent,
+  ChatStreaming,
   ChatSummaryDraft,
   ChatTurn,
   KnowledgeChat,
@@ -195,7 +196,14 @@ export function chatsFor(chats: KnowledgeChatSummary[], artifactId: string | nul
   return chats.filter((c) => c.artifact_id === artifactId)
 }
 
-/** 会話の API の失敗の文。サーバは固定の文だけを返すので、それを出す。 */
+/** 届いた出来事を、待っている間の表示に重ねる（思考の要約は足し、調べたことは並べる）。 */
+export function withStreamEvent(s: ChatStreaming, event: ChatStreamEvent): ChatStreaming {
+  if (event.type === 'delta') return { ...s, reply: s.reply + event.text }
+  if (event.type === 'thought') return { ...s, thought: (s.thought ?? '') + event.text }
+  if (event.type === 'tool') return { ...s, research: [...(s.research ?? []), event.text] }
+  return s
+}
+
 /** SSE の 1 イベントを、ストリームの出来事にする。知らない種類・壊れた JSON は null（読み飛ばす）。 */
 export function parseChatStreamEvent(msg: SseMessage): ChatStreamEvent | null {
   let data: unknown
@@ -213,6 +221,9 @@ export function parseChatStreamEvent(msg: SseMessage): ChatStreamEvent | null {
       return typeof d.text === 'string' ? { type: 'delta', text: d.text } : null
     case 'draft':
       return typeof d.field === 'string' && typeof d.text === 'string' ? { type: 'draft', field: d.field, text: d.text } : null
+    case 'thought':
+    case 'tool':
+      return typeof d.text === 'string' ? { type: msg.event, text: d.text } : null
     case 'done':
       return { type: 'done', turn: data as ChatTurn }
     case 'error':
@@ -227,6 +238,7 @@ export function parseChatStreamEvent(msg: SseMessage): ChatStreamEvent | null {
   }
 }
 
+/** 会話の API の失敗の文。サーバは固定の文だけを返すので、それを出す。 */
 export function describeChatError(err: unknown): string {
   if (err instanceof StreamInterruptedError) return err.message
   if (err instanceof ApiError) {

@@ -21,6 +21,12 @@ DEFAULT_PRICING: dict[str, tuple[Decimal, Decimal]] = {
     "scripted": (Decimal("0"), Decimal("0")),
 }
 
+# Google 検索によるグラウンディングの 1 問い合わせあたりの USD。Vertex AI の料金ページ
+# （https://cloud.google.com/vertex-ai/generative-ai/pricing、2026-10-11 に確認）の Gemini 3 の
+# 「$14 / 1,000 search queries」（月 5,000 件の無料枠は見込まない＝多めに数える）。
+# 1 回の依頼で複数の問い合わせが行われ、それぞれ課金される。検索の結果の入力トークンは課金されない
+SEARCH_QUERY_USD = Decimal("0.014")
+
 
 class CostLedger(Protocol):
     async def add(
@@ -61,6 +67,10 @@ class CostGuard:
     daily_limit_usd: Decimal
     per_run_limit_usd: Decimal = Decimal("0.50")
     pricing: dict[str, tuple[Decimal, Decimal]] | None = None
+
+    def search_cost(self, queries: int) -> Decimal:
+        """Google 検索の問い合わせ `queries` 件の費用。"""
+        return SEARCH_QUERY_USD * max(queries, 0)
 
     def estimate(self, model: str, input_tokens: int, output_tokens: int) -> Decimal:
         pin, pout = (self.pricing or DEFAULT_PRICING).get(
