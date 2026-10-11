@@ -85,6 +85,17 @@ class Settings(BaseSettings):
     # `speclino signing-key-id` で確かめる。lock の期限（30 日）が過ぎたら外してよい
     bundle_signing_keys_old: str | None = None
 
+    def llm_model_ids(self) -> tuple[str, ...]:
+        """設定にある LLM のモデル ID（重複なし）。LLM の出力に漏れていないかの照合に使う。"""
+        ids = (
+            self.agent_model,
+            self.spec_bot_model,
+            self.llm_policies_model,
+            self.a2a_model,
+            self.chat_model,
+        )
+        return tuple(dict.fromkeys(m for m in ids if m))
+
     @model_validator(mode="after")
     def _no_local_code_host_in_prod(self) -> Settings:
         # ローカルのコードホストは手元の git をそのまま信じる（GitHub の認証も ID の照合も無い）

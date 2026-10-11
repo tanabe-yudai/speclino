@@ -19,11 +19,18 @@ from speclino.agent.tools import InvestigationContext, build_tool_fns, register_
 from speclino.agent.tools.should_tools import build_should_tool_fns, register_should_tools
 from speclino.agent.tools.test_run import build_test_run_fn, register_test_run
 from speclino.domain.finding import Finding, Findings
+from speclino.services.llm_guardrails import guardrail_rules
 
 INSTRUCTION_PATH = (
     Path(__file__).resolve().parents[1] / "agent" / "instructions" / "investigator_v1.md"
 )
 PROMPT_VERSION = "investigator_v1"
+_ROLE = "仕様と実装の照合で未解決になった要求について、決定的なツールで追加の証拠を集める"
+
+
+def investigator_instruction() -> str:
+    """調査エージェントの指示: 共通の規則 ＋ investigator_v1.md。"""
+    return guardrail_rules(_ROLE) + "\n" + INSTRUCTION_PATH.read_text(encoding="utf-8")
 
 
 @dataclass
@@ -80,7 +87,7 @@ async def investigate(
         permissions=permissions,
         registry=registry,
         tool_fns=tool_fns,
-        instruction=INSTRUCTION_PATH.read_text(encoding="utf-8"),
+        instruction=investigator_instruction(),
         model=model,
     )
     holder["gw"] = investigator.gateway

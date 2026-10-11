@@ -28,6 +28,7 @@ from speclino.agent.gateway import ToolGateway, ToolRegistry
 from speclino.domain.bindings import Bindings
 from speclino.domain.domain_spec import DomainSpec
 from speclino.ports.text_llm import JsonGeneration, TextLlm
+from speclino.services.llm_guardrails import guardrail_rules
 from speclino.services.spec_pr_bot import MAX_SPEC_CHARS, worst_case_cost
 from speclino.spec.diagnostics import Diagnostic
 from speclino.spec.spec_extractor import (
@@ -61,14 +62,17 @@ REVISION_SCHEMA: dict[str, Any] = {
     },
     "required": ["edits"],
 }
-_REVISION_RULES = """\
-あなたは仕様書の曖昧な語句を、確認の答えに沿って書き直す案を出す。判断や承認はしない。
+_REVISION_RULES = (
+    guardrail_rules("仕様書の曖昧な語句を、確認の答えに沿って書き直す案を出す")
+    + """
+判断や承認はしない。
 規則:
 - 本文の語句をそのまま before に引用し、after に置き換え案を書く
 - 新しい要求を作らない。要求 ID を足さない
 - 判定・承認・「違反しない」のような結論を書かない
 - 答えが無い・答えで確定できない語句は edits に入れない
 """
+)
 
 
 class _Stop(Exception):

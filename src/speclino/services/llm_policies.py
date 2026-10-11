@@ -47,6 +47,7 @@ from speclino.domain.policy import PolicyRule
 from speclino.domain.policy_params import LlmChecklistItem, LlmChecklistParams
 from speclino.ports.text_llm import TextLlm
 from speclino.services.cost_guard import CostGuard
+from speclino.services.llm_guardrails import guardrail_rules
 from speclino.services.secret_scan import (
     SECRET_REASON,
     UNANALYZABLE_KIND,
@@ -56,7 +57,7 @@ from speclino.services.secret_scan import (
     secret_kinds,
 )
 
-PROMPT_VERSION = "llm-checklist-v1"
+PROMPT_VERSION = "llm-checklist-v2"
 TRIALS = 3
 DEFAULT_TIMEOUT_S = 60.0
 BEHAVIOR_ID = "policy:llm.checklist"
@@ -198,7 +199,8 @@ def outcome_of(votes: Sequence[bool]) -> AssessmentOutcome:
 def build_prompt(rule: PolicyRule, params: LlmChecklistParams, unit: AssessmentUnit) -> str:
     items = "\n".join(f"- {i.id}: {i.question}" for i in params.items)
     return (
-        "あなたはチームの規約のレビュー補助です。判定はせず、各チェック項目について、"
+        guardrail_rules("チームの規約に照らしてコードをレビューする補助をする") + "\n"
+        "判定はせず、各チェック項目について、"
         "下のコードがその項目の懸念に該当するか（applies）と、根拠となる箇所の短い引用（quote）"
         "だけを JSON で答えてください。該当しなければ applies=false、quote は空文字。\n\n"
         f"規約: {rule.title}\n{rule.text}\n\n"

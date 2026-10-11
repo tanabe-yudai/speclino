@@ -160,7 +160,13 @@ def _deps(state: AppState) -> kc.ChatDeps:
     if guard is None:
         _raise("chat_unavailable")
     factory = state.session_factory
-    return kc.ChatDeps(factory, _llm(state), ChatBudget(factory, guard), guard)
+    return kc.ChatDeps(
+        factory,
+        _llm(state),
+        ChatBudget(factory, guard),
+        guard,
+        model_ids=state.settings.llm_model_ids(),
+    )
 
 
 @router.get("", responses=error_responses(422))
