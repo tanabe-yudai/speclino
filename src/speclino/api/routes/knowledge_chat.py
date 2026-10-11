@@ -21,7 +21,8 @@ from google.genai import types
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from speclino.adapters.llm.chat_scripted import ScriptedChatLlm
-from speclino.adapters.llm.gemini_json import GeminiJsonLlm
+from speclino.adapters.llm.gemini_search import GeminiSearch
+from speclino.adapters.llm.gemini_tools import GeminiToolLlm
 from speclino.api.auth import require_user
 from speclino.api.deps import AppState, get_state
 from speclino.api.errors import api_error, error_responses
@@ -36,6 +37,7 @@ from speclino.domain.workspace import AuthUser
 from speclino.ports.text_llm import TextLlm
 from speclino.services import knowledge_chat as kc
 from speclino.services.knowledge_chat_budget import ChatBudget
+from speclino.services.knowledge_chat_research import ChatResearch
 from speclino.services.workspaces import WorkspaceNotFound, require_member
 
 logger = logging.getLogger(__name__)
@@ -138,21 +140,42 @@ async def _member(state: AppState, slug: str, user: AuthUser) -> None:
         raise api_error(404, "workspace_not_found", "ワークスペースが無い") from None
 
 
+_THINKING_LEVELS = {
+    "low": types.ThinkingLevel.LOW,
+    "medium": types.ThinkingLevel.MEDIUM,
+    "high": types.ThinkingLevel.HIGH,
+}
+
+
+def _model(state: AppState) -> str:
+    settings = state.settings
+    return settings.chat_model or settings.a2a_model or settings.agent_model
+
+
 def _llm(state: AppState) -> TextLlm:
-    """会話の LLM。出力の上限は設計 C7 の 4,096 トークンに固定する。"""
+    """会話の LLM。出力の上限は設計 C7 の 16,384 トークン（思考を含む）に固定する。
+
+    Gemini は読むだけの関数で調べてから答える（`GeminiToolLlm`）。思考の量は設定
+    `chat_thinking_level`（既定 medium）。
+    """
     if state.knowledge_chat_llm is None:
         settings = state.settings
         if settings.chat_llm == "scripted":
             state.knowledge_chat_llm = ScriptedChatLlm()
         else:
-            model = settings.chat_model or settings.a2a_model or settings.agent_model
-            # 思考は LOW にして、出力の枠（思考を含む）を返答の本文に残す
-            state.knowledge_chat_llm = GeminiJsonLlm(
-                model,
+            state.knowledge_chat_llm = GeminiToolLlm(
+                _model(state),
                 max_output_tokens=kc.CHAT_OUTPUT_TOKENS,
-                thinking_level=types.ThinkingLevel.LOW,
+                thinking_level=_THINKING_LEVELS[settings.chat_thinking_level],
             )
     return state.knowledge_chat_llm
+
+
+def _research(state: AppState) -> ChatResearch:
+    """調べる配線。Web 検索は Gemini のときだけ（台本の LLM は関数を呼ばないので使われない）。"""
+    if state.knowledge_chat_search is None and state.settings.chat_llm == "gemini":
+        state.knowledge_chat_search = GeminiSearch(_model(state))
+    return ChatResearch(reader=state.repo_reader, searcher=state.knowledge_chat_search)
 
 
 def _deps(state: AppState) -> kc.ChatDeps:
@@ -166,6 +189,7 @@ def _deps(state: AppState) -> kc.ChatDeps:
         ChatBudget(factory, guard),
         guard,
         model_ids=state.settings.llm_model_ids(),
+        research=_research(state),
     )
 
 
@@ -344,6 +368,8 @@ def _sse_event(ev: ChatStreamEvent) -> bytes:
         return _sse("delta", {"text": ev.text})
     if ev.type == "draft":
         return _sse("draft", {"field": ev.field, "text": ev.text})
+    if ev.type in ("thought", "tool"):
+        return _sse(ev.type, {"text": ev.text})
     if ev.type == "done":
         assert ev.turn is not None
         return _sse("done", ev.turn.model_dump(mode="json"))
@@ -402,7 +428,8 @@ async def stream_message(
 ) -> StreamingResponse:
     """post_message のストリーム版（text/event-stream）。
 
-    event は status / delta（説明の増えた分）/ done（post_message と同じ ChatTurn）/ error。
+    event は status / delta（説明の増えた分）/ draft（提案の本文の途中）/ thought（思考の要約の
+    増えた分）/ tool（調べていること）/ done（post_message と同じ ChatTurn）/ error。
     ストリームを始める前の失敗（認証・メンバー・body・LLM が無い）は通常の HTTP エラー。
     """
     await _member(state, slug, user)

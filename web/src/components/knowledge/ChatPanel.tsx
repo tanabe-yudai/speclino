@@ -11,9 +11,10 @@ import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion'
 import { cn } from '@/lib/utils'
 import { skipMessage } from '@/services/chatDraft'
 import { formatDateTime } from '@/services/format'
+import { CHAT_SOURCE_LABELS } from '@/services/labels'
 import { CHAT_NOTICE, MESSAGE_MAX_BYTES, errorCount, messageBytesLeft, textHash } from '@/services/knowledgeChat'
 import type { ChatDraft, ProposalOutcome } from '@/types/chatDraft'
-import type { ChatMessage, ChatPanelProps, ChatProposal, ChatStreaming, RawProposal } from '@/types/knowledgeChat'
+import type { ChatMessage, ChatPanelProps, ChatProposal, ChatSource, ChatStreaming, RawProposal } from '@/types/knowledgeChat'
 
 /** 今の編集欄の本文のハッシュ（提案の土台と比べて、古い提案を反映させない）。計算中は null。 */
 function useTextHash(text: string): string | null {
@@ -130,6 +131,49 @@ function ProposalLine({
   )
 }
 
+/** 返答の出典（AI が実際に読んだもの・検索の出典。サーバが組み立てる）。 */
+function Sources({ sources }: { sources: ChatSource[] }) {
+  return (
+    <div className="mt-2 border-t pt-2 text-xs">
+      <div className="mb-1 font-semibold text-ink-2">出典</div>
+      <ul className="space-y-0.5" aria-label="出典">
+        {sources.map((s) => (
+          <li key={s.ref} className="flex min-w-0 items-baseline gap-2">
+            <span className="shrink-0 text-ink-3">{CHAT_SOURCE_LABELS[s.kind]}</span>
+            {s.url ? (
+              <a href={s.url} target="_blank" rel="noopener noreferrer" className="min-w-0 truncate underline">
+                {s.title}
+              </a>
+            ) : (
+              <span className="min-w-0 truncate">{s.title}</span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+/**
+ * Google 検索の候補の表示（検索を使った返答に出す決まり）。中身は Google の HTML なので、
+ * スクリプトを動かさない sandbox の iframe に入れ、リンクだけ新しいタブで開けるようにする。
+ */
+function SearchSuggestions({ items }: { items: string[] }) {
+  return (
+    <div className="mt-2 space-y-1">
+      {items.map((html, i) => (
+        <iframe
+          key={i}
+          title="Google 検索の候補"
+          sandbox="allow-popups allow-popups-to-escape-sandbox"
+          srcDoc={`<base target="_blank">${html}`}
+          className="h-16 w-full border-0"
+        />
+      ))}
+    </div>
+  )
+}
+
 function Message({ m, children }: { m: ChatMessage; children?: ReactNode }) {
   const mine = m.role === 'user'
   return (
@@ -142,6 +186,8 @@ function Message({ m, children }: { m: ChatMessage; children?: ReactNode }) {
       </div>
       <p className="break-words whitespace-pre-wrap">{m.text}</p>
       {children}
+      {m.sources && m.sources.length > 0 && <Sources sources={m.sources} />}
+      {m.search_suggestions && m.search_suggestions.length > 0 && <SearchSuggestions items={m.search_suggestions} />}
     </li>
   )
 }
@@ -177,6 +223,34 @@ function WritingStatus({ onStop }: { onStop: () => void }) {
   )
 }
 
+/** AI の思考の要約（折りたたみ。表示だけで、会話には残らない）。 */
+function ThoughtSummary({ text }: { text: string }) {
+  return (
+    <details className="mb-2 text-xs text-ink-2">
+      <summary className="cursor-pointer select-none">考えていること</summary>
+      <p className="mt-1 max-h-40 overflow-auto break-words whitespace-pre-wrap">{text}</p>
+    </details>
+  )
+}
+
+/** 調べたこと（古い順）。本文を書き始めるまでは、最後の行が今調べていること。 */
+function ResearchStatus({ items, active }: { items: string[]; active: boolean }) {
+  const reduced = usePrefersReducedMotion()
+  return (
+    <ul className="mt-2 space-y-0.5 border-t pt-2 text-xs text-ink-2" aria-label="調べたこと" role="status">
+      {items.map((t, i) => {
+        const now = active && i === items.length - 1
+        return (
+          <li key={i} className="flex items-center gap-2">
+            {now ? <Loader2 aria-hidden="true" className={cn('size-3', !reduced && 'animate-spin')} /> : <span aria-hidden="true">・</span>}
+            <span className={cn('break-words', now && 'text-foreground')}>{t}</span>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
 /** 送った発言と、届いている途中の返答（返答が届くまでは「考えています」）と、本文を書いている間の状態。 */
 function StreamingMessages({ streaming, draft, onStop }: { streaming: ChatStreaming; draft: ChatDraft | null; onStop: () => void }) {
   return (
@@ -187,7 +261,9 @@ function StreamingMessages({ streaming, draft, onStop }: { streaming: ChatStream
       </li>
       <li className="mr-6 rounded-md border bg-background px-3 py-2 text-sm" aria-live="off" aria-busy="true">
         <div className="mb-1 text-xs font-semibold text-ink-3">AI</div>
+        {streaming.thought && <ThoughtSummary text={streaming.thought} />}
         {streaming.reply ? <p className="break-words whitespace-pre-wrap">{streaming.reply}</p> : <ThinkingDots />}
+        {streaming.research && streaming.research.length > 0 && <ResearchStatus items={streaming.research} active={!streaming.reply && !draft} />}
         {draft && <WritingStatus onStop={onStop} />}
       </li>
     </>

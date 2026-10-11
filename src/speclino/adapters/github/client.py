@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import io
 import re
 import tarfile
@@ -19,11 +20,20 @@ from speclino.adapters.github.app_auth import GitHubAppAuth
 from speclino.adapters.github.user_lookup import parse_user_response, validate_login
 from speclino.domain.run import GIT_REF_PATTERN
 from speclino.ports.github_users import GitHubUserLookupError
+from speclino.ports.repo_reader import RepoTree, RepoTreeEntry
 
 _MAX_RETRIES = 3
 _RETRY_BASE_DELAY_SECONDS = 0.5
 _RETRYABLE_CLIENT_STATUS = 429
 _ANNOTATIONS_PER_REQUEST = 50
+# 読むだけの API の URL に入れる値の形。リポジトリは `owner/name`、SHA は 40 桁の 16 進だけ
+_REPO_PATTERN = r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}/[A-Za-z0-9_.-]{1,100}"
+_SHA_PATTERN = r"[0-9a-f]{40}"
+
+
+def _checked(repo: str, sha: str) -> None:
+    if not re.fullmatch(_REPO_PATTERN, repo) or ".." in repo or not re.fullmatch(_SHA_PATTERN, sha):
+        raise ValueError("不正なリポジトリ名または SHA")
 
 
 def _should_retry(status_code: int) -> bool:
@@ -190,6 +200,36 @@ class GitHubClient:
             raise
         sha = response.json().get("commit", {}).get("sha")
         return sha if isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha) else None
+
+    async def tree(self, repo: str, commit_sha: str) -> RepoTree:
+        """`GET /repos/{repo}/git/trees/{sha}?recursive=1` の blob（`RepoReader` の実装）。"""
+        _checked(repo, commit_sha)
+        response = await self._request(
+            "GET", f"{self.base_url}/repos/{repo}/git/trees/{commit_sha}?recursive=1", repo=repo
+        )
+        data = response.json()
+        entries = [
+            RepoTreeEntry(
+                path=str(e["path"]),
+                mode=str(e["mode"]),
+                sha=str(e["sha"]),
+                size=e.get("size") if isinstance(e.get("size"), int) else None,
+            )
+            for e in data.get("tree", [])
+            if e.get("type") == "blob" and isinstance(e.get("path"), str)
+        ]
+        return RepoTree(entries, bool(data.get("truncated")))
+
+    async def blob(self, repo: str, blob_sha: str) -> bytes:
+        """`GET /repos/{repo}/git/blobs/{sha}` の中身（base64 を解く）。"""
+        _checked(repo, blob_sha)
+        response = await self._request(
+            "GET", f"{self.base_url}/repos/{repo}/git/blobs/{blob_sha}", repo=repo
+        )
+        data = response.json()
+        if data.get("encoding") != "base64":
+            raise ValueError("blob の符号化が base64 ではない")
+        return base64.b64decode(str(data.get("content", "")))
 
     async def fetch_snapshot(self, repo: str, sha: str, dest_dir: Path) -> Path:
         # ref は URL のパスに埋め込む。`..` 等で別リポジトリのパスに移れないよう、形を限る（S54）

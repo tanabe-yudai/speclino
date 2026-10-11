@@ -245,3 +245,10 @@ export const SYSTEM_RULES: Record<string, { title: string; hint: string }> = {
 export function systemRuleTitle(requirementId: string): string | null {
   return SYSTEM_RULES[requirementId.split(':')[0]]?.title ?? null
 }
+
+/** AI と作る会話の、返答の出典の種類（S81）。 */
+export const CHAT_SOURCE_LABELS: Record<'knowledge' | 'repo' | 'web', string> = {
+  knowledge: '承認済みの知識',
+  repo: 'リポジトリ',
+  web: 'Web',
+}

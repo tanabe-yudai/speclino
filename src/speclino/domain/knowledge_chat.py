@@ -74,6 +74,27 @@ class ChatProposal(IRModel):
     valid: bool = Field(description="診断にエラーが無いか（保存・承認の検証は別に行う）")
 
 
+ChatSourceKind = Literal["knowledge", "repo", "web"]
+# 会話の調査で AI が使える関数（読むだけ）
+ChatToolName = Literal["knowledge_list", "knowledge_read", "repo_tree", "repo_read", "web_search"]
+CHAT_SOURCES_MAX = 20
+SEARCH_SUGGESTIONS_MAX = 2
+SEARCH_SUGGESTION_MAX_BYTES = 16 * 1024
+
+
+class ChatSource(IRModel):
+    """返答の出典 1 件。サーバが、成功した調べものと検索の出典から組み立てる（AI に書かせない）。
+
+    `ref` は機械向けの参照（`skill:name@3`、`owner/repo@<sha>:path`、Web の URL）。
+    `url` は画面のリンク（リポジトリは GitHub の該当の版、Web は検索の出典）。
+    """
+
+    kind: ChatSourceKind
+    title: str = Field(max_length=300)
+    ref: str = Field(max_length=600)
+    url: str | None = Field(default=None, max_length=2000)
+
+
 class ChatMessage(IRModel):
     id: str = Field(min_length=1)
     role: ChatRole
@@ -82,6 +103,9 @@ class ChatMessage(IRModel):
     idempotency_key: str | None = None
     status: ChatMessageStatus
     created_at: datetime
+    # 調べた返答だけ。出典と、Google 検索の候補の表示（HTML。画面は sandbox の iframe で出す）
+    sources: list[ChatSource] | None = Field(default=None, max_length=CHAT_SOURCES_MAX)
+    search_suggestions: list[str] | None = Field(default=None, max_length=SEARCH_SUGGESTIONS_MAX)
 
 
 class KnowledgeChat(IRModel):
@@ -118,7 +142,7 @@ class ChatTurn(IRModel):
     replayed: bool = False
 
 
-ChatStreamEventType = Literal["status", "delta", "draft", "done", "error"]
+ChatStreamEventType = Literal["status", "delta", "draft", "thought", "tool", "done", "error"]
 
 
 class ChatStreamEvent(IRModel):
@@ -126,6 +150,9 @@ class ChatStreamEvent(IRModel):
 
     `draft` は提案の本文の途中経過で、`text` は増分ではなくここまでの全文（置き換える）。
     表示専用で、確定値は `done` の提案から取る。
+
+    `thought` は AI の思考の要約の増えた分（足していく。表示専用）。`tool` は AI が今調べている
+    ことの人向けの文（「リポジトリ owner/repo の src/x.py を読んでいます」）。
 
     `status` は進行の段階（`state`）、`error` は固定のエラーコード（`code`）だけを持つ（C9）。
     """
@@ -164,6 +191,12 @@ __all__ = [
     "ChatRole",
     "ChatStreamEvent",
     "ChatStreamEventType",
+    "CHAT_SOURCES_MAX",
+    "SEARCH_SUGGESTIONS_MAX",
+    "SEARCH_SUGGESTION_MAX_BYTES",
+    "ChatSource",
+    "ChatSourceKind",
+    "ChatToolName",
     "ChatSummaryDraft",
     "ChatTurn",
     "DiagnosticSeverity",
