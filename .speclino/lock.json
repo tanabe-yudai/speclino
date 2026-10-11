@@ -2,7 +2,7 @@
   "schema_version": "0.1",
   "workspace": "tanabe-yudai",
   "github_repo_id": 1380076715,
-  "bundle_generation": 7,
+  "bundle_generation": 8,
   "policy_revision": 2,
   "policy_hash": "sha256:a4eced43c42285e7bc020bef1548de6b03b05e27bb05b368993b9e5337fe778c",
   "members": [
@@ -17,8 +17,8 @@
       "artifact_id": "cb6371f4-5e7c-4757-951c-c28b9ce737a9",
       "kind": "skill",
       "name": "spec-write",
-      "revision": 1,
-      "content_hash": "sha256:b84c39848956068be995391bbb02886363e3d8a8a4c3b2240540cd8e96e90144"
+      "revision": 2,
+      "content_hash": "sha256:9b60dabec044056b5a734b7eda1f8049a70809dcd7bf8efe754810ec5ad07d33"
     },
     {
       "artifact_id": "61c44e3d-a748-49c7-84a4-29ec7c65cc11",
@@ -58,9 +58,9 @@
   ],
   "files": {
     ".agents/skills/speclino-mcp-guide/SKILL.md": "sha256:5b4d3d5019370d9bb72bf3371a8aa5d478bfbbf922c292ec6f636da20be6ac8b",
-    ".agents/skills/speclino-specification-guide/SKILL.md": "sha256:88d71ca734e4f4f5b1df26093c393185fad97c699b482f74912b858a819a3ce8",
+    ".agents/skills/speclino-specification-guide/SKILL.md": "sha256:58a9152c863cb96964a724271fd631eb84f6ce8101fa6487f23c8a7035cfdcbf",
     ".claude/skills/speclino-mcp-guide/SKILL.md": "sha256:5b4d3d5019370d9bb72bf3371a8aa5d478bfbbf922c292ec6f636da20be6ac8b",
-    ".claude/skills/speclino-specification-guide/SKILL.md": "sha256:88d71ca734e4f4f5b1df26093c393185fad97c699b482f74912b858a819a3ce8",
+    ".claude/skills/speclino-specification-guide/SKILL.md": "sha256:58a9152c863cb96964a724271fd631eb84f6ce8101fa6487f23c8a7035cfdcbf",
     ".speclino/specs/spec-gate-001.md": "sha256:59bf62bc9e4a95894e5d8fe4c3e478d40c01615032dcf0d0dd4e1ca85787a43a",
     ".speclino/specs/spec-run-001.md": "sha256:87d7af4744271f4eacceb20fb585621880995822afef01a6c3e52caee3c5e39c",
     ".speclino/specs/spec-test-002.md": "sha256:8ee5df3cebd36faabef4100ad8ea4af366175d2c5b1afe274a052f8415762490",
@@ -72,8 +72,8 @@
     ".agents/skills",
     ".claude/skills"
   ],
-  "issued_at": "2026-10-10T18:35:27.298829Z",
-  "expires_at": "2026-11-09T18:35:27.298829Z",
+  "issued_at": "2026-10-11T03:31:22.855800Z",
+  "expires_at": "2026-11-10T03:31:22.855800Z",
   "key_id": "d2ca695a75fba22d",
-  "signature": "hmac-sha256:31d106b11a90ae1b393cb415d312b5d6ace46ea019ef6d14948aeefa1ab592ae"
+  "signature": "hmac-sha256:8f4c64385afa357c112582b4435f03c725a0a11b1fe526a85e7b4d7fa053c12a"
 }

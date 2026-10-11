@@ -78,6 +78,7 @@ def build_deps(
         load_run_view=load_run_view,
         record_supplement=record_supplement,
         budget=ConsultBudget(factory, cost_guard),
+        model_ids=settings.llm_model_ids(),
     )
 
 

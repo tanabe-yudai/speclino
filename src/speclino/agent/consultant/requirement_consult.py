@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import uuid
 from decimal import Decimal
 from pathlib import Path
@@ -30,8 +31,14 @@ from speclino.db.models import Project
 from speclino.db.repositories import ProjectRepository
 from speclino.domain.a2a import CostReservation
 from speclino.services.cost_guard import CostGuard
+from speclino.services.llm_guardrails import find_leak, guardrail_rules, leak_patterns
+
+logger = logging.getLogger(__name__)
 
 INSTRUCTION_PATH = Path(__file__).resolve().parents[1] / "instructions" / "consultant_v1.md"
+_ROLE = "別のエージェントから届いた、仕様の要求についての質問に根拠を添えて答える"
+# 最終応答にモデル ID・指示の断片がそのまま含まれていたときに、代わりに返す文
+LEAK_REFUSAL = "その質問にはお答えできません。仕様の要求についての質問なら答えます。"
 # 1 回の LLM 呼出しの出力の上限（モデルに渡す）。Gemini では思考のトークンもこの上限に含まれ、
 # 課金される出力（候補＋思考）はこれを超えない。小さいと思考だけで尽きて答えが空になる
 CONSULT_MAX_OUTPUT_TOKENS = 8192
@@ -164,7 +171,7 @@ async def _answer(
 ) -> None:
     perms = consult_permissions()
     model_name = str(getattr(deps.agent_model, "model", deps.agent_model))
-    instruction = INSTRUCTION_PATH.read_text(encoding="utf-8")
+    instruction = consultant_instruction()
     tools = ConsultTools(deps, call.identity, gateway)
     findings = await tools.run_findings(str(run_id)) if run_id is not None else None
     prompt = _prompt(question, repo, call.request.requirement_id, run_id, findings)
@@ -215,14 +222,23 @@ async def _answer(
     if not log.final_text.strip():
         raise _Stop("議論役が答えを返しませんでした")
 
+    final_text = log.final_text
+    if find_leak(final_text, secrets=leak_patterns(deps.model_ids, instruction)) is not None:
+        logger.warning("議論役の応答を出力の検査で差し止めた")
+        final_text = LEAK_REFUSAL
     # 免責は answer.md そのものにも書く（成果物だけが転送されても判定と取り違えないように）
     disclaimer = _DISCLAIMER_VERIFIED if view is not None else _DISCLAIMER_NO_RUN
-    answer = f"{log.final_text}\n\n> {disclaimer}"
+    answer = f"{final_text}\n\n> {disclaimer}"
     updater = call.updater
     await updater.add_artifact([new_text_part(answer)], name="answer.md")
     if view is not None:
         await updater.add_artifact([new_data_part(view)], name="verification.json")
     await updater.complete(updater.new_agent_message([new_text_part(answer)]))
+
+
+def consultant_instruction() -> str:
+    """議論役の指示: 共通の規則 ＋ consultant_v1.md。"""
+    return guardrail_rules(_ROLE) + "\n" + INSTRUCTION_PATH.read_text(encoding="utf-8")
 
 
 def worst_case_cost(
@@ -269,7 +285,9 @@ def _prompt(
 
 __all__ = [
     "CONSULT_MAX_OUTPUT_TOKENS",
+    "LEAK_REFUSAL",
     "MAX_QUESTION_CHARS",
+    "consultant_instruction",
     "find_project",
     "run_requirement_consult",
     "worst_case_cost",

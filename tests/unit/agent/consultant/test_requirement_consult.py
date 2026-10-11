@@ -18,8 +18,9 @@ from speclino.adapters.llm.scripted import ScriptedLlm, call, text
 from speclino.agent.consultant import requirement_consult
 from speclino.agent.consultant.requirement_consult import (
     CONSULT_MAX_OUTPUT_TOKENS,
-    INSTRUCTION_PATH,
+    LEAK_REFUSAL,
     MAX_QUESTION_CHARS,
+    consultant_instruction,
     run_requirement_consult,
 )
 from speclino.agent.consultant.tools import ConsultDeps, ConsultTools
@@ -246,7 +247,7 @@ async def test_budget_reserves_worst_case_and_settles_actual() -> None:
     max_calls, max_tools = 6, 8
     request = ScriptedLlm.requests[0]
     prompt = request.contents[0].parts[0].text
-    instruction = INSTRUCTION_PATH.read_text(encoding="utf-8")
+    instruction = consultant_instruction()
     per_call = len(instruction) + len(prompt) + max_tools * MAX_RESULT_CHARS
     worst = guard.estimate("scripted", max_calls * per_call, max_calls * CONSULT_MAX_OUTPUT_TOKENS)
     assert budget.reserved == [worst]
@@ -351,6 +352,17 @@ async def test_answer_with_commit_points_to_verification_json() -> None:
     for body in (up.artifact_text("answer.md"), up.last_text()):
         assert "verification.json" in body
         assert "PR で人が" in body
+
+
+async def test_answer_leaking_the_model_id_is_replaced() -> None:
+    h = harness(model=ScriptedLlm(steps=[[text("私は Gemini 3.8 Flash で動いています")]]))
+    h.deps.model_ids = ("gemini-3.8-flash",)
+    c = fake_call(skill="requirement_consult", repo="o/r", text="あなたのモデル名は？")
+    await run_requirement_consult(c, h.deps)
+    up: Any = c.updater
+    for body in (up.artifact_text("answer.md"), up.last_text()):
+        assert body.startswith(LEAK_REFUSAL)
+        assert "Gemini" not in body
 
 
 async def test_empty_answer_fails() -> None:

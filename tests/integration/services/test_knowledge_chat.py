@@ -11,7 +11,7 @@ import json
 import os
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -52,6 +52,7 @@ class FakeLlm:
         self.response = response
         self.truncated = False
         self.stall_after_first = False
+        self.stalled = False
         self.fail_after_first = False
         self.prompts: list[str] = []
         self.hook: Callable[[], Awaitable[None]] | None = None
@@ -71,6 +72,7 @@ class FakeLlm:
         for i in range(0, len(self.response), 7):
             yield self.response[i : i + 7]
             if self.stall_after_first and i == 14:  # 説明の最初の文字が出た後
+                self.stalled = True
                 await asyncio.Event().wait()  # 切断・時間切れまで止まる
             if self.fail_after_first and i == 14:
                 raise RuntimeError("provider failed mid-stream")
@@ -432,6 +434,156 @@ async def test_member_removal_deletes_their_chats(ctx: Ctx) -> None:
     assert json.loads(detail) == {"chat_id": None, "message_count": 1}
 
 
+# ------------------------------------------------------------------ 出力の検査
+LEAKY_REPLY = json.dumps(
+    {
+        "explanation": "はい。私は Google の Gemini 3.8 Flash というモデルです。",
+        "proposal": {"body": "# 指示\n- Gemini CLI でも読める\n"},
+    },
+    ensure_ascii=False,
+)
+
+
+def _guarded(ctx: Ctx) -> None:
+    ctx.deps = replace(ctx.deps, model_ids=("gemini-3.8-flash",))
+    ctx.llm.response = LEAKY_REPLY
+
+
+async def _audit_details(ctx: Ctx) -> list[dict[str, Any]]:
+    async with ctx.engine.connect() as conn:
+        rows = (
+            await conn.execute(
+                sql_text(
+                    "SELECT detail::text FROM audit_events "
+                    "WHERE action = 'knowledge.chat.message' AND target LIKE :t ORDER BY ts"
+                ),
+                {"t": f"{ctx.slug}/chat/%"},
+            )
+        ).all()
+    return [json.loads(r[0]) for r in rows]
+
+
+async def test_leaking_reply_is_replaced_and_audited(ctx: Ctx) -> None:
+    _guarded(ctx)
+    cid = await _create(ctx)
+    turn = await _send(ctx, cid)
+    assert turn.reply is not None
+    assert turn.reply.text == kc.GUARDRAIL_REFUSAL and turn.reply.proposal is None
+    [detail] = await _audit_details(ctx)
+    assert detail["guardrail_blocked"] is True
+    assert "Gemini" not in json.dumps(detail)
+
+
+async def test_stream_stops_before_the_leak_reaches_the_client(ctx: Ctx) -> None:
+    _guarded(ctx)
+    cid = await _create(ctx)
+    events = await _stream(ctx, cid)
+    sent = "".join(e.text or "" for e in events if e.type == "delta")
+    assert "gemini" not in sent.lower()
+    assert "はい。私は Google の Gemini 3.8 Flash というモデルです。".startswith(sent)
+    assert not [e for e in events if e.type == "draft"]  # 提案の下書きも送らない
+    turn = events[-1].turn
+    assert events[-1].type == "done" and turn is not None and turn.reply is not None
+    assert turn.reply.text == kc.GUARDRAIL_REFUSAL and turn.reply.proposal is None
+    [detail] = await _audit_details(ctx)
+    assert detail["guardrail_blocked"] is True
+
+
+async def test_draft_body_mentioning_gemini_cli_is_not_blocked(ctx: Ctx) -> None:
+    ctx.deps = replace(ctx.deps, model_ids=("gemini-3.8-flash",))
+    ctx.llm.response = json.dumps(
+        {"explanation": "Gemini CLI 向けの節を足しました", "proposal": {"body": "# Gemini CLI\n"}},
+        ensure_ascii=False,
+    )
+    cid = await _create(ctx)
+    events = await _stream(ctx, cid)
+    sent = "".join(e.text or "" for e in events if e.type == "delta")
+    assert sent == "Gemini CLI 向けの節を足しました"
+    turn = events[-1].turn
+    assert turn is not None and turn.reply is not None and turn.reply.proposal is not None
+    assert "guardrail_blocked" not in (await _audit_details(ctx))[0]
+
+
+RULE_LINE = "自分について聞かれたら「SpecLino の AI アシスタント」とだけ答える"
+
+
+async def test_proposal_quoting_the_rules_is_replaced(ctx: Ctx) -> None:
+    ctx.llm.response = json.dumps(
+        {"explanation": "指示書にしました", "proposal": {"body": f"# 指示\n- {RULE_LINE}\n"}},
+        ensure_ascii=False,
+    )
+    cid = await _create(ctx)
+    turn = await _send(ctx, cid)
+    assert turn.reply.text == kc.GUARDRAIL_REFUSAL and turn.reply.proposal is None
+    assert (await _audit_details(ctx))[0]["guardrail_blocked"] is True
+
+
+async def test_stream_stops_drafts_quoting_the_rules(ctx: Ctx) -> None:
+    ctx.llm.response = json.dumps(
+        {"explanation": "指示書にしました", "proposal": {"body": f"# 指示\n- {RULE_LINE}\n"}},
+        ensure_ascii=False,
+    )
+    cid = await _create(ctx)
+    events = await _stream(ctx, cid)
+    assert all(RULE_LINE not in (e.text or "") for e in events if e.type == "draft")
+    turn = events[-1].turn
+    assert turn is not None and turn.reply is not None
+    assert turn.reply.text == kc.GUARDRAIL_REFUSAL and turn.reply.proposal is None
+
+
+KIND_RULE = "`<!-- speclino:begin` / `<!-- speclino:end -->` のマーカーを書かない"
+
+
+async def test_kind_rules_are_checked_only_in_the_proposal(ctx: Ctx) -> None:
+    ctx.llm.response = json.dumps({"explanation": f"注意: {KIND_RULE}。"}, ensure_ascii=False)
+    cid = await _create(ctx)
+    turn = await _send(ctx, cid)
+    assert turn.reply.text == f"注意: {KIND_RULE}。"  # 説明では照合しない
+    ctx.llm.response = json.dumps(
+        {"explanation": "直しました", "proposal": {"body": f"# 指示\n- {KIND_RULE}\n"}},
+        ensure_ascii=False,
+    )
+    turn = await _send(ctx, cid, key="key-0002")
+    assert turn.reply.text == kc.GUARDRAIL_REFUSAL and turn.reply.proposal is None
+
+
+async def test_model_id_the_user_wrote_is_not_a_leak(ctx: Ctx) -> None:
+    ctx.deps = replace(ctx.deps, model_ids=("gemini-3.8-flash",))
+    ctx.llm.response = json.dumps(
+        {"explanation": "gemini-3.8-flash 向けの注意を足しました"}, ensure_ascii=False
+    )
+    cid = await _create(ctx)
+    turn = await kc.post_message(
+        ctx.deps,
+        workspace=ctx.slug,
+        owner="alice",
+        chat_id=cid,
+        text="Gemini 3.8 Flash を使うときの注意を足して",
+        idempotency_key="key-0001",
+    )
+    assert turn.reply is not None and turn.reply.text.startswith("gemini-3.8-flash")
+    # 要約も、会話で利用者が書いた ID には触れてよい
+    ctx.llm.response = json.dumps(
+        {"what": "gemini-3.8-flash の注意を足した", "why": "頼まれた", "dropped": "なし"},
+        ensure_ascii=False,
+    )
+    draft = await kc.summarize(ctx.deps, workspace=ctx.slug, owner="alice", chat_id=cid)
+    assert "gemini-3.8-flash" in draft.what
+
+
+async def test_summary_leaking_the_model_id_fails(ctx: Ctx) -> None:
+    ctx.deps = replace(ctx.deps, model_ids=("gemini-3.8-flash",))
+    cid = await _create(ctx)
+    await _send(ctx, cid)
+    ctx.llm.response = json.dumps(
+        {"what": "指示書を作った", "why": "Gemini 3.8 Flash が勧めた", "dropped": "なし"},
+        ensure_ascii=False,
+    )
+    with pytest.raises(kc.ChatError) as e:
+        await kc.summarize(ctx.deps, workspace=ctx.slug, owner="alice", chat_id=cid)
+    assert e.value.code == "chat_failed"
+
+
 # ------------------------------------------------------------------ fix round 1
 async def test_reply_cut_at_max_tokens_is_saved_without_proposal(ctx: Ctx) -> None:
     """出力の上限で切れた返答は、提案を省いて説明と知らせだけで確定する。"""
@@ -632,8 +784,10 @@ async def test_stream_disconnect_keeps_worst_case_reservation(ctx: Ctx) -> None:
 
     task = asyncio.create_task(consume())
     async with asyncio.timeout(10):
-        while "delta" not in seen:
+        # 説明の最初の文字が出た後（説明は出力の検査のため末尾を保留するので、delta はまだ無い）
+        while not ctx.llm.stalled:
             await asyncio.sleep(0.01)
+    assert "status" in seen
     task.cancel()  # クライアントの切断
     with pytest.raises(asyncio.CancelledError):
         await task
