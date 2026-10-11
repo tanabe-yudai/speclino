@@ -33,9 +33,6 @@ export const paths = {
   },
   policies: (slug: string) => `/w/${e(slug)}/policies`,
   knowledgeNew: (slug: string, kind: ArtifactKind, from?: string | null) => `${kn(slug, kind)}/new${query({ from })}`,
-  /** S73: 会話から新しく作る（エディタで AI と作るパネルを開く） */
-  knowledgeNewWithChat: (slug: string, kind: ArtifactKind, from?: string | null) =>
-    `${kn(slug, kind)}/new${query({ chat: 'new', from })}`,
   knowledgeItem: (slug: string, kind: ArtifactKind, id: string, q?: KnowledgeQuery) =>
     `${kn(slug, kind)}/${e(id)}${query(q)}`,
   knowledgeRevisions: (slug: string, kind: ArtifactKind, id: string, from?: string | null) =>

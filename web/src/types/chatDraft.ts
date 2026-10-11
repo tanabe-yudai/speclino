@@ -46,29 +46,11 @@ export interface DecideApplyInput {
   baseMatches: boolean
 }
 
-export interface DraftDiffLine {
-  op: 'same' | 'add' | 'del'
-  text: string
-  oldNo: number | null
-  newNo: number | null
-}
-
-export interface DraftDiff {
-  lines: DraftDiffLine[]
-  /** 自動で追う行（最後に追加された行）。無ければ -1 */
-  anchor: number
-}
-
 /** 一覧のスクロールの位置（末尾を追うかの判断に使う）。 */
 export interface ScrollMetrics {
   scrollTop: number
   scrollHeight: number
   clientHeight: number
-}
-
-export interface DraftOverlayProps {
-  draft: ChatDraft
-  onStop: () => void
 }
 
 export interface AppliedDiffPanelProps {

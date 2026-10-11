@@ -27,8 +27,6 @@ describe('paths', () => {
   })
   it('from（戻り先のプロジェクト）と chat をクエリで引き継ぐ', () => {
     expect(paths.knowledgeNew('ws', 'skill', 'o/r')).toBe('/w/ws/knowledge/skills/new?from=o%2Fr')
-    expect(paths.knowledgeNewWithChat('ws', 'skill')).toBe('/w/ws/knowledge/skills/new?chat=new')
-    expect(paths.knowledgeNewWithChat('ws', 'skill', 'o/r')).toBe('/w/ws/knowledge/skills/new?chat=new&from=o%2Fr')
     expect(paths.knowledgeItem('ws', 'spec', 'id1', { chat: 'c1', from: 'o/r' })).toBe(
       '/w/ws/knowledge/specs/id1?chat=c1&from=o%2Fr',
     )

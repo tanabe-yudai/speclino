@@ -6,8 +6,7 @@
  * 送った編集欄の本文のものなので、「送った本文と今の本文が同じ」ことは、ハッシュの一致と同じ意味。
  */
 
-import { diffLines } from '@/services/textDiff'
-import type { AppliedEdit, ApplyDecision, DecideApplyInput, DraftDiff, ScrollMetrics, SkipReason } from '@/types/chatDraft'
+import type { AppliedEdit, ApplyDecision, DecideApplyInput, ScrollMetrics, SkipReason } from '@/types/chatDraft'
 import type { ArtifactContent } from '@/types/knowledge'
 import type { RawProposal } from '@/types/knowledgeChat'
 
@@ -78,17 +77,6 @@ export function skipMessage(reason: SkipReason, errors: number): string {
     case 'edited':
       return '編集中のため反映していません'
   }
-}
-
-/** 生成中の差分: 送った時点の本文と、届いた全文の行差分。大きすぎれば null。 */
-export function draftDiff(before: string, draft: string): DraftDiff | null {
-  const lines = diffLines(before, draft)
-  if (lines === null) return null
-  let anchor = -1
-  lines.forEach((l, i) => {
-    if (l.op === 'add') anchor = i
-  })
-  return { lines, anchor }
 }
 
 /** 会話の一覧の末尾からこの距離（px）までなら、新しい発言や返答の伸びを追う。 */

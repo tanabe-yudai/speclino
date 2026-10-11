@@ -114,7 +114,7 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
   const [resetKey, setResetKey] = useState(0)
   // 改訂の説明（S73）。下書きを直すときは今の下書きの説明から始める
   const [note, setNote] = useState<NoteState>(() => ({ text: initial.draft?.note ?? '', source: initial.draft?.note_source ?? 'manual' }))
-  const [chatOpen, setChatOpen] = useState(chatParam !== null)
+  const [chatOpen, setChatOpen] = useState(true)
   // AI が本文に反映した記録（元に戻す・差分の表示）と、提案ごとの扱い（S76）
   const [applied, setApplied] = useState<AppliedEdit | null>(null)
   const [outcomes, setOutcomes] = useState<Record<string, ProposalOutcome>>({})

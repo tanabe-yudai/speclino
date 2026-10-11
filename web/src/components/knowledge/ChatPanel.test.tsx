@@ -34,13 +34,15 @@ describe('ChatPanel', () => {
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>返答を待っています…/)
   })
 
-  it('shows the body being written inside the conversation, under the reply, with a stop button', () => {
+  it('shows an editing status (no diff table) under the reply, with a stop button', () => {
     const draft: ChatDraft = { field: 'body', before: '', text: '# 手順\n' }
     const html = render(controller({ sending: true, streaming: { userText: '書いて', reply: '書きます' }, draft }))
     const list = html.slice(html.indexOf('<ol'), html.indexOf('</ol>'))
     expect(list.indexOf('書きます')).toBeGreaterThan(-1)
-    expect(list.indexOf('AI が書いている本文')).toBeGreaterThan(list.indexOf('書きます'))
-    expect(list).toContain('# 手順')
+    expect(list.indexOf('本文を編集中…')).toBeGreaterThan(list.indexOf('書きます'))
+    expect(list).toContain('role="status"')
+    expect(list).not.toContain('<table')
+    expect(list).not.toContain('# 手順')
     expect(list).toMatch(/<button[^>]*>止める<\/button>/)
   })
 
