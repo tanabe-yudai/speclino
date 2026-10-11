@@ -1,4 +1,6 @@
 import { useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { PaneViewSwitch } from "@/components/knowledge/PaneViewSwitch";
 import { CanonicalView } from "@/components/spec-editor/CanonicalView";
 import { DiagnosticsList } from "@/components/spec-editor/DiagnosticsList";
 import { MarkdownInput } from "@/components/spec-editor/MarkdownInput";
@@ -8,14 +10,17 @@ import { SuggestionPanel } from "@/components/spec-editor/SuggestionPanel";
 import { Label } from "@/components/ui/label";
 import { MarkdownPreview } from "@/components/knowledge/MarkdownPreview";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 import { useSuggestions } from "@/hooks/useSuggestions";
 import { focusLine } from "@/lib/textarea";
+import { initialPaneView } from "@/services/paneView";
 import {
   countErrors,
   parseJsonField,
   requirementTrace,
 } from "@/services/specPreview";
 import type { DomainSpecJson, SpecIrJson } from "@/types/knowledge";
+import type { PaneView } from "@/types/paneView";
 import type { PaneValidity, SpecPaneProps } from "@/types/specEditor";
 
 const pretty = (v: unknown) =>
@@ -37,6 +42,9 @@ export function SpecEditorPane({
 }: SpecPaneProps & PaneValidity) {
   const textarea = useRef<HTMLTextAreaElement>(null);
   const [tab, setTab] = useState("diagnostics");
+  const [view, setView] = useState<PaneView>(() =>
+    initialPaneView(content.markdown),
+  );
   const [domainText, setDomainText] = useState(() => pretty(content.domain));
   const [legacyText, setLegacyText] = useState(() => pretty(content.legacy_ir));
   // 取り込んだ要求がある仕様だけ、その JSON 欄を見せる（新しい仕様には出さない）
@@ -74,6 +82,8 @@ export function SpecEditorPane({
           : null;
 
   function jump(line: number, column: number) {
+    // 本文が隠れている（狭い画面のプレビュー）と focus できないので、先に本文を出す
+    flushSync(() => setView("edit"));
     if (textarea.current) focusLine(textarea.current, line, column);
   }
 
@@ -96,136 +106,153 @@ export function SpecEditorPane({
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
-      <div className="min-w-0 space-y-4">
-        <MarkdownInput
-          id="spec-markdown"
-          label="仕様の本文（Markdown と ```mermaid の図）"
-          value={content.markdown}
-          onChange={(markdown) => onChange({ ...content, markdown })}
-          textareaRef={textarea}
-          describedBy="spec-markdown-help"
-          invalid={errors > 0}
-        />
-        <p id="spec-markdown-help" className="text-xs text-ink-3">
-          図の書き方は「診断」タブで確かめられます。
-        </p>
-        {hasLegacy && (
-          <details className="rounded-md border p-3" open>
-            <summary className="cursor-pointer text-sm font-medium">
-              取り込んだ要求（JSON）
-            </summary>
-            <div className="mt-3 space-y-3">
-              <div className="grid gap-1.5">
-                <Label htmlFor="spec-domain">対象の定義（JSON）</Label>
-                <textarea
-                  id="spec-domain"
-                  className="min-h-24 rounded-lg border border-input bg-transparent px-3 py-2 font-mono text-xs aria-invalid:border-destructive dark:bg-input/30"
-                  value={domainText}
-                  onChange={(e) => updateJson("domain", e.target.value)}
-                  aria-invalid={!!domain.error || undefined}
-                  aria-describedby={
-                    domain.error ? "spec-domain-error" : undefined
-                  }
-                  spellCheck={false}
-                />
-                {domain.error && (
-                  <p id="spec-domain-error" className="text-sm text-bad">
-                    {domain.error}
-                  </p>
-                )}
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="spec-legacy">取り込んだ要求（JSON）</Label>
-                <textarea
-                  id="spec-legacy"
-                  className="min-h-24 rounded-lg border border-input bg-transparent px-3 py-2 font-mono text-xs aria-invalid:border-destructive dark:bg-input/30"
-                  value={legacyText}
-                  onChange={(e) => updateJson("legacy", e.target.value)}
-                  aria-invalid={!!legacy.error || undefined}
-                  aria-describedby={
-                    legacy.error ? "spec-legacy-error" : undefined
-                  }
-                  spellCheck={false}
-                />
-                {legacy.error && (
-                  <p id="spec-legacy-error" className="text-sm text-bad">
-                    {legacy.error}
-                  </p>
-                )}
-              </div>
-            </div>
-          </details>
-        )}
-      </div>
-      <div className="min-w-0 space-y-3">
-        <div aria-live="polite" className="text-xs text-ink-3">
-          {previewPending
-            ? "診断を更新しています…"
-            : preview
-              ? `エラー ${errors} 件 · 警告 ${diagnostics.length - errors} 件`
-              : ""}
-        </div>
-        {previewError && (
-          <p role="alert" className="text-sm text-bad">
-            {previewError}
+    <div className="space-y-4 lg:space-y-0">
+      <PaneViewSwitch
+        view={view}
+        onChange={setView}
+        diagnosticCount={preview ? diagnostics.length : null}
+      />
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div
+          className={cn(
+            "min-w-0 space-y-4",
+            view !== "edit" && "hidden lg:block",
+          )}
+        >
+          <MarkdownInput
+            id="spec-markdown"
+            label="仕様の本文（Markdown と ```mermaid の図）"
+            value={content.markdown}
+            onChange={(markdown) => onChange({ ...content, markdown })}
+            textareaRef={textarea}
+            describedBy="spec-markdown-help"
+            invalid={errors > 0}
+          />
+          <p id="spec-markdown-help" className="text-xs text-ink-3">
+            図の書き方は「診断」タブで確かめられます。
           </p>
-        )}
-        <Tabs value={tab} onValueChange={setTab}>
-          <div className="-mx-1 overflow-x-auto px-1">
-            <TabsList>
-              <TabsTrigger value="diagnostics">
-                診断{preview ? `（${diagnostics.length}）` : ""}
-              </TabsTrigger>
-              <TabsTrigger value="preview">プレビュー</TabsTrigger>
-              <TabsTrigger value="diagrams">図</TabsTrigger>
-              <TabsTrigger value="canonical">整形した本文</TabsTrigger>
-              <TabsTrigger value="trace">要求の追跡</TabsTrigger>
-              <TabsTrigger value="suggest">AI の提案</TabsTrigger>
-            </TabsList>
+          {hasLegacy && (
+            <details className="rounded-md border p-3" open>
+              <summary className="cursor-pointer text-sm font-medium">
+                取り込んだ要求（JSON）
+              </summary>
+              <div className="mt-3 space-y-3">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="spec-domain">対象の定義（JSON）</Label>
+                  <textarea
+                    id="spec-domain"
+                    className="min-h-24 rounded-lg border border-input bg-transparent px-3 py-2 font-mono text-xs aria-invalid:border-destructive dark:bg-input/30"
+                    value={domainText}
+                    onChange={(e) => updateJson("domain", e.target.value)}
+                    aria-invalid={!!domain.error || undefined}
+                    aria-describedby={
+                      domain.error ? "spec-domain-error" : undefined
+                    }
+                    spellCheck={false}
+                  />
+                  {domain.error && (
+                    <p id="spec-domain-error" className="text-sm text-bad">
+                      {domain.error}
+                    </p>
+                  )}
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="spec-legacy">取り込んだ要求（JSON）</Label>
+                  <textarea
+                    id="spec-legacy"
+                    className="min-h-24 rounded-lg border border-input bg-transparent px-3 py-2 font-mono text-xs aria-invalid:border-destructive dark:bg-input/30"
+                    value={legacyText}
+                    onChange={(e) => updateJson("legacy", e.target.value)}
+                    aria-invalid={!!legacy.error || undefined}
+                    aria-describedby={
+                      legacy.error ? "spec-legacy-error" : undefined
+                    }
+                    spellCheck={false}
+                  />
+                  {legacy.error && (
+                    <p id="spec-legacy-error" className="text-sm text-bad">
+                      {legacy.error}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </details>
+          )}
+        </div>
+        <div
+          className={cn(
+            "min-w-0 space-y-3",
+            view !== "preview" && "hidden lg:block",
+          )}
+        >
+          <div aria-live="polite" className="text-xs text-ink-3">
+            {previewPending
+              ? "診断を更新しています…"
+              : preview
+                ? `エラー ${errors} 件 · 警告 ${diagnostics.length - errors} 件`
+                : ""}
           </div>
-          <TabsContent value="diagnostics" className="mt-3">
-            {preview ? (
-              <DiagnosticsList diagnostics={diagnostics} onJump={jump} />
-            ) : (
-              <p className="text-sm text-ink-3">
-                本文を入力すると診断が出ます。
-              </p>
-            )}
-          </TabsContent>
-          <TabsContent value="preview" className="mt-3">
-            <MarkdownPreview markdown={content.markdown} mermaid />
-          </TabsContent>
-          <TabsContent value="diagrams" className="mt-3">
-            <MermaidPreview markdown={content.markdown} onJump={jump} />
-          </TabsContent>
-          <TabsContent value="canonical" className="mt-3">
-            <CanonicalView
-              canonical={preview?.canonical ?? null}
-              pending={previewPending}
-              hasErrors={errors > 0}
-            />
-          </TabsContent>
-          <TabsContent value="trace" className="mt-3">
-            <RequirementTrace trace={trace} hasCompiled={compiled !== null} />
-          </TabsContent>
-          <TabsContent value="suggest" className="mt-3">
-            <SuggestionPanel
-              state={suggestions.state}
-              stale={suggestions.stale}
-              blockedReason={suggestBlocked}
-              onRequest={() =>
-                suggestions.request({
-                  markdown: content.markdown,
-                  domain: content.domain,
-                  legacy_ir: content.legacy_ir,
-                })
-              }
-              onApply={suggestions.apply}
-              onReject={suggestions.reject}
-            />
-          </TabsContent>
-        </Tabs>
+          {previewError && (
+            <p role="alert" className="text-sm text-bad">
+              {previewError}
+            </p>
+          )}
+          <Tabs value={tab} onValueChange={setTab}>
+            <div className="-mx-1 overflow-x-auto px-1">
+              <TabsList>
+                <TabsTrigger value="diagnostics">
+                  診断{preview ? `（${diagnostics.length}）` : ""}
+                </TabsTrigger>
+                <TabsTrigger value="preview">プレビュー</TabsTrigger>
+                <TabsTrigger value="diagrams">図</TabsTrigger>
+                <TabsTrigger value="canonical">整形した本文</TabsTrigger>
+                <TabsTrigger value="trace">要求の追跡</TabsTrigger>
+                <TabsTrigger value="suggest">AI の提案</TabsTrigger>
+              </TabsList>
+            </div>
+            <TabsContent value="diagnostics" className="mt-3">
+              {preview ? (
+                <DiagnosticsList diagnostics={diagnostics} onJump={jump} />
+              ) : (
+                <p className="text-sm text-ink-3">
+                  本文を入力すると診断が出ます。
+                </p>
+              )}
+            </TabsContent>
+            <TabsContent value="preview" className="mt-3">
+              <MarkdownPreview markdown={content.markdown} mermaid />
+            </TabsContent>
+            <TabsContent value="diagrams" className="mt-3">
+              <MermaidPreview markdown={content.markdown} onJump={jump} />
+            </TabsContent>
+            <TabsContent value="canonical" className="mt-3">
+              <CanonicalView
+                canonical={preview?.canonical ?? null}
+                pending={previewPending}
+                hasErrors={errors > 0}
+              />
+            </TabsContent>
+            <TabsContent value="trace" className="mt-3">
+              <RequirementTrace trace={trace} hasCompiled={compiled !== null} />
+            </TabsContent>
+            <TabsContent value="suggest" className="mt-3">
+              <SuggestionPanel
+                state={suggestions.state}
+                stale={suggestions.stale}
+                blockedReason={suggestBlocked}
+                onRequest={() =>
+                  suggestions.request({
+                    markdown: content.markdown,
+                    domain: content.domain,
+                    legacy_ir: content.legacy_ir,
+                  })
+                }
+                onApply={suggestions.apply}
+                onReject={suggestions.reject}
+              />
+            </TabsContent>
+          </Tabs>
+        </div>
       </div>
     </div>
   );
