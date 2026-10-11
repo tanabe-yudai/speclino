@@ -415,6 +415,36 @@ def _variables(classes: list[ClassDef], domain: DomainSpec | None) -> dict[str, 
     return out
 
 
+def check_domain(compiled: CompiledSpec, domain: DomainSpec | None) -> DomainSpec:
+    """検査に使う型環境: 仕様の domain に、クラス図の列挙と属性の変数を足したもの。
+
+    ガードは 13 章の規則でクラス図の属性（`triage.has_findings`）を参照するので、検査器にも
+    同じ変数を宣言する（同名はクラス図が優先。compile の解決と同じ）。`str` の属性は検査器の
+    型に無いので入れない（ガードで使えば型の検査で UNKNOWN になる）。
+    """
+    base = domain or DomainSpec()
+    enums = dict(base.enums)
+    for c in compiled.classes:
+        if c.stereotype == "enumeration":
+            enums.setdefault(c.name, list(c.enum_values))
+    opaque = list(base.opaque_types)
+    variables: dict[str, str] = {}
+    for c in compiled.classes:
+        if c.stereotype != "class":
+            continue
+        head = class_variable(c.name)
+        for a in c.attributes:
+            if a.type == "str":
+                continue
+            ty = a.enum if a.type == "enum" and a.enum else _ATTR_EXPR_TYPES[a.type]
+            if ty == "opaque_id" and ty not in opaque:
+                opaque.append(ty)
+            variables.setdefault(f"{head}.{a.name}", ty)
+    for var, ty in base.variables.items():
+        variables.setdefault(var, ty)
+    return base.model_copy(update={"enums": enums, "opaque_types": opaque, "variables": variables})
+
+
 def _enum_pairs(e: Expr) -> list[tuple[Ref, Const]]:
     """`参照 ==/!= 列挙値` の組（列挙値がその属性の列挙に属するかを確かめる）。"""
     if isinstance(e, Not):
@@ -610,7 +640,7 @@ def compile_with_coverage(
         if c.name in class_seen:
             diags.append(_err("E_DUPLICATE_ID", f"クラス {c.name} が複数の図にある", c.span))
         class_seen[c.name] = c.span
-        if c.enumeration:
+        if c.stereotype == "enumeration":
             if (
                 domain
                 and c.name in domain.enums
@@ -634,7 +664,7 @@ def compile_with_coverage(
             ClassDef(
                 id=c.name,
                 name=c.name,
-                stereotype="enumeration" if c.enumeration else "class",
+                stereotype=c.stereotype,
                 attributes=attrs,
                 operations=c.operations,
                 enum_values=c.enum_values,

@@ -501,7 +501,8 @@
             "default": "class",
             "enum": [
               "class",
-              "enumeration"
+              "enumeration",
+              "module"
             ],
             "title": "Stereotype",
             "type": "string"

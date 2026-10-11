@@ -26,6 +26,8 @@ from speclino.conformance.obligation import (
     inexact_reason,
     scope_text,
     solver_limit,
+    unbound_guard_variables,
+    unbound_unknown,
 )
 from speclino.conformance.typing import IRTypeError
 from speclino.domain.code_ir import CodeIR, Path
@@ -187,8 +189,11 @@ def check_state_machine(
     config: EngineConfig,
     *,
     domain: DomainSpec | None = None,
+    bound_variables: frozenset[str] | None = None,
 ) -> list[Finding]:
     """状態遷移図 1 つを Code IR（振る舞い 1 つ）で検査し、Finding を 1 つ返す。
+
+    bound_variables を渡すと、ガードがそれ以外の変数を参照するとき UNKNOWN にする。
 
     domain は属性の列挙型と経路条件の型環境（既定は空 → 属性の対応が無いので UNKNOWN）。
     """
@@ -199,6 +204,11 @@ def check_state_machine(
         claim_scope="memory_state",
         analysis_scope=scope_text(code),
     )
+    free = unbound_guard_variables(
+        [t.guard for t in sm.transitions if t.guard is not None], bound_variables
+    )
+    if free:
+        return [unbound_unknown(ctx, free, code.behavior_id)]
     dom = domain or DomainSpec()
     ty = dom.type_of(sm.attribute)
     if ty is None or not dom.is_enum(ty):

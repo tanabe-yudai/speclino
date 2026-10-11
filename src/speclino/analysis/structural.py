@@ -21,9 +21,10 @@ import ast
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 
+from speclino.analysis.static_types import PURE_FUNCTIONS, has_effectful_arguments
 from speclino.analysis.symbolic_state import ExprBuilder, Frame, RootAlias, SymState
 from speclino.domain.bindings import OperationBinding, OperationContract
-from speclino.frontend.python.index import RepoIndex
+from speclino.frontend.python.index import ModuleInfo, RepoIndex
 from speclino.frontend.python.subset import function_decorators
 
 OPAQUE_STMTS: tuple[type[ast.stmt], ...] = (
@@ -83,7 +84,9 @@ class RegionScanner:
         contracts: dict[str, OperationContract],
         known_pure: set[str],
         depth_limit: int,
+        expand_operations: frozenset[str] = frozenset(),
     ) -> None:
+        self.expand_operations = expand_operations
         self.builder = builder
         self.index = index
         self.op_by_symbol = op_by_symbol
@@ -109,7 +112,7 @@ class RegionScanner:
     ) -> bool:
         for node in stmts:
             for sub in ast.walk(node):
-                if isinstance(sub, ast.Raise):
+                if isinstance(sub, ast.Raise | ast.Assert):
                     scope.channels.add(OUTCOME_CHANNEL)  # 呼出し先の raise も呼出し元へ伝播する
                 elif isinstance(sub, ast.Return):
                     if not nested:
@@ -119,7 +122,11 @@ class RegionScanner:
                 elif isinstance(sub, ast.Call):
                     if not self._scan_call(sub, frame, state, scope, depth):
                         return False
-                elif isinstance(sub, ast.Yield | ast.YieldFrom | ast.Await | ast.Global):
+                elif isinstance(sub, ast.Await):
+                    # await した呼出しは、その呼出し（ast.walk が続けて訪れる）の効果だけを持つ
+                    if not isinstance(sub.value, ast.Call):
+                        return False
+                elif isinstance(sub, ast.Yield | ast.YieldFrom | ast.Global):
                     return False
                 if not nested:
                     # 領域が束縛し得るローカル名を汎用に拾う（for/with/内包表記/match/
@@ -155,25 +162,45 @@ class RegionScanner:
                         if var is not None:
                             scope.channels.add(f"write:{var}")
 
+    def _pure_function(self, call: ast.Call, frame: Frame) -> bool:
+        return is_pure_function_call(self.builder, call, frame)
+
     def _scan_call(
         self, call: ast.Call, frame: Frame, state: SymState, scope: RegionScope, depth: int
     ) -> bool:
-        qual = self.builder.callee_qualname(call.func, frame)
-        if qual is None:
+        cands = self.builder.callee_candidates(call.func, frame)
+        if not cands:
             return False
-        if qual in self.op_by_symbol:
-            op_id, ob = self.op_by_symbol[qual]
-            scope.channels.add(f"call:{op_id}")
-            contract = self.contracts.get(ob.summary_ref or "")
-            if contract is not None:
-                # 契約で変更し得ると宣言された変数は、領域が書き得る観測になる
-                scope.channels |= {f"write:{var}" for var in contract.may_modify}
+        bound = [self.op_by_symbol[c] for c in cands if c in self.op_by_symbol]
+        if bound:
+            # 候補が複数の操作に当たるときは、どれにも触れ得るとする（安全側）
+            for op_id, ob in bound:
+                scope.channels.add(f"call:{op_id}")
+                contract = self.contracts.get(ob.summary_ref or "")
+                if contract is not None:
+                    # 契約で変更し得ると宣言された変数は、領域が書き得る観測になる
+                    scope.channels |= {f"write:{var}" for var in contract.may_modify}
+            if not any(op_id in self.expand_operations for op_id, _ in bound):
+                return True
+            # 名前の一致で対応づけた操作は本体の効果も見る（下で走査する）
+        elif any(c in self.known_pure for c in cands):
             return True
-        if qual in self.known_pure:
-            return True
-        if not self.index.is_function(qual) or depth >= self.depth_limit:
+        elif self._pure_function(call, frame):
+            return True  # 引数の中の呼出しは ast.walk が続けて訪れる
+        else:
+            chain = self.builder.attribute_chain(call.func)
+            if chain is not None and chain[0] not in frame.locals:
+                ctor = self.builder.types.class_of(call.func, frame.module)
+                if ctor is not None and self.builder.types.trivial_class(ctor):
+                    return True  # 引数の中の呼出しは ast.walk が続けて訪れる
+        # 本体に入るのは名前で解決した関数か、展開する操作の宣言型のメソッドだけ（宣言型の
+        # メソッドを self なしで走査すると引数がずれる）
+        target = self.builder.body_target(call, frame, cands, typed_ok=bool(bound))
+        if target is None or depth >= self.depth_limit or _has_unpacking(call):
             return False
-        callee = self.index.function(qual)
+        if target[1] is not None and not isinstance(target[1], RootAlias):
+            return False  # 受け手が入口の引数を根に持たない: self の効果を走査で追えない
+        callee = self.index.function(target[0])
         if function_decorators(callee.node):
             return False
         module = self.index.module(callee.module)
@@ -181,12 +208,86 @@ class RegionScanner:
         inner = Frame(module)
         # 経路列挙の展開（_inline）と同じく、入口引数の別名だけを呼出し先へ渡す。
         # これで呼出し先での束縛済み属性への書込みが呼出し元の変数に対応づく
-        params = [a.arg for a in callee.node.args.args]
-        for i, p in enumerate(params):
-            node = call.args[i] if i < len(call.args) else _keyword(call, p)
+        args = callee.node.args
+        positional = [a.arg for a in [*args.posonlyargs, *args.args]]
+        if target[1] is not None:
+            if not positional:
+                return False
+            inner.bind(positional[0], target[1])
+            positional = positional[1:]
+        for i, p in enumerate([*positional, *(a.arg for a in args.kwonlyargs)]):
+            node = call.args[i] if i < len(positional) and i < len(call.args) else _keyword(call, p)
             if isinstance(node, ast.Name) and isinstance(frame.locals.get(node.id), RootAlias):
-                inner.locals[p] = frame.locals[node.id]
+                inner.bind(p, frame.locals[node.id])
         return self._scan_stmts(list(callee.node.body), inner, state, scope, depth + 1, nested=True)
+
+
+_BUILTINS_MODULE_NAMES = ("builtins", "__builtins__")
+
+
+def module_may_rebind(mod: ModuleInfo, name: str, *, allow_import: str | None = None) -> bool:
+    """モジュールのどこか（最上位に限らず、if/try/with/for/関数・クラス・match 本体の中も
+    含む）で name が再束縛され得るか。分からなければ True（安全側）。
+
+    束縛の構文を1つずつ列挙しない（MatchAs のキャプチャのような Name ノードにならない特殊な
+    形も見落とさないため）。``binding_candidates``（structural.py、S29 の RegionScanner と
+    共有）が ast.iter_fields で全フィールドを汎用に見て、識別子を束縛し得る文字列を返す。
+    ``from x import *`` はどの名前を束縛するか静的に分からないので無条件に対象とし、
+    ``builtins``/``__builtins__`` への参照は setattr 等で外から書き換えられ得るため
+    1 つでもあれば無条件に対象とする（この 2 つは「name と一致するか」では判定できない）。
+    allow_import を渡すと、モジュールの最上位の `import <allow_import>`（別名なし）だけは数えない。
+    """
+    allowed = {
+        id(a)
+        for stmt in mod.tree.body
+        if allow_import is not None and isinstance(stmt, ast.Import)
+        for a in stmt.names
+        if a.name == allow_import and a.asname is None
+    }
+    for node in ast.walk(mod.tree):
+        if id(node) in allowed:
+            continue
+        if isinstance(node, ast.alias) and node.name == "*":
+            return True
+        if isinstance(node, ast.Name) and node.id in _BUILTINS_MODULE_NAMES:
+            return True
+        if name in binding_candidates(node):
+            return True
+    return False
+
+
+# json の関数で許すキーワード引数（default・cls・object_hook などは任意の関数を呼び得る）
+_JSON_KEYWORDS = frozenset(
+    {"indent", "sort_keys", "ensure_ascii", "separators", "allow_nan", "skipkeys"}
+)
+
+
+def is_pure_function_call(builder: ExprBuilder, call: ast.Call, frame: Frame) -> bool:
+    """`PURE_FUNCTIONS` の呼出しで、引数も純粋なもの（経路の解析と領域の走査で同じ判定）。
+
+    組込みの名前はモジュールで再束縛され得ないこと。`json.dumps` のようなドットを含む名前は、
+    根が `import json` で束縛され再束縛され得ないこと。
+    json の関数のキーワード引数は許可した名前だけ。
+    """
+    chain = builder.attribute_chain(call.func)
+    if chain is None or chain[0] in frame.locals or has_effectful_arguments(call):
+        return False
+    if builder.callee_qualname(call.func, frame) not in PURE_FUNCTIONS:
+        return False
+    if len(chain) == 1:
+        return not module_may_rebind(frame.module, chain[0])
+    if len(chain) != 2 or frame.module.imports.get(chain[0]) != "json":
+        return False
+    if module_may_rebind(frame.module, chain[0], allow_import="json"):
+        return False
+    return all(k.arg in _JSON_KEYWORDS for k in call.keywords)
+
+
+def _has_unpacking(call: ast.Call) -> bool:
+    """`f(*xs)` / `f(**kw)`（実引数と引数の対応が静的に決まらない）。"""
+    return any(isinstance(a, ast.Starred) for a in call.args) or any(
+        k.arg is None for k in call.keywords
+    )
 
 
 def _keyword(call: ast.Call, name: str) -> ast.expr | None:
@@ -198,6 +299,8 @@ def _keyword(call: ast.Call, name: str) -> ast.expr | None:
 
 __all__ = [
     "OPAQUE_STMTS",
+    "is_pure_function_call",
+    "module_may_rebind",
     "OUTCOME_CHANNEL",
     "RegionScanner",
     "RegionScope",

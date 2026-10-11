@@ -215,3 +215,12 @@ def test_illegal_write_after_undecided_initial_write_is_violated() -> None:
     f = _one(_code(_path("p1", TRUE, ["PENDING", "SHIPPED"])))
     assert (f.verdict, f.category) == ("VIOLATED", "state_mismatch")
     assert "PENDING → SHIPPED" in f.message
+
+
+def test_guard_variable_without_binding_is_unknown() -> None:
+    code = _code(_path("p1", is_("PENDING"), ["PAID"]), _rest("p2", ne(STATUS, S("PENDING"))))
+    fs = check_state_machine(
+        _sm(guarded=True), code, CONFIG, domain=DOMAIN, bound_variables=frozenset({"order.status"})
+    )
+    assert fs[0].verdict == "UNKNOWN"
+    assert "order.paid" in fs[0].message

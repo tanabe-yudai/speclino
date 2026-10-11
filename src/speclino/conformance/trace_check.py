@@ -43,6 +43,8 @@ from speclino.conformance.obligation import (
     scope_text,
     solver_limit,
     spans_to_refs,
+    unbound_guard_variables,
+    unbound_unknown,
 )
 from speclino.conformance.typing import IRTypeError
 from speclino.domain.code_ir import CodeIR, Path
@@ -233,6 +235,7 @@ def check_trace(
     domain: DomainSpec | None = None,
     resolve_operation: ResolveOperation = _identity,
     known_operations: frozenset[str] | None = None,
+    bound_variables: frozenset[str] | None = None,
 ) -> list[Finding]:
     """順序・包含の義務 1 つを Code IR（入口の振る舞い 1 つ）で検査し、Finding を 1 つ返す。
 
@@ -240,6 +243,7 @@ def check_trace(
     resolve_operation は図の `<Class>.<method>` を Code IR の業務操作 ID に写す（None は対応なし）。
     known_operations を渡すと、写した先がその集合（Code IR / contracts に現れる操作 ID）に無いものも
     対応なし → UNKNOWN にする。
+    bound_variables を渡すと、ガードがそれ以外の変数を参照するとき UNKNOWN にする。
     """
     ctx = ObligationContext(
         requirement_id=ob.id,
@@ -249,6 +253,11 @@ def check_trace(
         analysis_scope=scope_text(code),
         spec_refs=tuple(spans_to_refs(ob.spans, ob.id)),
     )
+    free = unbound_guard_variables(
+        [t.guard for t in ob.automaton.transitions if t.guard is not None], bound_variables
+    )
+    if free:
+        return [unbound_unknown(ctx, free, code.behavior_id)]
     a, unbound = normalize(ob.automaton, resolve_operation, ob.entry_operation, known_operations)
     if unbound:
         return [

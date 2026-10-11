@@ -10,9 +10,12 @@
 - 操作 `<Class>.<method>`: bindings の operations に同じキーがあればそのシンボル、無ければシンボルが
   `.<Class>.<method>` で終わる（または一致する）operation が 1 つだけのときそのシンボル。最後に
   解析器が実際に使う操作 ID（同じシンボルのキーのうち最後のもの）にそろえる（別名のキーがあっても
-  Code IR のイベントと同じ ID になる）。見つからない・複数なら None（UNKNOWN）
+  Code IR のイベントと同じ ID になる）。複数なら None（UNKNOWN）
 - 入口 `<Class>.<method>`: behaviors に同じキーがあればそれ、無ければ entrypoint が
-  `.<Class>.<method>` で終わる behavior が 1 つだけのときそれ。見つからなければ None（UNKNOWN）
+  `.<Class>.<method>` で終わる behavior が 1 つだけのときそれ。複数なら None（UNKNOWN）
+- どちらも bindings に無ければ、名前の一致で見つけたコードの関数（`implicit`。クラス図の
+  `<Class>` を一意なクラス、`<<module>>` なら一意なモジュールとして探し、そこに `<method>` が
+  定義されているもの）を図の名前の ID で使う。見つからなければ None（UNKNOWN）
 
 DB に触れるのは `make_knowledge_resolver` の返す関数だけ（knowledge_registry は関数の中で
 import する。check_pipeline ← knowledge_registry の循環を避けるため）。
@@ -21,12 +24,13 @@ import する。check_pipeline ← knowledge_registry の循環を避けるた�
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Awaitable, Callable, Iterable
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Iterable, Mapping
+from dataclasses import dataclass, field
+from typing import Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from speclino.domain.bindings import Bindings
+from speclino.domain.bindings import BehaviorBinding, Bindings, OperationBinding
 from speclino.domain.code_ir import CodeIR
 from speclino.domain.domain_spec import DomainSpec
 from speclino.domain.knowledge import Bundle, ResolvedKnowledge, SpecContent
@@ -54,24 +58,37 @@ def _tail_matches(symbol: str, name: str) -> bool:
 
 @dataclass(frozen=True)
 class OperationResolver:
-    """図の名前（`<Class>.<method>`）を bindings の操作 ID・behavior ID に写す。"""
+    """図の名前（`<Class>.<method>`）を bindings の操作 ID・behavior ID に写す。
+
+    implicit は名前の一致で見つけたコードの関数（図の名前 → 完全修飾名。D9 の既定）。bindings に
+    対応が無い名前だけに使い、操作 ID・behavior ID は図の名前そのものにする。解析に渡す対応は
+    `analysis_bindings` で bindings に足して作る。
+    """
 
     bindings: Bindings
+    implicit: Mapping[str, str] = field(default_factory=dict)
 
-    def operation(self, name: str) -> str | None:
+    def explicit_operation(self, name: str) -> str | None | Literal[False]:
+        """bindings だけでの解決。False は「候補が複数で決まらない」（名前の一致に進まない）。"""
         explicit = self.bindings.operations.get(name)
         if explicit is not None:
-            symbol = explicit.symbol
-        else:
-            symbols = {
-                ob.symbol
-                for ob in self.bindings.operations.values()
-                if _tail_matches(ob.symbol, name)
-            }
-            if len(symbols) != 1:
-                return None
-            symbol = next(iter(symbols))
-        return self._analyzer_operation_id(symbol)
+            return self._analyzer_operation_id(explicit.symbol)
+        symbols = {
+            ob.symbol for ob in self.bindings.operations.values() if _tail_matches(ob.symbol, name)
+        }
+        if len(symbols) > 1:
+            return False
+        if len(symbols) == 1:
+            return self._analyzer_operation_id(next(iter(symbols)))
+        return None
+
+    def operation(self, name: str) -> str | None:
+        found = self.explicit_operation(name)
+        if found is False:
+            return None
+        if found is not None:
+            return found
+        return name if name in self.implicit else None
 
     def _analyzer_operation_id(self, symbol: str) -> str:
         """解析器が Code IR のイベントに付ける操作 ID。
@@ -82,7 +99,7 @@ class OperationResolver:
         """
         return [op_id for op_id, ob in self.bindings.operations.items() if ob.symbol == symbol][-1]
 
-    def behavior(self, entry: str) -> str | None:
+    def explicit_behavior(self, entry: str) -> str | None | Literal[False]:
         if entry in self.bindings.behaviors:
             return entry
         candidates = [
@@ -90,10 +107,43 @@ class OperationResolver:
             for bid, b in sorted(self.bindings.behaviors.items())
             if _tail_matches(b.entrypoint, entry)
         ]
-        return candidates[0] if len(candidates) == 1 else None
+        if len(candidates) > 1:
+            return False
+        return candidates[0] if candidates else None
+
+    def behavior(self, entry: str) -> str | None:
+        found = self.explicit_behavior(entry)
+        if found is False:
+            return None
+        if found is not None:
+            return found
+        return entry if entry in self.implicit else None
+
+    def analysis_bindings(self) -> Bindings:
+        """解析に渡す対応: bindings に、名前の一致で見つけた操作と入口を足したもの。
+
+        入口は変数の対応を持たない（ガードが変数を参照すれば UNKNOWN になる）。
+        """
+        if not self.implicit:
+            return self.bindings
+        operations = dict(self.bindings.operations)
+        behaviors = dict(self.bindings.behaviors)
+        for name, symbol in sorted(self.implicit.items()):
+            if self.explicit_operation(name) is None:
+                operations[name] = OperationBinding(symbol=symbol, claim_scope="command_invocation")
+            if self.explicit_behavior(name) is None:
+                behaviors[name] = BehaviorBinding(entrypoint=symbol)
+        return self.bindings.model_copy(update={"operations": operations, "behaviors": behaviors})
+
+    def implicit_operations(self) -> frozenset[str]:
+        """名前の一致で足した操作 ID。
+
+        解析はイベントを出したうえで本体も展開する（効果を仮定しない）。
+        """
+        return frozenset(n for n in self.implicit if self.explicit_operation(n) is None)
 
     def known_operations(self, codes: Iterable[CodeIR]) -> frozenset[str]:
-        """bindings の操作 ID と、Code IR に現れた操作 ID。"""
+        """bindings の操作 ID と、名前の一致で見つけた操作と、Code IR に現れた操作 ID。"""
         seen = {
             e.operation
             for code in codes
@@ -101,7 +151,7 @@ class OperationResolver:
             for e in path.events
             if e.operation is not None
         }
-        return frozenset({*self.bindings.operations, *seen})
+        return frozenset({*self.bindings.operations, *self.implicit, *seen})
 
 
 @dataclass(frozen=True)

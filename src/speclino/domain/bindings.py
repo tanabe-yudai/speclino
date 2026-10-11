@@ -12,6 +12,8 @@ from speclino.domain.common import SCHEMA_VERSION, ClaimScope, IRModel
 # 変数の対応先: "user.is_admin"（入口引数の属性）または "pure_call:pkg.mod.Cls.method"（契約済みの
 # 純粋な呼出しの結果を名前付き変数として扱う拡張。SpecLino 自己検証に必要）
 _VAR_SOURCE_RE = re.compile(r"^(pure_call:)?[A-Za-z_]\w*(\.[A-Za-z_]\w*)*$")
+_IDENT_RE = re.compile(r"^[A-Za-z_]\w*$")
+_DOTTED_RE = re.compile(r"^[A-Za-z_]\w*(\.[A-Za-z_]\w*)*$")
 _ARG_BINDING_RE = re.compile(r"^(positional:\d+|keyword:[A-Za-z_]\w*)$")
 
 
@@ -52,10 +54,24 @@ class Bindings(IRModel):
     schema_version: Literal["0.1"] = SCHEMA_VERSION
     behaviors: dict[str, BehaviorBinding] = Field(default_factory=dict)
     operations: dict[str, OperationBinding] = Field(default_factory=dict)
+    modules: dict[str, str] = Field(
+        default_factory=dict,
+        description="<<module>> の名前 → 完全修飾のモジュール名（例 speclino.mcp_server.server）",
+    )
     known_pure: list[str] = Field(
         default_factory=list,
         description="副作用が無く結果を検査に使わない外部呼出し（例 time.monotonic）",
     )
+
+    @field_validator("modules")
+    @classmethod
+    def _check_modules(cls, v: dict[str, str]) -> dict[str, str]:
+        for name, qual in v.items():
+            if not _IDENT_RE.match(name):
+                raise ValueError(f"modules のキーが識別子でない: {name!r}")
+            if not _DOTTED_RE.match(qual):
+                raise ValueError(f"modules[{name}] がドット区切りの識別子でない: {qual!r}")
+        return v
 
     def operation_by_symbol(self, symbol: str) -> tuple[str, OperationBinding] | None:
         for op_id, ob in self.operations.items():

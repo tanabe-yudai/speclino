@@ -29,12 +29,19 @@ def attribute_chain(node: ast.expr) -> list[str] | None:
     return None
 
 
+FuncDef = ast.FunctionDef | ast.AsyncFunctionDef
+
+
 @dataclass(frozen=True)
 class FunctionInfo:
     qualname: str  # 完全修飾（pkg.mod.func または pkg.mod.Cls.method）
     module: str
-    node: ast.FunctionDef
+    node: FuncDef
     path: Path
+
+    @property
+    def is_async(self) -> bool:
+        return isinstance(self.node, ast.AsyncFunctionDef)
 
     @property
     def line_start(self) -> int:
@@ -51,7 +58,7 @@ class ModuleInfo:
     path: Path
     tree: ast.Module
     imports: dict[str, str] = field(default_factory=dict)  # ローカル名 → 完全修飾名
-    functions: dict[str, ast.FunctionDef] = field(default_factory=dict)
+    functions: dict[str, FuncDef] = field(default_factory=dict)
     classes: dict[str, ast.ClassDef] = field(default_factory=dict)
     enums: dict[str, list[str]] = field(default_factory=dict)  # Enum クラス名 → 値名
 
@@ -73,7 +80,7 @@ def _collect(mod: ModuleInfo) -> None:
         elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
             for a in node.names:
                 mod.imports[a.asname or a.name] = f"{node.module}.{a.name}"
-        elif isinstance(node, ast.FunctionDef):
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             mod.functions[node.name] = node
         elif isinstance(node, ast.ClassDef):
             mod.classes[node.name] = node
@@ -140,10 +147,23 @@ class RepoIndex:
         if len(rest) == 1 and rest[0] in mod.functions:
             return FunctionInfo(qualname, mod.name, mod.functions[rest[0]], mod.path)
         if len(rest) == 2 and rest[0] in mod.classes:
+            method: FuncDef | None = None
             for s in mod.classes[rest[0]].body:
-                if isinstance(s, ast.FunctionDef) and s.name == rest[1]:
-                    return FunctionInfo(qualname, mod.name, s, mod.path)
+                if isinstance(s, ast.FunctionDef | ast.AsyncFunctionDef) and s.name == rest[1]:
+                    method = s  # 後の定義が勝つ
+            if method is not None:
+                return FunctionInfo(qualname, mod.name, method, mod.path)
         raise SymbolNotFound(f"関数が見つからない: {qualname}")
+
+    def class_def(self, qualname: str) -> tuple[ModuleInfo, ast.ClassDef] | None:
+        """`pkg.mod.Cls` のモジュール直下のクラス定義。無ければ None。"""
+        found = self.split_symbol(qualname)
+        if found is None:
+            return None
+        mod, rest = found
+        if len(rest) == 1 and rest[0] in mod.classes:
+            return mod, mod.classes[rest[0]]
+        return None
 
     def enum_values(self, qualname: str) -> list[str] | None:
         found = self.split_symbol(qualname)

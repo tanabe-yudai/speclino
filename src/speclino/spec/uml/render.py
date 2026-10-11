@@ -34,8 +34,9 @@ def _requirements(compiled: CompiledSpec) -> str:
 
 def _class_lines(c: ClassDef) -> list[str]:
     members: list[str] = []
+    if c.stereotype != "class":
+        members.append(f"        <<{c.stereotype}>>")
     if c.stereotype == "enumeration":
-        members.append("        <<enumeration>>")
         members.extend(f"        {v}" for v in c.enum_values)
     for a in c.attributes:
         type_name = a.enum if a.type == "enum" else a.type

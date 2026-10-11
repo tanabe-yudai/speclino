@@ -74,5 +74,5 @@ def unsupported_expr(expr: ast.expr) -> Unsupported | None:
             return Unsupported(f"{type(expr).__name__} は対応外の式", expr.lineno)
 
 
-def function_decorators(fn: ast.FunctionDef) -> list[str]:
+def function_decorators(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]:
     return [ast.unparse(d) for d in fn.decorator_list]

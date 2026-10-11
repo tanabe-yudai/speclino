@@ -39,10 +39,21 @@ CORPUS = [
     FULL.replace("cancel-flow#r", "cancel-flow#nothing"),
     FULL + "```mermaid\n%%@ id: x\nsequenceDiagram\n",
     FULL.replace("    r -->|[e4]| z", '    r -->|[e4] "x" & y| z'),
+    FULL.replace(
+        "    class OrderStatus {",
+        "    class reg {\n        <<module>>\n        int qty\n    }\n    class OrderStatus {",
+    ),
+    FULL.replace("<<enumeration>>", "<<enumeration>>\n        <<module>>"),
 ]
 
 
-@pytest.mark.parametrize("md", CORPUS)
+MODULE_OK = FULL.replace(
+    "    class OrderStatus {",
+    "    class reg {\n        <<module>>\n        run(a)\n    }\n    class OrderStatus {",
+)
+
+
+@pytest.mark.parametrize("md", [*CORPUS, MODULE_OK])
 def test_every_token_is_classified(md: str) -> None:
     res, coverage = compile_with_coverage(md, domain=None, legacy_ir=[])
     assert coverage.tokens, "トークンが 1 つも無い"
@@ -646,3 +657,20 @@ def test_per_line_markdown_diagnostics_are_capped() -> None:
     assert res.compiled is None
     assert len(res.diagnostics) <= 21
     assert "ほか" in res.diagnostics[19].message
+
+
+def test_module_stereotype_keeps_existing_ir_hash() -> None:
+    """既存の文書（<<module>> なし）の IR は stereotype の追加で変わらない。"""
+    a = compile_spec(FULL, domain=None, legacy_ir=[LEGACY]).compiled
+    assert a is not None
+    assert {c.stereotype for c in a.classes} == {"class", "enumeration"}
+    dumped = a.classes[0].model_dump()
+    assert dumped["stereotype"] == "class" and set(dumped) == {
+        "id",
+        "name",
+        "stereotype",
+        "attributes",
+        "operations",
+        "enum_values",
+        "span",
+    }

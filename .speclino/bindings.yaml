@@ -6,6 +6,9 @@ behaviors:
       call.tool: call.tool
       permitted: pure_call:self.permissions.allows
       budget_exhausted: pure_call:self.budget.is_exhausted
+      # 図（SPEC-AI-001 tool-gate）の変数名。旧形式の仕様は上の名前を使う
+      toolCall.permitted: pure_call:self.permissions.allows
+      toolCall.budget_exhausted: pure_call:self.budget.is_exhausted
   gate_decide:
     entrypoint: speclino.conformance.gate.decide_gate
     variables:
@@ -13,6 +16,11 @@ behaviors:
       has_mandatory: t.has_mandatory
       has_blocking: t.has_blocking
       has_waived: t.has_waived
+      # 図（SPEC-SYS-001 gate-decision）の変数名。旧形式の仕様は上の名前を使う
+      triage.has_findings: t.has_findings
+      triage.has_mandatory: t.has_mandatory
+      triage.has_blocking: t.has_blocking
+      triage.has_waived: t.has_waived
   run_freshness:
     entrypoint: speclino.services.run_freshness.should_publish
     variables:
@@ -26,19 +34,19 @@ behaviors:
       test.timed_out: timed_out
 operations:
   tool_execute:
-    symbol: self.registry.execute
+    symbol: speclino.agent.gateway.ToolRegistry.execute
     claim_scope: command_invocation
     argument_bindings: {}
   audit_denied:
-    symbol: self.audit.record_denied
+    symbol: speclino.agent.gateway.AuditSink.record_denied
     claim_scope: command_invocation
     argument_bindings: {}
   audit_allowed:
-    symbol: self.audit.record_allowed
+    symbol: speclino.agent.gateway.AuditSink.record_allowed
     claim_scope: command_invocation
     argument_bindings: {}
   budget_charge:
-    symbol: self.budget.charge
+    symbol: speclino.agent.budget.BudgetState.charge
     claim_scope: command_invocation
     argument_bindings: {}
   deny_result:
@@ -84,3 +92,10 @@ operations:
 known_pure:
   - time.monotonic
   - speclino.conformance.gate._blocking_reason
+# 図の <<module>> の名前 → モジュール（同名のファイルが複数あるもの）
+modules:
+  mcp_server: speclino.mcp_server.server
+  knowledge_chat: speclino.services.knowledge_chat
+  knowledge_sync: speclino.services.knowledge_sync
+  observability: speclino.services.observability
+  members: speclino.services.members

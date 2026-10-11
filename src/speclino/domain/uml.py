@@ -41,7 +41,7 @@ class ClassOperation(IRModel):
 class ClassDef(IRModel):
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
-    stereotype: Literal["class", "enumeration"] = "class"
+    stereotype: Literal["class", "enumeration", "module"] = "class"
     attributes: list[ClassAttribute] = Field(default_factory=list)
     operations: list[ClassOperation] = Field(default_factory=list)
     enum_values: list[str] = Field(default_factory=list)

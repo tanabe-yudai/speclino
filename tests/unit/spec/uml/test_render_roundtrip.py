@@ -15,7 +15,7 @@ from speclino.domain.expr import BOOL_TYPE, INT_TYPE, Binary, Const, Expr, Nary,
 from speclino.spec.uml.compile import compile_spec, semantic_dump
 from speclino.spec.uml.guard import render_expr
 from speclino.spec.uml.render import render
-from tests.unit.spec.uml.samples import FULL
+from tests.unit.spec.uml.samples import FULL, block
 
 ENUMS = {"E0": ["A", "B", "C"], "E1": ["X", "Y"]}
 CLASSES = ["C0", "C1", "C2"]
@@ -325,3 +325,26 @@ def test_render_full_sample() -> None:
     # アクティビティ図の辺のラベルは引用符で囲む（Mermaid は `|[` で始まるラベルを描けない）
     assert '    d -->|"[e2] before.order.paid"| r' in canonical
     assert semantic_dump(_compile_ok(canonical)) == semantic_dump(first)
+
+
+def test_module_roundtrip() -> None:
+    md = block(
+        "%%@ id: mods",
+        "classDiagram",
+        "    class OrderService {",
+        "        checkout(order)",
+        "    }",
+        "    class knowledge_registry {",
+        "        <<module>>",
+        "        approve(order)",
+        "        list_bundles()",
+        "    }",
+    )
+    first = compile_spec(md, domain=None, legacy_ir=[]).compiled
+    assert first is not None
+    text = render(first)
+    assert "<<module>>" in text
+    second = compile_spec(text, domain=None, legacy_ir=[]).compiled
+    assert second is not None
+    assert [c.model_dump() for c in second.classes] == [c.model_dump() for c in first.classes]
+    assert second.ir_hash == first.ir_hash
