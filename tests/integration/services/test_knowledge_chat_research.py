@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import uuid
@@ -208,3 +209,32 @@ async def test_research_stream_saves_sources_and_settles(world: World) -> None:
         "web_search": 1,
     }
     assert "dev-guide" not in audit and "src/app.py" not in audit and "AGENTS" not in audit
+
+
+async def test_research_stream_guards_thoughts_and_tool_texts(world: World) -> None:
+    """思考の要約と調べていることの文も、説明と同じ出力の検査にかける（出典は照合しない）。"""
+    model_id = "gemini-9.9-secret"
+    deps = dataclasses.replace(world.deps, model_ids=(model_id,))
+    world.llm.thought = f"私は {model_id} で考えます"
+    world.llm.steps = [[ToolCall("repo_read", {"repo": world.repo, "path": model_id}, id="r")]]
+    async with deps.session_factory() as s, s.begin():
+        chat = await kc.create_chat(s, workspace=world.slug, owner="alice", kind="instructions")
+    events = [
+        ev
+        async for ev in kc.stream_message(
+            deps,
+            workspace=world.slug,
+            owner="alice",
+            chat_id=chat.id,
+            text="指示書を直したい",
+            idempotency_key="key-research-2",
+            editor_text="# 指示\n",
+        )
+    ]
+    shown = "".join(e.text or "" for e in events if e.type in ("thought", "tool", "delta"))
+    assert model_id not in shown
+    assert [e.text for e in events if e.type == "tool"] == [kc.TOOL_ACTIVITY_FALLBACK]
+    assert events[-1].type == "done"
+    turn = events[-1].turn
+    assert turn is not None and turn.reply is not None
+    assert turn.reply.text == "既存の指示と食い違わない形にしました"  # 説明そのものは差し止めない

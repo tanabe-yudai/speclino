@@ -13,6 +13,9 @@
 - 調べてから答える（ストリームの発言、`ChatDeps.research`）: 読むだけの関数で承認済みの知識・
   登録済みのリポジトリ・Web を調べてから最後の JSON を流す（services/knowledge_chat_research.py）。
   予約はターンの予算で 1 回、出典はサーバが組み立てて返答に残し、監査には関数の種類と回数だけ
+- 出力の検査: 説明（explanation）にモデル ID・規則の断片がそのまま含まれていれば、固定の断りの文に
+  置き換えて提案を落とす。ストリームでは送る前に累積を照合し、境界をまたぐモデル ID に備えて
+  末尾を保留して送る。下書き（提案の本文）は検査しない（本文に Gemini CLI 等の正当な記述がありうる）
 """
 
 from __future__ import annotations
@@ -74,6 +77,10 @@ from speclino.services.knowledge_chat_prompt import (
     PromptTooLarge,
     build_chat_prompt,
     build_summary_prompt,
+    chat_rules,
+    leak_rules,
+    research_rules,
+    summary_rules,
 )
 from speclino.services.knowledge_chat_proposal import (
     build_proposal,
@@ -90,6 +97,14 @@ from speclino.services.knowledge_chat_research import (
     turn_budget,
 )
 from speclino.services.knowledge_chat_tools import ChatTools
+from speclino.services.llm_guardrails import (
+    StreamLeakGuard,
+    find_leak,
+    json_strings,
+    leak_patterns,
+    prompt_fragments,
+    unmentioned,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +133,10 @@ _EXPLANATION_MAX_CHARS = 16_000
 _SUMMARY_PART_MAX_CHARS = 400
 # 調べた返答に足す出典と検索の候補の表示の大きさの上界（会話の大きさの見積もりに足す）
 _RESEARCH_EXTRA_MAX_BYTES = SEARCH_SUGGESTIONS_MAX * SEARCH_SUGGESTION_MAX_BYTES + 32 * 1024
+# 出力の検査で説明を差し止めたときに、代わりに見せる文（提案は落とす）
+GUARDRAIL_REFUSAL = "その質問にはお答えできません。知識の下書きについてならお手伝いします。"
+# 調べていることの文が出力の検査に掛かったときに、代わりに見せる文
+TOOL_ACTIVITY_FALLBACK = "調べています"
 
 
 class ChatError(Exception):
@@ -162,6 +181,8 @@ class ChatDeps:
     today: Callable[[], date] = field(default=_utc_today)
     # 調べてから答える配線。None か、LLM が関数の呼出しに対応しなければ従来どおり 1 回で答える
     research: ChatResearch | None = None
+    # 設定にある LLM のモデル ID（説明に漏れていないかの照合に使う）
+    model_ids: tuple[str, ...] = ()
 
 
 # ------------------------------------------------------------------ 監査（C9）
@@ -175,15 +196,19 @@ async def record_chat_event(
     outcome: Literal["created", "deleted", "done", "failed", "purged"],
     message_count: int,
     error: ChatErrorCode | None = None,
+    guardrail_blocked: bool = False,
     tools: dict[str, int] | None = None,
 ) -> None:
-    """会話の監査。残すのは chat_id・件数・成否（と固定のエラーコード）だけ。本文・題は残さない。
+    """会話の監査。残すのは chat_id・件数・成否（と固定のエラーコード、出力の検査で差し止めたか）
+    だけ。本文・題・差し止めた中身は残さない。
 
     `tools` は調べた関数の種類ごとの回数（引数・結果の中身は残さない）。
     """
     detail: dict[str, Any] = {"chat_id": chat_id, "message_count": message_count}
     if error is not None:
         detail["error"] = error
+    if guardrail_blocked:
+        detail["guardrail_blocked"] = True
     if tools:
         detail["tools"] = dict(sorted(tools.items()))
     await AuditRepository(session).record(
@@ -444,6 +469,7 @@ async def _finish_turn(
     reply: ChatMessage | None,
     error: ChatErrorCode | None = None,
     tool_counts: dict[str, int] | None = None,
+    guardrail_blocked: bool = False,
 ) -> ChatTurn | None:
     """持ち主と保留の発言を確かめてから確定する。会話・発言が消えていれば何もせず None。"""
     async with deps.session_factory() as s, s.begin():
@@ -470,6 +496,7 @@ async def _finish_turn(
             outcome=status,
             message_count=len(messages),
             error=error,
+            guardrail_blocked=guardrail_blocked,
             tools=tool_counts,
         )
     return ChatTurn(chat=saved, user_message_id=message_id, reply=reply)
@@ -623,13 +650,26 @@ async def _complete_turn(
     gen: JsonGeneration,
     key: str,
     editor_text: str,
+    check: _LeakCheck,
+    blocked: bool = False,
     researched: ResearchDone | None = None,
 ) -> ChatTurn:
     """LLM の応答を検証して返答を確定する（提案の検証は最後に 1 度だけ）。
 
-    調べた返答には、サーバが組み立てた出典と検索の候補の表示を添える。
+    説明・提案に漏れがある（`blocked` はストリームの途中で見つけたとき）なら、説明を固定の
+    断りの文に置き換えて提案を落とす。調べた返答には、サーバが組み立てた出典と検索の候補の
+    表示を添える（差し止めた返答には添えない）。
     """
     explanation, proposal_data = _parse_reply(gen)
+    if (
+        blocked
+        or find_leak(explanation, secrets=check.explanation)
+        or find_leak(json_strings(proposal_data), secrets=check.proposal)
+    ):
+        logger.warning("会話の AI の返答を出力の検査で差し止めた")
+        blocked = True
+        explanation, proposal_data = GUARDRAIL_REFUSAL, None
+    shown = researched if not blocked else None
     proposal: ChatProposal | None = await build_proposal(
         ctx.chat.kind,
         proposal_data,
@@ -647,8 +687,8 @@ async def _complete_turn(
         idempotency_key=key,
         status="done",
         created_at=_now(),
-        sources=(researched.sources or None) if researched else None,
-        search_suggestions=(researched.search_suggestions or None) if researched else None,
+        sources=(shown.sources or None) if shown else None,
+        search_suggestions=(shown.search_suggestions or None) if shown else None,
     )
     extras = {"sources", "search_suggestions"}
     if len(reply.model_dump_json(exclude=extras).encode()) > REPLY_MAX_BYTES:
@@ -662,6 +702,7 @@ async def _complete_turn(
             cid=cid,
             message_id=ctx.message_id,
             reply=reply,
+            guardrail_blocked=blocked,
             tool_counts=researched.tool_counts if researched else None,
         )
     )
@@ -673,6 +714,42 @@ async def _complete_turn(
 def _proposes_name(ctx: _Context) -> bool:
     """新規作成の会話（まだ知識に結び付かない。規約を除く）では、名前の案も出させる（C4）。"""
     return ctx.chat.kind != "policy" and ctx.chat.artifact_id is None
+
+
+@dataclass(frozen=True)
+class _LeakCheck:
+    """出力に出てはいけないもの。
+
+    - 説明: モデル ID と、種類に依らない会話の規則の断片（種類ごとの規則は、説明で正当に
+      言い換えずに繰り返しうるので照合しない）
+    - 提案の本文: 種類ごとの規則を含む規則の断片だけ（本文には Gemini CLI などモデルに触れる
+      正当な記述がありうる）
+    """
+
+    model_ids: tuple[str, ...]
+    common: tuple[str, ...]
+    proposal: tuple[str, ...]
+
+    @property
+    def explanation(self) -> tuple[str, ...]:
+        return leak_patterns(self.model_ids) + self.common
+
+
+def _leak_check(
+    deps: ChatDeps, ctx: _Context, text: str, editor_text: str, *, researching: bool = False
+) -> _LeakCheck:
+    """利用者がこの回までに書いたモデル ID は、AI が繰り返しても漏れではないので照合から外す。
+
+    調べるターンは、深掘りと調査の規則も照合する（説明・提案の本文の両方）。
+    """
+    said = [m.text for m in ctx.chat.messages if m.role == "user"]
+    propose_name = _proposes_name(ctx)
+    extra = (research_rules(),) if researching else ()
+    return _LeakCheck(
+        unmentioned(deps.model_ids, text, editor_text, *said),
+        tuple(prompt_fragments(chat_rules(ctx.chat.kind, propose_name=propose_name), *extra)),
+        tuple(prompt_fragments(leak_rules(ctx.chat.kind, propose_name=propose_name), *extra)),
+    )
 
 
 def _chat_prompt(ctx: _Context, text: str, editor_text: str, tools: ChatTools | None = None) -> str:
@@ -744,6 +821,7 @@ async def post_message(
             gen=gen,
             key=idempotency_key,
             editor_text=editor_text,
+            check=_leak_check(deps, ctx, text, editor_text),
         )
     except PromptTooLarge:
         raise await fail("input_too_large") from None
@@ -928,6 +1006,12 @@ async def stream_message(
     researched: ResearchDone | None = None
     try:
         tools = await _chat_tools(deps, workspace)
+        # 説明は照合してから送る。漏れが見つかったら以後の説明・下書きを送らない（done の返答が
+        # 断りの文になる）。思考の要約も同じ照合をかけ、漏れたら以後の要約だけを止める。
+        # 調べていることの文（モデルが渡したパス・問いを含む）も照合し、漏れたら一般の文にする
+        check = _leak_check(deps, ctx, text, editor_text, researching=tools is not None)
+        guard = StreamLeakGuard(check.explanation, model_ids=check.model_ids)
+        thoughts = StreamLeakGuard(check.explanation, model_ids=check.model_ids)
         async for item in _stream_llm(
             deps,
             workspace=workspace,
@@ -942,17 +1026,37 @@ async def stream_message(
             elif isinstance(item, JsonGeneration):
                 gen = item
             elif isinstance(item, Thought):
-                yield ChatStreamEvent(type="thought", text=item.text)
+                if guard.blocked:
+                    thoughts.block()
+                if safe_thought := thoughts.feed(item.text):
+                    yield ChatStreamEvent(type="thought", text=safe_thought)
             elif isinstance(item, ToolActivity):
-                yield ChatStreamEvent(type="tool", text=item.text)
+                if rest_thought := thoughts.flush():
+                    yield ChatStreamEvent(type="thought", text=rest_thought)
+                activity = item.text
+                if find_leak(activity, secrets=check.explanation):
+                    activity = TOOL_ACTIVITY_FALLBACK
+                yield ChatStreamEvent(type="tool", text=activity)
             else:
-                if piece := explanation_stream.feed(item):
-                    yield ChatStreamEvent(type="delta", text=piece)
-                if drafts and draft_field and (snap := drafts.feed(item)) is not None:
+                if rest_thought := thoughts.flush():
+                    yield ChatStreamEvent(type="thought", text=rest_thought)
+                if (piece := explanation_stream.feed(item)) and (safe := guard.feed(piece)):
+                    yield ChatStreamEvent(type="delta", text=safe)
+                snap = drafts.feed(item) if drafts else None
+                if snap is not None and find_leak(snap, secrets=check.proposal):
+                    guard.block()
+                if draft_field and snap is not None and not guard.blocked:
                     yield ChatStreamEvent(type="draft", field=draft_field, text=snap)
         if gen is None:
             raise ChatError("chat_failed")
-        if drafts and draft_field and (snap := drafts.finish()) is not None:
+        snap = drafts.finish() if drafts else None
+        if snap is not None and find_leak(snap, secrets=check.proposal):
+            guard.block()
+        if rest_thought := thoughts.flush():
+            yield ChatStreamEvent(type="thought", text=rest_thought)
+        if rest := guard.flush():
+            yield ChatStreamEvent(type="delta", text=rest)
+        if draft_field and snap is not None and not guard.blocked:
             yield ChatStreamEvent(type="draft", field=draft_field, text=snap)
         turn = await _complete_turn(
             deps,
@@ -963,6 +1067,8 @@ async def stream_message(
             gen=gen,
             key=idempotency_key,
             editor_text=editor_text,
+            check=check,
+            blocked=guard.blocked,
             researched=researched,
         )
     except PromptTooLarge:
@@ -1011,6 +1117,12 @@ async def summarize(
     if not all(isinstance(p, str) for p in parts):
         raise ChatError("chat_failed")
     what, why, dropped = (str(p).strip()[:_SUMMARY_PART_MAX_CHARS] for p in parts)
+    # 利用者が会話に書いたモデル ID は照合から外す（要約がそれに触れても漏れではない）
+    said = [m.text for m in chat.messages if m.role == "user"]
+    secrets = leak_patterns(unmentioned(deps.model_ids, *said), summary_rules(chat.kind))
+    if find_leak("\n".join([what, why, dropped]), secrets=secrets):
+        logger.warning("会話の要約を出力の検査で差し止めた")
+        raise ChatError("chat_failed")
     return ChatSummaryDraft(
         what=what, why=why, dropped=dropped, note=_compose_note(what, why, dropped)
     )
@@ -1018,6 +1130,7 @@ async def summarize(
 
 __all__ = [
     "CHAT_OUTPUT_TOKENS",
+    "GUARDRAIL_REFUSAL",
     "ChatBudgetPort",
     "ChatDeps",
     "ChatError",

@@ -312,3 +312,20 @@ async def test_failed_search_keeps_its_worst_cost() -> None:
         searcher.max_queries
     )
     assert done.extra_usd == worst
+
+
+async def test_repository_without_github_id_is_not_offered_or_read() -> None:
+    """ID の無い登録は、名前の使い回しを確かめられないので扱わない（fail-closed）。"""
+    reader = FakeReader({"ok.py": b"x"})
+    tools = ChatTools(
+        session_factory=None,  # type: ignore[arg-type]
+        workspace="team",
+        repos=[RegisteredRepo(REPO, "main", None)],
+        reader=reader,
+        searcher=None,
+    )
+    assert tools.repos == []
+    assert "repo_read" not in [s.name for s in tools.specs(allow_search=False)]
+    out = await tools.run(ToolCall("repo_read", {"repo": REPO, "path": "ok.py"}))
+    assert not out.ok and "登録済みのリポジトリではありません" in out.output
+    assert reader.head_calls == 0 and reader.blob_shas == []

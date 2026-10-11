@@ -246,6 +246,7 @@ def test_function_units_never_contain_literal_values(tmp_path: Path) -> None:
     params = _params("function")
     (unit,) = extract_units(root, params, ["app/*.py"]).units
     prompt = build_prompt(_rule(), params, unit)
+    assert prompt.startswith("あなたは SpecLino の AI アシスタント。")  # 共通の規則
     for value in (
         "hunter2",
         "sk-proj",

@@ -25,13 +25,16 @@ from speclino.domain.domain_spec import DomainSpec
 from speclino.domain.expr import Expr
 from speclino.domain.spec_ir import Assertion, Modality, Rule, RuleLevel, SpecIR
 from speclino.ports.text_llm import TextLlm
+from speclino.services.llm_guardrails import guardrail_rules
 from speclino.spec.diagnostics import Diagnostic, Severity, ValidationReport
 from speclino.spec.loader import content_hash
 from speclino.spec.spec_validator import validate_spec_ir
 
 CANDIDATE_SNAPSHOT_ID = "candidate"
-_RULES = """\
-あなたは仕様書から検査可能な要求（Spec IR の Rule）を抽出する。判断や承認はしない。
+_RULES = (
+    guardrail_rules("仕様書から検査可能な要求（Spec IR の Rule）を抽出する")
+    + """
+判断や承認はしない。
 規則:
 - 変数参照は before.<変数> / after.<変数> / outcome.status だけ。語彙に無い名前を作らない
 - 列挙の値は語彙に宣言されたものだけ。数値は integer
@@ -42,6 +45,7 @@ _RULES = """\
 - 「適切に」「速やかに」「必要に応じて」のような曖昧語は確定させず ambiguities に入れる
 - 語彙で表せない要求は unextracted に理由つきで入れる（無理に近似しない）
 """
+)
 
 
 class RuleProposal(BaseModel):

@@ -239,7 +239,9 @@ class ChatTools:
     ) -> None:
         self._factory = session_factory
         self._workspace = workspace
-        self._repos = {r.full_name: r for r in repos}
+        # GitHub のリポジトリ ID の無い登録（ID を埋める前の行）は、名前の使い回しで別の
+        # リポジトリを読みうるので扱わない（関数の宣言にも出さない）
+        self._repos = {r.full_name: r for r in repos if r.github_repo_id is not None}
         self._reader = reader
         self._searcher = searcher
         self._heads: dict[str, str] = {}
@@ -395,9 +397,10 @@ class ChatTools:
             return self._heads[repo.full_name]
         assert self._reader is not None
         # 名前は改名後に別のリポジトリへ使い回されうるので、登録したリポジトリと同じか確かめる
+        # （ID が無ければ確かめられないので読まない）
         if (
-            repo.github_repo_id is not None
-            and await self._reader.repository_id(repo.full_name) != repo.github_repo_id
+            repo.github_repo_id is None
+            or await self._reader.repository_id(repo.full_name) != repo.github_repo_id
         ):
             raise ToolRefused("リポジトリを読めません")
         sha = await self._reader.branch_head(repo.full_name, repo.default_branch)

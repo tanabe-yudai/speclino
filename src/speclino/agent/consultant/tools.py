@@ -76,6 +76,8 @@ class ConsultDeps:
     load_run_view: Callable[[uuid.UUID, str], Awaitable[dict[str, Any] | None]]
     record_supplement: Callable[..., Awaitable[None]]
     budget: ConsultBudget | None = None
+    # 設定にある LLM のモデル ID（最終応答に漏れていないかの照合に使う）
+    model_ids: tuple[str, ...] = ()
     poll_seconds: float = 3.0
     wait_seconds: float = 180.0
 
