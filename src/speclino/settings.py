@@ -73,6 +73,8 @@ class Settings(BaseSettings):
     # （ネットワークを使わない決定的な応答）。env=prod では scripted を使えない
     chat_llm: Literal["gemini", "scripted"] = "gemini"
     chat_model: str | None = None  # 未指定なら a2a_model、それも無ければ agent_model
+    # 会話の AI の思考の量（Gemini 3 の thinking_level）。思考は出力の上限に含まれる
+    chat_thinking_level: Literal["low", "medium", "high"] = "medium"
 
     # 認証（S13）
     auth_kind: Literal["dev", "identity_platform"] = "dev"

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createChat, deleteChat, getChat, listChats, patchChat, postMessageStream, summarizeChat } from '@/api/knowledgeChat'
 import { ApiError, StreamInterruptedError } from '@/api/errors'
-import { chatsFor, describeChatError, idempotencyKeyFor, settleTurn } from '@/services/knowledgeChat'
+import { chatsFor, describeChatError, idempotencyKeyFor, settleTurn, withStreamEvent } from '@/services/knowledgeChat'
 import type { ChatDraft } from '@/types/chatDraft'
 import type { ChatSendOptions, ChatStreaming, ChatSummaryDraft, ChatTurn, KnowledgeChat, KnowledgeChatController, KnowledgeChatKind, KnowledgeChatSummary } from '@/types/knowledgeChat'
 
@@ -99,7 +99,7 @@ export function useKnowledgeChat(
         { text, idempotency_key: key, editor_text: editorText },
         (event) => {
           if (!alive.current) return
-          if (event.type === 'delta') setStreaming((s) => (s ? { ...s, reply: s.reply + event.text } : s))
+          if (event.type === 'delta' || event.type === 'thought' || event.type === 'tool') setStreaming((s) => (s ? withStreamEvent(s, event) : s))
           else if (event.type === 'draft') setDraft({ field: event.field, before: opts.bodyText ?? '', text: event.text })
           else if (event.type === 'done') turn = event.turn
           else if (event.type === 'error') throw new ApiError(event.status, event.message, event.code)

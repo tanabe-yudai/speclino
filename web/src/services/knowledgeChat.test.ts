@@ -21,6 +21,7 @@ import {
   messageBytesLeft,
   textHash,
   utf8Bytes,
+  withStreamEvent,
 } from './knowledgeChat'
 import type { ArtifactContent } from '@/types/knowledge'
 import type { ChatTurn, KnowledgeChat } from '@/types/knowledgeChat'
@@ -149,6 +150,19 @@ describe('ストリームの出来事', () => {
     expect(parseChatStreamEvent({ event: 'delta', data: '{"text":1}' })).toBeNull()
     expect(parseChatStreamEvent({ event: 'delta', data: '{' })).toBeNull()
     expect(parseChatStreamEvent({ event: 'other', data: '{}' })).toBeNull()
+    expect(parseChatStreamEvent({ event: 'thought', data: '{"text":"考え"}' })).toEqual({ type: 'thought', text: '考え' })
+    expect(parseChatStreamEvent({ event: 'tool', data: '{"text":"読んでいます"}' })).toEqual({ type: 'tool', text: '読んでいます' })
+    expect(parseChatStreamEvent({ event: 'tool', data: '{}' })).toBeNull()
+  })
+
+  it('重ねる: 思考は足し、調べたことは並べる', () => {
+    let s = { userText: 'q', reply: '' }
+    s = withStreamEvent(s, { type: 'thought', text: 'a' })
+    s = withStreamEvent(s, { type: 'thought', text: 'b' })
+    s = withStreamEvent(s, { type: 'tool', text: '一覧' })
+    s = withStreamEvent(s, { type: 'tool', text: '本文' })
+    s = withStreamEvent(s, { type: 'delta', text: '説明' })
+    expect(s).toEqual({ userText: 'q', reply: '説明', thought: 'ab', research: ['一覧', '本文'] })
   })
 
   it('途中で切れたときの文言', () => {

@@ -10,6 +10,9 @@
   生の応答・事業者の例外の文を例外にもログにも載せない（ログは例外の型名だけ）。監査は
   `record_chat_event`（chat_id・件数・成否だけ）
 - AI は提案を返すだけで、保存・承認には関与しない（C4・C6）
+- 調べてから答える（ストリームの発言、`ChatDeps.research`）: 読むだけの関数で承認済みの知識・
+  登録済みのリポジトリ・Web を調べてから最後の JSON を流す（services/knowledge_chat_research.py）。
+  予約はターンの予算で 1 回、出典はサーバが組み立てて返答に残し、監査には関数の種類と回数だけ
 """
 
 from __future__ import annotations
@@ -40,6 +43,8 @@ from speclino.domain.knowledge_chat import (
     MESSAGE_MAX_BYTES,
     NOTE_MAX_CHARS,
     REPLY_MAX_BYTES,
+    SEARCH_SUGGESTION_MAX_BYTES,
+    SEARCH_SUGGESTIONS_MAX,
     ChatAuditAction,
     ChatErrorCode,
     ChatMessage,
@@ -52,7 +57,14 @@ from speclino.domain.knowledge_chat import (
     KnowledgeChatSummary,
 )
 from speclino.domain.spec_ir import SpecIR
-from speclino.ports.text_llm import JsonGeneration, JsonStreamEvent, StreamingTextLlm, TextLlm
+from speclino.ports.text_llm import (
+    JsonGeneration,
+    JsonStreamEvent,
+    StreamingTextLlm,
+    TextLlm,
+    Thought,
+    ToolStreamingLlm,
+)
 from speclino.services.cost_guard import CostGuard
 from speclino.services.draft_stream import DraftSnapshots
 from speclino.services.json_string_stream import JsonStringStream
@@ -69,6 +81,15 @@ from speclino.services.knowledge_chat_proposal import (
     response_schema,
     text_hash,
 )
+from speclino.services.knowledge_chat_research import (
+    ChatResearch,
+    ResearchDone,
+    ResearchEvent,
+    ToolActivity,
+    research,
+    turn_budget,
+)
+from speclino.services.knowledge_chat_tools import ChatTools
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +116,8 @@ TRUNCATED_NOTICE = "本文が長いため提案を省きました。範囲を絞
 PENDING_STALE_AFTER = timedelta(minutes=10)
 _EXPLANATION_MAX_CHARS = 16_000
 _SUMMARY_PART_MAX_CHARS = 400
+# 調べた返答に足す出典と検索の候補の表示の大きさの上界（会話の大きさの見積もりに足す）
+_RESEARCH_EXTRA_MAX_BYTES = SEARCH_SUGGESTIONS_MAX * SEARCH_SUGGESTION_MAX_BYTES + 32 * 1024
 
 
 class ChatError(Exception):
@@ -118,7 +141,11 @@ class ChatBudgetPort(Protocol):
     ) -> tuple[ChatReservation | None, BudgetRefusal | None]: ...
 
     async def settle(
-        self, reservation: ChatReservation, input_tokens: int, output_tokens: int
+        self,
+        reservation: ChatReservation,
+        input_tokens: int,
+        output_tokens: int,
+        extra_usd: Decimal = Decimal("0"),
     ) -> None: ...
 
 
@@ -133,6 +160,8 @@ class ChatDeps:
     budget: ChatBudgetPort
     cost_guard: CostGuard
     today: Callable[[], date] = field(default=_utc_today)
+    # 調べてから答える配線。None か、LLM が関数の呼出しに対応しなければ従来どおり 1 回で答える
+    research: ChatResearch | None = None
 
 
 # ------------------------------------------------------------------ 監査（C9）
@@ -146,11 +175,17 @@ async def record_chat_event(
     outcome: Literal["created", "deleted", "done", "failed", "purged"],
     message_count: int,
     error: ChatErrorCode | None = None,
+    tools: dict[str, int] | None = None,
 ) -> None:
-    """会話の監査。残すのは chat_id・件数・成否（と固定のエラーコード）だけ。本文・題は残さない。"""
+    """会話の監査。残すのは chat_id・件数・成否（と固定のエラーコード）だけ。本文・題は残さない。
+
+    `tools` は調べた関数の種類ごとの回数（引数・結果の中身は残さない）。
+    """
     detail: dict[str, Any] = {"chat_id": chat_id, "message_count": message_count}
     if error is not None:
         detail["error"] = error
+    if tools:
+        detail["tools"] = dict(sorted(tools.items()))
     await AuditRepository(session).record(
         actor, action, f"{workspace}/chat/{chat_id or '*'}", outcome, detail
     )
@@ -385,7 +420,8 @@ async def _begin_turn(
         )
         if (
             len(chat.messages) + 2 > CHAT_MAX_MESSAGES
-            or _size([*chat.messages, user]) + REPLY_MAX_BYTES > CHAT_MAX_BYTES
+            or _size([*chat.messages, user]) + REPLY_MAX_BYTES + _RESEARCH_EXTRA_MAX_BYTES
+            > CHAT_MAX_BYTES
         ):
             raise ChatError("chat_full")
         names = [
@@ -407,6 +443,7 @@ async def _finish_turn(
     message_id: str,
     reply: ChatMessage | None,
     error: ChatErrorCode | None = None,
+    tool_counts: dict[str, int] | None = None,
 ) -> ChatTurn | None:
     """持ち主と保留の発言を確かめてから確定する。会話・発言が消えていれば何もせず None。"""
     async with deps.session_factory() as s, s.begin():
@@ -433,17 +470,24 @@ async def _finish_turn(
             outcome=status,
             message_count=len(messages),
             error=error,
+            tools=tool_counts,
         )
     return ChatTurn(chat=saved, user_message_id=message_id, reply=reply)
 
 
 async def _settle_quietly(
-    budget: ChatBudgetPort, reservation: ChatReservation, gen: JsonGeneration | None
+    budget: ChatBudgetPort,
+    reservation: ChatReservation,
+    gen: JsonGeneration | None,
+    extra_usd: Decimal = Decimal("0"),
 ) -> None:
     """精算。失敗しても元の結果を上書きしない（予約は最悪の額のまま残る＝多めに数える）。"""
     try:
         await budget.settle(
-            reservation, gen.input_tokens if gen else 0, gen.output_tokens if gen else 0
+            reservation,
+            gen.input_tokens if gen else 0,
+            gen.output_tokens if gen else 0,
+            extra_usd,
         )
     except Exception as e:  # noqa: BLE001 - 型名だけ残す（C9）
         logger.warning("会話の費用の精算に失敗した: %s", type(e).__name__)
@@ -579,8 +623,12 @@ async def _complete_turn(
     gen: JsonGeneration,
     key: str,
     editor_text: str,
+    researched: ResearchDone | None = None,
 ) -> ChatTurn:
-    """LLM の応答を検証して返答を確定する（提案の検証は最後に 1 度だけ）。"""
+    """LLM の応答を検証して返答を確定する（提案の検証は最後に 1 度だけ）。
+
+    調べた返答には、サーバが組み立てた出典と検索の候補の表示を添える。
+    """
     explanation, proposal_data = _parse_reply(gen)
     proposal: ChatProposal | None = await build_proposal(
         ctx.chat.kind,
@@ -599,8 +647,11 @@ async def _complete_turn(
         idempotency_key=key,
         status="done",
         created_at=_now(),
+        sources=(researched.sources or None) if researched else None,
+        search_suggestions=(researched.search_suggestions or None) if researched else None,
     )
-    if len(reply.model_dump_json().encode()) > REPLY_MAX_BYTES:
+    extras = {"sources", "search_suggestions"}
+    if len(reply.model_dump_json(exclude=extras).encode()) > REPLY_MAX_BYTES:
         raise ChatError("chat_failed")
     # 確定は取り消されても終わらせる（保留のまま残さない）
     turn = await asyncio.shield(
@@ -611,6 +662,7 @@ async def _complete_turn(
             cid=cid,
             message_id=ctx.message_id,
             reply=reply,
+            tool_counts=researched.tool_counts if researched else None,
         )
     )
     if turn is None:  # 途中で会話が消された: 応答を捨て、行を復活させない
@@ -623,7 +675,7 @@ def _proposes_name(ctx: _Context) -> bool:
     return ctx.chat.kind != "policy" and ctx.chat.artifact_id is None
 
 
-def _chat_prompt(ctx: _Context, text: str, editor_text: str) -> str:
+def _chat_prompt(ctx: _Context, text: str, editor_text: str, tools: ChatTools | None = None) -> str:
     return build_chat_prompt(
         ctx.chat.kind,
         message=text,
@@ -631,6 +683,23 @@ def _chat_prompt(ctx: _Context, text: str, editor_text: str) -> str:
         names=ctx.names,
         history=ctx.chat.messages,
         propose_name=_proposes_name(ctx),
+        research_repos=(
+            [f"{r.full_name}（{r.default_branch}）" for r in tools.repos]
+            if tools is not None
+            else None
+        ),
+    )
+
+
+async def _chat_tools(deps: ChatDeps, workspace: str) -> ChatTools | None:
+    """調べるターンの関数。LLM が関数の呼出しに対応しなければ None（従来どおり）。"""
+    if deps.research is None or not isinstance(deps.llm, ToolStreamingLlm):
+        return None
+    return await ChatTools.load(
+        deps.session_factory,
+        workspace,
+        reader=deps.research.reader,
+        searcher=deps.research.searcher,
     )
 
 
@@ -698,13 +767,30 @@ async def _llm_events(
         yield await llm.generate_json(prompt, schema)
 
 
-async def _close_quietly(events: AsyncIterator[JsonStreamEvent]) -> None:
+async def _close_quietly(events: AsyncIterator[Any]) -> None:
     aclose = getattr(events, "aclose", None)
     if aclose is not None:
         try:
             await aclose()
         except Exception as e:  # noqa: BLE001 - 型名だけ残す（C9）
             logger.warning("会話の AI のストリームを閉じられなかった: %s", type(e).__name__)
+
+
+def _research_events(
+    deps: ChatDeps, tools: ChatTools, prompt: str, schema: dict[str, Any]
+) -> AsyncIterator[ResearchEvent]:
+    assert deps.research is not None and isinstance(deps.llm, ToolStreamingLlm)
+    llm: ToolStreamingLlm = deps.llm
+    return research(
+        llm.open(prompt),
+        tools,
+        llm=llm,
+        guard=deps.cost_guard,
+        searcher=deps.research.searcher,
+        schema=schema,
+        prompt_bytes=len(prompt.encode()),
+        limits=deps.research.limits,
+    )
 
 
 async def _stream_llm(
@@ -715,26 +801,53 @@ async def _stream_llm(
     prompt: str,
     schema: dict[str, Any],
     purpose: ChatPurpose,
-) -> AsyncIterator[JsonStreamEvent]:
+    tools: ChatTools | None = None,
+) -> AsyncIterator[JsonStreamEvent | ResearchEvent]:
     """`_call_llm` のストリーム版。断片（str）を流し、最後に JsonGeneration を 1 つ流す。
 
     精算は `_call_llm` と同じ規則: 最後まで読み切ったときだけ実費で精算する。事業者の例外は、
     断片を受け取る前なら 0、受け取った後なら最悪の額のまま残す。
     時間切れ・取り消し・呼び手が読むのをやめた（切断）・最終要素が来なかった場合は、使用量が
     分からない（LLM は処理を続けて課金されうる）ので、予約した最悪の額のまま残す。
+
+    `tools` を渡すと調べるターンになる: 予約はターンの予算（`turn_budget`）で 1 回、途中で
+    思考の要約（Thought）と調べていること（ToolActivity）も流し、最後は `ResearchDone`
+    （トークンの合計と検索の費用で精算する）。調べる歩は始めた時点で課金されうるので、
+    失敗したら最悪の額のまま残す。
     """
-    worst = deps.cost_guard.estimate(deps.llm.model, len(prompt.encode()), CHAT_OUTPUT_TOKENS)
+    researching = (
+        tools is not None and deps.research is not None and isinstance(deps.llm, ToolStreamingLlm)
+    )
+    if researching:
+        assert deps.research is not None and isinstance(deps.llm, ToolStreamingLlm)
+        worst = turn_budget(
+            deps.cost_guard,
+            deps.llm,
+            deps.research.searcher,
+            len(prompt.encode()),
+            deps.research.limits,
+        )
+        timeout = LLM_TIMEOUT_SECONDS + deps.research.limits.seconds
+    else:
+        worst = deps.cost_guard.estimate(deps.llm.model, len(prompt.encode()), CHAT_OUTPUT_TOKENS)
+        timeout = LLM_TIMEOUT_SECONDS
     reservation, refusal = await deps.budget.reserve(
         deps.today(), deps.llm.model, worst, workspace=workspace, uid=owner, purpose=purpose
     )
     if reservation is None:
         raise ChatError(refusal or "cost_limit")
     gen: JsonGeneration | None = None
+    done: ResearchDone | None = None
     keep_worst = False
-    received = False  # 断片を 1 つでも受け取った = 事業者側で課金が始まっている
-    events = _llm_events(deps.llm, prompt, schema)
+    # 断片を 1 つでも受け取った = 事業者側で課金が始まっている（調べるターンは最初から）
+    received = researching
+    events: AsyncIterator[JsonStreamEvent | ResearchEvent] = (
+        _research_events(deps, tools, prompt, schema)
+        if researching and tools is not None
+        else _llm_events(deps.llm, prompt, schema)
+    )
     # 全体の期限。yield の間（呼び手の処理中）に時間切れが割り込まないよう、1 歩ずつ区切って測る
-    deadline = asyncio.get_running_loop().time() + LLM_TIMEOUT_SECONDS
+    deadline = asyncio.get_running_loop().time() + timeout
     try:
         while True:
             try:
@@ -742,7 +855,9 @@ async def _stream_llm(
                     event = await anext(events)
             except StopAsyncIteration:
                 break
-            if isinstance(event, JsonGeneration):
+            if isinstance(event, ResearchDone):
+                done, gen = event, event.gen
+            elif isinstance(event, JsonGeneration):
                 gen = event
             else:
                 received = True
@@ -767,9 +882,10 @@ async def _stream_llm(
         raise ChatError("chat_failed") from None
     finally:
         if not keep_worst:  # 最悪の額のまま残すときは精算の行を足さない
-            await _finish_detached(_settle_quietly(deps.budget, reservation, gen))
+            extra = done.extra_usd if done is not None else Decimal("0")
+            await _finish_detached(_settle_quietly(deps.budget, reservation, gen, extra))
         await _close_quietly(events)
-    yield gen
+    yield done if done is not None else gen
 
 
 async def stream_message(
@@ -809,17 +925,26 @@ async def stream_message(
     draft_field = draft_text_field(ctx.chat.kind)
     drafts = DraftSnapshots("proposal", draft_field) if draft_field else None
     gen: JsonGeneration | None = None
+    researched: ResearchDone | None = None
     try:
+        tools = await _chat_tools(deps, workspace)
         async for item in _stream_llm(
             deps,
             workspace=workspace,
             owner=owner,
-            prompt=_chat_prompt(ctx, text, editor_text),
+            prompt=_chat_prompt(ctx, text, editor_text, tools),
             schema=response_schema(ctx.chat.kind, propose_name=_proposes_name(ctx)),
             purpose="chat_message",
+            tools=tools,
         ):
-            if isinstance(item, JsonGeneration):
+            if isinstance(item, ResearchDone):
+                researched, gen = item, item.gen
+            elif isinstance(item, JsonGeneration):
                 gen = item
+            elif isinstance(item, Thought):
+                yield ChatStreamEvent(type="thought", text=item.text)
+            elif isinstance(item, ToolActivity):
+                yield ChatStreamEvent(type="tool", text=item.text)
             else:
                 if piece := explanation_stream.feed(item):
                     yield ChatStreamEvent(type="delta", text=piece)
@@ -838,6 +963,7 @@ async def stream_message(
             gen=gen,
             key=idempotency_key,
             editor_text=editor_text,
+            researched=researched,
         )
     except PromptTooLarge:
         err = await fail("input_too_large")

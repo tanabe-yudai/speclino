@@ -39,6 +39,16 @@ export interface ChatProposal {
   valid: boolean
 }
 
+export type ChatSourceKind = 'knowledge' | 'repo' | 'web'
+
+/** 返答の出典（サーバが、AI が実際に読んだもの・検索の出典から組み立てる）。 */
+export interface ChatSource {
+  kind: ChatSourceKind
+  title: string
+  ref: string
+  url?: string | null
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
@@ -47,6 +57,10 @@ export interface ChatMessage {
   idempotency_key?: string | null
   status: ChatMessageStatus
   created_at: string
+  /** 調べた返答だけ: 出典 */
+  sources?: ChatSource[] | null
+  /** 調べた返答だけ: Google 検索の候補の表示（HTML。sandbox の iframe で出す） */
+  search_suggestions?: string[] | null
 }
 
 export interface KnowledgeChat {
@@ -85,6 +99,10 @@ export type ChatStreamEvent =
   | { type: 'delta'; text: string }
   /** 提案の本文のここまでの全文（増分ではなく置き換える。表示専用） */
   | { type: 'draft'; field: string; text: string }
+  /** AI の思考の要約の増えた分（足していく） */
+  | { type: 'thought'; text: string }
+  /** AI が今調べていること（人向けの文） */
+  | { type: 'tool'; text: string }
   | { type: 'done'; turn: ChatTurn }
   | { type: 'error'; code: string; message: string; status: number }
 
@@ -92,6 +110,10 @@ export type ChatStreamEvent =
 export interface ChatStreaming {
   userText: string
   reply: string
+  /** 思考の要約（ここまでの全文） */
+  thought?: string
+  /** 調べたこと（古い順。最後が今調べていること） */
+  research?: string[]
 }
 
 export interface ChatSummaryDraft {

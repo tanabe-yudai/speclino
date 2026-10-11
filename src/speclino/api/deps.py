@@ -34,9 +34,10 @@ from speclino.ports.blob_store import BlobStore
 from speclino.ports.code_host import CodeHost
 from speclino.ports.github_users import GitHubUserLookup
 from speclino.ports.mcp_context import McpContextSource
+from speclino.ports.repo_reader import RepoReader
 from speclino.ports.sandbox import Sandbox
 from speclino.ports.task_queue import TaskQueue
-from speclino.ports.text_llm import TextLlm
+from speclino.ports.text_llm import TextLlm, WebSearcher
 from speclino.services import bundle_signing
 from speclino.services.cost_guard import CostGuard, CostLedger
 from speclino.services.knowledge_inputs import make_knowledge_resolver
@@ -68,6 +69,11 @@ class AppState:
     spec_suggest_llm: TextLlm | None = None
     # 対話による知識の作成（S73）の LLM。None なら初回に設定から作る。テストで台本に差し替える
     knowledge_chat_llm: TextLlm | None = None
+    # 会話の調査の Web 検索。None なら初回に設定から作る（台本の LLM では使わない）
+    knowledge_chat_search: WebSearcher | None = None
+    # 登録済みのリポジトリを読むだけの引き先（会話の調査）。None なら repo の関数を出さない。
+    # web の本番は秘密鍵を持つ worker に任せる（`build_repo_reader`）
+    repo_reader: RepoReader | None = None
     # 承認者のログイン名 → GitHub ユーザー ID（S61）。引き先は `build_github_user_lookup`
     github_users: GitHubUserLookup = field(default_factory=PublicGitHubUserLookup)
 
@@ -153,6 +159,21 @@ def build_github_user_lookup(settings: Settings) -> GitHubUserLookup:
     auth = _github_app_auth(settings)
     if auth is None:
         return PublicGitHubUserLookup(api_base=settings.github_api_base)
+    return GitHubClient(auth, 0, httpx.AsyncClient(timeout=30.0), base_url=settings.github_api_base)
+
+
+def build_repo_reader(settings: Settings) -> RepoReader | None:
+    """会話の調査でリポジトリを読む引き先。web の本番は worker に任せ、鍵があれば直接読む。
+
+    どちらも無い（ローカルのコードホストだけの開発）ときは None で、repo の関数を出さない。
+    """
+    if settings.role == "web" and settings.cloud_tasks_worker_url:
+        from speclino.adapters.worker.repo_reader_client import WorkerRepoReader
+
+        return WorkerRepoReader(settings.cloud_tasks_worker_url)
+    auth = _github_app_auth(settings)
+    if auth is None:
+        return None
     return GitHubClient(auth, 0, httpx.AsyncClient(timeout=30.0), base_url=settings.github_api_base)
 
 
@@ -323,6 +344,7 @@ def build_state(settings: Settings) -> AppState:
         context_source,
         user_oauth,
         github_users=build_github_user_lookup(settings),
+        repo_reader=build_repo_reader(settings),
     )
 
 
