@@ -1,33 +1,18 @@
 import { useState } from 'react'
 import { MarkdownPreview } from '@/components/knowledge/MarkdownPreview'
 import { MarkdownInput } from '@/components/spec-editor/MarkdownInput'
+import { PaneViewSwitch } from '@/components/knowledge/PaneViewSwitch'
 import { cn } from '@/lib/utils'
+import { initialPaneView } from '@/services/paneView'
+import type { PaneView } from '@/types/paneView'
 import type { MarkdownSplitInputProps } from '@/types/specEditor'
 
-type Mode = 'edit' | 'preview'
-const MODES: { value: Mode; label: string }[] = [
-  { value: 'edit', label: '編集' },
-  { value: 'preview', label: 'プレビュー' },
-]
-
-/** 本文の入力欄とプレビュー。lg 以上は左右に並べ、それより狭い画面は 編集 / プレビュー の切り替え。 */
+/** 本文の入力欄とプレビュー。lg 以上は左右に並べ、それより狭い画面は 本文 / プレビュー の切り替え。 */
 export function MarkdownSplitInput({ skillMd, ...input }: MarkdownSplitInputProps) {
-  const [mode, setMode] = useState<Mode>('edit')
+  const [mode, setMode] = useState<PaneView>(() => initialPaneView(input.value))
   return (
     <div className="space-y-2">
-      <div role="group" aria-label="表示の切り替え" className="inline-flex rounded-lg border p-0.5 lg:hidden">
-        {MODES.map((m) => (
-          <button
-            key={m.value}
-            type="button"
-            aria-pressed={mode === m.value}
-            onClick={() => setMode(m.value)}
-            className={cn('rounded-md px-3 py-1 text-sm', mode === m.value ? 'bg-muted font-medium' : 'text-ink-3')}
-          >
-            {m.label}
-          </button>
-        ))}
-      </div>
+      <PaneViewSwitch view={mode} onChange={setMode} />
       <div className="grid gap-4 lg:grid-cols-2">
         <div className={cn('min-w-0', mode !== 'edit' && 'hidden lg:block')}>
           <MarkdownInput {...input} />
