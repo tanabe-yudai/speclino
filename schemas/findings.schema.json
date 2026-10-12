@@ -141,7 +141,8 @@
             "potential_violation",
             "solver_limit",
             "conformant",
-            "missing_finding"
+            "missing_finding",
+            "scope_changed"
           ],
           "title": "Category",
           "type": "string"

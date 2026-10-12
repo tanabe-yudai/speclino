@@ -212,6 +212,11 @@ S82 のシステム全体の仕様 7 本で確かめた結果、構造の義務�
   従来どおり照合する（欠けている要素は VIOLATED のまま）
 - 対象外の図は run の manifest（`out_of_scope_diagrams`: 仕様の名前と図 ID）に残し、coverage では参照する図がすべて
   対象外の要求の行を `requirements_out_of_scope` に数える（対応範囲にも未解析にも入れない）
+- **抜け道の安全柵**: base（デフォルトブランチ）の run では対象だった図が head で対象外になったら、その図について
+  要確認（REVIEW、分類 `scope_changed`、要求 ID `<図 ID>#scope`、図の義務に mandatory が 1 つでもあれば mandatory）を出す。
+  PR で図のクラスを改名・削除して義務を黙って消すことを防ぐ。比べるのは同じ bundle の base の run の manifest だけで、
+  base の解析は増やさない。承認者は確定できる（指紋は仕様の改訂の内容の hash）。base の run が無い・判定できない run では
+  比べられないので、対象外にした図ごとに助言の UNKNOWN（`unsupported_analysis`、ゲートは止めない）を出し、素通りにしない
 - プロジェクトに絞った仕様の挙動は変えない（そのリポジトリの話だと宣言しているので、無い要素は VIOLATED）
 
 ### 5.2 期待する Finding の列挙

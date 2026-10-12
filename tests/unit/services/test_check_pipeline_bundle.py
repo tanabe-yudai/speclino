@@ -784,3 +784,60 @@ def test_class_relations_are_checked(tmp_path: Path) -> None:
     assert res.gate_levels["vocab#r1"] == "mandatory"
     assert res.gate_levels["vocab#r2"] == "advisory"
     assert {"vocab#r1", "vocab#r2"} <= set(res.manifest.expected_requirement_ids)
+
+
+SHIP_ORDER = block(
+    "%%@ id: own",
+    "classDiagram",
+    "    class Order {",
+    "        +ship(order)",
+    "    }",
+)
+
+
+def _rename_order(root: Path) -> Path:
+    """PR で図のクラス Order を改名した head（図の要素がリポジトリから消える）。"""
+    for name in ("models.py", "service.py"):
+        p = root / "examples" / "orders" / "app" / name
+        p.write_text(
+            p.read_text()
+            .replace("Order,", "Purchase,")
+            .replace("class Order:", "class Purchase:")
+            .replace(": Order)", ": Purchase)")
+        )
+    return root
+
+
+def test_diagram_that_drops_out_of_scope_in_the_pr_is_review(tmp_path: Path) -> None:
+    """base で対象だった図が head で対象外になったら、義務が黙って消えないよう要確認にする。"""
+    base = make_repo(tmp_path / "base")
+    head = _rename_order(make_repo(tmp_path / "head"))
+    k = knowledge(spec_revision("shared", "# x\n\n" + SHIP_ORDER + "\n" + FOREIGN, scope=WHOLE))
+    res = run_check(request(head, k, base_root=base, base_sha="BASE"))
+    found = by_req(res.findings.findings)
+    assert "own#Order" not in found
+    f = found["own#scope"]
+    assert (f.verdict, f.category) == ("REVIEW", "scope_changed")
+    assert "デフォルトブランチでは対象だった図 own" in f.message
+    assert res.gate.status == "fail"  # mandatory の図（要求の表に無い要素は mandatory）
+    # base でも対象外だった図（出荷）は通知しない
+    assert not {"ship#scope", "ship-seq#scope", "phase#scope"} & set(found)
+    # 承認者が確定できる（仕様の改訂の内容に結び付く）
+    from speclino.services.attestations import attestation_target
+
+    assert attestation_target(f) is not None
+
+    # base でも対象外なら（同じ head どうし）通知しない
+    same = run_check(request(head, k, base_root=head, base_sha="HEAD"))
+    assert "own#scope" not in by_req(same.findings.findings)
+    # base が無い run は比べられないので、対象外にした図ごとに助言の UNKNOWN（ゲートは止めない）
+    alone = run_check(request(head, k))
+    u = by_req(alone.findings.findings)["own#scope"]
+    assert (u.verdict, u.category) == ("UNKNOWN", "unsupported_analysis")
+    assert "デフォルトブランチの判定が無いため、対象外にした図 own" in u.message
+    assert {"ship#scope", "ship-seq#scope", "phase#scope"} <= set(by_req(alone.findings.findings))
+    scope_ids = {
+        f.requirement_id for f in alone.findings.findings if f.requirement_id.endswith("#scope")
+    }
+    assert not scope_ids & {f.requirement_id for f in alone.gate.blocking}
+    assert scope_ids <= {f.requirement_id for f in alone.gate.advisory}

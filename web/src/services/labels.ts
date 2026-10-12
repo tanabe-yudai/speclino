@@ -50,6 +50,7 @@ export const CATEGORY_LABELS: Record<Category, string> = {
   potential_violation: '違反の疑い',
   solver_limit: '検査上限到達',
   conformant: '適合',
+  scope_changed: '対象範囲の変化',
 }
 
 export const SEVERITY_LABELS: Record<Severity, string> = {

@@ -38,12 +38,15 @@ def attestation_target(f: Finding) -> tuple[str, str] | None:
 
     確定できるのは REVIEW で、指紋と hash を持つものだけ: LLM 支援のすべての区分（issue / split /
     no_issue。no_issue も機械検証ではないので、必須の規約では人の確定まで阻止する。#114）と、
-    対応・契約・免除・規約の変更の通知（`KNOWLEDGE-BINDINGS-001`）。
+    対応・契約・免除・規約の変更の通知（`KNOWLEDGE-BINDINGS-001`）と、ワークスペース全体の仕様の図が
+    この変更で対象外になった通知（`scope_changed`）。
     """
     if f.verdict != "REVIEW":
         return None
-    if f.assessment_outcome is None and (
-        f.requirement_id != CONFIG_CHANGE_REQUIREMENT_ID or f.assessment_outcome is not None
+    if (
+        f.assessment_outcome is None
+        and f.requirement_id != CONFIG_CHANGE_REQUIREMENT_ID
+        and f.category != "scope_changed"
     ):
         return None
     fp = next(

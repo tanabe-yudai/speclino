@@ -32,6 +32,7 @@ Category = Literal[
     "solver_limit",
     "conformant",
     "missing_finding",
+    "scope_changed",
 ]
 
 Severity = Literal["high", "medium", "low", "info"]
