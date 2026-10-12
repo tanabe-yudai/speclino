@@ -84,6 +84,12 @@
           "default": 0,
           "title": "Requirements Unanalyzed",
           "type": "integer"
+        },
+        "requirements_out_of_scope": {
+          "default": 0,
+          "description": "ワークスペース全体の仕様のうち、図の要素がこのリポジトリに無く対象外にした要求の行",
+          "title": "Requirements Out Of Scope",
+          "type": "integer"
         }
       },
       "title": "CoverageCounts",
@@ -135,7 +141,8 @@
             "potential_violation",
             "solver_limit",
             "conformant",
-            "missing_finding"
+            "missing_finding",
+            "scope_changed"
           ],
           "title": "Category",
           "type": "string"

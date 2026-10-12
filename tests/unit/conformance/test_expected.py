@@ -132,6 +132,30 @@ def test_uml_coverage_counts_requirement_rows() -> None:
     assert uml_coverage(compiled, findings, approved=False).requirements_approved == 0
 
 
+def test_uml_coverage_counts_out_of_scope_rows() -> None:
+    """参照する図がすべて対象外の行は、対応範囲にも未解析にも数えない。"""
+    from speclino.conformance.expected import uml_coverage
+    from speclino.domain.uml import RequirementRow
+
+    compiled = _compiled().model_copy(
+        update={
+            "requirements": [
+                RequirementRow(id="R1", level="mandatory", text="a", formalized_by=["cls#x"]),
+                RequirementRow(id="R2", level="mandatory", text="b", formalized_by=["seq#y"]),
+                RequirementRow(
+                    id="R3", level="mandatory", text="c", formalized_by=["seq#y", "cls#x"]
+                ),
+                RequirementRow(id="R4", level="advisory", text="d", formalized_by=[]),
+            ]
+        }
+    )
+    findings = [_finding("cls#Order", "VERIFIED_IN_SCOPE")]
+    c = uml_coverage(compiled, findings, approved=True, out_of_scope=["seq"])
+    assert c.requirements_total == 4
+    assert (c.requirements_in_scope, c.requirements_out_of_scope) == (2, 1)
+    assert c.requirements_unanalyzed == 1
+
+
 def test_relations_are_expected_obligations() -> None:
     rel = RelationObligation(
         id="cls#r1",

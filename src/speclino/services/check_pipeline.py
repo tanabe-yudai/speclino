@@ -63,6 +63,12 @@ from speclino.analysis.path_analyzer import ANALYZER_VERSION, analyze_repo
 from speclino.analysis.reachability import attribute_writes, reachable_source_hash
 from speclino.analysis.relation_check import RelationChecker
 from speclino.analysis.structure_check import SymbolLocator, check_structure
+from speclino.conformance.diagram_scope import (
+    ElementKind,
+    narrow,
+    obligation_diagram,
+    out_of_scope_diagrams,
+)
 from speclino.conformance.engine import ENGINE_VERSION, EngineConfig, EngineInputError, evaluate
 from speclino.conformance.exceptions import (
     RejectedWaiver,
@@ -78,6 +84,7 @@ from speclino.conformance.expected import (
 )
 from speclino.conformance.gate import DEFAULT_FAIL_ON, GatePolicy, GateResult, aggregate_gate
 from speclino.conformance.obligation import ObligationContext
+from speclino.conformance.reasons import finding_id
 from speclino.conformance.semantic_diff import DiffSide, annotate_findings, semantic_diff
 from speclino.conformance.state_check import check_state_machine
 from speclino.conformance.trace_check import check_trace
@@ -105,7 +112,13 @@ from speclino.domain.finding import (
 )
 from speclino.domain.knowledge import ResolvedKnowledge
 from speclino.domain.policy import PolicyExceptions, PolicyPackage, PolicyRevision, PolicyRule
-from speclino.domain.run import BehaviorAnalysis, RunInputs, RunManifest, RunVersions
+from speclino.domain.run import (
+    BehaviorAnalysis,
+    OutOfScopeDiagram,
+    RunInputs,
+    RunManifest,
+    RunVersions,
+)
 from speclino.domain.semantic_diff import SemanticDiff
 from speclino.domain.spec_ir import RuleLevel, SpecIR
 from speclino.domain.uml import CallLabel, CompiledSpec
@@ -398,6 +411,9 @@ def _run_check(req: CheckRequest, *, is_base: bool) -> CheckResult:
             changed = _config_change_notice(project_dir, config_dir)
             if changed is not None:
                 knowledge_findings.append(changed)
+            scope_changes = _scope_change_findings(knowledge, inputs, base_result, req.head_sha)
+            knowledge_findings.extend(f for f, _ in scope_changes)
+            levels.update({f.requirement_id: lv for f, lv in scope_changes})
     combined = _with_extra_findings(
         combined, [*knowledge_findings, *policy_result.findings, *req.extra_findings]
     )
@@ -486,6 +502,11 @@ def _run_check(req: CheckRequest, *, is_base: bool) -> CheckResult:
         bundle_hash=bundle_hash(knowledge.bundle) if knowledge is not None else None,
         uml_parser_version=",".join(compiled_versions) or None,
         expected_requirement_ids=expected,
+        out_of_scope_diagrams=[
+            OutOfScopeDiagram(spec=u.name, diagram_id=d)
+            for u in inputs.spec_units
+            for d in u.out_of_scope_diagrams
+        ],
         trusted_commit=req.trusted_sha if knowledge is not None and req.trusted_root else None,
         source_roots=list(req.source_roots),
         today=today,
@@ -713,12 +734,112 @@ def _bundle_inputs(req: CheckRequest, project_dir: Path, knowledge: ResolvedKnow
         for spec in unit.compiled.legacy:
             inputs.units.append(_LegacyUnit(spec, domain, domain_hash, unit.name))
             inputs.validations.append(validate_spec_ir(spec, domain, bindings, unit.markdown))
+    inputs.spec_units = _scoped_units(req, bindings, units)
     if domain_texts:
         inputs.domain_hash = _combined_hash(list(domain_texts))
         # エージェントは 1 つの domain で再解析する。spec ごとに違えば渡さない（調査しない）
         if len(domain_texts) == 1:
             inputs.domain = next(iter(domain_texts.values()))
     return inputs
+
+
+def _scope_change_findings(
+    knowledge: ResolvedKnowledge, inputs: _Inputs, base: CheckResult | None, head_sha: str
+) -> list[tuple[Finding, RuleLevel]]:
+    """base（デフォルトブランチ）では対象だった図が head で対象外になったら要確認（REVIEW）。
+
+    ワークスペース全体の仕様の図は、要素がリポジトリに無ければ義務を出さない（diagram_scope）。
+    PR で図のクラスを改名・削除すると義務が黙って消えるので、base の run の manifest
+    （`out_of_scope_diagrams`）と比べて残す。base の解析は増やさない（同じ bundle の base の
+    run の結果だけを見る）。base の run が無い・判定できなかったときは、以前は対象だったと
+    みなして同じ要確認を出す（フェイルクローズ）。level はその図の義務のうち 1 つでも
+    mandatory なら mandatory。確定は仕様の改訂（内容の hash）・図・head のコミットに結び付く
+    （別の変更に古い確定を使い回させない）。
+    """
+    was_out = (
+        {(d.spec, d.diagram_id) for d in base.manifest.out_of_scope_diagrams}
+        if base is not None
+        else set()
+    )
+    full = {u.name: u.compiled for u in spec_units(knowledge)}
+    out: list[tuple[Finding, RuleLevel]] = []
+    for unit in inputs.spec_units:
+        compiled = full.get(unit.name)
+        for diagram in unit.out_of_scope_diagrams:
+            if (unit.name, diagram) in was_out:
+                continue
+            levels = obligation_levels(compiled) if compiled is not None else {}
+            mine = [lv for oid, lv in levels.items() if obligation_diagram(oid) == diagram]
+            level: RuleLevel = "mandatory" if "mandatory" in mine or not mine else "advisory"
+            rid = f"{diagram}#scope"
+            why = (
+                "デフォルトブランチでは対象だった"
+                if base is not None
+                else "デフォルトブランチの判定が無く、以前は対象だったか確かめられない"
+            )
+            bound = hashlib.sha256(
+                f"{unit.content_hash}\n{diagram}\n{head_sha}".encode()
+            ).hexdigest()
+            finding = Finding(
+                id=finding_id(rid, f"spec:{unit.name}", None, "scope_changed"),
+                requirement_id=rid,
+                behavior_id=f"spec:{unit.name}",
+                verdict="REVIEW",
+                category="scope_changed",
+                severity="high" if level == "mandatory" else "medium",
+                message=(
+                    f"{why}図 {diagram}（ワークスペース全体の仕様 {unit.name}）が、この変更で"
+                    "対象外になった（図の要素がリポジトリに 1 つも無いので、その図の義務を検査して"
+                    "いない）"
+                ),
+                claim_scope="command_invocation",
+                next_steps=[
+                    "図のクラス・入口を改名・削除したなら、仕様の図も合わせて直す",
+                    "このリポジトリがもうその図の話でないなら、承認者が確定して進める"
+                    "（PR コメント `/speclino attest`）",
+                ],
+                evidence_refs=[
+                    f"{FINGERPRINT_REF}{rid}:{unit.name}:{unit.content_hash}",
+                    f"{CONTENT_HASH_REF}sha256:{bound}",
+                ],
+            )
+            out.append((finding, level))
+    return out
+
+
+def _scoped_units(req: CheckRequest, bindings: Bindings, units: list[SpecUnit]) -> list[SpecUnit]:
+    """ワークスペース全体の仕様から、このリポジトリで対象外の図の義務を除く（diagram_scope）。
+
+    図の要素の解決: クラス・モジュールはリポジトリに定義がある（あいまいでも「ある」）、入口の
+    操作は振る舞いに写せる（`OperationResolver.behavior`）、状態の属性は振る舞いの変数の対応に
+    あるか、同じ名前の属性への代入がある。プロジェクトに絞った仕様はそのまま。
+    """
+    if not any(u.workspace_wide and u.compiled is not None for u in units):
+        return units
+    locator = SymbolLocator(req.repo_root, req.source_roots, bindings.modules)
+    index = RepoIndex(req.repo_root, req.source_roots)
+    out: list[SpecUnit] = []
+    for unit in units:
+        compiled = unit.compiled
+        if not unit.workspace_wide or compiled is None:
+            out.append(unit)
+            continue
+        resolver = OperationResolver(bindings, _implicit_names(compiled, bindings, locator, index))
+
+        def resolves(kind: ElementKind, name: str, resolver: OperationResolver = resolver) -> bool:
+            if kind in ("class", "module"):
+                return not locator.locate(name, module=kind == "module").missing
+            if kind == "entry":
+                return resolver.behavior(name) is not None
+            return any(name in b.variables for b in bindings.behaviors.values()) or bool(
+                attribute_writes(req.repo_root, name.rsplit(".", 1)[-1], req.source_roots)
+            )
+
+        skipped = out_of_scope_diagrams(compiled, resolves)
+        out.append(
+            replace(unit, compiled=narrow(compiled, skipped), out_of_scope_diagrams=tuple(skipped))
+        )
+    return out
 
 
 def _uml_findings(
@@ -1498,6 +1619,7 @@ def _merge_findings(parts: list[Findings], run_id: str | None) -> Findings:
         requirements_in_scope=sum(p.coverage.requirements_in_scope for p in parts),
         requirements_decided=sum(p.coverage.requirements_decided for p in parts),
         requirements_unanalyzed=sum(p.coverage.requirements_unanalyzed for p in parts),
+        requirements_out_of_scope=sum(p.coverage.requirements_out_of_scope for p in parts),
     )
     return Findings(run_id=run_id, findings=all_findings, counts=counts, coverage=coverage)
 
@@ -1510,13 +1632,19 @@ def _with_uml_coverage(
     for unit in inputs.spec_units:
         if unit.compiled is None:
             continue
-        add = uml_coverage(unit.compiled, by_unit.get(unit.name, []), approved=unit.revision > 0)
+        add = uml_coverage(
+            unit.compiled,
+            by_unit.get(unit.name, []),
+            approved=unit.revision > 0,
+            out_of_scope=unit.out_of_scope_diagrams,
+        )
         c = CoverageCounts(
             requirements_total=c.requirements_total + add.requirements_total,
             requirements_approved=c.requirements_approved + add.requirements_approved,
             requirements_in_scope=c.requirements_in_scope + add.requirements_in_scope,
             requirements_decided=c.requirements_decided + add.requirements_decided,
             requirements_unanalyzed=c.requirements_unanalyzed + add.requirements_unanalyzed,
+            requirements_out_of_scope=(c.requirements_out_of_scope + add.requirements_out_of_scope),
         )
     return findings.model_copy(update={"coverage": c})
 

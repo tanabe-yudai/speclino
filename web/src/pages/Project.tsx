@@ -6,7 +6,7 @@ import { getRun } from '@/api/reviewRuns'
 import { Panel, PanelTitle } from '@/components/app/Panel'
 import { ErrorState } from '@/components/ErrorState'
 import { LoadingState } from '@/components/LoadingState'
-import { KnowledgeBrowser } from '@/components/knowledge/KnowledgeBrowser'
+import { SpecBrowser } from '@/components/knowledge/SpecBrowser'
 import { Breadcrumbs } from '@/components/shell/Breadcrumbs'
 import { TabNav } from '@/components/shell/TabNav'
 import { NextActionsCard } from '@/components/project/NextActionsCard'
@@ -27,8 +27,8 @@ import type { ProjectOverview, ProjectSummary } from '@/types/project'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 
 /**
- * プロジェクト画面（`/w/:slug/p/:owner/:repo/(overview|knowledge|runs)`）。知識と検査のタブは、
- * 第 1 階層の一覧をこのプロジェクトで絞ったもの（同じ部品）。URL のリポジトリを一覧から引き、中身は project ごとに作り直す。
+ * プロジェクト画面（`/w/:slug/p/:owner/:repo/(overview|specs|runs)`）。仕様と検査のタブは、
+ * 第 1 階層の画面をこのプロジェクトで絞ったもの（同じ部品）。URL のリポジトリを一覧から引き、中身は project ごとに作り直す。
  */
 export function Project() {
   const { slug, owner, repo, tab: rawTab } = useParams<{ slug: string; owner: string; repo: string; tab?: string }>()
@@ -38,7 +38,7 @@ export function Project() {
   const { projects, error: listError, retry: retryList } = useWorkspaceProjects(slug)
   const project = projects?.find((p) => p.repo_full_name === fullName) ?? null
   const tab = parseProjectTab(rawTab)
-  // 旧いタブ（仕様・スキル・指示書・規約）は知識のタブへ、知らないタブは概要へ
+  // 旧いタブ（知識・スキル・指示書・規約）は仕様のタブ・種類の画面へ、知らないタブは概要へ
   if (tab === null && slug) return <Navigate to={legacyRedirect(pathname, search) ?? paths.project(slug, fullName)} replace />
 
   if (listError) return <ErrorState message={listError} onRetry={retryList} />
@@ -71,7 +71,7 @@ function ProjectBody({ slug, project, tab }: { slug: string; project: ProjectSum
           items={PROJECT_TABS.map((t) => ({ id: t, label: PROJECT_TAB_LABELS[t], to: paths.project(slug, fullName, t) }))}
         />
       </header>
-      {tab === 'knowledge' && <KnowledgeBrowser slug={slug} project={project} />}
+      {tab === 'specs' && <SpecBrowser slug={slug} project={project} />}
       {tab === 'runs' && <RunBrowser slug={slug} project={project} />}
       {tab === 'overview' && <Overview slug={slug} project={project} />}
     </div>

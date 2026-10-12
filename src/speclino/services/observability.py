@@ -126,7 +126,7 @@ async def _spec_requirements(
 ) -> dict[str, dict[tuple[uuid.UUID, str], RequirementRow]]:
     """今の bundle の spec の要求の表。project ID → (spec artifact, 要求 ID) → 行（重複なし）。
 
-    spec のスコープは projects だけ（workspace スコープは skill / instructions の契約）。
+    ワークスペース全体のスコープの spec は、ワークスペースのすべてのプロジェクトに当たる。
     """
     members = bundle.members if bundle is not None else []
     keys = [(uuid.UUID(m.artifact_id), m.revision) for m in members if m.kind == "spec"]
@@ -142,14 +142,21 @@ async def _spec_requirements(
             tuple_(ArtifactRevisionRecord.artifact_id, ArtifactRevisionRecord.revision).in_(keys),
         )
     )
+    all_projects: list[str] | None = None
     for artifact_id, content in (await session.execute(stmt)).tuples():
         compiled = content.get("compiled") or {}
         rows = [RequirementRow.model_validate(r) for r in compiled.get("requirements", [])]
         scope = content.get("scope") or {}
-        for p in scope.get("projects", []):
-            if (pid := _canonical(p)) is not None:
-                for row in rows:
-                    by_project[pid].setdefault((artifact_id, row.id), row)
+        if scope.get("workspace"):
+            if all_projects is None:
+                ids = select(Project.id).where(Project.team == workspace)
+                all_projects = [str(i) for i in (await session.execute(ids)).scalars()]
+            targets = all_projects
+        else:
+            targets = [pid for p in scope.get("projects", []) if (pid := _canonical(p)) is not None]
+        for pid in targets:
+            for row in rows:
+                by_project[pid].setdefault((artifact_id, row.id), row)
     return by_project
 
 

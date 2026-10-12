@@ -254,7 +254,7 @@ async def world(engine: AsyncEngine) -> World:
         # 仕様: orders（P1、3 行のうち 2 行が形式化済み。同じ行の重複・同じプロジェクトの別表記は
         # 1 つに数える）、payments（P1、別の spec の同じ ID R1 は別の要求）、
         # billing（P2、要求の表が空）、
-        # workspace スコープの spec（契約外。どのプロジェクトにも数えない）
+        # ワークスペース全体のスコープの spec（すべてのプロジェクトに数える）
         orders = await _add_spec(
             s,
             ws,
@@ -489,7 +489,7 @@ async def test_workspace_health_numbers(world: World) -> None:
 
     a = by_repo[f"e2e/{world.ws}-a"]
     assert a.formalization is not None
-    assert (a.formalization.numerator, a.formalization.denominator) == (2, 4)
+    assert (a.formalization.numerator, a.formalization.denominator) == (2, 5)
     assert a.binding is not None
     assert (a.binding.numerator, a.binding.denominator) == (3, 4)
     assert a.unknown_breakdown is not None
@@ -512,9 +512,12 @@ async def test_workspace_health_numbers(world: World) -> None:
     }
     assert (a.latest_run.bundle_generation, a.latest_run.generation_lag) == (1, 1)
 
-    # 要求の表が空・run が無い → 0% ではなく未計測（None）
+    # 自分の要求の表は空だが、ワークスペース全体の spec の行（形式化なし）が当たる。
+    # run が無い → 対応率は未計測
     b = by_repo[f"e2e/{world.ws}-b"]
-    assert b.formalization is None and b.binding is None
+    assert b.formalization is not None
+    assert (b.formalization.numerator, b.formalization.denominator) == (0, 1)
+    assert b.binding is None
     assert b.unknown_breakdown is None and b.latest_run is None
 
 
@@ -665,9 +668,9 @@ async def test_api_member_sees_health(world: World, client: httpx.AsyncClient) -
     body = r.json()
     assert body["workspace"] == world.ws and body["current_generation"] == 2
     a = next(p for p in body["projects"] if p["repo_full_name"] == f"e2e/{world.ws}-a")
-    assert a["formalization"]["numerator"] == 2 and a["formalization"]["denominator"] == 4
+    assert a["formalization"]["numerator"] == 2 and a["formalization"]["denominator"] == 5
     b = next(p for p in body["projects"] if p["repo_full_name"] == f"e2e/{world.ws}-b")
-    assert b["formalization"] is None and b["binding"] is None
+    assert b["formalization"]["denominator"] == 1 and b["binding"] is None
     # REST は LLM 支援の記録の供給元を渡す（未計測にしない）
     assert body["llm"]["cache_hit_rate"] == 0.5 and body["llm"]["attestations"] == 3
 

@@ -21,6 +21,7 @@ export type Category =
   | 'potential_violation'
   | 'solver_limit'
   | 'conformant'
+  | 'scope_changed'
 
 export type Severity = 'high' | 'medium' | 'low' | 'info'
 

@@ -14,7 +14,7 @@ from speclino.domain.spec_ir import SpecIR
 from speclino.ports.sandbox import Sandbox
 
 UNRESOLVED_CATEGORIES_FOR_HUMANS = frozenset(
-    {"stale_approval", "vacuous_applicability", "ambiguous_spec"}
+    {"stale_approval", "vacuous_applicability", "ambiguous_spec", "scope_changed"}
 )
 
 

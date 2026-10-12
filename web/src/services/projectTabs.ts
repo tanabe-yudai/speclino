@@ -1,8 +1,8 @@
-/** プロジェクト画面のタブ（`/w/:slug/p/:owner/:repo/:tab`）。知識と検査は第 1 階層の一覧をこのプロジェクトで絞ったもの。 */
+/** プロジェクト画面のタブ（`/w/:slug/p/:owner/:repo/:tab`）。仕様と検査は第 1 階層の画面をこのプロジェクトで絞ったもの。 */
 
 import type { ProjectTab } from '@/types/navigation'
 
-export const PROJECT_TABS: ProjectTab[] = ['overview', 'knowledge', 'runs']
+export const PROJECT_TABS: ProjectTab[] = ['overview', 'specs', 'runs']
 
 /** URL のタブ。無ければ概要、知らないタブは null（旧いタブは legacyRoutes が転送する）。 */
 export function parseProjectTab(raw: string | undefined): ProjectTab | null {

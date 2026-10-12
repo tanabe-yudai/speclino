@@ -4,6 +4,7 @@ import { AgentsTab } from '@/components/settings/AgentsTab'
 import { MembersTab } from '@/components/settings/MembersTab'
 import { ProjectSettingsTab } from '@/components/settings/ProjectSettingsTab'
 import { RepositoriesTab } from '@/components/settings/RepositoriesTab'
+import { RetiredTab } from '@/components/settings/RetiredTab'
 import { ErrorState } from '@/components/ErrorState'
 import { LoadingState } from '@/components/LoadingState'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -67,6 +68,9 @@ export function Settings() {
         </TabsContent>
         <TabsContent value="projects" className="mt-6">
           <ProjectSettingsTab slug={slug} role={membership.role} />
+        </TabsContent>
+        <TabsContent value="retired" className="mt-6">
+          <RetiredTab slug={slug} />
         </TabsContent>
       </Tabs>
     </div>

@@ -24,9 +24,11 @@ def test_scope_requires_exactly_one_form() -> None:
         ArtifactScope(workspace=True, projects=["p1"])
 
 
-def test_spec_scope_must_name_projects() -> None:
-    with pytest.raises(ValidationError):
-        SpecContent(kind="spec", markdown="# x", scope=ArtifactScope(workspace=True))
+def test_spec_scope_may_be_workspace_wide() -> None:
+    spec = SpecContent(kind="spec", markdown="# x", scope=ArtifactScope(workspace=True))
+    assert spec.scope.workspace
+    own = SpecContent(kind="spec", markdown="# x", scope=ArtifactScope(projects=["p1"]))
+    assert own.scope.projects == ["p1"]
 
 
 def test_skill_file_paths_are_relative_and_inside() -> None:

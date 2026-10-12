@@ -144,6 +144,29 @@
       "title": "BehaviorAnalysis",
       "type": "object"
     },
+    "OutOfScopeDiagram": {
+      "additionalProperties": false,
+      "description": "ワークスペース全体の仕様のうち、要素がこのリポジトリに 1 つも無く義務を出さなかった図。",
+      "properties": {
+        "spec": {
+          "description": "仕様（artifact）の名前",
+          "minLength": 1,
+          "title": "Spec",
+          "type": "string"
+        },
+        "diagram_id": {
+          "minLength": 1,
+          "title": "Diagram Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "spec",
+        "diagram_id"
+      ],
+      "title": "OutOfScopeDiagram",
+      "type": "object"
+    },
     "ReachabilityDigest": {
       "additionalProperties": false,
       "description": "到達関数群のソースハッシュ（S41c 増分解析）。`analysis.reachability` の戻り値。\n\nbehavior の入口から静的にたどれる関数群と、それを含むモジュール群の import 推移閉包\n（解析器がモジュールを読む経路は import 経由しかない）を正規化して連結したハッシュ。\nbase と head でこれが一致すれば（かつ入力の同一性も一致すれば）Code IR の再解析を省ける。",
@@ -485,6 +508,14 @@
         "type": "string"
       },
       "title": "Expected Requirement Ids",
+      "type": "array"
+    },
+    "out_of_scope_diagrams": {
+      "description": "ワークスペース全体の仕様で対象外にした図（その図の義務は出るべき要求に入れない）",
+      "items": {
+        "$ref": "#/$defs/OutOfScopeDiagram"
+      },
+      "title": "Out Of Scope Diagrams",
       "type": "array"
     },
     "llm_assessment_keys": {

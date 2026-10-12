@@ -18,8 +18,6 @@ import { useCurrentWorkspace } from '@/hooks/useCurrentWorkspace'
 import { useKnowledgeChat } from '@/hooks/useKnowledgeChat'
 import { applyRuleProposal, canSummarize, currentRuleText, proposalText, ruleEditorText } from '@/services/knowledgeChat'
 import { paths } from '@/services/paths'
-import { policiesCrumbs } from '@/services/breadcrumbs'
-import { Breadcrumbs } from '@/components/shell/Breadcrumbs'
 import { baseForDraft, newRule, removeRule, upsertRule } from '@/services/policyDraft'
 import type { NoteState, RawProposal } from '@/types/knowledgeChat'
 import type { AuditEntry, PoliciesView, PolicyRule, RevisionSummary } from '@/types/policy'
@@ -31,7 +29,7 @@ interface Loaded {
   audit: AuditEntry[]
 }
 
-/** 規約（チーム規約、S43、design 6 章。`/w/:slug/knowledge/policies`）。左に下書きの帯とルール、右に改訂の履歴と監査ログ。 */
+/** 規約（チーム規約、S43、design 6 章。`/w/:slug/policies`）。左に下書きの帯とルール、右に改訂の履歴と監査ログ。 */
 export function Policies() {
   const workspace = useCurrentWorkspace()
   useDocumentTitle('規約')
@@ -141,8 +139,8 @@ function PoliciesBody({ slug }: { slug: string }) {
   return (
     <div className="space-y-6">
       <header className="min-w-0">
-        <Breadcrumbs items={policiesCrumbs(slug)} />
-        <h1 className="mt-2 truncate text-2xl font-bold tracking-tight">規約</h1>
+        <p className="text-xs font-semibold tracking-widest text-primary uppercase">Policies</p>
+        <h1 className="mt-1 truncate text-2xl font-bold tracking-tight">規約</h1>
         <p className="mt-1 text-sm text-ink-2">
           チームのすべてのプロジェクトに効く規約です。
           {view.active ? `有効な改訂 ${view.active.revision}` : '有効な改訂はまだありません'}

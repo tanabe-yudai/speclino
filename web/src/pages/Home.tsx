@@ -33,7 +33,7 @@ export function Home() {
   const workspace = pickWorkspace(me?.workspaces ?? [], urlSlug)
   useDocumentTitle(workspace ? (workspace.name ?? workspace.slug) : undefined)
 
-  // 旧いタブ（?tab=shared など）は知識・規約・観測の画面へ
+  // 旧いタブ（?tab=shared など）はスキル・規約・観測の画面へ
   const legacy = urlSlug ? legacyRedirect(pathname, search) : null
   if (legacy) return <Navigate to={legacy} replace />
   if (!me) return <LoadingState />
@@ -112,7 +112,6 @@ function HomeBody({ slug, role }: { slug: string; role: WorkspaceRole }) {
           <TodoPanel
             title={canApprove ? `承認待ち ${pendingCount} 件（あなたが承認できます）` : `承認待ち ${pendingCount} 件`}
             emphasis={canApprove}
-            more={{ to: paths.knowledge(slug, { status: 'pending' }), label: '知識の一覧で見る' }}
           >
             <ul className="space-y-1.5">
               {policyPending && policy.row && (
@@ -124,7 +123,7 @@ function HomeBody({ slug, role }: { slug: string; role: WorkspaceRole }) {
                   <KnowledgeStateBadges states={policyStates(policy.row).filter((s) => s === 'pending')} revisions={{ pending: policy.row.draftRevision }} />
                 </li>
               )}
-              {pending.slice(0, TODO_LIMIT - (policyPending ? 1 : 0)).map((a) => (
+              {pending.map((a) => (
                 <li key={a.artifact_id} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
                   <span className="w-14 text-xs text-ink-3">{KNOWLEDGE_KIND_LABELS[a.kind]}</span>
                   <Link
@@ -178,7 +177,7 @@ function HomeBody({ slug, role }: { slug: string; role: WorkspaceRole }) {
           {KNOWLEDGE_KINDS.map((k) => (
             <Link
               key={k}
-              to={k === 'policy' ? paths.policies(slug) : paths.knowledge(slug, { kind: k })}
+              to={paths.knowledgeList(slug, k)}
               className="row flex flex-col gap-1 p-4"
             >
               <span className="text-xs text-ink-3">{KNOWLEDGE_KIND_LABELS[k]}</span>

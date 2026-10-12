@@ -50,6 +50,7 @@ export const CATEGORY_LABELS: Record<Category, string> = {
   potential_violation: '違反の疑い',
   solver_limit: '検査上限到達',
   conformant: '適合',
+  scope_changed: '対象範囲の変化',
 }
 
 export const SEVERITY_LABELS: Record<Severity, string> = {
@@ -262,20 +263,48 @@ export const CHAT_SOURCE_LABELS: Record<'knowledge' | 'repo' | 'web', string> = 
 /** 第 1 階層の名前。「検査」は run（ゲートは検査の判定の言葉）、「観測」は可観測性の画面。 */
 export const SECTION_LABELS: Record<SectionId, string> = {
   home: 'ホーム',
-  knowledge: '知識',
+  specs: '仕様',
+  skills: 'スキル',
+  instructions: '指示書',
+  policies: '規約',
   runs: '検査',
   observability: '観測',
   settings: '設定',
 }
 
-/** スマホの画面下のタブの 5 つ目（設定・規約・ワークスペースの切り替え）。 */
+/** スマホの画面下のタブの 5 つ目（スキル・指示書・規約・設定・ワークスペースの切り替え）。 */
 export const MORE_LABEL = 'その他'
 
 export const PROJECT_TAB_LABELS: Record<ProjectTab, string> = {
   overview: '概要',
-  knowledge: '知識',
+  specs: '仕様',
   runs: '検査',
 }
+
+/** 種類ごとの画面の説明（見出しの下）。規約の画面は自分で書く。 */
+export const KNOWLEDGE_PAGE_DESCRIPTIONS: Record<Exclude<KnowledgeKind, 'policy'>, string> = {
+  spec: '要求と振る舞いの仕様。ワークスペース全体で共有するものと、リポジトリ固有のものに分けて並べます。改訂して承認すると、検査と各自のエージェントに使われます。',
+  skill: 'エージェントに渡す手順（SKILL.md）。改訂して承認すると、各自のエージェントに配られます。',
+  instructions: 'エージェントへの指示書（AGENTS.md / CLAUDE.md に書き出す本文）。改訂して承認すると、各自のエージェントに配られます。',
+}
+
+/** 仕様の画面の節。 */
+export const SPEC_GROUP_LABELS = {
+  workspace: 'ワークスペース全体の仕様',
+  repositories: 'リポジトリ別の仕様',
+  thisRepository: 'このリポジトリの仕様',
+  unknownRepository: 'このワークスペースに無いリポジトリ',
+} as const
+
+/** 仕様の節の説明。 */
+export const SPEC_GROUP_HINTS = {
+  workspace: 'すべてのリポジトリに当たる仕様（要求仕様など）。',
+  repositories: '特定のリポジトリに当たる仕様（振る舞いなどの細かい仕様）。複数のリポジトリに当たるものはそれぞれに出します。',
+} as const
+
+/** 取り下げ済みの知識の戻し方（設定の「取り下げ済みの知識」）。 */
+export const RETIRED_RESTORE_HINT =
+  '取り下げた知識は配信と検査に使われません。戻すときはエディタを開き、下書きを保存してオーナーか承認者が承認すると、その改訂が有効になって戻ります。'
 
 export const AGENT_CONNECTION_LABEL = 'エージェント接続（MCP / A2A）'
 export const REPO_SYNC_LABEL = 'リポジトリ同期（speclino sync）'
@@ -285,6 +314,7 @@ export const SETTINGS_TAB_LABELS: Record<SettingsTab, string> = {
   repositories: 'リポジトリ',
   agents: 'エージェント接続',
   projects: 'プロジェクト',
+  retired: '取り下げ済みの知識',
 }
 
 /** 知識の種類（規約はチーム規約）。 */

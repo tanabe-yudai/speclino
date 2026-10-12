@@ -135,6 +135,7 @@ def spec_revision(
     *,
     domain: DomainSpec | None = DOMAIN,
     legacy: list[SpecIR] | None = None,
+    scope: ArtifactScope | None = None,
 ) -> ArtifactRevision:
     result = compile_spec(markdown, domain=domain, legacy_ir=legacy or [])
     assert result.compiled is not None, result.diagnostics
@@ -143,7 +144,7 @@ def spec_revision(
         markdown=markdown,
         domain=domain,
         legacy_ir=legacy or [],
-        scope=ArtifactScope(projects=[PROJECT]),
+        scope=scope or ArtifactScope(projects=[PROJECT]),
         compiled=result.compiled,
     )
     return ArtifactRevision(
@@ -658,6 +659,113 @@ def test_local_specs_fail_closed_on_bad_input(tmp_path: Path) -> None:
         run_check(_local(root, {"broken.md": broken}))
 
 
+# ワークスペース全体の仕様: 別のリポジトリの話の図（出荷）は、このリポジトリ（注文）では対象外
+FOREIGN = (
+    block(
+        "%%@ id: ship",
+        "classDiagram",
+        "    class Shipment {",
+        "        ShipmentPhase phase",
+        "        +dispatch(order)",
+        "    }",
+        "    class Carrier {",
+        "        +pickup(order)",
+        "    }",
+        "    class ShipmentPhase {",
+        "        <<enumeration>>",
+        "        READY",
+        "        SENT",
+        "    }",
+    )
+    + "\n"
+    + block(
+        "%%@ id: ship-seq",
+        "%%@ entry: Shipment.dispatch",
+        "sequenceDiagram",
+        "    participant S as Shipment",
+        "    participant C as Carrier",
+        "    S->>C: [p1] pickup(order)",
+    )
+    + "\n"
+    + block(
+        "%%@ id: phase",
+        "%%@ attribute: shipment.phase",
+        "stateDiagram-v2",
+        "    [*] --> READY",
+        "    READY --> SENT: [q1] send",
+    )
+)
+TABLE = (
+    "\n| ID | level | 要求 | 形式化 |\n| --- | --- | --- | --- |\n"
+    "| R-OWN | mandatory | 取消 | cancel#m1 |\n"
+    "| R-SHIP | mandatory | 出荷 | ship#Shipment, ship-seq#p1 |\n"
+)
+SHARED = UML + "\n" + FOREIGN + TABLE
+WHOLE = ArtifactScope(workspace=True)
+FOREIGN_IDS = {"ship#Shipment", "ship#Carrier", "ship-seq#Shipment.dispatch", "phase"}
+
+
+def test_workspace_spec_skips_diagrams_with_no_element_in_the_repo(tmp_path: Path) -> None:
+    """要素が 1 つも無い図は義務を出さない（偽の VIOLATED・欠落の UNKNOWN にしない）。"""
+    res = run_check(
+        request(make_repo(tmp_path / "r"), knowledge(spec_revision("shared", SHARED, scope=WHOLE)))
+    )
+    found = by_req(res.findings.findings)
+    assert not FOREIGN_IDS & set(found)
+    assert not FOREIGN_IDS & set(res.manifest.expected_requirement_ids)
+    # 注文の例はクラスを持たない（関数だけ）ので、クラス図 vocab も対象外になる
+    assert [(d.spec, d.diagram_id) for d in res.manifest.out_of_scope_diagrams] == [
+        ("shared", "phase"),
+        ("shared", "ship"),
+        ("shared", "ship-seq"),
+        ("shared", "vocab"),
+    ]
+    # このリポジトリの話の図（入口・状態の属性が解決できる）は従来どおり照合する
+    assert found["cancel#OrderService.cancel_order"].verdict == "VERIFIED_IN_SCOPE"
+    assert {f.verdict for f in res.findings.findings if f.requirement_id == "status"} == {
+        "VERIFIED_IN_SCOPE"
+    }
+    # 出荷の要求の行は対象外として数える（対応範囲・未解析には入れない）
+    c = res.findings.coverage
+    assert (c.requirements_total, c.requirements_in_scope, c.requirements_out_of_scope) == (2, 1, 1)
+    assert c.requirements_unanalyzed == 0
+
+
+def test_project_spec_keeps_missing_diagrams_violated(tmp_path: Path) -> None:
+    """プロジェクトに絞った仕様の挙動は変えない（無いクラスは VIOLATED）。"""
+    res = run_check(request(make_repo(tmp_path / "r"), knowledge(spec_revision("own", SHARED))))
+    found = by_req(res.findings.findings)
+    assert found["ship#Shipment"].verdict == "VIOLATED"
+    assert found["vocab#OrderService"].verdict == "VIOLATED"
+    assert res.manifest.out_of_scope_diagrams == []
+    assert res.findings.coverage.requirements_out_of_scope == 0
+
+
+def test_workspace_spec_diagram_with_one_known_element_is_checked(tmp_path: Path) -> None:
+    """図の要素が 1 つでもリポジトリにあれば図ごと照合する（欠けた要素は VIOLATED のまま）。"""
+    mixed = block(
+        "%%@ id: mixed",
+        "classDiagram",
+        "    class Order {",
+        "        +ship(order)",
+        "    }",
+        "    class Shipment {",
+        "        +dispatch(order)",
+        "    }",
+    )
+    res = run_check(
+        request(
+            make_repo(tmp_path / "r"),
+            knowledge(spec_revision("shared", "# x\n\n" + mixed, scope=WHOLE)),
+        )
+    )
+    found = by_req(res.findings.findings)
+    # Order はあるので図ごと照合し（Order の義務も出る）、無い Shipment は VIOLATED のまま
+    assert found["mixed#Order"].verdict != "VERIFIED_IN_SCOPE"
+    assert found["mixed#Shipment"].verdict == "VIOLATED"
+    assert res.manifest.out_of_scope_diagrams == []
+
+
 def test_class_relations_are_checked(tmp_path: Path) -> None:
     root = make_repo(tmp_path / "r")
     with_relations = CLASSES.replace(
@@ -676,3 +784,60 @@ def test_class_relations_are_checked(tmp_path: Path) -> None:
     assert res.gate_levels["vocab#r1"] == "mandatory"
     assert res.gate_levels["vocab#r2"] == "advisory"
     assert {"vocab#r1", "vocab#r2"} <= set(res.manifest.expected_requirement_ids)
+
+
+SHIP_ORDER = block(
+    "%%@ id: own",
+    "classDiagram",
+    "    class Order {",
+    "        +ship(order)",
+    "    }",
+)
+
+
+def _rename_order(root: Path) -> Path:
+    """PR で図のクラス Order を改名した head（図の要素がリポジトリから消える）。"""
+    for name in ("models.py", "service.py"):
+        p = root / "examples" / "orders" / "app" / name
+        p.write_text(
+            p.read_text()
+            .replace("Order,", "Purchase,")
+            .replace("class Order:", "class Purchase:")
+            .replace(": Order)", ": Purchase)")
+        )
+    return root
+
+
+def test_diagram_that_drops_out_of_scope_in_the_pr_is_review(tmp_path: Path) -> None:
+    """base で対象だった図が head で対象外になったら、義務が黙って消えないよう要確認にする。"""
+    base = make_repo(tmp_path / "base")
+    head = _rename_order(make_repo(tmp_path / "head"))
+    k = knowledge(spec_revision("shared", "# x\n\n" + SHIP_ORDER + "\n" + FOREIGN, scope=WHOLE))
+    res = run_check(request(head, k, base_root=base, base_sha="BASE"))
+    found = by_req(res.findings.findings)
+    assert "own#Order" not in found
+    f = found["own#scope"]
+    assert (f.verdict, f.category) == ("REVIEW", "scope_changed")
+    assert "デフォルトブランチでは対象だった図 own" in f.message
+    assert res.gate.status == "fail"  # mandatory の図（要求の表に無い要素は mandatory）
+    # base でも対象外だった図（出荷）は通知しない
+    assert not {"ship#scope", "ship-seq#scope", "phase#scope"} & set(found)
+    # 承認者が確定できる（仕様の改訂の内容に結び付く）
+    from speclino.services.attestations import attestation_target
+
+    assert attestation_target(f) is not None
+
+    # base でも対象外なら（同じ head どうし）通知しない
+    same = run_check(request(head, k, base_root=head, base_sha="HEAD"))
+    assert "own#scope" not in by_req(same.findings.findings)
+    # base が無い run は比べられないので、以前は対象だったとみなして同じ要確認（フェイルクローズ）
+    alone = run_check(request(head, k))
+    u = by_req(alone.findings.findings)["own#scope"]
+    assert (u.verdict, u.category) == ("REVIEW", "scope_changed")
+    assert "デフォルトブランチの判定が無く" in u.message
+    assert "own#scope" in {f.requirement_id for f in alone.gate.blocking}
+    assert alone.gate.status == "fail"
+    # 確定は head のコミットに結び付く（別の変更に古い確定を使い回させない）
+    other = run_check(request(head, k, base_root=base, base_sha="BASE", head_sha="OTHER"))
+    g = by_req(other.findings.findings)["own#scope"]
+    assert attestation_target(g) != attestation_target(f)

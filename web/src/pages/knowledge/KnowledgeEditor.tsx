@@ -144,7 +144,7 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
   const artifactName = base.base?.name ?? null
   const baseContent = base.base ? toEditable(base.base.content) : emptyContent(kind)
   const dirty = !isSameContent(content, baseContent)
-  const scopeIssue = scopeProblem(kind, content.scope)
+  const scopeIssue = scopeProblem(content.scope)
   const nameIssue = id ? null : !name ? '名前を入力してください' : !NAME_RE.test(name) || name.length > 64 ? '名前は英小文字・数字・ハイフンで 64 文字以内（先頭は英小文字か数字）にします' : null
 
   const previewRequest: SpecPreviewRequest | null =
@@ -340,7 +340,7 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
             </p>
           </div>
         )}
-        <ScopePicker kind={kind} scope={content.scope} onChange={(scope) => setContent({ ...content, scope })} projects={projects} error={projectsError} />
+        <ScopePicker scope={content.scope} onChange={(scope) => setContent({ ...content, scope })} projects={projects} error={projectsError} />
         {applied && (
           <AppliedDiffPanel applied={applied} undoable={canUndo(applied, editorText(content), content)} onUndo={undoApplied} onClose={() => setApplied(null)} />
         )}

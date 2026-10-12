@@ -156,7 +156,11 @@ class OperationResolver:
 
 @dataclass(frozen=True)
 class SpecUnit:
-    """bundle の spec の改訂 1 つ（検査の単位）。"""
+    """bundle の spec の改訂 1 つ（検査の単位）。
+
+    workspace_wide はスコープがワークスペース全体の仕様。out_of_scope_diagrams はそのうち、
+    このリポジトリで対象外にした図（`conformance.diagram_scope`。compiled からは義務を除いてある）。
+    """
 
     name: str
     artifact_id: str
@@ -165,6 +169,8 @@ class SpecUnit:
     compiled: CompiledSpec | None
     domain: DomainSpec | None
     markdown: str
+    workspace_wide: bool = False
+    out_of_scope_diagrams: tuple[str, ...] = ()
 
 
 def spec_units(knowledge: ResolvedKnowledge) -> list[SpecUnit]:
@@ -183,6 +189,7 @@ def spec_units(knowledge: ResolvedKnowledge) -> list[SpecUnit]:
                 compiled=content.compiled,
                 domain=content.domain,
                 markdown=content.markdown,
+                workspace_wide=content.scope.workspace,
             )
         )
     return units

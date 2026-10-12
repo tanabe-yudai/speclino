@@ -2,12 +2,14 @@
 
 import type { SettingsTab } from '@/types/command'
 import type { ArtifactKind } from '@/types/knowledge'
-import type { KnowledgeFilter, ProjectTab, RunFilter } from '@/types/navigation'
+import type { KnowledgeKind, KnowledgeListFilter, ProjectTab, RunFilter } from '@/types/navigation'
 import { KIND_SECTION } from './knowledge'
 
 const e = encodeURIComponent
 const ws = (slug: string) => `/w/${e(slug)}`
 const kn = (slug: string, kind: ArtifactKind) => `${ws(slug)}/knowledge/${KIND_SECTION[kind]}`
+/** 種類ごとの画面の区切り（エディタの区切りと同じ名前）。 */
+const listSegment = (kind: KnowledgeKind) => (kind === 'policy' ? 'policies' : KIND_SECTION[kind])
 
 /** エディタ・改訂履歴へ渡すクエリ。`from` は戻り先のプロジェクト（owner/repo）、`chat` は会話の ID（`new` なら新規）。 */
 export interface KnowledgeQuery {
@@ -37,21 +39,21 @@ export const paths = {
   home: () => '/app',
   /** ワークスペースのホーム（やること・件数・プロジェクトの健全性）。 */
   workspace: (slug: string) => ws(slug),
-  /** プロジェクト（絞り込みの画面）。概要は素のパス。知識・検査のタブは一覧と同じ絞り込みのクエリを持てる。 */
-  project: (slug: string, fullName: string, tab?: ProjectTab, filter?: Partial<KnowledgeFilter & RunFilter>) => {
+  /** プロジェクト（絞り込みの画面）。概要は素のパス。仕様・検査のタブは一覧と同じ絞り込みのクエリを持てる。 */
+  project: (slug: string, fullName: string, tab?: ProjectTab, filter?: Partial<KnowledgeListFilter & RunFilter>) => {
     const base = projectBase(slug, fullName)
     if (!tab || tab === 'overview') return base
-    const q =
-      tab === 'knowledge'
-        ? filterQuery([['kind', filter?.kind], ['status', filter?.status]])
-        : filterQuery([['gate', filter?.gate]])
+    const q = tab === 'specs' ? filterQuery([['status', filter?.status]]) : filterQuery([['gate', filter?.gate]])
     return `${base}/${tab}${q}`
   },
-  /** 知識の一覧（仕様・スキル・指示書・規約）。 */
-  knowledge: (slug: string, filter?: Partial<KnowledgeFilter>) =>
-    `${ws(slug)}/knowledge${filterQuery([['kind', filter?.kind], ['project', filter?.project], ['status', filter?.status]])}`,
+  /** 種類ごとの画面（`/w/:slug/specs` など）。リポジトリで絞れるのは仕様だけ。規約は絞り込みを持たない。 */
+  knowledgeList: (slug: string, kind: KnowledgeKind, filter?: Partial<KnowledgeListFilter>) => {
+    const base = `${ws(slug)}/${listSegment(kind)}`
+    if (kind === 'policy') return base
+    return `${base}${filterQuery([['project', kind === 'spec' ? filter?.project : null], ['status', filter?.status]])}`
+  },
   /** 規約（チーム規約）の画面。 */
-  policies: (slug: string) => `${ws(slug)}/knowledge/policies`,
+  policies: (slug: string) => `${ws(slug)}/policies`,
   knowledgeNew: (slug: string, kind: ArtifactKind, from?: string | null) => `${kn(slug, kind)}/new${query({ from })}`,
   knowledgeItem: (slug: string, kind: ArtifactKind, id: string, q?: KnowledgeQuery) =>
     `${kn(slug, kind)}/${e(id)}${query(q)}`,

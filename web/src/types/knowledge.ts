@@ -8,7 +8,7 @@ export type ArtifactStatus = 'draft' | 'active' | 'superseded'
 export type InstructionsTarget = 'agents_md' | 'claude_md'
 export type RuleLevel = 'mandatory' | 'advisory'
 
-/** `workspace: true` か `projects`（project ID の正規形）のどちらか一方。spec は projects だけ。 */
+/** `workspace: true` か `projects`（project ID の正規形）のどちらか一方（どの種類も同じ）。 */
 export interface ArtifactScope {
   workspace: boolean
   projects: string[]

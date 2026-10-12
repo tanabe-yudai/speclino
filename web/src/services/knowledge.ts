@@ -79,10 +79,8 @@ export function editBase(draft: ArtifactRevision | null, revisions: ArtifactRevi
   return { base, expectedRevision: base?.revision ?? null, expectedHash: base?.content_hash ?? null }
 }
 
-export function scopeProblem(kind: ArtifactKind, scope: ArtifactScope): string | null {
-  if (kind === 'spec') {
-    return scope.workspace || scope.projects.length === 0 ? '仕様のスコープはプロジェクトを 1 つ以上選びます' : null
-  }
+/** スコープはワークスペース全体か、プロジェクトの列挙のどちらか一方（どの種類も同じ）。 */
+export function scopeProblem(scope: ArtifactScope): string | null {
   return scope.workspace === scope.projects.length > 0 ? 'ワークスペース全体か、プロジェクトを 1 つ以上選びます' : null
 }
 

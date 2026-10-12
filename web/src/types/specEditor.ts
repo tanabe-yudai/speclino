@@ -1,6 +1,6 @@
 /** 仕様エディタの部品（components/spec-editor/）と知識の画面の props 型。 */
 
-import type { ArtifactContent, ArtifactKind, ArtifactRevision, ArtifactScope, SpecDiagnostic, SpecPreview } from './knowledge'
+import type { ArtifactContent, ArtifactRevision, ArtifactScope, SpecDiagnostic, SpecPreview } from './knowledge'
 import type { ProjectSummary } from './project'
 
 export interface MarkdownInputProps {
@@ -34,7 +34,6 @@ export interface DiagnosticsListProps {
 }
 
 export interface ScopePickerProps {
-  kind: ArtifactKind
   scope: ArtifactScope
   onChange: (scope: ArtifactScope) => void
   projects: ProjectSummary[] | null
