@@ -142,6 +142,24 @@ class StructureObligation(IRModel):
     level: RuleLevel
 
 
+RelationKind = Literal["inheritance", "composition", "aggregation", "association", "dependency"]
+
+
+class RelationObligation(IRModel):
+    """クラス図の関係線（grammar.md 4.1 節）。source が依存する側（子・全体・使う側）。"""
+
+    id: str = Field(
+        min_length=1,
+        description="<図 ID>#<関係 ID>、ID が無ければ <図 ID>#<source>-<kind>-<target>",
+    )
+    element_id: str | None = Field(default=None, description="図に書いた関係 ID（`[r1]`）")
+    kind: RelationKind
+    source: str = Field(min_length=1)
+    target: str = Field(min_length=1)
+    level: RuleLevel
+    span: SourceSpan
+
+
 class RequirementRow(IRModel):
     id: str = Field(min_length=1)
     level: RuleLevel
@@ -157,6 +175,12 @@ class CompiledSpec(IRModel):
     ir_hash: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     classes: list[ClassDef] = Field(default_factory=list)
     structure: list[StructureObligation] = Field(default_factory=list)
+    relations: list[RelationObligation] = Field(
+        default_factory=list,
+        # 空なら出力しない: 関係の無い仕様の JSON・ir_hash・content_hash を関係の追加前と同じに保つ
+        exclude_if=lambda v: not v,
+        description="クラス図の関係線（grammar.md 4.1 節）",
+    )
     traces: list[TraceObligation] = Field(default_factory=list)
     state_machines: list[StateMachine] = Field(default_factory=list)
     legacy: list[SpecIR] = Field(default_factory=list)
@@ -187,6 +211,8 @@ __all__ = [
     "DiagramKind",
     "EpsilonLabel",
     "ParseResult",
+    "RelationKind",
+    "RelationObligation",
     "RequirementRow",
     "SourceSpan",
     "SpecDiagnostic",

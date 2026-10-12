@@ -61,7 +61,7 @@ def test_class_diagram() -> None:
 @pytest.mark.parametrize(
     ("line", "code"),
     [
-        ("    Order <|-- Special", "E_UNSUPPORTED_SYNTAX"),
+        ("    Order <|-- Special", "E_UNKNOWN_CLASS"),
         ("    Order : +int qty", "E_UNSUPPORTED_SYNTAX"),
         ("    class Order", "E_DUPLICATE_ID"),
     ],
