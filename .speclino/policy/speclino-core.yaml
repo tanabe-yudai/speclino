@@ -62,8 +62,8 @@ rules:
       Spec IR（specs/ir/*.spec-ir.json）の rules[].tests に宣言したテスト ID は実在する
       ファイル::関数を指し、@pytest.mark.spec("R-...") の付いたテストは対応する rule.tests
       に宣言されていること。二重管理（Spec IR の tests とテストのマーカー）がずれると
-      test_run が no_declared_tests で何もしなくなる（S38）。既存のマーカー（R-RUN 系等）が
-      未宣言のまま残っているため、まず advisory とし、宣言を揃えたら mandatory に上げる。
+      test_run が no_declared_tests で何もしなくなる（S38）。このリポジトリの仕様の正本は
+      SpecLino にあり specs/ir を置かないので、マーカーも付けない。advisory のまま残す。
     applies_to:
       paths:
         - "specs/ir/*.spec-ir.json"

@@ -545,12 +545,15 @@ CLI 側を残しているのは、**GCP を畳んだ後でも / clone した人�
 SpecLino は自分自身のコードを自分の仕様で検査する。CI が落ちれば自分の規約違反を自分で見つけた
 ということ。
 
-| 仕様 | 対象 | 要求 |
-| --- | --- | --- |
-| [SPEC-TOOL-001](specs/SPEC-TOOL-001.md) | `ToolGateway.invoke` | 権限が無ければツールを実行せず監査に残す。予算超過でも同じ |
-| [SPEC-GATE-001](specs/SPEC-GATE-001.md) | `conformance.gate.decide_gate` | 検証集合が空・必須ルールが無い状態で「通過」を返さない |
-| [SPEC-RUN-001](specs/SPEC-RUN-001.md) | `services.run_freshness.should_publish` | 古い実行（superseded / 最新でない）の結果を公開しない |
-| [SPEC-TEST-002](specs/SPEC-TEST-002.md) | `agent.tools.test_run.decide_observation` | 宣言済みテストの成功・error・skipped・timeout は観測を別軸に記録するだけで、判定（VIOLATED）を上書きしない |
+仕様の正本は SpecLino（ワークスペース）にある。CI の self-check ジョブ（`make selfcheck`）は、承認済みの
+仕様を `speclino sync`（または MCP の `knowledge_pull`）で書き出した `.speclino/specs/*.md` を手元の
+parser で変換し、bundle の run と同じ UML の義務の検査に通す（`speclino check --specs-dir .speclino/specs`。
+LLM・DB・GitHub App を使わない）。UML の要求を持たない仕様（旧形式の本文だけのもの）は、IR が手元に
+無いので UNKNOWN（advisory）として「判定していない」ことを残す。
+
+検出のデモ（`make test`）は、凍結した旧形式の Spec IR（`tests/fixtures/selfcheck/`）で、
+`ToolGateway.invoke`・`conformance.gate.decide_gate`・`services.run_freshness.should_publish`・
+`agent.tools.test_run.decide_observation` をわざと壊すと違反が出ることを確かめる。
 
 規約は MAKE-001（`make setup/test/lint` が存在し空でない）、SPEC-FMT-001（仕様の書式）、
 CI-001（pull_request トリガー・必須ステップ・読取り専用権限。`echo make test` や

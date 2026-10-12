@@ -83,6 +83,15 @@ export interface ApprovalPanelProps {
   onConflict: () => void
 }
 
+export interface RetirePanelProps {
+  slug: string
+  /** 今の有効な改訂（無ければパネルを出さない） */
+  active: ArtifactRevision | null
+  dirty: boolean
+  onRetired: (generation: number) => void
+  onConflict: () => void
+}
+
 export interface DiffViewProps {
   before: string
   after: string

@@ -12,7 +12,7 @@
 成功した junit を書ける（`PYTHONSAFEPATH=1` では防げない）。偽の失敗はゲートを厳しくする
 だけなので受け入れてよいが、偽の成功は違反を適合に変えてしまうので採らない。
 
-`decide_observation` は SpecLino 自身の解析対象（specs/SPEC-TEST-002.md、R-TEST-01〜03）なので
+`decide_observation` は SpecLino 自身の解析対象（R-TEST-01〜03）なので
 対応構文だけで書く。各テストの結果を仕分ける `classify_statuses`（ループを使う）と分離している
 のは `conformance.gate` の `triage` / `decide_gate` の分割と同じ技法（S36）。
 """

@@ -8,6 +8,7 @@ import type {
   ArtifactRevision,
   ArtifactScope,
   KnowledgeSection,
+  RetireState,
 } from '@/types/knowledge'
 import type { WorkspaceRole } from '@/types/me'
 
@@ -57,15 +58,24 @@ export function activeRevision(revisions: ArtifactRevision[]): ArtifactRevision 
   return revisions.find((r) => r.status === 'active') ?? null
 }
 
+/** 取り下げ済みなら取り下げた改訂（有効な改訂が無く、承認済みの改訂がある。revisions は新しい順）。 */
+export function retiredRevision(revisions: ArtifactRevision[]): ArtifactRevision | null {
+  if (activeRevision(revisions)) return null
+  return revisions.find((r) => r.status === 'superseded') ?? null
+}
+
 export interface EditBase {
   base: ArtifactRevision | null
   expectedRevision: number | null
   expectedHash: string | null
 }
 
-/** 編集の土台: 下書きがあれば下書き、無ければ有効な改訂。保存の前提（番号と hash）も同じもの。 */
+/**
+ * 編集の土台: 下書きがあれば下書き、無ければ有効な改訂、取り下げ済みなら最新の改訂（サーバも同じ規則で
+ * 次の番号の下書きを作る）。保存の前提（番号と hash）も同じもの。
+ */
 export function editBase(draft: ArtifactRevision | null, revisions: ArtifactRevision[]): EditBase {
-  const base = draft ?? activeRevision(revisions)
+  const base = draft ?? activeRevision(revisions) ?? revisions[0] ?? null
   return { base, expectedRevision: base?.revision ?? null, expectedHash: base?.content_hash ?? null }
 }
 
@@ -117,6 +127,13 @@ export function approvalState(input: ApprovalInput): ApprovalState {
   return { visible, enabled: true, reason: null, selfApproval }
 }
 
+/** 取り下げのボタン。取り下げるのは今の有効な改訂（サーバが番号と hash で照合する）。 */
+export function retireState(role: WorkspaceRole | null, active: ArtifactRevision | null, dirty: boolean): RetireState {
+  const visible = !!active && (role === 'owner' || role === 'approver')
+  if (dirty) return { visible, enabled: false, reason: '保存していない変更があります。保存するか戻してから取り下げます' }
+  return { visible, enabled: visible, reason: null }
+}
+
 export type KnowledgeErrorKind = 'conflict' | 'bundle_conflict' | 'not_compilable' | 'forbidden' | 'invalid' | 'other'
 
 /** 保存・承認の失敗を画面の区分と文言にする。conflict は読み直しを促すダイアログで扱う。 */
@@ -130,7 +147,9 @@ export function describeKnowledgeError(err: unknown): { kind: KnowledgeErrorKind
     case 'spec_not_compilable':
       return { kind: 'not_compilable', message: `仕様を読み取れないため承認できません: ${err.message}` }
     case 'not_an_approver':
-      return { kind: 'forbidden', message: '承認できるのはオーナーと承認者だけです' }
+      return { kind: 'forbidden', message: '承認・取り下げができるのはオーナーと承認者だけです' }
+    case 'artifact_not_active':
+      return { kind: 'conflict', message: '有効な改訂がありません（すでに取り下げられています）' }
     case 'artifact_exists':
       return { kind: 'invalid', message: '同じ名前のものが既にあります' }
     case 'invalid_artifact':

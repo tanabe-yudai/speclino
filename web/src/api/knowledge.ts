@@ -9,6 +9,7 @@ import type {
   ArtifactRevision,
   ArtifactSummary,
   Bundle,
+  RetireResult,
   SpecPreview,
   SpecPreviewRequest,
 } from '../types/knowledge'
@@ -84,6 +85,21 @@ export function approveArtifact(
     method: 'POST',
     headers: json,
     body: JSON.stringify({ expected_revision: expectedRevision, expected_hash: expectedHash, expected_note_hash: expectedNoteHash }),
+  })
+}
+
+/** 有効な改訂（見た番号と hash）を取り下げる。違えば 409 draft_changed、有効な改訂が無ければ 409 artifact_not_active。 */
+export function retireArtifact(
+  slug: string,
+  id: string,
+  expectedRevision: number,
+  expectedHash: string,
+  reason: string,
+): Promise<RetireResult> {
+  return apiFetch<RetireResult>(`${art(slug, id)}/retire`, {
+    method: 'POST',
+    headers: json,
+    body: JSON.stringify({ expected_revision: expectedRevision, expected_hash: expectedHash, reason: reason.trim() }),
   })
 }
 

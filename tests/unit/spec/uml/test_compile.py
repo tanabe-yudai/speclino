@@ -23,7 +23,7 @@ from tests.unit.spec.uml.samples import STATES as STATES_MD
 ROOT = Path(__file__).resolve().parents[4]
 PERF_LIMIT = 3.0 * float(os.environ.get("SPECLINO_PERF_FACTOR", "1"))
 """計算量のテストの時間の上限（秒）。遅い環境では SPECLINO_PERF_FACTOR で倍率を掛ける。"""
-LEGACY = load_spec_ir(ROOT / "specs/ir/gate_decide.spec-ir.json")
+LEGACY = load_spec_ir(ROOT / "tests/fixtures/selfcheck/gate_decide.spec-ir.json")
 
 # 正常な文書と、さまざまな誤りを含む文書（網羅のテストに使う）
 CORPUS = [

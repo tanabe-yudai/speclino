@@ -1,4 +1,8 @@
-"""自己検証: SpecLino の ToolGateway.invoke を SPEC-TOOL-001 の Spec IR で検査する（S24）。"""
+"""自己検証: SpecLino 自身の振る舞いを、凍結した旧形式の Spec IR で検査する。
+
+仕様の正本は SpecLino（ワークスペース）にあり、リポジトリには `specs/ir` を置かない。
+ここの Spec IR は検出テストの入力として凍結したもの（tests/fixtures/selfcheck/README.md）。
+"""
 
 from __future__ import annotations
 
@@ -17,25 +21,15 @@ DOMAIN = load_domain(REPO / ".speclino" / "domain.yaml")
 BINDINGS = load_bindings(REPO / ".speclino" / "bindings.yaml")
 GATEWAY = REPO / "src" / "speclino" / "agent" / "gateway.py"
 
-# デモブランチが src/speclino/... や specs/ir/... を壊しても検出テストが巻き添えで壊れないよう、
+# デモブランチが src/speclino/... を壊しても検出テストが巻き添えで壊れないよう、
 # 変異させる「元」を凍結したコピー（tests/fixtures/selfcheck/README.md 参照）。
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "selfcheck"
 FROZEN_GATEWAY = FIXTURES / "gateway.py"
 FROZEN_SPEC = load_spec_ir(FIXTURES / "tool_gateway.spec-ir.json")
 
 
-def verdicts(root: Path) -> dict[str, tuple[str, str]]:
-    """現物（specs/ir/tool_gateway.spec-ir.json）に対する検証。selfcheck 専用。"""
-    spec = load_spec_ir(REPO / "specs" / "ir" / "tool_gateway.spec-ir.json")
-    code = analyze_repo(root, "tool_gateway_invoke", DOMAIN, BINDINGS)
-    assert code.paths, code.unknown_causes
-    return {
-        f.requirement_id: (f.verdict, f.category) for f in evaluate(spec, code, DOMAIN).findings
-    }
-
-
 def _frozen_verdicts(root: Path) -> dict[str, tuple[str, str]]:
-    """凍結コピー（FROZEN_SPEC）に対する検証。検出テストはこちらを使う。"""
+    """凍結した Spec IR（FROZEN_SPEC）に対する検証。"""
     code = analyze_repo(root, "tool_gateway_invoke", DOMAIN, BINDINGS)
     assert code.paths, code.unknown_causes
     return {
@@ -45,10 +39,9 @@ def _frozen_verdicts(root: Path) -> dict[str, tuple[str, str]]:
 
 
 @pytest.mark.selfcheck
-def test_spec_ir_is_valid_and_approved_against_current_markdown() -> None:
-    spec = load_spec_ir(REPO / "specs" / "ir" / "tool_gateway.spec-ir.json")
-    md = (REPO / "specs" / "SPEC-TOOL-001.md").read_text(encoding="utf-8")
-    report = validate_spec_ir(spec, DOMAIN, BINDINGS, md)
+def test_frozen_spec_ir_is_valid_against_current_vocabulary() -> None:
+    """凍結した Spec IR が今の domain.yaml・bindings.yaml で読める（検出テストの前提）。"""
+    report = validate_spec_ir(FROZEN_SPEC, DOMAIN, BINDINGS, None)
     assert report.ok, [d.model_dump() for d in report.errors]
     assert not report.warnings, [d.model_dump() for d in report.warnings]
 
@@ -63,7 +56,7 @@ def test_gateway_invoke_satisfies_spec_tool_001() -> None:
     assert all(p.precision == "exact_in_model" for p in code.paths), [
         (p.path_id, [u.detail for u in p.unknown_causes]) for p in code.paths
     ]
-    v = verdicts(REPO)
+    v = _frozen_verdicts(REPO)
     assert all(val == ("VERIFIED_IN_SCOPE", "conformant") for val in v.values()), v
 
 
@@ -110,22 +103,21 @@ def test_missing_denied_audit_violates_r_tool_01b(tmp_path: Path) -> None:
     assert v["R-TOOL-01"] == ("VERIFIED_IN_SCOPE", "conformant")
 
 
-# ------------------------- S36: SPEC-GATE-001 / SPEC-RUN-001、S50: SPEC-TEST-002
+# ------------------------- ゲート・run の鮮度・test_run の判定
 
+# behavior → 凍結した Spec IR
 SELF_SPECS = {
-    "gate_decide": ("SPEC-GATE-001.md", "gate_decide.spec-ir.json"),
-    "run_freshness": ("SPEC-RUN-001.md", "run_freshness.spec-ir.json"),
-    "test_run_decide": ("SPEC-TEST-002.md", "test_run_decide.spec-ir.json"),
+    "gate_decide": "gate_decide.spec-ir.json",
+    "run_freshness": "run_freshness.spec-ir.json",
+    "test_run_decide": "test_run_decide.spec-ir.json",
 }
 
 
 @pytest.mark.selfcheck
 @pytest.mark.parametrize("behavior", sorted(SELF_SPECS))
 def test_gate_and_run_specs_are_valid_and_verified(behavior: str) -> None:
-    md_name, ir_name = SELF_SPECS[behavior]
-    spec = load_spec_ir(REPO / "specs" / "ir" / ir_name)
-    md = (REPO / "specs" / md_name).read_text(encoding="utf-8")
-    report = validate_spec_ir(spec, DOMAIN, BINDINGS, md)
+    spec = load_spec_ir(FIXTURES / SELF_SPECS[behavior])
+    report = validate_spec_ir(spec, DOMAIN, BINDINGS, None)
     assert report.ok and not report.warnings, [d.model_dump() for d in report.diagnostics]
     code = analyze_repo(REPO, behavior, DOMAIN, BINDINGS)
     assert code.paths and all(p.precision == "exact_in_model" for p in code.paths), [
@@ -165,7 +157,7 @@ def _copy_module(tmp_path: Path, rel: str, transform: Callable[[str], str]) -> P
 
 def _self_verdicts(root: Path, behavior: str) -> dict[str, tuple[str, str]]:
     """凍結コピー（FIXTURES 配下の Spec IR）に対する検証。検出テストはこちらを使う。"""
-    spec = load_spec_ir(FIXTURES / SELF_SPECS[behavior][1])
+    spec = load_spec_ir(FIXTURES / SELF_SPECS[behavior])
     code = analyze_repo(root, behavior, DOMAIN, BINDINGS)
     assert code.paths, code.unknown_causes
     return {
@@ -223,10 +215,6 @@ FROZEN_TARGETS = {
     "src/speclino/conformance/gate.py": FROZEN_MODULES["conformance/gate.py"],
     "src/speclino/services/run_freshness.py": FROZEN_MODULES["services/run_freshness.py"],
     "src/speclino/agent/tools/test_run.py": FROZEN_MODULES["agent/tools/test_run.py"],
-    "specs/ir/tool_gateway.spec-ir.json": FIXTURES / "tool_gateway.spec-ir.json",
-    "specs/ir/gate_decide.spec-ir.json": FIXTURES / "gate_decide.spec-ir.json",
-    "specs/ir/run_freshness.spec-ir.json": FIXTURES / "run_freshness.spec-ir.json",
-    "specs/ir/test_run_decide.spec-ir.json": FIXTURES / "test_run_decide.spec-ir.json",
 }
 
 
@@ -247,39 +235,4 @@ def test_selfcheck_fixtures_match_live_source() -> None:
     assert not stale, (
         "fixture が古い。意図した変更なら tests/fixtures/selfcheck/ を現物からコピーし直す: "
         + ", ".join(stale)
-    )
-
-
-@pytest.mark.selfcheck
-def test_top_level_spec_content_hash_matches_the_markdown() -> None:
-    """`SpecIR.spec_content_hash`（トップレベル）が現在の Markdown と一致すること。
-
-    `approvals[].spec_content_hash` と同じ意味の値が 2 か所にあり、片方だけ更新して
-    ずれていた（本番でだけ E_SPEC_HASH_MISMATCH になって発覚）。ローカルの検証は
-    approvals 側しか見ないが、worker は base 由来の承認を合成するときにトップレベルを
-    読むため、両方が一致していないと本番で必ず失敗する。
-    """
-    from speclino.spec.loader import content_hash
-
-    mismatched: list[str] = []
-    for ir_path in sorted((REPO / "specs" / "ir").glob("*.spec-ir.json")):
-        spec = load_spec_ir(ir_path)
-        ids = {
-            r.requirement_id for rule in spec.rules for r in rule.source_refs if r.requirement_id
-        }
-        md = next(
-            (
-                p
-                for p in sorted((REPO / "specs").glob("*.md"))
-                if any(i in p.read_text(encoding="utf-8") for i in ids)
-            ),
-            None,
-        )
-        if md is None or spec.spec_content_hash is None:
-            continue
-        expected = content_hash(md.read_text(encoding="utf-8"))
-        if spec.spec_content_hash != expected:
-            mismatched.append(f"{ir_path.name}: 記録 {spec.spec_content_hash} ≠ 実体 {expected}")
-    assert not mismatched, "仕様本文のハッシュがずれている（再承認が要る）: " + "; ".join(
-        mismatched
     )

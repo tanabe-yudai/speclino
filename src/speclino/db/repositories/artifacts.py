@@ -83,18 +83,16 @@ class ArtifactRepository:
         return list((await self._session.execute(stmt)).scalars())
 
     async def revision_numbers(self, workspace: str) -> dict[uuid.UUID, dict[str, int]]:
-        """artifact ごとの active / draft の改訂番号（一覧の表示用）。"""
+        """artifact ごとの active / draft の改訂番号と、superseded の最大の番号（一覧の表示用）。"""
         stmt = (
             select(
                 ArtifactRevisionRecord.artifact_id,
                 ArtifactRevisionRecord.status,
-                ArtifactRevisionRecord.revision,
+                func.max(ArtifactRevisionRecord.revision),
             )
             .join(ArtifactRecord, ArtifactRecord.id == ArtifactRevisionRecord.artifact_id)
-            .where(
-                ArtifactRecord.workspace == workspace,
-                ArtifactRevisionRecord.status.in_(("active", "draft")),
-            )
+            .where(ArtifactRecord.workspace == workspace)
+            .group_by(ArtifactRevisionRecord.artifact_id, ArtifactRevisionRecord.status)
         )
         out: dict[uuid.UUID, dict[str, int]] = {}
         for aid, status, revision in (await self._session.execute(stmt)).all():
@@ -122,6 +120,9 @@ class ArtifactRepository:
 
     async def current_draft(self, artifact_id: uuid.UUID) -> ArtifactRevision | None:
         return await self._one(artifact_id, ArtifactRevisionRecord.status == "draft")
+
+    async def current_active(self, artifact_id: uuid.UUID) -> ArtifactRevision | None:
+        return await self._one(artifact_id, ArtifactRevisionRecord.status == "active")
 
     async def latest(self, artifact_id: uuid.UUID) -> ArtifactRevision | None:
         stmt = (
@@ -254,6 +255,25 @@ class ArtifactRepository:
                 content_hash=content_hash,
                 approved_at=func.now(),
             )
+            .returning(ArtifactRevisionRecord)
+        )
+        row = (await self._session.execute(stmt)).scalar_one_or_none()
+        artifact = await self.get(artifact_id)
+        return _to_domain(artifact, row) if row is not None and artifact is not None else None
+
+    async def retire(self, *, artifact_id: uuid.UUID, revision: int) -> ArtifactRevision | None:
+        """active な改訂を superseded にする（後継の active は作らない）。
+
+        `status='active'` と番号を条件にし、0 行なら None（並行する承認・取り下げで変わった）。
+        """
+        stmt = (
+            update(ArtifactRevisionRecord)
+            .where(
+                ArtifactRevisionRecord.artifact_id == artifact_id,
+                ArtifactRevisionRecord.revision == revision,
+                ArtifactRevisionRecord.status == "active",
+            )
+            .values(status="superseded")
             .returning(ArtifactRevisionRecord)
         )
         row = (await self._session.execute(stmt)).scalar_one_or_none()

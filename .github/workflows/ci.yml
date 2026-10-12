@@ -66,8 +66,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-backend
-      # SpecLino 自身の仕様（SPEC-TOOL-001 / SPEC-GATE-001 / SPEC-RUN-001 / SPEC-TEST-002）と規約
-      # （MAKE-001 / SPEC-FMT-001 / CI-001 / API-ERR-001）を、**CLI だけで**検査する
+      # SpecLino 自身の仕様（承認済みの知識を sync で書き出した UML の仕様 .speclino/specs/*.md）と
+      # 規約（MAKE-001 / SPEC-FMT-001 / CI-001 / API-ERR-001 ほか）を、**CLI だけで**検査する
       # （pytest 側の selfcheck マーカーのテストも合わせて実行する。`make selfcheck` 参照）。
       #
       # PR に出る `SpecLino / gate` は同じ判定を本番（Cloud Run）で出すが、あちらは

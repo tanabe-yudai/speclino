@@ -72,6 +72,8 @@ export interface ArtifactSummary {
   name: string
   active_revision: number | null
   draft_revision: number | null
+  /** 取り下げた改訂（有効な改訂が無く、承認済みの改訂があるときの最新の番号） */
+  retired_revision?: number | null
   /** 有効な改訂のスコープ、無ければ下書きのもの（S74） */
   scope?: ArtifactScope | null
   created_at: string
@@ -99,6 +101,12 @@ export interface Bundle {
 }
 
 export interface ApproveResult {
+  revision: ArtifactRevision
+  bundle: Bundle
+}
+
+/** 取り下げの結果。revision は取り下げた改訂（状態は superseded）。 */
+export interface RetireResult {
   revision: ArtifactRevision
   bundle: Bundle
 }
@@ -163,4 +171,11 @@ export interface ApprovalState {
   /** 押せない理由（enabled=false のとき） */
   reason: string | null
   selfApproval: boolean
+}
+
+/** 取り下げのボタンを出す・押せるかの判断（services/knowledge.ts の retireState）。 */
+export interface RetireState {
+  visible: boolean
+  enabled: boolean
+  reason: string | null
 }

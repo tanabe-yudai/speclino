@@ -66,9 +66,8 @@ def test_this_repository_conforms_to_speclino_core() -> None:
     assert ci_finding.verdict == "VERIFIED_IN_SCOPE", ci_finding.message
 
     # API-ERR-001 / SPEC-TEST-001 は advisory。前者は既存ルートの HTTPException 直書きが
-    # 未置換、後者は R-RUN 系のマーカー（tests/unit/services/test_run_freshness.py）が
-    # Spec IR の tests に未宣言のまま残っているため、このリポジトリ自身は現状 VIOLATED を
-    # 許容する（design/product-spec-summary.md: 規約違反を自分に対して検出するデモ、S49）。
+    # 未置換のため、このリポジトリ自身は現状 VIOLATED を許容する
+    # （design/product-spec-summary.md: 規約違反を自分に対して検出するデモ、S49）。
     # mandatory ルールにだけ「VIOLATED が無いこと」を要求する。
     mandatory_ids = {rule.id for rule in package.rules if rule.level == "mandatory"}
     mandatory_findings = [f for f in findings if f.requirement_id.split(":", 1)[0] in mandatory_ids]

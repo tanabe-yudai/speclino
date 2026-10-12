@@ -9,6 +9,8 @@ import {
   emptyContent,
   isSameContent,
   parseSection,
+  retireState,
+  retiredRevision,
   revisionText,
   scopeProblem,
   toEditable,
@@ -58,6 +60,12 @@ describe('editBase', () => {
     expect(editBase(draft, [draft, active])).toEqual({ base: draft, expectedRevision: 2, expectedHash: 'sha256:d' })
     expect(editBase(null, [active])).toEqual({ base: active, expectedRevision: 1, expectedHash: 'sha256:a' })
     expect(editBase(null, [])).toEqual({ base: null, expectedRevision: null, expectedHash: null })
+  })
+
+  it('edits the latest revision of a retired artifact (the server numbers the next draft from it)', () => {
+    const retired = rev({ revision: 2, status: 'superseded', content_hash: 'sha256:r' })
+    const older = rev({ revision: 1, status: 'superseded', content_hash: 'sha256:o' })
+    expect(editBase(null, [retired, older])).toEqual({ base: retired, expectedRevision: 2, expectedHash: 'sha256:r' })
   })
 
   it('finds the active revision among superseded ones', () => {
@@ -116,9 +124,10 @@ describe('describeKnowledgeError', () => {
       message: 'ほかの有効な内容と競合するため承認できません: 同名の skill',
     })
     expect(describeKnowledgeError(new ApiError(422, 'x', 'spec_not_compilable')).kind).toBe('not_compilable')
-    expect(describeKnowledgeError(new ApiError(403, 'x', 'not_an_approver')).message).toBe('承認できるのはオーナーと承認者だけです')
+    expect(describeKnowledgeError(new ApiError(403, 'x', 'not_an_approver')).message).toBe('承認・取り下げができるのはオーナーと承認者だけです')
     expect(describeKnowledgeError(new ApiError(422, '名前が不正', 'invalid_artifact'))).toEqual({ kind: 'invalid', message: '名前が不正' })
     expect(describeKnowledgeError(new ApiError(409, 'x', 'artifact_exists')).message).toBe('同じ名前のものが既にあります')
+    expect(describeKnowledgeError(new ApiError(409, 'x', 'artifact_not_active')).kind).toBe('conflict')
     expect(describeKnowledgeError(new Error('boom')).kind).toBe('other')
   })
 })
@@ -154,5 +163,31 @@ describe('contentAfterSave', () => {
     const r = contentAfterSave(sent, typed, saved)
     expect(r).toEqual({ content: typed, replaced: false })
     expect(isSameContent(r.content, toEditable(saved.content))).toBe(false)
+  })
+})
+
+describe('retiredRevision', () => {
+  it('is the latest approved revision only when nothing is active', () => {
+    const superseded = rev({ revision: 2, status: 'superseded' })
+    expect(retiredRevision([rev({ revision: 3, status: 'draft' }), superseded, rev({ revision: 1, status: 'superseded' })])?.revision).toBe(2)
+    expect(retiredRevision([rev({ revision: 3, status: 'active' }), superseded])).toBeNull()
+    expect(retiredRevision([rev({ revision: 1, status: 'draft' })])).toBeNull()
+    expect(retiredRevision([])).toBeNull()
+  })
+})
+
+describe('retireState', () => {
+  const active = rev({ status: 'active' })
+  it('shows the button to owners and approvers only, when there is an active revision', () => {
+    expect(retireState('owner', active, false)).toEqual({ visible: true, enabled: true, reason: null })
+    expect(retireState('approver', active, false).visible).toBe(true)
+    expect(retireState('member', active, false).visible).toBe(false)
+    expect(retireState('owner', null, false).visible).toBe(false)
+  })
+
+  it('blocks while there are unsaved edits', () => {
+    const state = retireState('owner', active, true)
+    expect(state.enabled).toBe(false)
+    expect(state.reason).toContain('保存していない変更')
   })
 })

@@ -6,7 +6,7 @@ import { paths } from '@/services/paths'
 import type { ArtifactKind } from '@/types/knowledge'
 import type { ArtifactRowData } from '@/types/navigation'
 
-/** 仕様・スキル・指示書の行（状態・有効な改訂・下書き）。from はエディタから戻る先のプロジェクト。 */
+/** 仕様・スキル・指示書の行（状態・有効な改訂・取り下げ済み・下書き）。from はエディタから戻る先のプロジェクト。 */
 export function ArtifactRows({ slug, kind, rows, from }: { slug: string; kind: ArtifactKind; rows: ArtifactRowData[]; from?: string | null }) {
   const label = KIND_LABELS[kind]
   if (rows.length === 0) return <Panel className="text-sm text-ink-2">まだ{label}はありません。</Panel>
@@ -23,6 +23,8 @@ export function ArtifactRows({ slug, kind, rows, from }: { slug: string; kind: A
           {workspaceWide && from && <span className="rounded-full bg-secondary px-2.5 py-1 text-xs whitespace-nowrap text-ink-2">チーム共通</span>}
           {a.active_revision !== null ? (
             <ToneBadge tone="ok">有効 改訂 {a.active_revision}</ToneBadge>
+          ) : a.retired_revision != null ? (
+            <span className="rounded-full bg-muted px-2.5 py-1 text-xs whitespace-nowrap text-ink-3">取り下げ済み 改訂 {a.retired_revision}</span>
           ) : (
             <span className="rounded-full bg-muted px-2.5 py-1 text-xs text-ink-3">未承認</span>
           )}

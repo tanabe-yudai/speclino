@@ -77,6 +77,7 @@ Project（リポジトリ。最大 1 つのワークスペースに属する。S
   spec の要求 ID の重複）を検査し、競合があれば承認ごと拒否する
 - `artifact.workspace` とスコープのプロジェクトの `team` が一致することを、bundle を作るトランザクションの中で確かめる
 - 監査: 作成・更新・承認・却下を `audit_events` に残す
+- **取り下げ**: owner / approver は有効な改訂（見た番号と content_hash）を取り下げられる。行は消さず superseded にし（後継の active は作らない）、同じトランザクションで新しい bundle を作る。過去の bundle は不変。sync は次の取り込みで外れたファイルを `absent` として消す。戻すときは最新の改訂を土台に下書きを作って承認する。監査は `knowledge.retire`（理由・bundle の世代）
 
 ### 3.3 移行（取り込み）
 
