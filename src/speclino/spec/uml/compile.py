@@ -19,6 +19,7 @@ from speclino.domain.uml import (
     CompiledSpec,
     DiagramKind,
     ParseResult,
+    RelationObligation,
     RequirementRow,
     SourceSpan,
     SpecDiagnostic,
@@ -703,6 +704,23 @@ def compile_with_coverage(
     if any(d.severity == "error" for d in diags):
         return ParseResult(compiled=None, diagnostics=diags), coverage
 
+    relations = [
+        RelationObligation(
+            id=f"{r.diagram_id}#{rel.element_id or f'{rel.source}-{rel.kind}-{rel.target}'}",
+            element_id=rel.element_id,
+            kind=rel.kind,
+            source=rel.source,
+            target=rel.target,
+            level=(
+                _level({rel.element_id}, r.diagram_id, level_index)
+                if rel.element_id is not None
+                else "mandatory"
+            ),
+            span=rel.span,
+        )
+        for r in results
+        for rel in r.relations
+    ]
     traces: list[TraceObligation] = []
     machines: list[StateMachine] = []
     for r in results:
@@ -739,6 +757,7 @@ def compile_with_coverage(
         ir_hash=_PLACEHOLDER_HASH,
         classes=classes,
         structure=structure,
+        relations=relations,
         traces=traces,
         state_machines=machines,
         legacy=list(legacy_ir),

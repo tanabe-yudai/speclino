@@ -39,6 +39,7 @@ MD = "# x\n\n" + "\n".join(
             "        A",
             "        B",
             "    }",
+            "    Svc ..> Order : [r1] 使う",
         ),
         block(
             "%%@ id: seq",
@@ -67,7 +68,7 @@ def compiled() -> CompiledSpec:
 
 def test_elements_per_diagram() -> None:
     assert diagram_elements(compiled()) == {
-        "cls": [("class", "Svc"), ("class", "Repo"), ("module", "tools")],
+        "cls": [("class", "Svc"), ("class", "Repo"), ("module", "tools"), ("class", "Order")],
         "seq": [("entry", "Svc.place"), ("class", "Svc"), ("class", "Repo")],
         "st": [("attribute", "order.phase")],
     }
@@ -84,7 +85,8 @@ def test_diagram_is_out_of_scope_only_when_no_element_resolves() -> None:
 def test_narrow_drops_only_the_obligations_of_skipped_diagrams() -> None:
     c = compiled()
     n = narrow(c, ["cls", "st"])
-    assert [s.id for s in n.structure] == []
+    assert [r.id for r in c.relations] == ["cls#r1"]
+    assert [s.id for s in n.structure] == [] and n.relations == []
     assert [t.id for t in n.traces] == ["seq#Svc.place"]
     assert n.state_machines == []
     assert n.requirements == c.requirements and n.classes == c.classes

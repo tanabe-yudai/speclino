@@ -16,10 +16,12 @@ from speclino.domain.uml import CompiledSpec, RequirementRow
 
 
 def obligation_levels(compiled: CompiledSpec) -> dict[str, RuleLevel]:
-    """義務 ID（構造・順序/包含・遷移）と旧形式の要求 ID → level。"""
+    """義務 ID（構造・関係・順序/包含・遷移）と旧形式の要求 ID → level。"""
     levels: dict[str, RuleLevel] = {}
     for s in compiled.structure:
         levels[s.id] = s.level
+    for rel in compiled.relations:
+        levels[rel.id] = rel.level
     for t in compiled.traces:
         levels[t.id] = t.level
     for m in compiled.state_machines:

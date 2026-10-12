@@ -764,3 +764,23 @@ def test_workspace_spec_diagram_with_one_known_element_is_checked(tmp_path: Path
     assert found["mixed#Order"].verdict != "VERIFIED_IN_SCOPE"
     assert found["mixed#Shipment"].verdict == "VIOLATED"
     assert res.manifest.out_of_scope_diagrams == []
+
+
+def test_class_relations_are_checked(tmp_path: Path) -> None:
+    root = make_repo(tmp_path / "r")
+    with_relations = CLASSES.replace(
+        "```\n",
+        "    Order --> OrderStatus : [r1] 状態\n    Order ..> Audit : [r2]\n```\n",
+        1,
+    )
+    body = (
+        "# 関係\n\n| ID | level | 要求 | 形式化 |\n| --- | --- | --- | --- |\n"
+        "| R1 | advisory | 注文は監査に依存する | vocab#r2 |\n\n" + with_relations
+    )
+    res = run_check(_local(root, {"rel.md": body}))
+    found = by_req(res.findings.findings)
+    assert found["vocab#r1"].verdict == "VERIFIED_IN_SCOPE", found["vocab#r1"].message
+    assert found["vocab#r2"].verdict == "VIOLATED", found["vocab#r2"].message
+    assert res.gate_levels["vocab#r1"] == "mandatory"
+    assert res.gate_levels["vocab#r2"] == "advisory"
+    assert {"vocab#r1", "vocab#r2"} <= set(res.manifest.expected_requirement_ids)

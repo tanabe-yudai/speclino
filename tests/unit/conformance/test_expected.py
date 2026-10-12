@@ -9,6 +9,8 @@ from speclino.domain.finding import Finding, VerdictCounts
 from speclino.domain.uml import (
     Automaton,
     CompiledSpec,
+    RelationObligation,
+    SourceSpan,
     StateMachine,
     StructureObligation,
     TraceObligation,
@@ -152,3 +154,18 @@ def test_uml_coverage_counts_out_of_scope_rows() -> None:
     assert c.requirements_total == 4
     assert (c.requirements_in_scope, c.requirements_out_of_scope) == (2, 1)
     assert c.requirements_unanalyzed == 1
+
+
+def test_relations_are_expected_obligations() -> None:
+    rel = RelationObligation(
+        id="cls#r1",
+        element_id="r1",
+        kind="dependency",
+        source="Svc",
+        target="Order",
+        level="advisory",
+        span=SourceSpan(diagram_id="cls", line=1, column=1),
+    )
+    compiled = _compiled().model_copy(update={"relations": [rel]})
+    assert obligation_levels(compiled)["cls#r1"] == "advisory"
+    assert "cls#r1" in expected_ids(compiled, [])

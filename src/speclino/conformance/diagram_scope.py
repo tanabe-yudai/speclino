@@ -29,7 +29,7 @@ def obligation_diagram(obligation_id: str) -> str:
 def diagram_elements(compiled: CompiledSpec) -> dict[str, list[Element]]:
     """義務を持つ図ごとの要素。
 
-    - クラス図: 操作を持つクラス（`<<module>>` はモジュール）
+    - クラス図: 操作を持つクラスと関係の両端のクラス（`<<module>>` はモジュール）
     - シーケンス図・アクティビティ図: 入口の操作と、入口・呼び出しの持ち主のクラス
     - 状態遷移図: 状態を持つ属性
     """
@@ -44,10 +44,14 @@ def diagram_elements(compiled: CompiledSpec) -> dict[str, list[Element]]:
             return ("module", name)
         return None
 
+    def cls(name: str) -> Element:
+        return ("module", name) if stereotypes.get(name) == "module" else ("class", name)
+
     out: dict[str, list[Element]] = defaultdict(list)
     for st in compiled.structure:
-        kind: ElementKind = "module" if stereotypes.get(st.class_name) == "module" else "class"
-        out[obligation_diagram(st.id)].append((kind, st.class_name))
+        out[obligation_diagram(st.id)].append(cls(st.class_name))
+    for rel in compiled.relations:
+        out[obligation_diagram(rel.id)].extend([cls(rel.source), cls(rel.target)])
     for tr in compiled.traces:
         elements = out[obligation_diagram(tr.id)]
         elements.append(("entry", tr.entry_operation))
@@ -83,6 +87,7 @@ def narrow(compiled: CompiledSpec, diagrams: Collection[str]) -> CompiledSpec:
     return compiled.model_copy(
         update={
             "structure": [s for s in compiled.structure if keep(s.id)],
+            "relations": [r for r in compiled.relations if keep(r.id)],
             "traces": [t for t in compiled.traces if keep(t.id)],
             "state_machines": [m for m in compiled.state_machines if keep(m.id)],
         }

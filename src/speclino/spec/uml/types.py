@@ -13,6 +13,7 @@ from speclino.domain.uml import (
     Automaton,
     ClassOperation,
     DiagramKind,
+    RelationKind,
     SourceSpan,
     SpecDiagnostic,
     StateTransition,
@@ -107,6 +108,17 @@ class RawClass:
 
 
 @dataclass
+class RawRelation:
+    element_id: str | None
+    kind: RelationKind
+    source: str
+    target: str
+    source_tok: Token
+    target_tok: Token
+    span: SourceSpan
+
+
+@dataclass
 class DiagramResult:
     """図 1 つ分の中間結果。図をまたぐ解決（列挙・level・参照）は compile が行う。"""
 
@@ -119,6 +131,7 @@ class DiagramResult:
     """重複検査の対象になった ID すべて（応答など参照できないものも含む）。"""
     guards: list[tuple[Expr, SourceSpan]] = field(default_factory=list)
     classes: list[RawClass] = field(default_factory=list)
+    relations: list[RawRelation] = field(default_factory=list)
     entry: str | None = None
     entry_span: SourceSpan | None = None
     attribute_span: SourceSpan | None = None
