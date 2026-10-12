@@ -8,7 +8,7 @@ UNKNOWN（`missing_finding`）を合成する。ゲートが「出てきた Find
 from __future__ import annotations
 
 from speclino.conformance.reasons import finding_id
-from speclino.domain.finding import Finding, Findings, VerdictCounts
+from speclino.domain.finding import CoverageCounts, Finding, Findings, VerdictCounts
 from speclino.domain.spec_ir import RuleLevel
 from speclino.domain.uml import CompiledSpec
 
@@ -67,4 +67,47 @@ def fill_missing(findings: Findings, expected: list[str], behavior_id: str) -> F
     return findings.model_copy(update={"findings": all_findings, "counts": _counts(all_findings)})
 
 
-__all__ = ["expected_ids", "fill_missing", "obligation_levels"]
+def uml_coverage(
+    compiled: CompiledSpec, findings: list[Finding], *, approved: bool
+) -> CoverageCounts:
+    """UML の仕様の要求の行を数える（旧形式の要求は engine が数えるので、`ir:` だけの行は除く）。
+
+    - 要求数: 行の数
+    - 承認済み: 承認済みの bundle の仕様なら行の数、手元の仕様なら 0
+    - 対応範囲: 図の要素に結びついた（形式化された）行。このプロジェクトに当たる仕様だけが渡る
+    - 判定済み: 対応範囲の行のうち、参照する図の義務がすべて適合か違反に決まったもの
+    - 未解析: 形式化されておらず検査できない行
+    """
+    rows = [
+        r
+        for r in compiled.requirements
+        if not (r.formalized_by and all(x.startswith("ir:") for x in r.formalized_by))
+    ]
+    obligation_ids = list(obligation_levels(compiled))
+    in_scope = [r for r in rows if r.formalized_by]
+    decided = 0
+    for row in in_scope:
+        diagrams = {x.split("#", 1)[0] for x in row.formalized_by if "#" in x}
+        mine = [o for o in obligation_ids if o.split("#", 1)[0] in diagrams]
+        if mine and all(_is_decided(o, findings) for o in mine):
+            decided += 1
+    return CoverageCounts(
+        requirements_total=len(rows),
+        requirements_approved=len(rows) if approved else 0,
+        requirements_in_scope=len(in_scope),
+        requirements_decided=decided,
+        requirements_unanalyzed=len(rows) - len(in_scope),
+    )
+
+
+def _is_decided(obligation_id: str, findings: list[Finding]) -> bool:
+    """義務の Finding（`<ID>` または `<ID>:<経路>`）があり、すべて適合か違反に決まっている。"""
+    own = [
+        f
+        for f in findings
+        if f.requirement_id == obligation_id or f.requirement_id.startswith(obligation_id + ":")
+    ]
+    return bool(own) and all(f.verdict in ("VERIFIED_IN_SCOPE", "VIOLATED") for f in own)
+
+
+__all__ = ["expected_ids", "fill_missing", "obligation_levels", "uml_coverage"]

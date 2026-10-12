@@ -92,3 +92,39 @@ def test_missing_expected_is_unknown() -> None:
 def test_nothing_missing_returns_same() -> None:
     fs = Findings(findings=[_verified("x")], counts=VerdictCounts(VERIFIED_IN_SCOPE=1))
     assert fill_missing(fs, ["x"], "b") == fs
+
+
+def _finding(rid: str, verdict: str) -> Finding:
+    return Finding(
+        id=f"f-{rid}",
+        requirement_id=rid,
+        behavior_id="b",
+        verdict=verdict,  # type: ignore[arg-type]
+        category="missing_finding",
+        severity="low",
+        message="m",
+        claim_scope="command_invocation",
+    )
+
+
+def test_uml_coverage_counts_requirement_rows() -> None:
+    from speclino.conformance.expected import uml_coverage
+    from speclino.domain.uml import RequirementRow
+
+    compiled = _compiled().model_copy(
+        update={
+            "requirements": [
+                RequirementRow(id="R1", level="mandatory", text="a", formalized_by=["cls#x"]),
+                RequirementRow(id="R2", level="mandatory", text="b", formalized_by=["seq#y"]),
+                RequirementRow(id="R3", level="advisory", text="c", formalized_by=[]),
+                RequirementRow(id="R4", level="mandatory", text="d", formalized_by=["ir:X"]),
+            ]
+        }
+    )
+    findings = [_finding("cls#Order", "VERIFIED_IN_SCOPE"), _finding("seq#Svc.place", "UNKNOWN")]
+    c = uml_coverage(compiled, findings, approved=True)
+    # R4 は旧形式の要求（engine が数える）なので除く
+    assert (c.requirements_total, c.requirements_approved) == (3, 3)
+    assert (c.requirements_in_scope, c.requirements_unanalyzed) == (2, 1)
+    assert c.requirements_decided == 1
+    assert uml_coverage(compiled, findings, approved=False).requirements_approved == 0

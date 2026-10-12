@@ -69,7 +69,12 @@ from speclino.conformance.exceptions import (
     rejected_exceptions_for,
     waivers_for,
 )
-from speclino.conformance.expected import expected_ids, fill_missing, obligation_levels
+from speclino.conformance.expected import (
+    expected_ids,
+    fill_missing,
+    obligation_levels,
+    uml_coverage,
+)
 from speclino.conformance.gate import DEFAULT_FAIL_ON, GatePolicy, GateResult, aggregate_gate
 from speclino.conformance.obligation import ObligationContext
 from speclino.conformance.semantic_diff import DiffSide, annotate_findings, semantic_diff
@@ -397,6 +402,8 @@ def _run_check(req: CheckRequest, *, is_base: bool) -> CheckResult:
     elif local_specs:
         combined, expected = _fill_spec_expected(combined, inputs, by_unit)
         expected = list(dict.fromkeys(expected))
+
+    combined = _with_uml_coverage(combined, inputs, by_unit)
 
     # S28: base の判定と Finding 同士を突き合わせる（head を base 仕様に照合しない）
     diff: SemanticDiff | None = None
@@ -1479,6 +1486,25 @@ def _merge_findings(parts: list[Findings], run_id: str | None) -> Findings:
         requirements_unanalyzed=sum(p.coverage.requirements_unanalyzed for p in parts),
     )
     return Findings(run_id=run_id, findings=all_findings, counts=counts, coverage=coverage)
+
+
+def _with_uml_coverage(
+    findings: Findings, inputs: _Inputs, by_unit: dict[str, list[Finding]]
+) -> Findings:
+    """UML の仕様の要求の行を coverage に足す（旧形式の要求は engine が数え済み）。"""
+    c = findings.coverage
+    for unit in inputs.spec_units:
+        if unit.compiled is None:
+            continue
+        add = uml_coverage(unit.compiled, by_unit.get(unit.name, []), approved=unit.revision > 0)
+        c = CoverageCounts(
+            requirements_total=c.requirements_total + add.requirements_total,
+            requirements_approved=c.requirements_approved + add.requirements_approved,
+            requirements_in_scope=c.requirements_in_scope + add.requirements_in_scope,
+            requirements_decided=c.requirements_decided + add.requirements_decided,
+            requirements_unanalyzed=c.requirements_unanalyzed + add.requirements_unanalyzed,
+        )
+    return findings.model_copy(update={"coverage": c})
 
 
 def _with_extra_findings(base: Findings, extra: list[Finding]) -> Findings:
