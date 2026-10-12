@@ -1,0 +1,51 @@
+# 知識のチャットの深掘りの評価（`make eval-chat-depth`、実 Gemini を呼ぶ。CI では回さない）。
+#
+# どれも新規作成の会話の最初の発言（編集欄は空、会話の履歴なし）。各ケースの判定は決定的:
+# - expect: questions … 質問（questions）が 1 問以上返り、提案（proposal）が無い
+# - expect: proposal  … 提案が返る（質問は添えてもよい）
+#
+# kind: spec / skill / instructions。
+cases:
+  - id: vague-skill
+    title: 曖昧なスキルの依頼
+    kind: skill
+    message: テストのスキルを作って
+    expect: questions
+  - id: vague-spec
+    title: 曖昧な仕様の依頼
+    kind: spec
+    message: 注文の仕様を書きたい
+    expect: questions
+  - id: vague-instructions
+    title: 曖昧な指示書の依頼
+    kind: instructions
+    message: いい感じの AGENTS.md を作ってください
+    expect: questions
+  - id: vague-skill-tool
+    title: 中身の分からない社内ツールのスキル
+    kind: skill
+    message: 社内の CLI ツール foo の使い方をスキルにしたい
+    expect: questions
+  - id: concrete-instructions
+    title: 具体的な指示書の依頼（対照）
+    kind: instructions
+    message: |
+      Python 3.12 のバックエンド（FastAPI、uv、pytest、ruff、mypy strict）のリポジトリ用の AGENTS.md を作って。
+      対象はこのリポジトリで作業するコーディングエージェント。守らせたいこと:
+      - 返答とコミットメッセージは日本語、Conventional Commits
+      - 実装の前に失敗するテストを書く（pytest）
+      - 変更後に `make lint typecheck test` を通す
+      - 秘密の値をコードやログに書かない
+      - コミット・プッシュは人の承認の後
+      見出しと箇条書きで、短くまとめてください。
+    expect: proposal
+  - id: concrete-skill
+    title: 具体的なスキルの依頼（対照）
+    kind: skill
+    message: |
+      Python のコードに pytest の単体テストを足す手順のスキルを作って。名前は pytest-unit-tests。
+      使う場面: 関数やクラスを新しく書いたとき・直したとき。
+      手順: 1) 対象の関数の入出力と境界値を列挙 2) tests/unit/ に test_<モジュール名>.py を作る
+      3) 正常系・境界値・例外を 1 テスト 1 観点で書く 4) `uv run pytest -q` で通るまで直す。
+      外部の API・DB はモックにする。付属ファイルは要らない。
+    expect: proposal

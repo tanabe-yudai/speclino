@@ -49,6 +49,12 @@ export interface ChatSource {
   url?: string | null
 }
 
+/** AI から利用者への質問。選択肢を押すと、その文をそのまま発言として送る。 */
+export interface ChatQuestion {
+  question: string
+  options: string[]
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
@@ -61,6 +67,8 @@ export interface ChatMessage {
   sources?: ChatSource[] | null
   /** 調べた返答だけ: Google 検索の候補の表示（HTML。sandbox の iframe で出す） */
   search_suggestions?: string[] | null
+  /** AI の返答だけ: 次に決めることの質問と選択肢 */
+  questions?: ChatQuestion[] | null
 }
 
 export interface KnowledgeChat {

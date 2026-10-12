@@ -102,3 +102,46 @@ describe('ChatPanel の調査の表示', () => {
     expect(iframe).toContain('srcDoc=')
   })
 })
+
+describe('ChatPanel の質問', () => {
+  const chatWith = (messages: object[]) => ({
+    id: 'c1',
+    workspace: 'w',
+    owner_uid: 'u',
+    kind: 'skill' as const,
+    artifact_id: null,
+    title: 't',
+    version: 1,
+    created_at: '2026-10-12T00:00:00Z',
+    updated_at: '2026-10-12T00:00:00Z',
+    messages: messages as never,
+  })
+  const reply = (id: string, question: string, options: string[]) => ({
+    id,
+    role: 'assistant',
+    text: '前提を確かめます',
+    status: 'done',
+    created_at: '2026-10-12T00:00:00Z',
+    questions: [{ question, options }],
+  })
+  const user = (id: string) => ({ id, role: 'user', text: '答え', status: 'done', created_at: '2026-10-12T00:00:00Z' })
+
+  it('shows the questions under the latest reply with tappable option buttons', () => {
+    const html = render(controller({ current: chatWith([user('u1'), reply('a1', '誰が使いますか？', ['開発者', 'レビュアー'])]) }))
+    expect(html).toContain('AI からの質問')
+    expect(html).toContain('誰が使いますか？')
+    expect(html).toMatch(/<button[^>]*min-h-11[^>]*>開発者<\/button>/)
+    expect(html).toMatch(/<button[^>]*>レビュアー<\/button>/)
+    expect(html).toContain('選択肢を押すとそのまま送ります')
+  })
+
+  it('keeps older questions as text only, and hides the buttons while sending', () => {
+    const current = chatWith([reply('a1', '古い質問', ['古い案 1', '古い案 2']), user('u1'), reply('a2', '新しい質問', ['新しい案 1', '新しい案 2'])])
+    const html = render(controller({ current }))
+    expect(html).toContain('古い質問')
+    expect(html).not.toMatch(/<button[^>]*>古い案 1<\/button>/)
+    expect(html).toMatch(/<button[^>]*>新しい案 1<\/button>/)
+    const sending = render(controller({ current, sending: true }))
+    expect(sending).not.toMatch(/<button[^>]*>新しい案 1<\/button>/)
+  })
+})

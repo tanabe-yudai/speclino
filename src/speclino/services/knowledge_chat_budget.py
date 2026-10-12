@@ -31,7 +31,7 @@ BudgetRefusal = Literal["cost_limit", "message_limit"]
 @dataclass(frozen=True)
 class ChatLimits:
     user_messages_per_day: int = 50
-    user_share: Decimal = Decimal("0.20")
+    user_share: Decimal = Decimal("0.50")
     workspace_share: Decimal = Decimal("0.50")
 
 
