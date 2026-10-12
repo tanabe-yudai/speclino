@@ -39,6 +39,7 @@ A2A の議論役（`speclino.a2a_server`）。全体の要求 R-SYS-01、R-SYS-1
 | R-AI-13 | advisory | モデルは明示の ID で固定し（エイリアス `-latest` を使わない）、run の manifest と LLM 支援の記録のキーにモデルとプロンプトの版を残す | - |
 | R-AI-14 | advisory | ツールの関門の流れ（図 tool-gate） | tool-gate#s, tool-gate#p, tool-gate#b, tool-gate#dn, tool-gate#ch, tool-gate#ex, tool-gate#al, tool-gate#z, tool-gate#e1, tool-gate#e2, tool-gate#e3, tool-gate#e4, tool-gate#e5, tool-gate#e6, tool-gate#e7, tool-gate#e8, tool-gate#e9 |
 | R-AI-15 | advisory | 知識のチャットの 1 発言の流れ（図 chat-turn） | chat-turn#c1, chat-turn#a1, chat-turn#c2, chat-turn#c3, chat-turn#c4, chat-turn#c5, chat-turn#c6, chat-turn#c7, chat-turn#a2, ai-vocab#knowledge_chat |
+| R-AI-16 | mandatory | 構成要素のつながり: ツールの関門は権限・ツールの登録簿・監査・予算を部品として持ち、チャットと議論役の予約は費用ガードを使い、知識のチャットは会話の保存と費用ガードを使う（クラス図の関係） | ai-vocab#r1, ai-vocab#r2, ai-vocab#r3, ai-vocab#r4, ai-vocab#r5, ai-vocab#r6, ai-vocab#r7, ai-vocab#r8 |
 
 ## 4. 語彙（クラス図）
 
@@ -112,6 +113,14 @@ classDiagram
         no_issue
         split
     }
+    ToolGateway *-- AgentPermissions : [r1] 権限
+    ToolGateway *-- ToolRegistry : [r2] ツールの実行
+    ToolGateway *-- AuditSink : [r3] 監査
+    ToolGateway *-- BudgetState : [r4] 予算
+    ChatBudget --> CostGuard : [r5] 日次の枠
+    ConsultBudget --> CostGuard : [r6] 日次の枠
+    knowledge_chat ..> KnowledgeChatRepository : [r7] 会話の保存
+    knowledge_chat ..> CostGuard : [r8] 費用の見積り
 ```
 
 ## 5. ツールの関門（アクティビティ図）

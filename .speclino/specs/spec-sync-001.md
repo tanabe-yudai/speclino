@@ -59,6 +59,7 @@ lock の鮮度の判定を定める。全体の要求 R-SYS-05、R-SYS-06、R-SY
 | R-SYNC-15 | advisory | 取り込みの計画の発行（図 pull） | pull#p2, sync-vocab#mcp_server, sync-vocab#knowledge_sync |
 | R-SYNC-16 | advisory | 計画の取得（図 redeem） | redeem#t1, redeem#o1, redeem#t2 |
 | R-SYNC-17 | advisory | 計画の適用（図 apply） | apply#s, apply#r, apply#o, apply#l, apply#d, apply#st, apply#c, apply#z, apply#e1, apply#e2, apply#e3, apply#e4, apply#e5, apply#e6, apply#e7, apply#e8, apply#e9, apply#e10, apply#e11, sync-vocab#sync_apply |
+| R-SYNC-18 | mandatory | 構成要素のつながり: MCP は配信と取得の記録を使い、配信は適用スクリプト・計画の保存・取得の記録を使う（クラス図の関係） | sync-vocab#r1, sync-vocab#r2, sync-vocab#r3, sync-vocab#r4, sync-vocab#r5 |
 
 ## 5. 語彙（クラス図）
 
@@ -122,6 +123,11 @@ classDiagram
         bridge_missing
         layout_change
     }
+    mcp_server ..> knowledge_sync : [r1] 鮮度の確認・計画の発行
+    mcp_server ..> KnowledgeFetchRepository : [r2] 取得の記録
+    knowledge_sync ..> sync_apply : [r3] 適用スクリプトの同梱
+    knowledge_sync ..> SyncPlanRepository : [r4] 使い捨ての取得 URL
+    knowledge_sync ..> KnowledgeFetchRepository : [r5] 取得の記録
 ```
 
 ## 6. 取り込みの計画の発行（シーケンス図）
