@@ -1,7 +1,7 @@
 """知識レジストリ（S62）の API。判断は services/knowledge_registry.py。
 
 メンバー以外・別のワークスペースの artifact は 404（存在を漏らさない）。下書きの作成・保存は
-メンバー、承認は owner / approver（それ以外は 403 で、拒否は監査に残る）。
+メンバー、承認と取り下げは owner / approver（それ以外は 403 で、拒否は監査に残る）。
 リクエストに入れられるのは人が書く入力だけ（kind・名前・内容・見た番号と hash）。改訂番号・
 状態・hash・作者・承認者・ワークスペースはサーバが決める（`extra="forbid"` で拒否する）。
 """
@@ -23,7 +23,7 @@ from speclino.domain.knowledge import (
     ArtifactKind,
 )
 from speclino.domain.knowledge_chat import NOTE_MAX_CHARS, NoteSource
-from speclino.domain.knowledge_view import ApproveResult
+from speclino.domain.knowledge_view import ApproveResult, RetireResult
 from speclino.domain.workspace import AuthUser
 from speclino.services import knowledge_registry as kr
 from speclino.services.policy_governance import DraftConflict
@@ -65,6 +65,19 @@ class ApproveRequest(BaseModel):
     expected_hash: str = Field(min_length=1, max_length=200)
     # 承認者が見た説明（note）のハッシュ（S73、任意）。違えば 409
     expected_note_hash: str | None = Field(default=None, max_length=200)
+
+
+class RetireRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # 取り下げる人が見た有効な改訂の番号と hash
+    expected_revision: int = Field(ge=1)
+    expected_hash: str = Field(min_length=1, max_length=200)
+    reason: str = Field(default="", max_length=NOTE_MAX_CHARS)
+
+
+_NOT_ACTIVE = "有効な改訂が無い（未承認か取り下げ済み）"
+_ACTIVE_CHANGED = "有効な改訂が変わった。読み直してから取り下げる"
 
 
 def _not_found(e: Exception) -> Exception:
@@ -198,6 +211,41 @@ async def approve(
     except kr.SpecNotCompilable as e:
         raise api_error(422, "spec_not_compilable", str(e)) from e
     return ApproveResult(revision=revision, bundle=bundle).model_dump(mode="json")
+
+
+@router.post("/artifacts/{artifact_id}/retire", responses=error_responses(403, 409))
+async def retire(
+    slug: str,
+    artifact_id: str,
+    body: RetireRequest,
+    state: AppState = Depends(get_state),
+    user: AuthUser = Depends(require_user),
+) -> dict[str, Any]:
+    """有効な改訂を取り下げ、それを外した新しい bundle を作る（改訂は履歴に残る）。"""
+    try:
+        async with state.session_factory() as s, s.begin():
+            await require_member(s, slug, user.uid)
+            await kr.require_artifact(s, slug, artifact_id)
+            revision, bundle = await kr.retire(
+                s,
+                artifact_id=artifact_id,
+                expected_revision=body.expected_revision,
+                expected_hash=body.expected_hash,
+                actor=user.uid,
+                reason=body.reason,
+                audit_factory=state.session_factory,
+            )
+    except (WorkspaceNotFound, kr.ArtifactNotFound) as e:
+        raise _not_found(e) from e
+    except PermissionError as e:
+        raise api_error(403, "not_an_approver", "取り下げられるのは owner / approver だけ") from e
+    except kr.NotActive as e:
+        raise api_error(409, "artifact_not_active", _NOT_ACTIVE) from e
+    except DraftConflict as e:
+        raise api_error(409, "draft_changed", _ACTIVE_CHANGED) from e
+    except kr.BundleConflict as e:
+        raise api_error(409, "bundle_conflict", str(e)) from e
+    return RetireResult(revision=revision, bundle=bundle).model_dump(mode="json")
 
 
 @router.get("/artifacts/{artifact_id}/revisions")

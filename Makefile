@@ -13,13 +13,14 @@ test:
 	uv run pytest -m "not live and not selfcheck"
 
 # SpecLino を自分自身に当てた結果。デモブランチでは落ちるのが主役（CI の self-check ジョブと同じ主張）。
-# pytest 側（selfcheck マーカー）と CLI 側（specs/ir を使った自己検査）の両方を実行する。
+# pytest 側（selfcheck マーカー）と CLI 側（sync で書き出した UML の仕様 .speclino/specs/*.md を
+# 手元の parser で変換して検査する。LLM・DB を使わない）の両方を実行する。
 # 片方が落ちても もう片方を必ず動かし、終了コードは最後にまとめる。デモブランチでは凍結 fixture の
 # ドリフト検査が必ず落ちるが、見せたいのは CLI が出す違反と反例なので、そこで止まっては困る。
 selfcheck:
 	@rc=0; \
 	uv run pytest -m selfcheck || rc=$$?; \
-	uv run speclino check --repo . --head WORKTREE --out build/self-check \
+	uv run speclino check --repo . --head WORKTREE --specs-dir .speclino/specs --out build/self-check \
 		--fail-on VIOLATED --fail-on UNKNOWN --fail-on REVIEW --blocking || rc=$$?; \
 	exit $$rc
 

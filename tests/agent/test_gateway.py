@@ -1,8 +1,6 @@
-"""ToolGateway: 拒否は実行より先に起き、監査に残る（R-TOOL-01 / R-TOOL-02 のテスト版）。"""
+"""ToolGateway: 拒否は実行より先に起き、監査に残る。"""
 
 from __future__ import annotations
-
-import pytest
 
 from speclino.agent.budget import BudgetState
 from speclino.agent.gateway import InMemoryAudit, ToolCall, ToolGateway, ToolRegistry
@@ -21,7 +19,6 @@ def make(
     return gw, executed, audit
 
 
-@pytest.mark.spec("R-TOOL-01")
 def test_not_permitted_is_denied_before_execution_and_audited() -> None:
     gw, executed, audit = make()
     res = gw.invoke(ToolCall("test_run", {"ids": ["t1"]}))
@@ -38,7 +35,6 @@ def test_not_permitted_is_denied_before_execution_and_audited() -> None:
     ]
 
 
-@pytest.mark.spec("R-TOOL-01")
 def test_honeypot_is_denied_and_flagged_as_injection() -> None:
     gw, executed, audit = make()
     res = gw.invoke(ToolCall("repo_write", {"path": "x"}))
@@ -46,7 +42,6 @@ def test_honeypot_is_denied_and_flagged_as_injection() -> None:
     assert audit.entries[0]["injection_suspected"] is True
 
 
-@pytest.mark.spec("R-TOOL-02")
 def test_permitted_executes_exactly_once_with_audit() -> None:
     gw, executed, audit = make()
     res = gw.invoke(ToolCall("repo_search", {"query": "restore"}))

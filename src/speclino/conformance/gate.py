@@ -4,7 +4,7 @@ verdict は正直に 4 値を保ち、ゲートはフェイルクローズ: mand
 1 つでも残れば失敗。実行状態（exec_state）とは分離する。
 
 仕分け（`triage`: ループ）と決定（`decide_gate`: 分岐だけ）を分けている。`decide_gate` は
-SpecLino 自身の解析対象（specs/SPEC-GATE-001.md、R-GATE-01〜03）なので対応構文だけで書く。
+SpecLino 自身の解析対象（R-GATE-01〜03）なので対応構文だけで書く。
 """
 
 from __future__ import annotations

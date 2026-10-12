@@ -84,9 +84,18 @@ def test_validation_error_is_input_error(tmp_path: Path) -> None:
 
 @pytest.mark.selfcheck
 def test_self_repository_check_passes_including_policies() -> None:
-    res = run_check(CheckRequest(repo_root=REPO, head_sha="WORKTREE", run_id="self"))
+    res = run_check(
+        CheckRequest(
+            repo_root=REPO,
+            head_sha="WORKTREE",
+            run_id="self",
+            spec_dir=Path(".speclino/specs"),
+        )
+    )
     ids = {f.requirement_id for f in res.findings.findings}
-    assert {"R-TOOL-01", "R-TOOL-02", "MAKE-001"} <= ids
+    assert "MAKE-001" in ids
+    # 書き出した仕様（.speclino/specs）を入力にしている
+    assert res.manifest.inputs.spec_content_hash is not None
     assert any(i.startswith("SPEC-FMT-001:") for i in ids)
     # 例外（.speclino/exceptions.yaml）で免除された VIOLATED があると pass_with_exceptions に
     # なる。免除は適合に書き換えず別記する設計（AC-009）なので、どちらも「通過」として扱う。

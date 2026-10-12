@@ -130,7 +130,7 @@ class ToolGateway:
     def invoke(self, call: ToolCall) -> ToolResult:
         """R-TOOL-01: 許可されなければ実行せず監査して denied。R-TOOL-02: 許可なら 1 回だけ実行。
 
-        SpecLino 自身の解析対象（specs/SPEC-TOOL-001.md）。対応構文だけで書く。
+        SpecLino 自身の解析対象。対応構文だけで書く。
         """
         permitted = self.permissions.allows(call.tool)
         if not permitted:

@@ -10,7 +10,7 @@ import type { ProjectSummary } from '@/types/project'
 
 export const KNOWLEDGE_KINDS: KnowledgeKind[] = ['spec', 'skill', 'instructions', 'policy']
 /** 絞り込みに出す状態。 */
-export const KNOWLEDGE_STATUS_FILTERS: KnowledgeState[] = ['active', 'pending', 'unapproved']
+export const KNOWLEDGE_STATUS_FILTERS: KnowledgeState[] = ['active', 'pending', 'unapproved', 'retired']
 
 const ARTIFACT_KINDS: ArtifactKind[] = ['spec', 'skill', 'instructions']
 
@@ -30,9 +30,12 @@ export function parseKnowledgeFilter(params: URLSearchParams): KnowledgeFilter {
   }
 }
 
-/** 知識 1 件の状態（表示する順）。有効な改訂が無ければ未承認、下書きがあれば承認待ちも。 */
+/**
+ * 知識 1 件の状態（表示する順）。有効な改訂が無ければ、取り下げた改訂があれば取り下げ済み、
+ * 無ければ未承認。下書きがあれば承認待ちも。
+ */
 export function artifactStates(a: ArtifactSummary): KnowledgeState[] {
-  const states: KnowledgeState[] = [a.active_revision !== null ? 'active' : 'unapproved']
+  const states: KnowledgeState[] = [a.active_revision !== null ? 'active' : a.retired_revision != null ? 'retired' : 'unapproved']
   if (a.draft_revision !== null) states.push('pending')
   return states
 }

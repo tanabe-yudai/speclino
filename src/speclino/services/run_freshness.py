@@ -1,6 +1,6 @@
 """古い実行の結果を公開しない（AC-011 / FR 017）。
 
-`should_publish` は SpecLino 自身の解析対象（specs/SPEC-RUN-001.md、R-RUN-01〜03）なので
+`should_publish` は SpecLino 自身の解析対象（R-RUN-01〜03）なので
 対応構文だけで書く。各出口は bindings.yaml で操作（publish / mark_superseded / mark_not_latest）
 に束縛する。
 """

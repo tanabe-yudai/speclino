@@ -598,3 +598,61 @@ def test_manifest_records_replay_inputs(tmp_path: Path) -> None:
     m = res.manifest
     assert m.source_roots == ["."] and m.today == NOW.date()
     assert m.bindings_patch == {"Audit.record": "examples.orders.app.audit.record"}
+
+
+# ---------------------------------------------------------------- 手元の UML の仕様（--specs-dir）
+
+
+def _local(root: Path, files: dict[str, str]) -> CheckRequest:
+    spec_dir = root / ".speclino" / "specs"
+    spec_dir.mkdir(parents=True, exist_ok=True)
+    for name, body in files.items():
+        (spec_dir / name).write_text(body)
+    return request(root, None, spec_dir=Path(".speclino/specs"), trusted_root=None)
+
+
+def test_local_specs_run_the_same_uml_checks_as_a_bundle(tmp_path: Path) -> None:
+    """書き出した UML の仕様を手元で変換し、bundle と同じ義務の検査に通す（lock は見ない）。
+
+    書き出した Markdown に domain は無いので、domain の無い仕様の bundle と同じ結果になる。
+    """
+
+    def uml_findings(res: Any) -> set[tuple[str, str, str]]:
+        return {
+            (f.requirement_id, f.verdict, f.message)
+            for f in res.findings.findings
+            if not f.requirement_id.startswith(("KNOWLEDGE-", "LOCAL-SPEC-"))
+            and not f.behavior_id.startswith("policy")
+            and f.requirement_id in res.manifest.expected_requirement_ids
+        }
+
+    root = make_repo(tmp_path / "r")
+    shutil.rmtree(root / "specs")  # specs/ir は読まない
+    local = run_check(_local(root, {"u.md": UML}))
+    bundled = run_check(request(root, knowledge(spec_revision("u", UML, domain=None))))
+    assert uml_findings(local) and uml_findings(local) == uml_findings(bundled)
+    found = by_req(local.findings.findings)
+    assert "KNOWLEDGE-LOCK-001" not in found and "LOCAL-SPEC-001:u" not in found
+    assert local.manifest.bundle_generation is None
+    assert local.manifest.uml_parser_version == PARSER_VERSION
+    assert local.gate.status == "fail"  # 判定できない必須の義務が残れば落ちる（フェイルクローズ）
+
+
+def test_local_spec_without_uml_requirements_is_an_advisory_unknown(tmp_path: Path) -> None:
+    """旧形式の本文だけの仕様は IR が手元に無いので、判定していないことを UNKNOWN で残す。"""
+    root = make_repo(tmp_path / "r")
+    legacy_md = "# 旧形式\n\n## 要求\n\n### R-OLD-01\n\n- 条件: x\n- 期待する結果: y\n"
+    res = run_check(_local(root, {"orders-uml.md": UML, "spec-old.md": legacy_md}))
+    f = by_req(res.findings.findings)["LOCAL-SPEC-001:spec-old"]
+    assert f.verdict == "UNKNOWN"
+    assert res.gate_levels["LOCAL-SPEC-001:spec-old"] == "advisory"
+    assert f.id not in {b.id for b in res.gate.blocking}
+
+
+def test_local_specs_fail_closed_on_bad_input(tmp_path: Path) -> None:
+    root = make_repo(tmp_path / "r")
+    with pytest.raises(check_pipeline.CheckInputError, match="仕様が無い"):
+        run_check(request(root, None, spec_dir=Path(".speclino/specs"), trusted_root=None))
+    broken = "# x\n\n" + block("%%@ id: s", "sequenceDiagram", "    ???")
+    with pytest.raises(check_pipeline.CheckInputError, match="仕様の変換エラー"):
+        run_check(_local(root, {"broken.md": broken}))

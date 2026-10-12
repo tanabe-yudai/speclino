@@ -9,6 +9,8 @@ design/2026-10-05-team-knowledge-registry.md 3 章。承認の流れは `policy_
 - 作者本人（と下書きを直した人）の承認は認め、`self_approved` を改訂と監査に残す
 - 承認・規約の有効化のたびに、同じトランザクションで新しい bundle を作る（`build_bundle`）。
   競合があれば `BundleConflict` で承認ごと拒否する（呼び出し側が rollback する）
+- 取り下げ（`retire`）は active な改訂を superseded にして bundle から外す。行は消さない
+  （過去の bundle は不変で、その改訂を指したまま再現できる）。新しい改訂を承認すれば戻る
 
 呼び出し側は `async with session_factory() as s, s.begin(): ...` で 1 トランザクションに包む。
 """
@@ -58,6 +60,7 @@ from speclino.spec.uml import compile_spec
 
 _DRAFT = "knowledge.draft"
 _APPROVE = "knowledge.approve"
+_RETIRE = "knowledge.retire"
 _FRONTMATTER = re.compile(r"\A---\r?\n(.*?)\r?\n---", re.DOTALL)
 _FM_NAME = re.compile(r"^name:\s*(.+?)\s*$", re.MULTILINE)
 
@@ -99,6 +102,10 @@ class SpecNotCompilable(ValueError):
 
 class BundleConflict(ValueError):
     """bundle を作れない（スコープの重なる競合、スコープのプロジェクトの所属が変わった）。"""
+
+
+class NotActive(ValueError):
+    """取り下げる有効な改訂が無い（未承認、または取り下げ済み）。"""
 
 
 class BundleNotFound(LookupError):
@@ -413,6 +420,64 @@ async def approve(
     return bundle
 
 
+async def retire(
+    session: AsyncSession,
+    *,
+    artifact_id: str,
+    expected_revision: int,
+    expected_hash: str,
+    actor: str,
+    reason: str = "",
+    audit_factory: async_sessionmaker[AsyncSession] | None = None,
+) -> tuple[ArtifactRevision, Bundle]:
+    """有効な改訂（見た番号と content_hash）を取り下げ、それを外した新しい bundle を返す。
+
+    承認と同じく owner / approver だけができ、ワークスペース行のロックの下で 1 トランザクションで
+    行う。有効な改訂が無ければ `NotActive`、見た改訂と違えば `DraftConflict`。下書きは残す
+    （承認すれば戻る）。
+    """
+    aid = _parse_id(artifact_id)
+    repo = ArtifactRepository(session)
+    artifact = await repo.get(aid)
+    if artifact is None:
+        raise ArtifactNotFound(artifact_id)
+    workspace = artifact.workspace
+    teams = await _lock_workspace(session, workspace)
+    active = await repo.current_active(aid)
+    if actor not in set(await teams.list_approvers(workspace)):
+        await record_denial(
+            session,
+            audit_factory,
+            actor=actor,
+            action=_RETIRE,
+            target=_target(workspace, artifact_id, active.revision if active else 0),
+            detail={"reason": "not_an_approver"},
+        )
+        raise PermissionError(f"{actor} は {workspace} の承認者ではない")
+    if active is None:
+        raise NotActive(f"{artifact_id} に有効な改訂が無い")
+    if active.revision != expected_revision or active.content_hash != expected_hash:
+        raise DraftConflict(f"{artifact_id}@{expected_revision} は今の有効な改訂ではない")
+    retired = await repo.retire(artifact_id=aid, revision=active.revision)
+    if retired is None:
+        raise DraftConflict(f"{artifact_id}@{expected_revision} は並行する操作で状態が変わった")
+    bundle = await build_bundle(session, workspace)
+    await AuditRepository(session).record(
+        actor,
+        _RETIRE,
+        _target(workspace, artifact_id, retired.revision),
+        "retired",
+        {
+            "kind": artifact.kind,
+            "name": artifact.name,
+            "content_hash": retired.content_hash,
+            "reason": reason,
+            "bundle_generation": bundle.generation,
+        },
+    )
+    return retired, bundle
+
+
 def _compile(name: str, content: ArtifactContent, compiler: SpecCompiler) -> ArtifactContent:
     """active にする内容。spec は本文から IR を作って入れる（下書きの値は使わない）。"""
     if not isinstance(content, SpecContent):
@@ -629,6 +694,11 @@ async def list_artifacts(session: AsyncSession, workspace: str) -> list[Artifact
             name=a.name,
             active_revision=numbers.get(a.id, {}).get("active"),
             draft_revision=numbers.get(a.id, {}).get("draft"),
+            retired_revision=(
+                None
+                if "active" in numbers.get(a.id, {})
+                else numbers.get(a.id, {}).get("superseded")
+            ),
             scope=scopes.get(a.id, {}).get("active") or scopes.get(a.id, {}).get("draft"),
             created_at=a.created_at,
         )
@@ -665,6 +735,7 @@ __all__ = [
     "BundleConflict",
     "BundleNotFound",
     "InvalidArtifact",
+    "NotActive",
     "SpecCompiler",
     "SpecNotCompilable",
     "uml_compiler",
@@ -683,6 +754,7 @@ __all__ = [
     "list_revisions",
     "require_artifact",
     "resolve_for_project",
+    "retire",
     "revision_at",
     "skill_dir_name",
     "update_draft",

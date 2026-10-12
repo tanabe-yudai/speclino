@@ -53,6 +53,8 @@ describe('artifactStates / policyStates', () => {
     expect(artifactStates(art('a', 'spec', ws))).toEqual(['active'])
     expect(artifactStates(art('a', 'spec', ws, { active: null, draft: 1 }))).toEqual(['unapproved', 'pending'])
     expect(artifactStates(art('a', 'spec', ws, { active: 2, draft: 3 }))).toEqual(['active', 'pending'])
+    expect(artifactStates({ ...art('a', 'spec', ws, { active: null }), retired_revision: 2 })).toEqual(['retired'])
+    expect(artifactStates({ ...art('a', 'spec', ws, { active: null, draft: 3 }), retired_revision: 2 })).toEqual(['retired', 'pending'])
     expect(policyStates({ activeRevision: null, draftRevision: 1, rules: 2 })).toEqual(['unapproved', 'pending'])
   })
 })

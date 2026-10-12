@@ -133,7 +133,7 @@ function HomeBody({ slug, role }: { slug: string; role: WorkspaceRole }) {
                   >
                     {a.name}
                   </Link>
-                  <KnowledgeStateBadges states={artifactStates(a)} revisions={{ active: a.active_revision, pending: a.draft_revision }} />
+                  <KnowledgeStateBadges states={artifactStates(a)} revisions={{ active: a.active_revision, retired: a.retired_revision, pending: a.draft_revision }} />
                 </li>
               ))}
             </ul>

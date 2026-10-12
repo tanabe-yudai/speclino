@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from speclino.db.models import AuditEvent
 from speclino.domain.domain_spec import DomainSpec
 from speclino.domain.knowledge import (
+    ArtifactRevision,
     ArtifactScope,
     Bundle,
     InstructionsContent,
@@ -637,3 +638,111 @@ async def test_draft_audit_has_the_content_hash(ws: Ws) -> None:
         "created": kr.content_hash(_instr("v1")),
         "updated": kr.content_hash(_instr("v2")),
     }
+
+
+async def _retire(
+    w: Ws, artifact_id: str, actor: str = "owner1"
+) -> tuple[ArtifactRevision, Bundle]:
+    async with w.f() as s:
+        active = next(r for r in await kr.list_revisions(s, artifact_id) if r.status == "active")
+    async with w.f() as s, s.begin():
+        return await kr.retire(
+            s,
+            artifact_id=artifact_id,
+            expected_revision=active.revision,
+            expected_hash=active.content_hash,
+            actor=actor,
+            reason="新しい仕様で覆う",
+            audit_factory=w.f,
+        )
+
+
+async def test_retire_removes_from_bundle_and_keeps_history(ws: Ws) -> None:
+    keep = await _create(ws, "spec", "keep", _spec(_projects(ws.p1), "R-K-1"))
+    old = await _create(ws, "spec", "old", _spec(_projects(ws.p1), "R-O-1"))
+    await _approve(ws, keep)
+    first = await _approve(ws, old)
+    assert {m.name for m in first.members} == {"keep", "old"}
+
+    retired, bundle = await _retire(ws, old)
+    assert retired.status == "superseded" and retired.revision == 1
+    assert bundle.generation == first.generation + 1
+    assert [m.name for m in bundle.members] == ["keep"]
+    assert kr.verify_bundle(bundle)
+    async with ws.f() as s:
+        # 過去の bundle は不変で、取り下げた改訂を指したまま解決できる
+        past = await kr.get_bundle(s, ws.slug, first.generation)
+        resolved = await kr.resolve_for_project(s, past, ws.p1)
+        assert {r.name for r in resolved.specs} == {"keep", "old"}
+        rows = {r.name: r for r in await kr.list_artifacts(s, ws.slug)}
+        assert rows["old"].active_revision is None and rows["old"].retired_revision == 1
+        assert rows["keep"].retired_revision is None
+        events = [e for e in await _audit(s, ws.slug) if e.action == "knowledge.retire"]
+    assert len(events) == 1 and events[0].decision == "retired"
+    assert events[0].detail["bundle_generation"] == bundle.generation
+    assert events[0].detail["reason"] == "新しい仕様で覆う"
+
+    # 取り下げ済みは有効な改訂が無い
+    with pytest.raises(kr.NotActive):
+        async with ws.f() as s, s.begin():
+            await kr.retire(
+                s,
+                artifact_id=old,
+                expected_revision=1,
+                expected_hash=retired.content_hash,
+                actor="owner1",
+            )
+
+    # 戻す: 最新（取り下げた改訂）を土台に下書きを作って承認する
+    async with ws.f() as s, s.begin():
+        draft = await kr.update_draft(
+            s,
+            artifact_id=old,
+            expected_revision=1,
+            expected_hash=retired.content_hash,
+            content=_spec(_projects(ws.p1), "R-O-1"),
+            author="member1",
+            note="戻す",
+        )
+    assert draft.revision == 2
+    restored = await _approve(ws, old)
+    assert {m.name for m in restored.members} == {"keep", "old"}
+    async with ws.f() as s:
+        rows = {r.name: r for r in await kr.list_artifacts(s, ws.slug)}
+    assert rows["old"].active_revision == 2 and rows["old"].retired_revision is None
+
+
+async def test_retire_requires_an_approver_and_the_seen_revision(ws: Ws) -> None:
+    aid = await _create(ws, "skill", "s1", _skill("s1"))
+    await _approve(ws, aid)
+    with pytest.raises(PermissionError):
+        await _retire(ws, aid, actor="member1")
+    async with ws.f() as s:
+        denied = [e for e in await _audit(s, ws.slug) if e.action == "knowledge.retire"]
+    assert [e.decision for e in denied] == ["denied"]
+    with pytest.raises(DraftConflict):
+        async with ws.f() as s, s.begin():
+            await kr.retire(
+                s, artifact_id=aid, expected_revision=1, expected_hash=H0, actor="owner1"
+            )
+    # 未承認（下書きだけ）は取り下げられない
+    draft_only = await _create(ws, "skill", "s2", _skill("s2"))
+    with pytest.raises(kr.NotActive):
+        async with ws.f() as s, s.begin():
+            await kr.retire(
+                s, artifact_id=draft_only, expected_revision=1, expected_hash=H0, actor="owner1"
+            )
+    # 下書きがあっても取り下げられ、下書きは残る
+    async with ws.f() as s, s.begin():
+        await kr.update_draft(
+            s,
+            artifact_id=aid,
+            expected_revision=1,
+            expected_hash=await _latest_hash(ws, aid),
+            content=_skill("s1", _projects(ws.p1)),
+            author="member1",
+        )
+    _, bundle = await _retire(ws, aid)
+    assert bundle.members == []
+    async with ws.f() as s:
+        assert (await kr.current_draft(s, aid)) is not None

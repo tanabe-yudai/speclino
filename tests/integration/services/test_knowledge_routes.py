@@ -480,3 +480,38 @@ async def test_policy_approval_checks_the_note(ctx: Ctx) -> None:
     right = "sha256:" + hashlib.sha256("説明 P".encode()).hexdigest()
     res = await c.post(url, json={**body, "expected_note_hash": right}, headers=OWNER)
     assert res.status_code == 200, res.text
+
+
+async def test_retire_route(ctx: Ctx) -> None:
+    c, slug, other, _ = ctx
+    created = await _create(c, slug)
+    aid = created["artifact_id"]
+    approved = await c.post(
+        f"/api/workspaces/{slug}/artifacts/{aid}/approve",
+        json={"expected_revision": 1, "expected_hash": created["content_hash"]},
+        headers=OWNER,
+    )
+    assert approved.status_code == 200, approved.text
+    active = approved.json()["revision"]
+    url = f"/api/workspaces/{slug}/artifacts/{aid}/retire"
+    body = {"expected_revision": 1, "expected_hash": active["content_hash"], "reason": "古い"}
+
+    denied = await c.post(url, json=body, headers=MEMBER)
+    assert denied.status_code == 403 and denied.json()["error"]["code"] == "not_an_approver"
+    hidden = await c.post(
+        f"/api/workspaces/{other}/artifacts/{aid}/retire", json=body, headers=STRANGER
+    )
+    assert hidden.status_code == 404
+    stale = await c.post(url, json={**body, "expected_hash": "sha256:" + "0" * 64}, headers=OWNER)
+    assert stale.status_code == 409 and stale.json()["error"]["code"] == "draft_changed"
+    extra = await c.post(url, json={**body, "status": "active"}, headers=OWNER)
+    assert extra.status_code == 422
+
+    ok = await c.post(url, json=body, headers=OWNER)
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["revision"]["status"] == "superseded"
+    assert ok.json()["bundle"]["generation"] == 2 and ok.json()["bundle"]["members"] == []
+    listed = (await c.get(f"/api/workspaces/{slug}/artifacts", headers=MEMBER)).json()
+    assert [(a["active_revision"], a["retired_revision"]) for a in listed] == [(None, 1)]
+    again = await c.post(url, json=body, headers=OWNER)
+    assert again.status_code == 409 and again.json()["error"]["code"] == "artifact_not_active"

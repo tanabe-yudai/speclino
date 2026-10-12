@@ -1625,6 +1625,34 @@
         "title": "RequirementRow",
         "type": "object"
       },
+      "RetireRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_hash": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Expected Hash",
+            "type": "string"
+          },
+          "expected_revision": {
+            "minimum": 1.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "reason": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_revision",
+          "expected_hash"
+        ],
+        "title": "RetireRequest",
+        "type": "object"
+      },
       "RoleRequest": {
         "properties": {
           "role": {
@@ -4016,6 +4044,110 @@
           }
         },
         "summary": "Put Draft",
+        "tags": [
+          "knowledge"
+        ]
+      }
+    },
+    "/api/workspaces/{slug}/artifacts/{artifact_id}/retire": {
+      "post": {
+        "description": "有効な改訂を取り下げ、それを外した新しい bundle を作る（改訂は履歴に残る）。",
+        "operationId": "retire_api_workspaces__slug__artifacts__artifact_id__retire_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "title": "Artifact Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetireRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Retire Api Workspaces  Slug  Artifacts  Artifact Id  Retire Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Retire",
         "tags": [
           "knowledge"
         ]

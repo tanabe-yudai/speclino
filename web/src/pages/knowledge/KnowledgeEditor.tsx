@@ -6,6 +6,7 @@ import { createArtifact, getDraft, listArtifactRevisions, saveDraft } from '@/ap
 import { ToneBadge } from '@/components/app/ToneBadge'
 import { ErrorState } from '@/components/ErrorState'
 import { ApprovalPanel } from '@/components/knowledge/ApprovalPanel'
+import { RetirePanel } from '@/components/knowledge/RetirePanel'
 import { AppliedDiffPanel } from '@/components/knowledge/AppliedDiffPanel'
 import { ChatPanel } from '@/components/knowledge/ChatPanel'
 import { ConflictDialog } from '@/components/knowledge/ConflictDialog'
@@ -33,6 +34,7 @@ import {
   emptyContent,
   isSameContent,
   parseSection,
+  retiredRevision,
   revisionText,
   scopeProblem,
   toEditable,
@@ -138,6 +140,7 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
   }, [id, fromProjectId])
 
   const active = activeRevision(initial.revisions)
+  const retired = retiredRevision(initial.revisions)
   const artifactName = base.base?.name ?? null
   const baseContent = base.base ? toEditable(base.base.content) : emptyContent(kind)
   const dirty = !isSameContent(content, baseContent)
@@ -271,6 +274,7 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
             )}
           </h1>
           {active && <ToneBadge tone="ok">有効 改訂 {active.revision}</ToneBadge>}
+          {retired && <span className="rounded-full bg-muted px-2.5 py-1 text-xs whitespace-nowrap text-ink-3">取り下げ済み 改訂 {retired.revision}</span>}
           {draft && <ToneBadge tone="rev">下書き 改訂 {draft.revision}</ToneBadge>}
           {id && (
             <Link to={paths.knowledgeRevisions(slug, kind, id, from)} className="ml-auto text-sm text-primary underline-offset-4 hover:underline">
@@ -279,6 +283,12 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
           )}
         </div>
         {id && !draft && active && <p className="text-sm text-ink-2">保存すると新しい下書きになります。承認されるまで今の内容が使われます。</p>}
+        {retired && (
+          <p className="text-sm text-ink-2">
+            取り下げ済みです。配信と検査には使われません。{draft ? '下書きを承認すると戻せます。' : '下書きを保存して承認すると戻せます（変更の説明だけでも保存できます）。'}
+          </p>
+        )}
+        {id && <RetirePanel slug={slug} active={active} dirty={dirty} onRetired={onReload} onConflict={() => setConflict(true)} />}
         <Button type="button" size="sm" variant={chatOpen ? 'secondary' : 'outline'} onClick={() => setChatOpen(!chatOpen)} aria-expanded={chatOpen}>
           {chatOpen ? 'AI と作るパネルを閉じる' : 'AI と作る'}
         </Button>

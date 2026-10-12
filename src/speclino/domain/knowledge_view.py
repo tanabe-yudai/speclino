@@ -18,10 +18,21 @@ class ArtifactSummary(IRModel):
     name: str
     active_revision: int | None = None
     draft_revision: int | None = None
+    retired_revision: int | None = Field(
+        default=None,
+        description="取り下げた改訂（有効な改訂が無く、承認済みの改訂があるときの最新の番号）",
+    )
     scope: ArtifactScope | None = Field(
         default=None, description="有効な改訂のスコープ。無ければ下書きのもの"
     )
     created_at: datetime
+
+
+class RetireResult(IRModel):
+    """取り下げの結果。`revision` は取り下げた改訂（状態は superseded）。"""
+
+    revision: ArtifactRevision
+    bundle: Bundle
 
 
 class ApproveResult(IRModel):
@@ -31,7 +42,7 @@ class ApproveResult(IRModel):
     bundle: Bundle
 
 
-__all__ = ["ApproveResult", "ArtifactSummary", "CutoverProjectStatus"]
+__all__ = ["ApproveResult", "ArtifactSummary", "CutoverProjectStatus", "RetireResult"]
 
 
 class CutoverProjectStatus(IRModel):

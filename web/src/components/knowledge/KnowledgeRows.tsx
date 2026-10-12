@@ -57,7 +57,7 @@ export function KnowledgeRows({
           <span className="max-w-[14rem] truncate rounded-full bg-secondary px-2.5 py-1 text-xs whitespace-nowrap text-ink-2">
             {workspaceWide ? 'チーム共通' : (a.scope?.projects.map((p) => projectNames.get(p) ?? p).join(', ') ?? '—')}
           </span>
-          <KnowledgeStateBadges states={artifactStates(a)} revisions={{ active: a.active_revision, pending: a.draft_revision }} />
+          <KnowledgeStateBadges states={artifactStates(a)} revisions={{ active: a.active_revision, retired: a.retired_revision, pending: a.draft_revision }} />
           <Link to={paths.knowledgeRevisions(slug, a.kind, a.artifact_id, from)} className="text-xs text-primary underline-offset-4 hover:underline">
             改訂と承認
           </Link>

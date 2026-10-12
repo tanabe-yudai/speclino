@@ -93,6 +93,14 @@ def check(
     code_ir: str | None = typer.Option(
         None, "--code-ir", help="手書き Code IR を直接入力する（解析器の代わりに使う）"
     ),
+    specs_dir: str | None = typer.Option(
+        None,
+        "--specs-dir",
+        help=(
+            "UML の仕様 Markdown のディレクトリ（--project からの相対、例: .speclino/specs）。"
+            "指定すると specs/ir の代わりに読む"
+        ),
+    ),
     out: str = typer.Option("build/review", "--out", help="成果物の出力先"),
     fail_on: list[str] | None = typer.Option(  # noqa: B008
         None, "--fail-on", help="ゲート失敗にする verdict（複数可。既定は advisory 運用）"
@@ -167,6 +175,7 @@ def check(
             code_ir_override=Path(code_ir).resolve() if code_ir is not None else None,
             base_root=base_root,
             base_project_dir=base_root / rel_project if base_root is not None else None,
+            spec_dir=Path(specs_dir) if specs_dir is not None else None,
         )
 
         try:

@@ -36,6 +36,9 @@ S65（design/2026-10-05-team-knowledge-registry.md 5 章・8 章）: `CheckReque
     - 出るべき要求 ID（義務・旧形式の要求・規約・lock）を manifest に書き、Finding が欠けたものに
       UNKNOWN（`missing_finding`）を合成する（5.2）
 knowledge が None（CLI のローカル実行・自己検証）なら従来どおり Git の入力を読む。
+`CheckRequest.spec_dir` があれば、`specs/ir` の代わりにそのディレクトリの UML の仕様 Markdown
+（`speclino sync` が書き出した `.speclino/specs/*.md`）を手元の parser で変換し、bundle と同じ
+UML の義務の検査に通す（LLM・DB・署名を使わない自己検証）。lock の照合はしない。
 """
 
 from __future__ import annotations
@@ -112,6 +115,7 @@ from speclino.spec import (
     rules_content_hash,
     validate_spec_ir,
 )
+from speclino.spec.uml import compile_spec
 from speclino.spec.uml.compile import check_domain
 from speclino.verifiers.base import Snapshot
 from speclino.verifiers.catalog import policy_registry
@@ -178,6 +182,9 @@ class CheckRequest:
     llm_assessment_keys: tuple[str, ...] = ()
     # S70: ワークスペースの人の確定。指紋と内容の hash が一致する REVIEW をゲートの阻止から外す
     attestations: tuple[Attestation, ...] = ()
+    # UML の仕様 Markdown のディレクトリ（`project_dir` からの相対、例: `.speclino/specs`）。
+    # knowledge が無いときだけ使い、`specs/ir` の代わりに読む
+    spec_dir: Path | None = None
 
     @property
     def resolved_project_dir(self) -> Path:
@@ -250,11 +257,13 @@ def _run_check(req: CheckRequest, *, is_base: bool) -> CheckResult:
     limits = clamp(req.limits)
     created_at = req.now or datetime.now(UTC)
     knowledge = req.knowledge
-    inputs = (
-        _git_inputs(req, project_dir)
-        if knowledge is None
-        else _bundle_inputs(req, project_dir, knowledge)
-    )
+    local_specs = knowledge is None and req.spec_dir is not None
+    if knowledge is not None:
+        inputs = _bundle_inputs(req, project_dir, knowledge)
+    elif local_specs:
+        inputs = _local_spec_inputs(req, project_dir)
+    else:
+        inputs = _git_inputs(req, project_dir)
 
     error_messages = [
         f"{report.spec.behavior_id}: [{d.code}] {d.rule_id or '-'} {d.path or ''} {d.message}"
@@ -352,7 +361,7 @@ def _run_check(req: CheckRequest, *, is_base: bool) -> CheckResult:
     for unit, part in zip(inputs.units, findings_parts, strict=True):
         if unit.unit_name is not None:
             by_unit.setdefault(unit.unit_name, []).extend(part.findings)
-    if knowledge is not None:
+    if knowledge is not None or local_specs:
         codes = {
             (unit.spec.behavior_id, unit.domain_hash): code
             for unit, code in zip(inputs.units, code_irs, strict=True)
@@ -362,7 +371,11 @@ def _run_check(req: CheckRequest, *, is_base: bool) -> CheckResult:
             knowledge_findings.extend(found)
             by_unit.setdefault(name, []).extend(found)
         levels.update(uml_levels)
-        if not is_base:
+        if local_specs:
+            notices = _no_requirement_notices(inputs)
+            knowledge_findings.extend(notices)
+            levels.update({f.requirement_id: "advisory" for f in notices})
+        elif knowledge is not None and not is_base:
             knowledge_findings.append(_lock_finding(req, knowledge, created_at))
             dirs = [project_dir] if config_dir is None else [project_dir, config_dir]
             notice = _git_specs_notice(dirs, inputs)
@@ -381,6 +394,9 @@ def _run_check(req: CheckRequest, *, is_base: bool) -> CheckResult:
         combined, expected = _fill_expected(
             combined, inputs, policy_result, levels, is_base, by_unit
         )
+    elif local_specs:
+        combined, expected = _fill_spec_expected(combined, inputs, by_unit)
+        expected = list(dict.fromkeys(expected))
 
     # S28: base の判定と Finding 同士を突き合わせる（head を base 仕様に照合しない）
     diff: SemanticDiff | None = None
@@ -536,6 +552,89 @@ def _git_inputs(req: CheckRequest, project_dir: Path) -> _Inputs:
             inputs.spec_markdown_texts.append(markdown_text)
         inputs.validations.append(validate_spec_ir(spec, domain, bindings, markdown_text))
     return inputs
+
+
+LOCAL_SPEC_REQUIREMENT_ID = "LOCAL-SPEC-001"
+
+
+def _local_spec_inputs(req: CheckRequest, project_dir: Path) -> _Inputs:
+    """手元の UML の仕様: `spec_dir/*.md` を parser で変換する。対応・契約は `project_dir` から。
+
+    変換のエラーは `CheckInputError`（承認済みの書き出しなら起きない。parser のずれを黙って
+    見逃さない）。domain は使わない（UML の型環境はクラス図から作る）。
+    """
+    assert req.spec_dir is not None
+    spec_dir = project_dir / req.spec_dir
+    files = sorted(spec_dir.glob("*.md")) if spec_dir.is_dir() else []
+    if not files:
+        raise CheckInputError(f"仕様が無い: {spec_dir}/*.md")
+    bindings_text, bindings = _read_bindings(project_dir)
+    bindings = _patched_bindings(bindings, req.bindings_patch)
+    contracts_dir = project_dir / ".speclino" / "contracts"
+    inputs = _Inputs(
+        units=[],
+        bindings=bindings,
+        bindings_hash=content_hash(bindings_text) if bindings_text is not None else None,
+        contracts=load_contracts(contracts_dir) if contracts_dir.is_dir() else {},
+        contracts_hash=_combined_hash(_contract_texts(contracts_dir)),
+        domain=None,
+        domain_hash=None,
+    )
+    problems: list[str] = []
+    for path in files:
+        markdown = path.read_text(encoding="utf-8")
+        result = compile_spec(markdown, domain=None, legacy_ir=[])
+        errors = [d for d in result.diagnostics if d.severity == "error"]
+        if errors or result.compiled is None:
+            detail = ", ".join(f"{d.code}: {d.message}" for d in errors) or "変換結果が無い"
+            problems.append(f"{path.name}: {detail}")
+            continue
+        inputs.spec_markdown_texts.append(markdown)
+        inputs.spec_ir_texts.append(_canonical(result.compiled.model_dump(mode="json")))
+        inputs.spec_units.append(
+            SpecUnit(
+                name=path.stem,
+                artifact_id=f"local:{path.name}",
+                revision=0,
+                content_hash=content_hash(markdown),
+                compiled=result.compiled,
+                domain=None,
+                markdown=markdown,
+            )
+        )
+    if problems:
+        raise CheckInputError("仕様の変換エラー:\n" + "\n".join(problems))
+    return inputs
+
+
+def _no_requirement_notices(inputs: _Inputs) -> list[Finding]:
+    """義務を 1 つも持たない手元の仕様（旧形式の本文だけのもの）は検査していないことを示す。
+
+    旧形式の仕様の IR は改訂の内容にあり、書き出した Markdown には無いので手元では判定できない。
+    黙って外さず UNKNOWN（advisory）で残す。
+    """
+    out = []
+    for unit in inputs.spec_units:
+        if unit.compiled is None or expected_ids(unit.compiled, []):
+            continue
+        out.append(
+            Finding(
+                id=f"local-spec:{unit.name}",
+                requirement_id=f"{LOCAL_SPEC_REQUIREMENT_ID}:{unit.name}",
+                behavior_id=f"spec:{unit.name}",
+                verdict="UNKNOWN",
+                category="unsupported_analysis",
+                severity="low",
+                message=(
+                    f"仕様 {unit.name} に UML の義務が無い（旧形式の仕様は IR が手元に無いので、"
+                    "この検査では判定していない）"
+                ),
+                claim_scope="command_invocation",
+                code_refs=[SourceRef(snapshot_id="specs", path=f"{unit.name}.md")],
+                next_steps=["UML の仕様に書き直して承認し、取り込み直す"],
+            )
+        )
+    return out
 
 
 def _canonical(data: object) -> str:
@@ -1043,6 +1142,22 @@ def changed_content_hash(head_dir: Path, changed: list[str]) -> str:
     return "sha256:" + digest.hexdigest()
 
 
+def _fill_spec_expected(
+    findings: Findings, inputs: _Inputs, by_unit: dict[str, list[Finding]]
+) -> tuple[Findings, list[str]]:
+    """仕様の出るべき ID を spec ごとに列挙し、その spec の Finding の欠けを UNKNOWN で補う。"""
+    expected: list[str] = []
+    for unit in inputs.spec_units:
+        if unit.compiled is None:
+            continue
+        spec_ids = expected_ids(unit.compiled, [])
+        expected.extend(spec_ids)
+        own = Findings(findings=by_unit.get(unit.name, []))
+        added = fill_missing(own, spec_ids, f"spec:{unit.name}").findings[len(own.findings) :]
+        findings = _with_extra_findings(findings, added)
+    return findings, expected
+
+
 def _fill_expected(
     findings: Findings,
     inputs: _Inputs,
@@ -1061,15 +1176,7 @@ def _fill_expected(
     """
     from speclino.services.knowledge_sync import LOCK_REQUIREMENT_ID
 
-    expected: list[str] = []
-    for unit in inputs.spec_units:
-        if unit.compiled is None:
-            continue
-        spec_ids = expected_ids(unit.compiled, [])
-        expected.extend(spec_ids)
-        own = Findings(findings=by_unit.get(unit.name, []))
-        added = fill_missing(own, spec_ids, f"spec:{unit.name}").findings[len(own.findings) :]
-        findings = _with_extra_findings(findings, added)
+    findings, expected = _fill_spec_expected(findings, inputs, by_unit)
     present = [f.requirement_id for f in findings.findings]
     missing_policy = [
         rid
