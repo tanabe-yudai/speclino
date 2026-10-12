@@ -68,7 +68,7 @@ function ProfileForm({ current, onDone, onSaved }: { current: string | null; onD
       <DialogHeader>
         <DialogTitle>{PROFILE_LABELS.editDisplayName}</DialogTitle>
         <DialogDescription>
-          同じワークスペースのメンバーに、メンバーの一覧や改訂の作者・承認者として表示されます。空にするとメールアドレスで表示されます。
+          同じワークスペースのメンバーに、メンバーの一覧や改訂の作者・承認者として、メールアドレスと並べて表示されます。@ は使えません。空にするとメールアドレスで表示されます。
         </DialogDescription>
       </DialogHeader>
       <div className="grid gap-1.5">

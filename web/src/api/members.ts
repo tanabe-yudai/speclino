@@ -21,7 +21,7 @@ let mockMembers: WorkspaceMember[] = [
     display_name: 'オーナー',
     email: 'owner@example.com',
     email_verified: true,
-    label: 'オーナー',
+    label: 'オーナー（owner@example.com）',
     role: 'owner',
     joined_at: '2026-09-20T09:00:00Z',
   },

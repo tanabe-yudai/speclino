@@ -4,7 +4,10 @@
   （変わったときだけ書く）。表示名は行を作るときだけトークンの name を入れ、以後は本人の設定を
   上書きしない
 - 表示名を変えられるのは本人だけ（`update_display_name` は呼び出した人の uid にだけ書く）
-- 画面に出す名前は 表示名 → メール → uid の短縮。プロフィール（メールを含む）を解決するのは
+- 画面に出す名前は、表示名があれば必ず「表示名（メール、無ければ uid の短縮）」にする。表示名は
+  本人が自由に決められるので、同名の別人や他人の名前を名乗る人を見分けられるようにする。未確認の
+  メールには「・未確認」を添える。表示名が無ければメール、それも無ければ uid の短縮。表示名に
+  `@` は使えない（メールの形を名乗らせない）。プロフィール（メールを含む）を解決するのは
   同じワークスペースのメンバーの uid だけで、それ以外の uid は短縮表示にする（別のワークスペースの
   人の名前・メールを漏らさない）。GitHub の actor（`github:<id>`）はそのまま出す
 """
@@ -29,7 +32,7 @@ _REJECTED_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
 
 
 class InvalidDisplayName(ValueError):
-    """表示名が規則（前後の空白を除いて 1〜50 文字、制御文字なし）に合わない。"""
+    """表示名が規則（前後の空白を除いて 1〜50 文字、制御文字と `@` なし）に合わない。"""
 
 
 def normalize_display_name(raw: str) -> str:
@@ -40,6 +43,8 @@ def normalize_display_name(raw: str) -> str:
         raise InvalidDisplayName(f"表示名は {DISPLAY_NAME_MAX_LENGTH} 文字まで")
     if any(unicodedata.category(ch) in _REJECTED_CATEGORIES for ch in name):
         raise InvalidDisplayName("表示名に制御文字は使えない")
+    if "@" in name:
+        raise InvalidDisplayName("表示名に @ は使えない（メールアドレスの形を名乗れない）")
     return name
 
 
@@ -47,8 +52,17 @@ def short_uid(uid: str) -> str:
     return uid if len(uid) <= _SHORT_UID_LENGTH + 1 else f"{uid[:_SHORT_UID_LENGTH]}…"
 
 
-def profile_label(uid: str, display_name: str | None, email: str | None) -> str:
-    return display_name or email or short_uid(uid)
+def profile_label(
+    uid: str, display_name: str | None, email: str | None, email_verified: bool
+) -> str:
+    """表示名（メール、無ければ uid の短縮）→ メール → uid の短縮。未確認のメールには印を添える。"""
+    if display_name:
+        if not email:
+            return f"{display_name}（{short_uid(uid)}）"
+        return f"{display_name}（{email}{'' if email_verified else '・未確認'}）"
+    if email:
+        return email if email_verified else f"{email}（未確認）"
+    return short_uid(uid)
 
 
 def _token_name(user: AuthUser) -> str | None:
@@ -151,7 +165,7 @@ async def member_views(
                 display_name=display_name,
                 email=email,
                 email_verified=verified,
-                label=profile_label(member.uid, display_name, email),
+                label=profile_label(member.uid, display_name, email, verified),
                 role=member.role,
                 joined_at=member.created_at,
             )

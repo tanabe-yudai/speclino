@@ -112,7 +112,7 @@ async def test_unusable_token_name_is_not_stored(client: httpx.AsyncClient) -> N
     assert res.json()["display_name"] is None
 
 
-@pytest.mark.parametrize("bad", ["", "   ", "x" * 51, "a\nb", "a\u202eb"])
+@pytest.mark.parametrize("bad", ["", "   ", "x" * 51, "boss@example.com", "a\nb", "a\u202eb"])
 async def test_invalid_display_name_is_rejected(client: httpx.AsyncClient, bad: str) -> None:
     uid = _uid("bad")
     res = await client.patch("/api/me/profile", json={"display_name": bad}, headers=_user(uid))
@@ -161,9 +161,9 @@ async def test_members_list_shows_display_name_and_email(
 
     members = await _members(client, slug, owner)
     assert members[named]["display_name"] == "Named"
-    assert members[named]["label"] == "Named"
+    assert members[named]["label"] == "Named（n@example.com）"
     assert (members[named]["email"], members[named]["email_verified"]) == ("n@example.com", True)
-    assert members[unverified]["label"] == "u@example.com"
+    assert members[unverified]["label"] == "u@example.com（未確認）"
     assert members[unverified]["email_verified"] is False
     # 招待の受諾で入ったメール（確認済み）。プロフィールが無くても出す
     assert (members[invited]["email"], members[invited]["email_verified"]) == (
@@ -190,7 +190,11 @@ async def test_names_of_people_in_other_workspaces_are_not_resolved(
     factory = async_sessionmaker(engine)
     async with factory() as s:
         labels = await display_names(s, workspace=mine, uids=[me, stranger, "github:12345", ""])
-    assert labels == {me: "Me", stranger: f"{stranger[:8]}…", "github:12345": "github:12345"}
+    assert labels == {
+        me: "Me（me@example.com）",
+        stranger: f"{stranger[:8]}…",
+        "github:12345": "github:12345",
+    }
 
 
 async def test_me_is_returned_even_if_the_profile_write_fails(
@@ -205,3 +209,18 @@ async def test_me_is_returned_even_if_the_profile_write_fails(
     assert res.status_code == 200, res.text
     assert res.json()["uid"] == uid and res.json()["display_name"] is None
     assert res.json()["workspaces"] == []
+
+
+async def test_same_display_name_is_told_apart_in_display_names(
+    client: httpx.AsyncClient, engine: AsyncEngine
+) -> None:
+    real, fake = _uid("real"), _uid("fake")
+    slug = await _workspace(engine, {real: "owner", fake: "member"})
+    await client.get("/api/me", headers=_user(real, "boss@example.com", name="Boss"))
+    await client.get("/api/me", headers=_user(fake, "boss2@example.com", verified=False))
+    res = await client.patch("/api/me/profile", json={"display_name": "Boss"}, headers=_user(fake))
+    assert res.status_code == 200
+
+    async with async_sessionmaker(engine)() as s:
+        labels = await display_names(s, workspace=slug, uids=[real, fake])
+    assert labels == {real: "Boss（boss@example.com）", fake: "Boss（boss2@example.com・未確認）"}

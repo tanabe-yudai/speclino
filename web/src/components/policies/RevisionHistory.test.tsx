@@ -11,7 +11,7 @@ const members: WorkspaceMember[] = [
     display_name: '田辺',
     email: 't@example.com',
     email_verified: true,
-    label: '田辺',
+    label: '田辺（t@example.com）',
     role: 'owner',
     joined_at: '2026-10-01T00:00:00Z',
   },
@@ -37,7 +37,7 @@ describe('改訂の履歴と監査ログの人の表示', () => {
         ]}
       />,
     )
-    expect(history).toContain('作成 田辺')
+    expect(history).toContain('作成 田辺（t@example.com）')
     expect(history).toContain('承認 LeftMemb…')
     expect(history).not.toContain('AuthorUid1234567')
 

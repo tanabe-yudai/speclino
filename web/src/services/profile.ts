@@ -15,5 +15,7 @@ export function parseDisplayName(raw: string): DisplayNameInput {
     return { ok: false, message: `表示名は ${DISPLAY_NAME_MAX_LENGTH} 文字までです` }
   }
   if (REJECTED.test(value)) return { ok: false, message: '表示名に改行や制御文字は使えません' }
+  // メールアドレスの形を名乗らせない（作者・承認者の表示でなりすませないように）
+  if (value.includes('@')) return { ok: false, message: '表示名に @ は使えません' }
   return { ok: true, value }
 }

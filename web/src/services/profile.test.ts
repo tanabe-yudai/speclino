@@ -11,8 +11,8 @@ describe('parseDisplayName', () => {
     expect(parseDisplayName('😀'.repeat(50)).ok).toBe(true)
     expect(parseDisplayName('あ'.repeat(51)).ok).toBe(false)
   })
-  it('改行・制御文字・向きを変える文字は拒否する', () => {
-    for (const bad of ['a\nb', 'a\tb', 'evil\u202etxt', 'a\u2028b']) {
+  it('@・改行・制御文字・向きを変える文字は拒否する', () => {
+    for (const bad of ['boss@example.com', 'a@b', 'a\nb', 'a\tb', 'evil\u202etxt', 'a\u2028b']) {
       expect(parseDisplayName(bad).ok).toBe(false)
     }
   })

@@ -19,7 +19,18 @@ def test_display_name_is_stripped_and_kept_up_to_50_characters() -> None:
 
 @pytest.mark.parametrize(
     "bad",
-    ["", "   ", "あ" * 51, "a\nb", "a\tb", "a\x00b", "evil\u202etxt", "a\u2028b"],
+    [
+        "",
+        "   ",
+        "あ" * 51,
+        "boss@example.com",
+        "a@b",
+        "a\nb",
+        "a\tb",
+        "a\x00b",
+        "evil\u202etxt",
+        "a\u2028b",
+    ],
 )
 def test_invalid_display_names_are_rejected(bad: str) -> None:
     with pytest.raises(InvalidDisplayName):
@@ -28,7 +39,17 @@ def test_invalid_display_names_are_rejected(bad: str) -> None:
 
 def test_label_prefers_display_name_then_email_then_short_uid() -> None:
     uid = "Xy12abcdEFGHijklmnop"
-    assert profile_label(uid, "Tanabe", "t@example.com") == "Tanabe"
-    assert profile_label(uid, None, "t@example.com") == "t@example.com"
-    assert profile_label(uid, None, None) == "Xy12abcd…"
+    assert profile_label(uid, "Tanabe", "t@example.com", True) == "Tanabe（t@example.com）"
+    assert profile_label(uid, "Tanabe", "t@example.com", False) == "Tanabe（t@example.com・未確認）"
+    assert profile_label(uid, "Tanabe", None, False) == "Tanabe（Xy12abcd…）"
+    assert profile_label(uid, None, "t@example.com", True) == "t@example.com"
+    assert profile_label(uid, None, "t@example.com", False) == "t@example.com（未確認）"
+    assert profile_label(uid, None, None, False) == "Xy12abcd…"
+
+
+def test_two_people_with_the_same_display_name_are_distinguishable() -> None:
+    a = profile_label("uid-aaaaaaaaaa", "Tanabe", "real@example.com", True)
+    b = profile_label("uid-bbbbbbbbbb", "Tanabe", None, False)
+    c = profile_label("uid-cccccccccc", "Tanabe", "real@example.com", False)
+    assert len({a, b, c}) == 3
     assert short_uid("dev") == "dev"
