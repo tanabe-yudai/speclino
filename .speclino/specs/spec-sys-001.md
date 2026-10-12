@@ -2,8 +2,7 @@
 
 SpecLino 全体を上から見た仕様。個々の関数の振る舞いではなく、利用者・構成要素・知識のライフサイクル・判定のモデルと、
 システム全体で守る要求を定める。各要求の詳細は下位の仕様（SPEC-KNOW-001、SPEC-SYNC-001、SPEC-GATE-002、
-SPEC-WS-001、SPEC-AI-001、SPEC-OBS-001）が定め、関数単位の既存の仕様（SPEC-GATE-001、SPEC-RUN-001、
-SPEC-TEST-002、SPEC-TOOL-001）はさらにその下に位置づく。
+SPEC-WS-001、SPEC-AI-001、SPEC-OBS-001）が定め。
 
 ## 1. 目的と範囲
 
@@ -68,7 +67,7 @@ MCP・A2A・`speclino sync` で各自のエージェントに配り、PR のゲ�
 | R-SYS-18 | advisory | 構成要素の語彙: 図に現れる処理の持ち主（モジュールとクラス）と操作 | sys-vocab#knowledge_registry, sys-vocab#mcp_server, sys-vocab#knowledge_sync, sys-vocab#sync_apply, sys-vocab#ReviewRunService, sys-vocab#check_pipeline, sys-vocab#gate, sys-vocab#observability |
 | R-SYS-19 | advisory | 知識のライフサイクルは、下書き → 承認 → bundle → 鮮度の確認と取り込み → PR の run とゲート → 観測の順に進む | - |
 | R-SYS-20 | advisory | 知識の改訂の状態は、下書き → 有効 → 置き換え済み の順にだけ進む | - |
-| R-SYS-21 | advisory | ゲートの決定はフェイルクローズの順序で出口を選ぶ | gate-decision#s, gate-decision#c1, gate-decision#c2, gate-decision#c3, gate-decision#c4, gate-decision#f, gate-decision#pw, gate-decision#p, gate-decision#z, gate-decision#e1, gate-decision#e2, gate-decision#e3, gate-decision#e4, gate-decision#e5, gate-decision#e6, gate-decision#e7, gate-decision#e8, gate-decision#e9, gate-decision#e10, gate-decision#e11, gate-decision#e12 |
+| R-SYS-21 | mandatory | ゲートの決定はフェイルクローズの順序で出口を選ぶ | gate-decision#s, gate-decision#c1, gate-decision#c2, gate-decision#c3, gate-decision#c4, gate-decision#f, gate-decision#pw, gate-decision#p, gate-decision#z, gate-decision#e1, gate-decision#e2, gate-decision#e3, gate-decision#e4, gate-decision#e5, gate-decision#e6, gate-decision#e7, gate-decision#e8, gate-decision#e9, gate-decision#e10, gate-decision#e11, gate-decision#e12 |
 
 ### 4.1 要求と下位の仕様の対応
 
@@ -80,7 +79,7 @@ MCP・A2A・`speclino sync` で各自のエージェントに配り、PR のゲ�
 | R-SYS-04 | SPEC-KNOW-001 | R-KNOW-08、R-KNOW-09、R-KNOW-10 |
 | R-SYS-05 | SPEC-KNOW-001、SPEC-SYNC-001、SPEC-GATE-002 | R-KNOW-11、R-SYNC-01、R-SYNC-02、R-GATEPR-02 |
 | R-SYS-06 | SPEC-SYNC-001、SPEC-GATE-002 | R-SYNC-07、R-SYNC-08、R-GATEPR-07 |
-| R-SYS-07 | SPEC-GATE-002、SPEC-GATE-001 | R-GATEPR-04、R-GATEPR-05（R-GATE-01〜03c） |
+| R-SYS-07 | SPEC-GATE-002 | R-GATEPR-04、R-GATEPR-05 |
 | R-SYS-08 | SPEC-GATE-002 | R-GATEPR-10、R-GATEPR-11、R-GATEPR-12 |
 | R-SYS-09 | SPEC-GATE-002 | R-GATEPR-03、R-GATEPR-06 |
 | R-SYS-10 | SPEC-WS-001、SPEC-AI-001 | R-WS-07、R-WS-08、R-AI-02 |
@@ -89,7 +88,7 @@ MCP・A2A・`speclino sync` で各自のエージェントに配り、PR のゲ�
 | R-SYS-13 | SPEC-WS-001、SPEC-KNOW-001、SPEC-AI-001、SPEC-GATE-002 | R-WS-09、R-KNOW-12、R-AI-05、R-GATEPR-14 |
 | R-SYS-14 | SPEC-WS-001、SPEC-AI-001、SPEC-SYNC-001 | R-WS-10、R-WS-13、R-AI-10、R-SYNC-10 |
 | R-SYS-15 | SPEC-GATE-002 | R-GATEPR-08、R-GATEPR-09 |
-| R-SYS-16 | SPEC-GATE-002、SPEC-RUN-001 | R-GATEPR-13 |
+| R-SYS-16 | SPEC-GATE-002 | R-GATEPR-13 |
 | R-SYS-17 | SPEC-OBS-001 | R-OBS-01、R-OBS-02 |
 
 ## 5. 語彙（クラス図）
@@ -226,7 +225,7 @@ worker が bundle を固定して検査し、ゲートを決める。owner と�
 Finding の verdict は 4 値で、ゲートの状態（`pass` / `pass_with_exceptions` / `fail`）とは分ける。仕分け（`triage`）は
 Finding ごとに level（表に無い要求は mandatory）と `fail_on`（既定は VIOLATED・UNKNOWN・REVIEW）で
 `blocking`・`advisory`・`waived`（有効な例外で免除された VIOLATED）・`cleared`（人が attested で確定した REVIEW）に分ける。
-決定（`decide_gate`）は次の順で出口を選ぶ。SPEC-GATE-001 はこの決定を関数単位で検証する。
+決定（`decide_gate`）は次の順で出口を選ぶ。
 
 | verdict | 意味 | ゲート（mandatory のとき） |
 | --- | --- | --- |
@@ -238,6 +237,7 @@ Finding ごとに level（表に無い要求は mandatory）と `fail_on`（既�
 ```mermaid
 %%@ id: gate-decision
 %%@ entry: gate.decide_gate
+%%@ closed: true
 flowchart TD
     s((start))
     c1{検証集合が空でないか}

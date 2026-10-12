@@ -3,7 +3,7 @@
 SPEC-SYS-001 の区画のうち、LLM（Vertex AI の Gemini）を使うすべての機能と、その境界・費用を定める:
 知識のチャット（`speclino.services.knowledge_chat`）、仕様の書き換え提案（`speclino.services.spec_suggest`、REST・MCP・A2A）、
 LLM 支援の規約（`speclino.services.llm_policies`）、未解決の指摘の調査エージェント（`speclino.agent`、`speclino.services.investigation`）、
-A2A の議論役（`speclino.a2a_server`）。全体の要求 R-SYS-01、R-SYS-11〜14 を詳しくする。関数単位の仕様は SPEC-TOOL-001（ツールの関門）。
+A2A の議論役（`speclino.a2a_server`）。全体の要求 R-SYS-01、R-SYS-11〜14 を詳しくする。
 
 ## 1. 目的と範囲
 
@@ -117,7 +117,7 @@ classDiagram
 ## 5. ツールの関門（アクティビティ図）
 
 `ToolGateway.invoke`。許可されないツールと予算切れは実行せずに拒否を記録し、許可されたものは予算を数えてから 1 回だけ実行し、
-許可を記録する。拒否のときは `ToolResult.denied(reason)` を返す（`ToolResult` は `agent/gateway.py` と `ports/text_llm.py` に同名のクラスがあり、クラス名だけでは一意に決まらないため図には描かず、文章で述べる）。SPEC-TOOL-001 が同じ関数を旧形式で検証している。
+許可を記録する。拒否のときは `ToolResult.denied(reason)` を返す（`ToolResult` は `agent/gateway.py` と `ports/text_llm.py` に同名のクラスがあり、クラス名だけでは一意に決まらないため図には描かず、文章で述べる）。
 
 ```mermaid
 %%@ id: tool-gate
