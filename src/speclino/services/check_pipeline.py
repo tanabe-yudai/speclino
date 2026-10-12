@@ -411,7 +411,7 @@ def _run_check(req: CheckRequest, *, is_base: bool) -> CheckResult:
             changed = _config_change_notice(project_dir, config_dir)
             if changed is not None:
                 knowledge_findings.append(changed)
-            scope_changes = _scope_change_findings(knowledge, inputs, base_result)
+            scope_changes = _scope_change_findings(knowledge, inputs, base_result, req.head_sha)
             knowledge_findings.extend(f for f, _ in scope_changes)
             levels.update({f.requirement_id: lv for f, lv in scope_changes})
     combined = _with_extra_findings(
@@ -744,53 +744,42 @@ def _bundle_inputs(req: CheckRequest, project_dir: Path, knowledge: ResolvedKnow
 
 
 def _scope_change_findings(
-    knowledge: ResolvedKnowledge, inputs: _Inputs, base: CheckResult | None
+    knowledge: ResolvedKnowledge, inputs: _Inputs, base: CheckResult | None, head_sha: str
 ) -> list[tuple[Finding, RuleLevel]]:
     """base（デフォルトブランチ）では対象だった図が head で対象外になったら要確認（REVIEW）。
 
     ワークスペース全体の仕様の図は、要素がリポジトリに無ければ義務を出さない（diagram_scope）。
     PR で図のクラスを改名・削除すると義務が黙って消えるので、base の run の manifest
     （`out_of_scope_diagrams`）と比べて残す。base の解析は増やさない（同じ bundle の base の
-    run の結果だけを見る）。level はその図の義務のうち 1 つでも mandatory なら mandatory。
-    base の run が無い・判定できなかった run では比べられないので、対象外にした図ごとに助言の
-    UNKNOWN を出す（ゲートは止めないが、素通りにはしない）。
+    run の結果だけを見る）。base の run が無い・判定できなかったときは、以前は対象だったと
+    みなして同じ要確認を出す（フェイルクローズ）。level はその図の義務のうち 1 つでも
+    mandatory なら mandatory。確定は仕様の改訂（内容の hash）・図・head のコミットに結び付く
+    （別の変更に古い確定を使い回させない）。
     """
-    if base is None:
-        return [
-            (
-                Finding(
-                    id=finding_id(f"{d}#scope", f"spec:{u.name}", None, "unsupported_analysis"),
-                    requirement_id=f"{d}#scope",
-                    behavior_id=f"spec:{u.name}",
-                    verdict="UNKNOWN",
-                    category="unsupported_analysis",
-                    severity="low",
-                    message=(
-                        f"デフォルトブランチの判定が無いため、対象外にした図 {d}（ワークスペース"
-                        f"全体の仕様 {u.name}）が以前は対象だったか確かめられない"
-                    ),
-                    claim_scope="command_invocation",
-                    next_steps=["デフォルトブランチを判定できる状態で検査し直す"],
-                ),
-                "advisory",
-            )
-            for u in inputs.spec_units
-            for d in u.out_of_scope_diagrams
-        ]
-    was_out = {(d.spec, d.diagram_id) for d in base.manifest.out_of_scope_diagrams}
+    was_out = (
+        {(d.spec, d.diagram_id) for d in base.manifest.out_of_scope_diagrams}
+        if base is not None
+        else set()
+    )
     full = {u.name: u.compiled for u in spec_units(knowledge)}
     out: list[tuple[Finding, RuleLevel]] = []
     for unit in inputs.spec_units:
         compiled = full.get(unit.name)
-        if compiled is None:
-            continue
-        levels = obligation_levels(compiled)
         for diagram in unit.out_of_scope_diagrams:
             if (unit.name, diagram) in was_out:
                 continue
+            levels = obligation_levels(compiled) if compiled is not None else {}
             mine = [lv for oid, lv in levels.items() if obligation_diagram(oid) == diagram]
-            level: RuleLevel = "mandatory" if "mandatory" in mine else "advisory"
+            level: RuleLevel = "mandatory" if "mandatory" in mine or not mine else "advisory"
             rid = f"{diagram}#scope"
+            why = (
+                "デフォルトブランチでは対象だった"
+                if base is not None
+                else "デフォルトブランチの判定が無く、以前は対象だったか確かめられない"
+            )
+            bound = hashlib.sha256(
+                f"{unit.content_hash}\n{diagram}\n{head_sha}".encode()
+            ).hexdigest()
             finding = Finding(
                 id=finding_id(rid, f"spec:{unit.name}", None, "scope_changed"),
                 requirement_id=rid,
@@ -799,9 +788,9 @@ def _scope_change_findings(
                 category="scope_changed",
                 severity="high" if level == "mandatory" else "medium",
                 message=(
-                    f"デフォルトブランチでは対象だった図 {diagram}（ワークスペース全体の仕様"
-                    f" {unit.name}）が、この変更で対象外になった（図の要素がリポジトリに 1 つも"
-                    "無くなったので、その図の義務を検査していない）"
+                    f"{why}図 {diagram}（ワークスペース全体の仕様 {unit.name}）が、この変更で"
+                    "対象外になった（図の要素がリポジトリに 1 つも無いので、その図の義務を検査して"
+                    "いない）"
                 ),
                 claim_scope="command_invocation",
                 next_steps=[
@@ -809,10 +798,9 @@ def _scope_change_findings(
                     "このリポジトリがもうその図の話でないなら、承認者が確定して進める"
                     "（PR コメント `/speclino attest`）",
                 ],
-                # 確定は仕様の改訂（内容の hash）と図に結び付く。仕様が変われば確定し直す
                 evidence_refs=[
                     f"{FINGERPRINT_REF}{rid}:{unit.name}:{unit.content_hash}",
-                    f"{CONTENT_HASH_REF}{unit.content_hash}",
+                    f"{CONTENT_HASH_REF}sha256:{bound}",
                 ],
             )
             out.append((finding, level))

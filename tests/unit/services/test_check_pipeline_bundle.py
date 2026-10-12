@@ -830,14 +830,14 @@ def test_diagram_that_drops_out_of_scope_in_the_pr_is_review(tmp_path: Path) -> 
     # base でも対象外なら（同じ head どうし）通知しない
     same = run_check(request(head, k, base_root=head, base_sha="HEAD"))
     assert "own#scope" not in by_req(same.findings.findings)
-    # base が無い run は比べられないので、対象外にした図ごとに助言の UNKNOWN（ゲートは止めない）
+    # base が無い run は比べられないので、以前は対象だったとみなして同じ要確認（フェイルクローズ）
     alone = run_check(request(head, k))
     u = by_req(alone.findings.findings)["own#scope"]
-    assert (u.verdict, u.category) == ("UNKNOWN", "unsupported_analysis")
-    assert "デフォルトブランチの判定が無いため、対象外にした図 own" in u.message
-    assert {"ship#scope", "ship-seq#scope", "phase#scope"} <= set(by_req(alone.findings.findings))
-    scope_ids = {
-        f.requirement_id for f in alone.findings.findings if f.requirement_id.endswith("#scope")
-    }
-    assert not scope_ids & {f.requirement_id for f in alone.gate.blocking}
-    assert scope_ids <= {f.requirement_id for f in alone.gate.advisory}
+    assert (u.verdict, u.category) == ("REVIEW", "scope_changed")
+    assert "デフォルトブランチの判定が無く" in u.message
+    assert "own#scope" in {f.requirement_id for f in alone.gate.blocking}
+    assert alone.gate.status == "fail"
+    # 確定は head のコミットに結び付く（別の変更に古い確定を使い回させない）
+    other = run_check(request(head, k, base_root=base, base_sha="BASE", head_sha="OTHER"))
+    g = by_req(other.findings.findings)["own#scope"]
+    assert attestation_target(g) != attestation_target(f)
