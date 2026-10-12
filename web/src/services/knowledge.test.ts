@@ -77,11 +77,10 @@ describe('editBase', () => {
 
 describe('scopeProblem', () => {
   const s = (over: Partial<ArtifactScope>): ArtifactScope => ({ workspace: false, projects: [], ...over })
-  it('requires projects for specs and one form for the others', () => {
-    expect(scopeProblem('spec', s({ workspace: true }))).toBe('仕様のスコープはプロジェクトを 1 つ以上選びます')
-    expect(scopeProblem('spec', s({ projects: ['p'] }))).toBeNull()
-    expect(scopeProblem('skill', s({}))).toBe('ワークスペース全体か、プロジェクトを 1 つ以上選びます')
-    expect(scopeProblem('skill', s({ workspace: true }))).toBeNull()
+  it('ワークスペース全体かプロジェクトの列挙のどちらか一方（仕様も同じ）', () => {
+    expect(scopeProblem(s({ workspace: true }))).toBeNull()
+    expect(scopeProblem(s({ projects: ['p'] }))).toBeNull()
+    expect(scopeProblem(s({}))).toBe('ワークスペース全体か、プロジェクトを 1 つ以上選びます')
   })
 })
 

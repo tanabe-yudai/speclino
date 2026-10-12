@@ -9,5 +9,5 @@ export interface Command {
   path: string
 }
 
-/** 設定のタブ（`/w/:slug/settings/:tab`）。 */
-export type SettingsTab = 'members' | 'repositories' | 'agents' | 'projects'
+/** 設定のタブ（`/w/:slug/settings/:tab`）。retired は取り下げ済みの知識。 */
+export type SettingsTab = 'members' | 'repositories' | 'agents' | 'projects' | 'retired'

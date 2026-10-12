@@ -10,7 +10,6 @@ const SLUG = process.env.E2E_WORKSPACE ?? 'shop-team'
 // スクリーンショットは E2E_SHOTS_DIR を設定したときだけ保存する（docs の画像を撮り直すとき）
 const SHOTS = process.env.E2E_SHOTS_DIR ? path.resolve(process.env.E2E_SHOTS_DIR) : null
 // seed_demo.py のプロジェクト（examples/shop/seed.py の REPO）
-const PROJECT = '/p/example/shop'
 const DEV_HEADERS = { 'X-Dev-User': 'judge' }
 
 async function shot(page: Page, name: string) {
@@ -27,10 +26,9 @@ async function login(page: Page) {
 test('仕様の編集・診断・承認、skill、可観測性、検査結果の確定', async ({ page, request }) => {
   await login(page)
 
-  // 1. 上部バーの「知識」→ 種類を仕様に絞る → 仕様のエディタ
-  await page.getByRole('navigation', { name: '主な画面' }).getByRole('link', { name: '知識', exact: true }).click()
-  await page.getByRole('navigation', { name: '種類で絞る' }).getByRole('link', { name: '仕様', exact: true }).click()
-  await page.waitForURL(/\/knowledge\?kind=spec/)
+  // 1. 上部バーの「仕様」→ 仕様の画面 → 仕様のエディタ
+  await page.getByRole('navigation', { name: '主な画面' }).getByRole('link', { name: '仕様', exact: true }).click()
+  await page.waitForURL(/\/w\/[^/]+\/specs$/)
   await shot(page, 'list')
   await page.getByRole('link', { name: 'shop', exact: true }).click()
   await expect(page.getByRole('navigation', { name: 'パンくずリスト' }).getByRole('link', { name: '仕様' })).toBeVisible()
@@ -82,7 +80,7 @@ test('仕様の編集・診断・承認、skill、可観測性、検査結果の
   await expect(page.getByText(/改訂 \d+ を承認しました/)).toBeVisible()
 
   // 5. skill のエディタ
-  await page.goto(`/w/${SLUG}${PROJECT}/knowledge?kind=skill`)
+  await page.goto(`/w/${SLUG}/skills`)
   await page.getByRole('link', { name: 'shop-error-format', exact: true }).click()
   await expect(page.getByLabel('SKILL.md')).toHaveValue(/name: shop-error-format/)
   await shot(page, 'skill')

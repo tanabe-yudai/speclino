@@ -1,6 +1,6 @@
 /** ⌘K の候補。所属ワークスペースとそのプロジェクトから作る（ネットワークは呼ばない）。 */
 
-import { AGENT_CONNECTION_LABEL, KNOWLEDGE_KIND_LABELS, SECTION_LABELS } from './labels'
+import { AGENT_CONNECTION_LABEL, SECTION_LABELS } from './labels'
 import { SECTIONS, sectionPath } from './navSections'
 import { paths } from './paths'
 import type { Command } from '@/types/command'
@@ -17,9 +17,6 @@ export function buildCommands(input: {
     const add = (id: string, name: string, path: string) =>
       commands.push({ id: `${id}:${ws.slug}`, label: `${label} の${name}`, group: 'ワークスペース', path })
     for (const s of SECTIONS) add(s === 'home' ? 'workspace' : s, SECTION_LABELS[s], sectionPath(ws.slug, s))
-    add('specs', KNOWLEDGE_KIND_LABELS.spec, paths.knowledge(ws.slug, { kind: 'spec' }))
-    add('pending', '承認待ちの知識', paths.knowledge(ws.slug, { status: 'pending' }))
-    add('policies', KNOWLEDGE_KIND_LABELS.policy, paths.policies(ws.slug))
     add('agents', AGENT_CONNECTION_LABEL, paths.settings(ws.slug, 'agents'))
     for (const repo of input.projects[ws.slug] ?? []) {
       commands.push({

@@ -32,13 +32,13 @@ describe('buildCommands', () => {
     expect(commands.map((c) => c.path)).toEqual([
       '/app',
       '/w/ws',
-      '/w/ws/knowledge',
+      '/w/ws/specs',
+      '/w/ws/skills',
+      '/w/ws/instructions',
+      '/w/ws/policies',
       '/w/ws/runs',
       '/w/ws/observability',
       '/w/ws/settings',
-      '/w/ws/knowledge?kind=spec',
-      '/w/ws/knowledge?status=pending',
-      '/w/ws/knowledge/policies',
       '/w/ws/settings/agents',
       '/w/ws/p/example-org/example-repo',
     ])
@@ -57,6 +57,6 @@ describe('buildCommands', () => {
   })
   it('ワークスペースごとに規約への候補がある', () => {
     const cmds = buildCommands({ me, projects: {} })
-    expect(cmds.find((c) => c.id === 'policies:ws')).toMatchObject({ label: 'Example の規約', path: '/w/ws/knowledge/policies' })
+    expect(cmds.find((c) => c.id === 'policies:ws')).toMatchObject({ label: 'Example の規約', path: '/w/ws/policies' })
   })
 })

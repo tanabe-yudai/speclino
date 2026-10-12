@@ -7,7 +7,7 @@ import { AcceptInvite } from './pages/AcceptInvite'
 import { GithubCallback } from './pages/GithubCallback'
 import { Home } from './pages/Home'
 import { HomeRedirect } from './pages/HomeRedirect'
-import { Knowledge } from './pages/Knowledge'
+import { KnowledgeList } from './pages/KnowledgeList'
 import { Landing } from './pages/Landing'
 import { Login } from './pages/Login'
 import { Policies } from './pages/Policies'
@@ -36,8 +36,11 @@ function App() {
             <Route path="/app" element={<HomeRedirect />} />
             <Route path="/w/:slug" element={<Home />} />
             <Route path="/w/:slug/p/:owner/:repo/:tab?" element={<Project />} />
-            <Route path="/w/:slug/knowledge" element={<Knowledge />} />
-            <Route path="/w/:slug/knowledge/policies" element={<Policies />} />
+            <Route path="/w/:slug/specs" element={<KnowledgeList kind="spec" />} />
+            <Route path="/w/:slug/skills" element={<KnowledgeList kind="skill" />} />
+            <Route path="/w/:slug/instructions" element={<KnowledgeList kind="instructions" />} />
+            <Route path="/w/:slug/policies" element={<Policies />} />
+            {/* 旧い統合一覧 /w/:slug/knowledge と種類ごとの旧い一覧は Fallback（legacyRoutes）が種類の画面へ転送する */}
             <Route path="/w/:slug/knowledge/:section/new" element={<KnowledgeEditor />} />
             <Route path="/w/:slug/knowledge/:section/:id" element={<KnowledgeEditor />} />
             <Route path="/w/:slug/knowledge/:section/:id/revisions" element={<KnowledgeRevisions />} />

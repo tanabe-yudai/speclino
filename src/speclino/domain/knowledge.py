@@ -144,12 +144,6 @@ class SpecContent(IRModel):
     def _markdown(cls, v: str) -> str:
         return _limit_body(v)
 
-    @model_validator(mode="after")
-    def _projects_only(self) -> SpecContent:
-        if self.scope.workspace:
-            raise ValueError("spec の scope はプロジェクトを列挙する（仕様と実装の組）")
-        return self
-
 
 ArtifactContent = Annotated[
     SkillContent | InstructionsContent | SpecContent, Field(discriminator="kind")

@@ -746,3 +746,32 @@ async def test_retire_requires_an_approver_and_the_seen_revision(ws: Ws) -> None
     assert bundle.members == []
     async with ws.f() as s:
         assert (await kr.current_draft(s, aid)) is not None
+
+
+async def test_workspace_spec_is_approved_and_applies_to_every_project(ws: Ws) -> None:
+    """ワークスペース全体の仕様: 作成・承認・bundle に入り、すべてのプロジェクトに当たる。"""
+    shared = await _create(ws, "spec", "requirements", _spec(_ws_scope(), "REQ-W"))
+    own = await _create(ws, "spec", "orders", _spec(_projects(ws.p1), "REQ-A"))
+    await _approve(ws, shared)
+    bundle = await _approve(ws, own)
+    assert {m.artifact_id for m in bundle.members} == {shared, own}
+    async with ws.f() as s:
+        ra = await kr.resolve_for_project(s, bundle, ws.p1)
+        rb = await kr.resolve_for_project(s, bundle, ws.p2)
+        ids_b = await kr.requirement_artifacts(s, ws.slug, bundle.generation, ws.p2)
+        summaries = {a.artifact_id: a for a in await kr.list_artifacts(s, ws.slug)}
+    assert sorted(r.artifact_id for r in ra.specs) == sorted([shared, own])
+    assert [r.artifact_id for r in rb.specs] == [shared]
+    assert ids_b == {"REQ-W": shared}
+    assert summaries[shared].scope == _ws_scope()
+
+
+async def test_workspace_spec_conflicts_with_every_project_spec(ws: Ws) -> None:
+    """同じ要求 ID は、ワークスペース全体の仕様とどのプロジェクトの仕様の間でも重なる。"""
+    own = await _create(ws, "spec", "billing", _spec(_projects(ws.p2), "REQ-1"))
+    await _approve(ws, own)
+    shared = await _create(ws, "spec", "requirements", _spec(_ws_scope(), "REQ-1"))
+    with pytest.raises(kr.BundleConflict, match="REQ-1"):
+        await _approve(ws, shared)
+    other = await _create(ws, "spec", "requirements2", _spec(_ws_scope(), "REQ-2"))
+    await _approve(ws, other)  # 要求 ID が違えば並べられる

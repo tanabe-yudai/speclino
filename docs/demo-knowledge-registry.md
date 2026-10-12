@@ -47,7 +47,7 @@ uv run uvicorn speclino.api.app:app --port 8080
 
 ## 1. 仕様を書く（0:00–1:00）
 
-「知識」→「仕様」→ `shop`。今の bundle は世代 4（仕様・skill・指示・規約の 4 回の承認）。
+「仕様」→ `shop`。今の bundle は世代 4（仕様・skill・指示・規約の 4 回の承認）。
 
 ![知識の一覧](screenshots/knowledge-list.png)
 

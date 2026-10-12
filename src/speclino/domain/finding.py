@@ -92,6 +92,10 @@ class CoverageCounts(IRModel):
     requirements_in_scope: int = 0
     requirements_decided: int = 0
     requirements_unanalyzed: int = 0
+    requirements_out_of_scope: int = Field(
+        default=0,
+        description="ワークスペース全体の仕様のうち、図の要素がこのリポジトリに無く対象外にした要求の行",
+    )
 
 
 class Findings(IRModel):

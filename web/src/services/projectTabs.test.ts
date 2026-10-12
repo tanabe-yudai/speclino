@@ -5,10 +5,10 @@ describe('parseProjectTab', () => {
   it('タブが無ければ概要', () => {
     expect(parseProjectTab(undefined)).toBe('overview')
   })
-  it('概要・知識・検査はそのまま、旧いタブと知らないタブは null', () => {
-    expect(parseProjectTab('knowledge')).toBe('knowledge')
+  it('概要・仕様・検査はそのまま、旧いタブと知らないタブは null', () => {
+    expect(parseProjectTab('specs')).toBe('specs')
     expect(parseProjectTab('runs')).toBe('runs')
-    expect(parseProjectTab('specs')).toBeNull()
+    expect(parseProjectTab('knowledge')).toBeNull()
     expect(parseProjectTab('')).toBeNull()
   })
 })

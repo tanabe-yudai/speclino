@@ -1,13 +1,17 @@
 /** 画面の行き来（第 1 階層・プロジェクトのタブ・一覧の絞り込み・パンくず）の型。 */
 
 import type { ArtifactKind, ArtifactSummary } from './knowledge'
+import type { ProjectSummary } from './project'
 import type { GateStatus } from './run'
 
-/** ワークスペースの下の第 1 階層。上部バー（PC）と画面下のタブ（スマホ）で同じ並び。 */
-export type SectionId = 'home' | 'knowledge' | 'runs' | 'observability' | 'settings'
+/**
+ * ワークスペースの下の第 1 階層。上部バー（PC）はすべて、画面下のタブ（スマホ）は一部を並べ、残りは「その他」に入れる。
+ * 仕様・スキル・指示書・規約は種類ごとに独立した画面。
+ */
+export type SectionId = 'home' | 'specs' | 'skills' | 'instructions' | 'policies' | 'runs' | 'observability' | 'settings'
 
 /** プロジェクト（絞り込みの画面）のタブ。 */
-export type ProjectTab = 'overview' | 'knowledge' | 'runs'
+export type ProjectTab = 'overview' | 'specs' | 'runs'
 
 export interface TabItem {
   id: string
@@ -24,17 +28,25 @@ export type KnowledgeKind = ArtifactKind | 'policy'
  */
 export type KnowledgeState = 'active' | 'pending' | 'unapproved' | 'retired'
 
-/** 知識の一覧の絞り込み（`?kind=&project=&status=`）。project は owner/repo。 */
-export interface KnowledgeFilter {
-  kind: KnowledgeKind | null
+/** 一覧の状態の絞り込み。取り下げ済みは一覧に出さない（設定の「取り下げ済みの知識」に分ける）。 */
+export type KnowledgeStatusFilter = Exclude<KnowledgeState, 'retired'>
+
+/** 種類ごとの一覧の絞り込み（`?project=&status=`）。project は owner/repo（仕様の画面だけが使う）。 */
+export interface KnowledgeListFilter {
   project: string | null
-  status: KnowledgeState | null
+  status: KnowledgeStatusFilter | null
 }
 
-/** 一覧の 1 行。workspaceWide は「チーム共通」（ワークスペース全体のスコープ）。 */
-export interface ArtifactRowData {
-  artifact: ArtifactSummary
-  workspaceWide: boolean
+/** リポジトリ別の仕様の 1 まとまり。project が null なのは、このワークスペースに見つからないプロジェクトを指すもの。 */
+export interface RepositorySpecs {
+  project: ProjectSummary | null
+  specs: ArtifactSummary[]
+}
+
+/** 仕様の画面の 2 つの節（ワークスペース全体・リポジトリ別）。 */
+export interface SpecGroups {
+  workspace: ArtifactSummary[]
+  repositories: RepositorySpecs[]
 }
 
 /** 規約の行（チーム規約は 1 つの改訂の列）。 */

@@ -65,6 +65,13 @@ class BehaviorAnalysis(IRModel):
     reason: str = Field(min_length=1, description="再利用した／しなかった理由（人が読める説明）")
 
 
+class OutOfScopeDiagram(IRModel):
+    """ワークスペース全体の仕様のうち、要素がこのリポジトリに 1 つも無く義務を出さなかった図。"""
+
+    spec: str = Field(min_length=1, description="仕様（artifact）の名前")
+    diagram_id: str = Field(min_length=1)
+
+
 class RunManifest(IRModel):
     schema_version: Literal["0.1"] = SCHEMA_VERSION
     run_id: str = Field(min_length=1)
@@ -89,6 +96,10 @@ class RunManifest(IRModel):
     uml_parser_version: str | None = None
     expected_requirement_ids: list[str] = Field(
         default_factory=list, description="出るべき要求 ID（欠けたら UNKNOWN）"
+    )
+    out_of_scope_diagrams: list[OutOfScopeDiagram] = Field(
+        default_factory=list,
+        description="ワークスペース全体の仕様で対象外にした図（その図の義務は出るべき要求に入れない）",
     )
     llm_assessment_keys: list[str] = Field(default_factory=list)
     attestations: list[Attestation] = Field(

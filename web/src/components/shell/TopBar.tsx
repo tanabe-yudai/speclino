@@ -12,7 +12,7 @@ import { BrandMark } from './BrandMark'
 
 /**
  * ログイン後の上部に固定するバー（design 3.3）。PC 幅ではワークスペースの第 1 階層
- * （ホーム・知識・検査・観測・設定）を並べ、スマホ幅ではワークスペース名とアカウントだけ（画面の行き来は下のタブ）。
+ * （ホーム・仕様・スキル・指示書・規約・検査・観測・設定）を並べ、スマホ幅ではワークスペース名とアカウントだけ（画面の行き来は下のタブ）。
  */
 export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
   const workspace = useCurrentWorkspace()
@@ -28,7 +28,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
         <WorkspacePill />
         <ProjectPill />
         {workspace && (
-          <nav aria-label="主な画面" className="hidden min-w-0 items-center sm:flex">
+          <nav aria-label="主な画面" className="hidden min-w-0 items-center overflow-x-auto [scrollbar-width:none] sm:flex">
             {SECTIONS.map((s) => (
               <Link
                 key={s}

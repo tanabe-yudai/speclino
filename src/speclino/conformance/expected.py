@@ -7,10 +7,12 @@ UNKNOWN（`missing_finding`）を合成する。ゲートが「出てきた Find
 
 from __future__ import annotations
 
+from collections.abc import Collection
+
 from speclino.conformance.reasons import finding_id
 from speclino.domain.finding import CoverageCounts, Finding, Findings, VerdictCounts
 from speclino.domain.spec_ir import RuleLevel
-from speclino.domain.uml import CompiledSpec
+from speclino.domain.uml import CompiledSpec, RequirementRow
 
 
 def obligation_levels(compiled: CompiledSpec) -> dict[str, RuleLevel]:
@@ -68,7 +70,11 @@ def fill_missing(findings: Findings, expected: list[str], behavior_id: str) -> F
 
 
 def uml_coverage(
-    compiled: CompiledSpec, findings: list[Finding], *, approved: bool
+    compiled: CompiledSpec,
+    findings: list[Finding],
+    *,
+    approved: bool,
+    out_of_scope: Collection[str] = (),
 ) -> CoverageCounts:
     """UML の仕様の要求の行を数える（旧形式の要求は engine が数えるので、`ir:` だけの行は除く）。
 
@@ -76,6 +82,8 @@ def uml_coverage(
     - 承認済み: 承認済みの bundle の仕様なら行の数、手元の仕様なら 0
     - 対応範囲: 図の要素に結びついた（形式化された）行。このプロジェクトに当たる仕様だけが渡る
     - 判定済み: 対応範囲の行のうち、参照する図の義務がすべて適合か違反に決まったもの
+    - 対象外: 参照する図がすべて対象外（`diagram_scope`。ワークスペース全体の仕様で、
+      図の要素がこのリポジトリに無い）の行。対応範囲にも未解析にも数えない
     - 未解析: 形式化されておらず検査できない行
     """
     rows = [
@@ -84,7 +92,14 @@ def uml_coverage(
         if not (r.formalized_by and all(x.startswith("ir:") for x in r.formalized_by))
     ]
     obligation_ids = list(obligation_levels(compiled))
-    in_scope = [r for r in rows if r.formalized_by]
+    skipped = set(out_of_scope)
+
+    def outside(row: RequirementRow) -> bool:
+        diagrams = {x.split("#", 1)[0] for x in row.formalized_by if not x.startswith("ir:")}
+        return bool(skipped) and bool(diagrams) and diagrams <= skipped
+
+    outside_rows = [r for r in rows if outside(r)]
+    in_scope = [r for r in rows if r.formalized_by and not outside(r)]
     decided = 0
     for row in in_scope:
         diagrams = {x.split("#", 1)[0] for x in row.formalized_by if "#" in x}
@@ -96,7 +111,8 @@ def uml_coverage(
         requirements_approved=len(rows) if approved else 0,
         requirements_in_scope=len(in_scope),
         requirements_decided=decided,
-        requirements_unanalyzed=len(rows) - len(in_scope),
+        requirements_unanalyzed=len(rows) - len(in_scope) - len(outside_rows),
+        requirements_out_of_scope=len(outside_rows),
     )
 
 

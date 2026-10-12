@@ -1357,3 +1357,14 @@ def test_declared_copies_for_sync_status() -> None:
         False,
     )
     assert ks.declared_copies(None, {SKILL_C: "x"}, {"CLAUDE.md": ""}) == ([], False)
+
+
+def test_workspace_spec_is_written_like_a_project_spec() -> None:
+    """ワークスペース全体の仕様も、当たったリポジトリの `.speclino/specs/` に書き出す。"""
+    shared = _rev(
+        "requirements",
+        SpecContent(kind="spec", markdown="# 要求\n", scope=ArtifactScope(workspace=True)),
+    )
+    files = ks.render_files(_resolved([shared, _spec("orders")]))
+    assert files[".speclino/specs/requirements.md"] == "# 要求\n"
+    assert ".speclino/specs/orders.md" in files

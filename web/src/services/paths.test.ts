@@ -5,24 +5,26 @@ describe('paths', () => {
   it('プロジェクトは owner/repo をパスの 2 段にし、概要以外はタブを足す', () => {
     expect(paths.project('ws', 'example-org/example-repo')).toBe('/w/ws/p/example-org/example-repo')
     expect(paths.project('ws', 'example-org/example-repo', 'overview')).toBe('/w/ws/p/example-org/example-repo')
-    expect(paths.project('ws', 'example-org/example-repo', 'knowledge', { kind: 'skill' })).toBe(
-      '/w/ws/p/example-org/example-repo/knowledge?kind=skill',
+    expect(paths.project('ws', 'example-org/example-repo', 'specs', { status: 'pending' })).toBe(
+      '/w/ws/p/example-org/example-repo/specs?status=pending',
     )
     expect(paths.project('ws', 'o/r', 'runs', { gate: 'fail' })).toBe('/w/ws/p/o/r/runs?gate=fail')
   })
   it('設定のタブはパスで指定する', () => {
     expect(paths.settings('ws')).toBe('/w/ws/settings')
     expect(paths.settings('ws', 'agents')).toBe('/w/ws/settings/agents')
+    expect(paths.settings('ws', 'retired')).toBe('/w/ws/settings/retired')
   })
   it('slug と名前はエンコードする', () => {
-    expect(paths.policies('a b')).toBe('/w/a%20b/knowledge/policies')
+    expect(paths.policies('a b')).toBe('/w/a%20b/policies')
     expect(paths.workspace('acme team')).toBe('/w/acme%20team')
   })
-  it('知識と検査の一覧は絞り込みをクエリにする', () => {
-    expect(paths.knowledge('ws')).toBe('/w/ws/knowledge')
-    expect(paths.knowledge('ws', { kind: 'spec', project: 'o/r', status: 'pending' })).toBe(
-      '/w/ws/knowledge?kind=spec&project=o%2Fr&status=pending',
-    )
+  it('種類の画面と検査の一覧は絞り込みをクエリにする（リポジトリで絞れるのは仕様だけ、規約は絞らない）', () => {
+    expect(paths.knowledgeList('ws', 'spec')).toBe('/w/ws/specs')
+    expect(paths.knowledgeList('ws', 'spec', { project: 'o/r', status: 'pending' })).toBe('/w/ws/specs?project=o%2Fr&status=pending')
+    expect(paths.knowledgeList('ws', 'skill', { project: 'o/r', status: 'active' })).toBe('/w/ws/skills?status=active')
+    expect(paths.knowledgeList('ws', 'instructions')).toBe('/w/ws/instructions')
+    expect(paths.knowledgeList('ws', 'policy', { status: 'pending' })).toBe('/w/ws/policies')
     expect(paths.runs('ws', { gate: 'fail', project: 'o/r' })).toBe('/w/ws/runs?gate=fail&project=o%2Fr')
   })
   it('検査の詳細はワークスペースの下。分からなければ旧いパス', () => {
