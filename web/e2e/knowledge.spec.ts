@@ -42,10 +42,9 @@ test('仕様の編集・診断・承認、skill、可観測性、検査結果の
   const broken = original.replace('before.inventory.available >= before.order.quantity', 'before.inventory.available >= before.order.qty')
   expect(broken).not.toBe(original)
   await body.fill(broken)
-  await page.getByRole('tab', { name: /診断/ }).click() // 既定の表示はプレビュー
+  await page.getByText(/診断の内容（[1-9]/).click() // 診断は折りたたみの中
   const diagnostic = page.getByRole('button', { name: /行 \d+ 列へ移る: .*before\.order\.qty/ })
   await expect(diagnostic).toBeVisible()
-  await expect(page.getByRole('tab', { name: /診断（[1-9]/ })).toBeVisible()
   await diagnostic.click() // 本文のその行へ移る
   await shot(page, 'spec-diagnostic')
 
@@ -56,23 +55,20 @@ test('仕様の編集・診断・承認、skill、可観測性、検査結果の
   )
   expect(withComparison).not.toBe(original)
   await body.fill(withComparison)
-  await expect(page.getByText('診断はありません。')).toBeVisible()
-  await page.getByRole('tab', { name: '図' }).click()
-  await expect(page.locator('figure svg')).toHaveCount(4)
-  await expect(page.getByText('描画できない')).toHaveCount(0)
-  await expect(page.locator('figure svg').last()).toContainText('before.order.quantity < 1 and before.inventory.available >= 0')
-  await page.getByRole('tab', { name: /診断/ }).click()
+  await expect(page.getByText('問題なし', { exact: true })).toBeVisible()
+  await expect(page.locator('svg[id^="speclino-mermaid"]')).toHaveCount(4)
+  await expect(page.getByText(/図を描画できません/)).toHaveCount(0)
+  await expect(page.locator('svg[id^="speclino-mermaid"]').last()).toContainText('before.order.quantity < 1 and before.inventory.available >= 0')
 
   // 3. 直す（説明の 1 文も足して保存できる差分にする）→ 診断が消え、図が描ける
   const fixed = original.replace('挟んでもよい（シーケンス図は「この順で含む」の義務）。', '挟んでもよい（シーケンス図は「この順で含む」の義務）。在庫が足りなければ何も呼ばない。')
   expect(fixed).not.toBe(original)
   await body.fill(fixed)
-  await expect(page.getByText('診断はありません。')).toBeVisible()
-  await page.getByRole('tab', { name: '図' }).click()
+  await expect(page.getByText('問題なし', { exact: true })).toBeVisible()
   // 4 つの図（クラス・シーケンス・状態遷移・アクティビティ）がすべて描ける
-  await expect(page.locator('figure svg')).toHaveCount(4)
-  await expect(page.getByText('描画できない')).toHaveCount(0)
-  await page.locator('figure').last().scrollIntoViewIfNeeded()
+  await expect(page.locator('svg[id^="speclino-mermaid"]')).toHaveCount(4)
+  await expect(page.getByText(/図を描画できません/)).toHaveCount(0)
+  await page.locator('svg[id^="speclino-mermaid"]').last().scrollIntoViewIfNeeded()
   await shot(page, 'spec-preview')
 
   // 4. 下書きを保存 → 承認 → 有効になる
