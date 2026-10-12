@@ -14,7 +14,13 @@ import hmac
 import json
 from collections.abc import Mapping
 
-from speclino.adapters.github.types import IssueCommentRef, PullRequestRef, RerunRef, WebhookEvent
+from speclino.adapters.github.types import (
+    IssueCommentRef,
+    PullRequestRef,
+    PullRequestReviewRef,
+    RerunRef,
+    WebhookEvent,
+)
 
 _PR_ACTIONS = frozenset({"opened", "synchronize", "reopened"})
 _CHECK_RUN_RERUN_ACTIONS = frozenset({"rerequested", "requested_action"})
@@ -122,6 +128,42 @@ def extract_comment(payload: dict[str, object]) -> IssueCommentRef | None:
     )
 
 
+def extract_review_approval(payload: dict[str, object]) -> PullRequestReviewRef | None:
+    """pull_request_review の submitted で state が approved のものだけを抽出する。
+
+    commented / changes_requested / dismissed は確定ではないので扱わない。
+    """
+    if payload.get("action") != "submitted":
+        return None
+    review = _as_dict(payload.get("review"))
+    pr = _as_dict(payload.get("pull_request"))
+    repo = _as_dict(payload.get("repository"))
+    installation = _as_dict(payload.get("installation"))
+    if not review or not pr or not repo or not installation:
+        return None
+    # GitHub の webhook は小文字（approved）で送る。大文字の表記も同じに扱う
+    if _as_str(review.get("state")).lower() != "approved":
+        return None
+    installation_id = _as_int(installation.get("id"))
+    pr_number = _as_int(pr.get("number"))
+    repo_id = _as_int(repo.get("id"))
+    commit_id = _as_str(review.get("commit_id"))
+    if installation_id is None or pr_number is None or repo_id is None or not commit_id:
+        return None
+    reviewer = _as_dict(review.get("user"))
+    return PullRequestReviewRef(
+        repo_full_name=_as_str(repo.get("full_name")),
+        repo_id=repo_id,
+        installation_id=installation_id,
+        pr_number=pr_number,
+        commit_id=commit_id,
+        reviewer_login=_as_str(reviewer.get("login")),
+        reviewer_id=_as_int(reviewer.get("id")),
+        review_url=_as_str(review.get("html_url")),
+        pr_author_id=_as_int(_as_dict(pr.get("user")).get("id")),
+    )
+
+
 def _pr_numbers(check_suite: dict[str, object]) -> list[int]:
     prs = check_suite.get("pull_requests")
     if not isinstance(prs, list):
@@ -176,6 +218,7 @@ __all__ = [
     "extract_comment",
     "extract_pr",
     "extract_rerun",
+    "extract_review_approval",
     "parse_event",
     "verify_signature",
 ]

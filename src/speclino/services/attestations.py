@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -23,9 +25,9 @@ from speclino.db.repositories import ProjectRepository, ReviewRunRepository
 from speclino.db.repositories.assessments import AttestationRepository
 from speclino.db.repositories.audit import AuditRepository
 from speclino.domain.assessment import Attestation, Disposition
-from speclino.domain.finding import Finding, Findings
+from speclino.domain.finding import CONTENT_HASH_REF, FINGERPRINT_REF, Finding, Findings
 from speclino.domain.workspace import APPROVER_ROLES
-from speclino.services.llm_policies import CONTENT_HASH_REF, FINGERPRINT_REF
+from speclino.services.approvers import is_approver
 from speclino.services.workspaces import WorkspaceNotFound, role_of
 
 CONFIG_CHANGE_REQUIREMENT_ID = "KNOWLEDGE-BINDINGS-001"
@@ -127,26 +129,70 @@ async def attest(
         self_attested=self_attested,
         now=now,
     )
+    await _audit_attestation(session, saved, first_actor, via, self_attested, actor_login)
+    return saved
+
+
+async def attest_if_absent(
+    session: AsyncSession,
+    *,
+    fingerprint: str,
+    content_hash: str,
+    actor: str,
+    workspace: str,
+    project_id: uuid.UUID,
+    via: str,
+    self_attested: bool | None,
+    actor_login: str | None,
+) -> Attestation | None:
+    """同じ (指紋, hash) の確定が無いときだけ attested で記録し、監査に残す（`attest` と同じ監査）。
+
+    既にあれば（並行して保存された `ack` も含め）何も変えず None。判定と書込みを 1 文で行う。
+    """
+    saved = await AttestationRepository(session).insert_if_absent(
+        workspace=workspace,
+        project_id=project_id,
+        fingerprint=fingerprint,
+        content_hash=content_hash,
+        actor=actor,
+        self_attested=self_attested,
+    )
+    if saved is not None:
+        await _audit_attestation(session, saved, actor, via, self_attested, actor_login)
+    return saved
+
+
+async def _audit_attestation(
+    session: AsyncSession,
+    saved: Attestation,
+    first_actor: str,
+    via: str,
+    self_attested: bool | None,
+    actor_login: str | None,
+) -> None:
     detail: dict[str, object] = {
-        "content_hash": content_hash,
-        "project_id": str(project_id),
+        "content_hash": saved.content_hash,
+        "project_id": saved.project_id,
         "via": via,
         # この確定の照合結果と、保存した印（true > null > false で強い方を保つ）
         "self_attested": self_attested,
         "self_attested_label": self_attest_label(self_attested),
         "self_attested_stored": saved.self_attested,
         "first_actor": first_actor,
-        "latest_actor": actor,
+        "latest_actor": saved.actor,
     }
     if actor_login is not None:
         detail["actor_login"] = actor_login
-    warning = config_change_warning(fingerprint, self_attested)
+    warning = config_change_warning(saved.fingerprint, self_attested)
     if warning is not None:
         detail["warning"] = warning
     await AuditRepository(session).record(
-        actor, "attestation.record", f"{workspace}:{fingerprint}", disposition, detail
+        saved.actor,
+        "attestation.record",
+        f"{saved.workspace}:{saved.fingerprint}",
+        saved.disposition,
+        detail,
     )
-    return saved
 
 
 def same_github_user(actor_id: int | None, author_id: int | None) -> bool | None:
@@ -173,7 +219,9 @@ def config_change_warning(fingerprint: str, self_attested: bool | None) -> str |
     )
 
 
-BINDINGS_VIA_PR_COMMENT_REASON = "対応表・免除・規約の変更の確定は PR コメントで行う"
+BINDINGS_VIA_PR_COMMENT_REASON = (
+    "対応表・免除・規約の変更の確定は PR の Approve か PR コメントで行う"
+)
 
 
 class BindingsAttestRequiresPrComment(PermissionError):
@@ -354,6 +402,160 @@ async def in_run_findings(
     return False
 
 
+BULK_NOT_REGISTERED_REASON = "ワークスペースに登録されていないリポジトリ"
+BULK_NOT_APPROVER_REASON = "承認者ではない"
+BULK_STALE_REASON = "Approve したコミットが PR の最新の検査の head と違う"
+BULK_PENDING_REASON = "PR の最新のコミットの検査がまだ完了していない（完了してからやり直す）"
+BULK_NOTHING_REASON = "確定できる要確認が無い（確定済みを含む）"
+BULK_REAPPLY_REASON = "確定済みの要確認が検査に反映されていないため再検査する"
+
+# 一括の確定の経路: PR の Approve と、引数なしの PR コメント `/speclino attest`
+BulkSource = Literal["pr_review", "pr_comment_all"]
+
+
+@dataclass(frozen=True)
+class BulkAttest:
+    """PR の最新の検査の要確認をまとめて確定する依頼（Approve か引数なしの `/speclino attest`）。
+
+    `commit_id` は Approve したコミット。コメントには無いので None（最新の run の head を使う）。
+    """
+
+    source: BulkSource
+    pr_number: int
+    commit_id: str | None
+    actor_login: str
+    actor_id: int | None
+    url: str
+    pr_author_id: int | None
+
+
+@dataclass(frozen=True)
+class BulkAttestOutcome:
+    """一括の確定の結果。`recheck` は再検査する run（確定が 1 件以上のときだけ）。"""
+
+    accepted: bool
+    reason: str
+    attested: list[Attestation] = field(default_factory=list)
+    recheck: ReviewRun | None = None
+
+
+async def attest_all_in_pr(
+    session: AsyncSession, *, project: Project, req: BulkAttest
+) -> BulkAttestOutcome:
+    """承認者の依頼で、その PR の最新の検査の確定できる要確認すべてを attested で確定する。
+
+    PR コメントの `/speclino attest <指紋> <hash>` と同じ規則で記録する: 承認者は
+    `projects.settings` の `approver_ids` と GitHub のユーザー ID で照合し（`is_approver`）、
+    actor は `github:<ID>`、自己確定の印・対応表の変更の警告は `attest` が残す。経路は監査の
+    `via`（`<source>:<URL>`）で区別する。指紋と内容の hash は利用者が打たず、run の保存済みの
+    Findings の値を使う。
+
+    対象はその PR の最新の run で、最新の完了した run と head が一致し（検査中・未検査のコミットが
+    無い）、Approve ならその head が Approve したコミットと一致するものだけ（古いコミットへの承認で
+    新しい変更を確定しない）。確定できるのは `attestation_target` が返す REVIEW だけで、VIOLATED
+    などは対象外。既に確定がある (指紋, hash) は上書きしない（重複の依頼は冪等。`ack` で問題として
+    記録したものを覆さない）。結果は受理・拒否とも監査（`attestation.bulk`）に残す。
+    """
+    actor = f"github:{req.actor_id}" if req.actor_id is not None else req.actor_login
+    outcome = await _attest_all(session, project, req, actor)
+    await AuditRepository(session).record(
+        actor,
+        "attestation.bulk",
+        f"{project.repo_full_name}#{req.pr_number}",
+        _bulk_decision(outcome),
+        {
+            "source": req.source,
+            "actor_login": req.actor_login,
+            "commit_id": req.commit_id,
+            "url": req.url,
+            "reason": outcome.reason,
+            "attested": [a.fingerprint for a in outcome.attested],
+        },
+    )
+    return outcome
+
+
+def _bulk_decision(outcome: BulkAttestOutcome) -> str:
+    if outcome.accepted:
+        return "accepted"
+    return "ignored" if outcome.reason == BULK_NOTHING_REASON else "rejected"
+
+
+async def _attest_all(
+    session: AsyncSession, project: Project, req: BulkAttest, actor: str
+) -> BulkAttestOutcome:
+    if project.team is None:
+        return BulkAttestOutcome(False, BULK_NOT_REGISTERED_REASON)
+    if not is_approver(project.settings, user_id=req.actor_id, login=req.actor_login):
+        return BulkAttestOutcome(False, f"{req.actor_login} は{BULK_NOT_APPROVER_REASON}")
+    runs = ReviewRunRepository(session)
+    latest = await runs.latest_run_for_pr(project.id, req.pr_number)
+    if latest is None or (req.commit_id is not None and latest.head_sha != req.commit_id):
+        return BulkAttestOutcome(False, BULK_STALE_REASON)
+    done = await runs.latest_completed_for_pr(project.id, req.pr_number)
+    if done is None or done.head_sha != latest.head_sha:
+        return BulkAttestOutcome(False, BULK_PENDING_REASON)
+    author_id = req.pr_author_id if req.pr_author_id is not None else done.pr_author_id
+    targets = sorted(await _run_targets(session, done.id))
+    saved = [
+        a
+        for fp, ch in targets
+        if (
+            a := await attest_if_absent(
+                session,
+                fingerprint=fp,
+                content_hash=ch,
+                actor=actor,
+                actor_login=req.actor_login,
+                workspace=project.team,
+                project_id=project.id,
+                via=f"{req.source}:{req.url}",
+                self_attested=same_github_user(req.actor_id, author_id),
+            )
+        )
+        is not None
+    ]
+    if saved:
+        return BulkAttestOutcome(True, "承認者の一括の確定", saved, latest)
+    # 新しい確定が無くても、確定済みの attested がまだ検査に反映されていない（前の再検査の投入に
+    # 失敗した・再送された）なら再検査し直す。未完了の run は create_run_in が superseded にする
+    if await _unapplied_attestations(session, project.team, project.id, done, targets):
+        return BulkAttestOutcome(True, BULK_REAPPLY_REASON, [], latest)
+    return BulkAttestOutcome(False, BULK_NOTHING_REASON)
+
+
+async def _unapplied_attestations(
+    session: AsyncSession,
+    workspace: str,
+    project_id: uuid.UUID,
+    done: ReviewRun,
+    targets: list[tuple[str, str]],
+) -> bool:
+    """`done` の要確認に attested の確定があるのに、`done` の検査に効いていないか。"""
+    attested = {
+        (a.fingerprint, a.content_hash)
+        for a in await list_attestations(session, workspace, project_id)
+        if a.disposition == "attested"
+    }
+    applied = {
+        (a.get("fingerprint"), a.get("content_hash"))
+        for a in (done.manifest or {}).get("attestations", [])
+        if isinstance(a, dict)
+    }
+    return any(t in attested and t not in applied for t in targets)
+
+
+async def _run_targets(session: AsyncSession, run_id: uuid.UUID) -> set[tuple[str, str]]:
+    from speclino.db.repositories import FindingRepository
+
+    rows = await FindingRepository(session).list_for_run(run_id)
+    return {
+        t
+        for row in rows
+        if (t := attestation_target(Finding.model_validate(row.payload))) is not None
+    }
+
+
 async def list_attestations(
     session: AsyncSession, workspace: str, project_id: uuid.UUID
 ) -> list[Attestation]:
@@ -368,6 +570,14 @@ __all__ = [
     "NOT_IN_PR_REASON",
     "NOT_IN_RUN_REASON",
     "AttestTargetNotFound",
+    "BULK_NOTHING_REASON",
+    "BULK_PENDING_REASON",
+    "BULK_STALE_REASON",
+    "BulkAttest",
+    "BulkAttestOutcome",
+    "BulkSource",
+    "attest_all_in_pr",
+    "attest_if_absent",
     "in_run_findings",
     "applied_attestations",
     "apply_attestations",

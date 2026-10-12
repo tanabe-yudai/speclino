@@ -9,6 +9,10 @@ from pydantic import Field
 from speclino.domain.assessment import AssessmentOutcome
 from speclino.domain.common import SCHEMA_VERSION, ClaimScope, IRModel, SourceRef
 
+# 人が確定できる Finding の `evidence_refs` の接頭辞（指紋と内容の hash）
+FINGERPRINT_REF = "fingerprint:"
+CONTENT_HASH_REF = "content_hash:"
+
 Verdict = Literal["VERIFIED_IN_SCOPE", "VIOLATED", "UNKNOWN", "REVIEW"]
 
 Category = Literal[

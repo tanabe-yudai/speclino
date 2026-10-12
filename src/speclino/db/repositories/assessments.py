@@ -166,6 +166,42 @@ class AttestationRepository:
         await self._session.flush()
         return _attestation(row), row.first_actor
 
+    async def insert_if_absent(
+        self,
+        *,
+        workspace: str,
+        project_id: uuid.UUID,
+        fingerprint: str,
+        content_hash: str,
+        actor: str,
+        self_attested: bool | None = None,
+        now: datetime | None = None,
+    ) -> Attestation | None:
+        """attested の確定を、同じ (指紋, hash) の確定が無いときだけ記録する（原子的）。
+
+        既にあれば（attested でも acknowledged_violation でも、並行して保存されたものでも）何も
+        変えずに None を返す。まとめての確定が人の個別の処置を覆さないため。
+        """
+        stmt = (
+            insert(AttestationRecord)
+            .values(
+                workspace=workspace,
+                project_id=project_id,
+                fingerprint=fingerprint,
+                content_hash=content_hash,
+                disposition="attested",
+                actor=actor,
+                first_actor=actor,
+                self_attested=self_attested,
+                created_at=now or datetime.now(UTC),
+            )
+            .on_conflict_do_nothing(constraint="uq_attestations_workspace_project_fingerprint_hash")
+            .returning(AttestationRecord)
+        )
+        row = (await self._session.execute(stmt)).scalar_one_or_none()
+        await self._session.flush()
+        return _attestation(row) if row is not None else None
+
     async def list_for_project(self, workspace: str, project_id: uuid.UUID) -> list[Attestation]:
         """そのプロジェクトの確定（run のゲートに効かせるのはこれだけ。#114）。"""
         stmt = (

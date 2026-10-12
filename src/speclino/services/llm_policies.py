@@ -42,7 +42,7 @@ from speclino.domain.assessment import (
     ItemVerdict,
 )
 from speclino.domain.common import SourceRef
-from speclino.domain.finding import Finding
+from speclino.domain.finding import CONTENT_HASH_REF, FINGERPRINT_REF, Finding
 from speclino.domain.policy import PolicyRule
 from speclino.domain.policy_params import LlmChecklistItem, LlmChecklistParams
 from speclino.ports.text_llm import TextLlm
@@ -62,9 +62,9 @@ TRIALS = 3
 DEFAULT_TIMEOUT_S = 60.0
 BEHAVIOR_ID = "policy:llm.checklist"
 # Finding.evidence_refs の接頭辞。ゲート（確定の照合）と画面が読む
-FINGERPRINT_REF = "fingerprint:"
-CONTENT_HASH_REF = "content_hash:"
 ASSESSMENT_KEY_REF = "assessment_key:"
+# 確定できる要確認の案内（1 件ずつのハッシュつきの形は、ゲートのコメントの根拠に畳んで出す）
+ATTEST_ALL_HOW = "承認者が `/speclino attest` とコメントする（または PR を Approve する）と確定する"
 
 NO_ISSUE_LABEL = "LLM で確認、指摘なし（機械検証ではない）"
 # 必須の規約の no_issue。人の確定（attested）までゲートを止める（#114）
@@ -327,11 +327,10 @@ def _item_finding(
     else:
         message = f"{rule.id}: 「{item.question}」 — {NO_ISSUE_LABEL}"
         severity = "info"
-    attest_cmd = f"（PR コメント `/speclino attest {fp} {unit.unit_hash}`）"
     next_steps = (
-        [f"指摘どおりなら直す。問題が無ければ owner / approver が確定する{attest_cmd}"]
+        [f"指摘どおりなら直す。問題が無ければ{ATTEST_ALL_HOW}"]
         if outcome != "no_issue"
-        else [f"機械検証ではないため、内容を確かめて owner / approver が確定する{attest_cmd}"]
+        else [f"機械検証ではないため、内容を確かめて{ATTEST_ALL_HOW}"]
     )
     return Finding(
         id=f"llm:{fp}",
@@ -518,6 +517,7 @@ async def assess(
 
 __all__ = [
     "ASSESSMENT_KEY_REF",
+    "ATTEST_ALL_HOW",
     "BEHAVIOR_ID",
     "CONTENT_HASH_REF",
     "FINGERPRINT_REF",

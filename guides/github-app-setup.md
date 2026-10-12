@@ -22,10 +22,10 @@ Webhook URL はトンネルで頻繁に変わり、秘密鍵も手元に置く�
 | Checks | Read and write | `SpecLino / gate` の Check Run 作成・更新 |
 | Contents | Read-only | base / head のスナップショット取得 |
 | Issues | Read-only | **`issue_comment` イベントを受け取るために必要**（Pull requests 権限だけでは選択肢に出ない）。コメントの投稿は PR に対して行うので Pull requests の write で足り、Issues は read で十分 |
-| Pull requests | Read and write | 質問・承認待ちのコメント投稿 |
+| Pull requests | Read and write | 質問・承認待ちのコメント投稿。`pull_request_review` イベント（PR の Approve による確定）もこの権限で受け取れる（受け取るだけなら Read-only で足りる） |
 | Metadata | Read-only | 必須（自動で付く） |
 
-**Subscribe to events**: `Pull request`、`Issue comment`、`Check run`、`Check suite`。
+**Subscribe to events**: `Pull request`、`Pull request review`、`Issue comment`、`Check run`、`Check suite`。
 
 > イベントの選択肢は**選んだ権限で絞り込まれる**。先に権限を設定して保存しないと、
 > Check run / Check suite（Checks 権限）と Issue comment（Issues 権限）は一覧に現れない。
@@ -33,8 +33,44 @@ Webhook URL はトンネルで頻繁に変わり、秘密鍵も手元に置く�
 実装が処理するのは次だけ（それ以外は 200 を返して無視する）:
 
 - `pull_request`: `opened` / `synchronize` / `reopened`
-- `issue_comment`: `created`（本文の `/speclino approve-spec|answer|attest|rerun`）
+- `pull_request_review`: `submitted` で `review.state` が `approved` のものだけ（承認者の Approve を要確認の確定として扱う。
+  commented / changes_requested / dismissed は無視）
+- `issue_comment`: `created`（本文の `/speclino approve-spec|answer|attest|rerun`。引数なしの `attest` はまとめて確定）
 - `check_run`: `rerequested` / `requested_action`、`check_suite`: `rerequested`
+
+### 既存の App に `Pull request review` を足す
+
+PR の Approve による確定（下記）を使うには、作成済みの App にもイベントを足す。
+
+1. GitHub の **Settings → Developer settings → GitHub Apps → 対象の App → Edit** を開く
+2. **Permissions & events** の Repository permissions で `Pull requests` が Read-only 以上であることを確かめる
+   （SpecLino は Read and write にしている。変えていなければそのままでよい）
+3. 同じ画面の **Subscribe to events** で `Pull request review` にチェックを入れ、**Save changes**
+4. 権限を変えた場合だけ、インストール先（リポジトリの Settings → GitHub Apps、または Organization の設定）で
+   新しい権限の承認を求められるので承認する。イベントの追加だけなら承認は要らない
+5. App の **Advanced → Recent Deliveries** で、PR を Approve したときに `pull_request_review` が 200 で
+   届くことを確かめる（応答の `status` が `queued` なら確定して再検査した、`handled` なら理由が `reason` に出る）
+
+### 要確認をまとめて確定する（`/speclino attest` か PR の Approve）
+
+必須の要確認（`KNOWLEDGE-BINDINGS-001` の対応表・規約・免除・契約の変更、LLM 支援の規約の指摘）は、
+プロジェクトの承認者（設定画面の「仕様の承認者」。GitHub のユーザー ID で照合）が次のどちらかをすると、
+その PR の最新の検査の確定できる要確認がすべて確定する。ハッシュを打つ必要はない（サーバが run の指摘の値を使う）。
+
+- PR に **`/speclino attest`**（引数なし）とコメントする。1 人運用で作成者＝承認者のとき（GitHub では自分の PR を
+  Approve できない）はこちら
+- GitHub で PR を **Approve** する（Approve したコミット `review.commit_id` が最新の検査の head と一致するときだけ）
+
+共通の規則:
+
+- 最新の run と最新の完了した run の head が一致するときだけ確定する。検査中・未検査のコミットがあるとき、古い
+  コミットへの Approve では何もしない。理由は webhook の応答（Recent Deliveries）と監査 `attestation.bulk` に残る
+  （webhook は PR にコメントを書かない）。検査が終わってからやり直せばよい
+- 確定済み（`/speclino attest <指紋> <hash> ack` で問題として記録したものを含む）は上書きしない
+- 確定のあとは同じ head で再検査し、ゲートのコメントと Check を更新する（確定が検査に反映されていなければ、もう一度
+  `/speclino attest` とコメントすると再検査し直す）
+- 1 件ずつの `/speclino attest <指紋> <sha256:…> [ack]` もそのまま使える（形はゲートのコメントの各指摘の「根拠」に出る。
+  問題として記録する `ack` はこの形だけ）
 
 作成後に **Generate a private key** して `.pem` をダウンロードし、App ID を控える。
 

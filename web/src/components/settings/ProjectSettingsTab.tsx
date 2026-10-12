@@ -154,7 +154,7 @@ function SettingsForm({ slug, projectId }: { slug: string; projectId: string }) 
             !view.can_edit_approvers && <p className="font-mono text-xs text-ink-2">（未設定）</p>
           )}
           <p className="text-xs text-ink-3">
-            PR のコメントで仕様の承認や指摘の確定ができる人です。空なら誰も承認できません。変更できるのはオーナーだけです。
+            PR のコメントで仕様の承認や指摘の確定ができる人です。PR に /speclino attest とコメントするか PR を Approve すると、その PR の要確認をまとめて確定します。空なら誰も承認できません。変更できるのはオーナーだけです。
           </p>
           {approversError && <p className="text-sm text-bad">{approversError}</p>}
         </div>

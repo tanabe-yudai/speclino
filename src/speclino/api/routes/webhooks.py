@@ -19,11 +19,12 @@ from typing import Any
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from speclino.adapters.github.types import IssueCommentRef, WebhookEvent
+from speclino.adapters.github.types import IssueCommentRef, PullRequestReviewRef, WebhookEvent
 from speclino.adapters.github.webhook import (
     extract_comment,
     extract_pr,
     extract_rerun,
+    extract_review_approval,
     parse_event,
     verify_signature,
 )
@@ -41,7 +42,9 @@ from speclino.db.repositories import (
 from speclino.services.approvals import attest_disposition, authorize_command, parse_commands
 from speclino.services.attestations import (
     NOT_IN_PR_REASON,
+    BulkAttest,
     attest,
+    attest_all_in_pr,
     in_pr_findings,
     same_github_user,
 )
@@ -125,6 +128,12 @@ async def _dispatch(
     if event.event == "issue_comment" and (cm := extract_comment(event.payload)) is not None:
         return await _handle_comment(state, session, cm)
 
+    if (
+        event.event == "pull_request_review"
+        and (rv := extract_review_approval(event.payload)) is not None
+    ):
+        return await _handle_review_approval(state, session, rv)
+
     return {"status": "ignored", "event": event.event, "action": event.action}, []
 
 
@@ -170,6 +179,10 @@ async def _handle_comment(
                 approver=cm.author_login,
                 comment_url=cm.comment_url,
             )
+        if cmd.kind == "attest" and not cmd.args:
+            outcome = await _record_bulk_attestation(session, cm, project)
+            results.append({"kind": cmd.kind, **outcome})
+            continue
         if cmd.kind == "attest":
             outcome = await _record_attestation(session, cmd.args, cm, project)
             results.append({"kind": cmd.kind, **outcome})
@@ -193,6 +206,80 @@ async def _handle_comment(
         )
         return {"status": "queued", "run_id": str(run_id), "commands": results}, [run_id]
     return {"status": "handled", "commands": results}, []
+
+
+async def _handle_review_approval(
+    state: AppState, session: AsyncSession, rv: PullRequestReviewRef
+) -> tuple[dict[str, Any], list[uuid.UUID]]:
+    """承認者の PR の Approve を、その PR の要確認の確定として扱う（PR コメントと同じ規則）。
+
+    project は ID で引き、作らない（コメントと同じ）。確定が 1 件以上あれば、その PR の最新の
+    head で再検査し、ゲートのコメントと Check を更新させる。
+    """
+    project = await ProjectRepository(session).get_by_github_id(rv.repo_id)
+    if project is None:
+        return {"status": "ignored", "reason": "登録されていないリポジトリ"}, []
+    outcome = await attest_all_in_pr(
+        session,
+        project=project,
+        req=BulkAttest(
+            source="pr_review",
+            pr_number=rv.pr_number,
+            commit_id=rv.commit_id,
+            actor_login=rv.reviewer_login,
+            actor_id=rv.reviewer_id,
+            url=rv.review_url,
+            pr_author_id=rv.pr_author_id,
+        ),
+    )
+    result: dict[str, Any] = {
+        "accepted": outcome.accepted,
+        "reason": outcome.reason,
+        "attested": [a.fingerprint for a in outcome.attested],
+        "self_attested": [a.self_attested for a in outcome.attested],
+    }
+    if outcome.recheck is None:
+        return {"status": "handled", **result}, []
+    run_id = await state.service.create_run_in(
+        session,
+        project=project,
+        head_sha=outcome.recheck.head_sha,
+        base_sha=outcome.recheck.base_sha,
+        pr_number=rv.pr_number,
+        trigger="pr_review",
+    )
+    return {"status": "queued", "run_id": str(run_id), **result}, [run_id]
+
+
+async def _record_bulk_attestation(
+    session: AsyncSession, cm: IssueCommentRef, project: Project | None
+) -> dict[str, Any]:
+    """引数なしの `/speclino attest`: PR の最新の検査の要確認をすべて確定する（Approve と共通）。
+
+    確定できないとき（検査中・未検査のコミットがある、確定するものが無い）は理由を応答と監査に
+    残す（他のコマンドと同じく、webhook はコメントを書かない）。
+    """
+    if project is None:
+        return {"accepted": False, "reason": "ワークスペースに登録されていないリポジトリ"}
+    outcome = await attest_all_in_pr(
+        session,
+        project=project,
+        req=BulkAttest(
+            source="pr_comment_all",
+            pr_number=cm.issue_number,
+            commit_id=None,
+            actor_login=cm.author_login,
+            actor_id=cm.author_id,
+            url=cm.comment_url,
+            pr_author_id=cm.issue_author_id,
+        ),
+    )
+    return {
+        "accepted": outcome.accepted,
+        "reason": outcome.reason,
+        "attested": [a.fingerprint for a in outcome.attested],
+        "self_attested": [a.self_attested for a in outcome.attested],
+    }
 
 
 async def _record_attestation(

@@ -457,8 +457,11 @@ VERIFIED / VIOLATED を出すのは、モデルの中で正確な経路（`preci
 /speclino attest <指紋> <sha256:内容のハッシュ> ack    # 問題として記録（阻止したまま）
 ```
 
-PR コメントの承認者は GitHub のユーザー ID で照合する（ログイン名の付け替えでは通らない）。
-`KNOWLEDGE-BINDINGS-001` の確定は ID で照合できる PR コメントからだけ受け付ける。PR の作成者自身の確定は
+ふだんは承認者が PR に引数なしの `/speclino attest` とコメントする（または GitHub で PR を **Approve** する）と、
+その PR の最新の検査の要確認をまとめて確定する（ハッシュを打つ必要はない。最新のコミットの検査が完了しているとき
+だけ。設定は `guides/github-app-setup.md`）。
+PR コメント・Approve の承認者は GitHub のユーザー ID で照合する（ログイン名の付け替えでは通らない）。
+`KNOWLEDGE-BINDINGS-001` の確定は ID で照合できる PR コメントか PR の Approve からだけ受け付ける。PR の作成者自身の確定は
 自己確定として gate.json・manifest・画面に残る。
 
 #### LLM に送るもの（データの扱い）

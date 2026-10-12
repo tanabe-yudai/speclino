@@ -66,7 +66,7 @@ def authorize_command(
         return CommandDecision(False, "answer の引数は <質問ID> <選択肢>", cmd)
     if cmd.kind == "attest" and not _attest_args_ok(cmd.args):
         return CommandDecision(
-            False, "attest の引数は <指紋> <sha256:内容の hash> [ack]（S70）", cmd
+            False, "attest の引数は無し、または <指紋> <sha256:内容の hash> [ack]", cmd
         )
     return CommandDecision(True, "承認者のコマンド", cmd)
 
@@ -75,7 +75,10 @@ _CONTENT_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 def _attest_args_ok(args: tuple[str, ...]) -> bool:
-    """`/speclino attest <指紋> <sha256:hash> [ack]`。ack は acknowledged_violation。"""
+    """`/speclino attest <指紋> <sha256:hash> [ack]`（ack は acknowledged_violation）か、引数なしの
+    `/speclino attest`（その PR の最新の検査の要確認をすべて確定する）。"""
+    if not args:
+        return True
     if len(args) not in (2, 3) or not _CONTENT_HASH_RE.match(args[1]):
         return False
     return len(args) == 2 or args[2] == "ack"

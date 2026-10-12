@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from speclino.conformance.gate import GateResult
 from speclino.conformance.reasons import VERDICT_PRIORITY
-from speclino.domain.finding import Finding, Findings, Verdict
+from speclino.domain.finding import CONTENT_HASH_REF, FINGERPRINT_REF, Finding, Findings, Verdict
 from speclino.domain.run import GateStatus
 from speclino.domain.semantic_diff import SemanticDiff
 from speclino.reporter.review_md import (
@@ -215,8 +215,29 @@ def _render_comment_finding(f: Finding) -> str:
         evidence.append(f"- 仮定: {'; '.join(f.assumptions)}")
     if f.test_observation:
         evidence.append(f"- テスト観測: {_TEST_OBSERVATION_LABELS[f.test_observation]}")
+    if (single := _single_attest_command(f)) is not None:
+        evidence.append(f"- この 1 件だけ確定: `{single}`（問題として記録するなら末尾に ` ack`）")
     lines += ["", "<details><summary>根拠</summary>", "", *evidence, "", "</details>"]
     return "\n".join(lines)
+
+
+def _single_attest_command(f: Finding) -> str | None:
+    """指紋と内容の hash を持つ REVIEW を 1 件だけ確定する PR コメント。無ければ None。"""
+    if f.verdict != "REVIEW":
+        return None
+    fp = next(
+        (r.removeprefix(FINGERPRINT_REF) for r in f.evidence_refs if r.startswith(FINGERPRINT_REF)),
+        None,
+    )
+    ch = next(
+        (
+            r.removeprefix(CONTENT_HASH_REF)
+            for r in f.evidence_refs
+            if r.startswith(CONTENT_HASH_REF)
+        ),
+        None,
+    )
+    return f"/speclino attest {fp} {ch}" if fp and ch else None
 
 
 def _render_comment_tally(findings: Findings, semantic_diff: SemanticDiff | None) -> list[str]:

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -18,7 +20,12 @@ from speclino.adapters.queue.inprocess import InProcessQueue
 from speclino.adapters.storage.fs import FileSystemBlobStore
 from speclino.api.app import create_app
 from speclino.api.deps import AppState
-from speclino.services.attestations import attest_as_member, list_attestations
+from speclino.services.attestations import (
+    attest,
+    attest_as_member,
+    attest_if_absent,
+    list_attestations,
+)
 from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
 from speclino.settings import Settings
 from tests.integration.services.conftest import (
@@ -490,3 +497,322 @@ async def test_attestation_does_not_cross_projects(ctx: Ctx, engine: AsyncEngine
     assert (await ctx.c.post(url, json=body, headers=OWNER)).status_code == 200
     assert await _stored(engine, ctx.slug) == [("R:i:x", "attested", "owner1")]
     assert await _stored(engine, ctx.slug, second) == []
+
+
+# ---------------------------------------------------------------- PR の Approve による確定
+
+
+def _review_payload(
+    ctx: Ctx,
+    login: str,
+    *,
+    commit_id: str | None = None,
+    state: str = "approved",
+    number: int = 1,
+    pr_author_id: int | None = 777_777,
+) -> dict[str, Any]:
+    pr_user: dict[str, Any] = {"login": "author"}
+    if pr_author_id is not None:
+        pr_user["id"] = pr_author_id
+    return {
+        "action": "submitted",
+        "installation": {"id": 1},
+        "repository": {"full_name": ctx.repo, "id": repo_id_of(ctx.repo)},
+        "review": {
+            "state": state,
+            "commit_id": commit_id or ctx.head,
+            "html_url": f"https://github.com/{ctx.repo}/pull/{number}#pullrequestreview-1",
+            "user": {"login": login, "id": login_id(login)},
+        },
+        "pull_request": {"number": number, "user": pr_user},
+    }
+
+
+async def _post_review(ctx: Ctx, payload: dict[str, Any], delivery: str | None = None) -> Any:
+    raw, headers = signed(payload, "pull_request_review", delivery)
+    res = await ctx.c.post("/webhooks/github", content=raw, headers=headers)
+    assert res.status_code == 200, res.text
+    return res.json()
+
+
+async def _review_audit(engine: AsyncEngine, repo: str) -> list[tuple[str, str]]:
+    async with engine.connect() as conn:
+        rows = await conn.execute(
+            sql_text(
+                "SELECT decision, detail->>'reason' FROM audit_events "
+                "WHERE action = 'attestation.bulk' AND target LIKE :t ORDER BY ts"
+            ),
+            {"t": f"{repo}#%"},
+        )
+        return [(r[0], r[1]) for r in rows]
+
+
+async def test_pr_review_approval_attests_the_runs_reviews(ctx: Ctx, engine: AsyncEngine) -> None:
+    """承認者の Approve で、最新の run の確定できる要確認をすべて確定し、再検査する。"""
+    bindings = f"KNOWLEDGE-BINDINGS-001:{HASH}"
+    await _seed_targets(engine, await _pr_run(ctx, ctx.repo), "R:i:1", bindings)
+    await set_project_approvers(engine, ctx.repo, ["gh-approver"])
+    res = await _post_review(ctx, _review_payload(ctx, "gh-approver"))
+    assert res["status"] == "queued" and res["accepted"] is True, res
+    assert sorted(res["attested"]) == sorted(["R:i:1", bindings])
+    assert res["self_attested"] == [False, False]
+    assert sorted(await _stored(engine, ctx.slug)) == sorted(
+        [("R:i:1", "attested", GH_APPROVER), (bindings, "attested", GH_APPROVER)]
+    )
+    # 経路は監査の via で区別する（ログイン名も残す）
+    async with engine.connect() as conn:
+        vias = (
+            await conn.execute(
+                sql_text(
+                    "SELECT detail->>'via', detail->>'actor_login' FROM audit_events "
+                    "WHERE action = 'attestation.record' AND target LIKE :t"
+                ),
+                {"t": f"{ctx.slug}:%"},
+            )
+        ).all()
+    assert {(v.split("#")[0], login) for v, login in vias} == {
+        (f"pr_review:https://github.com/{ctx.repo}/pull/1", "gh-approver")
+    }
+    # 再検査の run が作られ、ゲートのコメント・Check の更新（worker）まで進む
+    detail = (await ctx.c.get(f"/api/review-runs/{res['run_id']}", headers=OWNER)).json()
+    assert detail["trigger"] == "pr_review" and detail["head_sha"] == ctx.head
+    assert detail["exec_state"] == "completed"
+    assert await _review_audit(engine, ctx.repo) == [("accepted", "承認者の一括の確定")]
+
+
+async def test_pr_review_on_old_commit_does_nothing(ctx: Ctx, engine: AsyncEngine) -> None:
+    await _seed_targets(engine, await _pr_run(ctx, ctx.repo), "R:i:1")
+    await set_project_approvers(engine, ctx.repo, ["gh-approver"])
+    res = await _post_review(ctx, _review_payload(ctx, "gh-approver", commit_id=ctx.base))
+    assert res["status"] == "handled" and res["accepted"] is False
+    assert res["reason"] == "Approve したコミットが PR の最新の検査の head と違う"
+    assert await _stored(engine, ctx.slug) == []
+    assert await _review_audit(engine, ctx.repo) == [("rejected", res["reason"])]
+
+
+async def test_pr_review_by_non_approver_does_nothing(ctx: Ctx, engine: AsyncEngine) -> None:
+    await _seed_targets(engine, await _pr_run(ctx, ctx.repo), "R:i:1")
+    await set_project_approvers(engine, ctx.repo, ["gh-approver"])
+    res = await _post_review(ctx, _review_payload(ctx, "stranger"))
+    assert res["status"] == "handled" and res["accepted"] is False
+    # 承認者と同じログイン名でも ID が違えば通らない
+    payload = _review_payload(ctx, "gh-approver")
+    payload["review"]["user"]["id"] = 4242
+    res = await _post_review(ctx, payload)
+    assert res["accepted"] is False
+    assert await _stored(engine, ctx.slug) == []
+    assert [d for d, _ in await _review_audit(engine, ctx.repo)] == ["rejected", "rejected"]
+
+
+async def test_pr_review_other_states_are_ignored(ctx: Ctx, engine: AsyncEngine) -> None:
+    await _seed_targets(engine, await _pr_run(ctx, ctx.repo), "R:i:1")
+    await set_project_approvers(engine, ctx.repo, ["gh-approver"])
+    for state in ("commented", "changes_requested"):
+        res = await _post_review(ctx, _review_payload(ctx, "gh-approver", state=state))
+        assert res["status"] == "ignored"
+    dismissed = {**_review_payload(ctx, "gh-approver"), "action": "dismissed"}
+    assert (await _post_review(ctx, dismissed))["status"] == "ignored"
+    assert await _stored(engine, ctx.slug) == []
+
+
+async def test_pr_review_marks_self_attestation(ctx: Ctx, engine: AsyncEngine) -> None:
+    """自己確定の印は PR コメントと同じ規則（GitHub の ID で照合、照合不可は null）。"""
+    await _seed_targets(engine, await _pr_run(ctx, ctx.repo), "R:i:1")
+    await set_project_approvers(engine, ctx.repo, ["dev"])
+    res = await _post_review(ctx, _review_payload(ctx, "dev", pr_author_id=DEV_ID))
+    assert res["self_attested"] == [True]
+    # 作成者の ID が無い（run にも無い）なら照合不可
+    await _seed_targets(engine, res["run_id"], "R:i:2")
+    res = await _post_review(ctx, _review_payload(ctx, "dev", pr_author_id=None))
+    assert res["attested"] == ["R:i:2"] and res["self_attested"] == [None]
+
+
+async def test_pr_review_approval_is_idempotent(ctx: Ctx, engine: AsyncEngine) -> None:
+    run_id = await _pr_run(ctx, ctx.repo)
+    await _seed_targets(engine, run_id, "R:i:1", "R:i:2")
+    await set_project_approvers(engine, ctx.repo, ["gh-approver"])
+    # 問題として記録した（ack）ものは Approve で覆さない
+    ack = comment_payload(ctx.repo, 1, f"/speclino attest R:i:2 {HASH} ack", "gh-approver")
+    raw, headers = signed(ack, "issue_comment")
+    rerun = (await ctx.c.post("/webhooks/github", content=raw, headers=headers)).json()["run_id"]
+    await _seed_targets(engine, rerun, "R:i:1", "R:i:2")
+    payload = _review_payload(ctx, "gh-approver")
+    delivery = uuid.uuid4().hex
+    first = await _post_review(ctx, payload, delivery=delivery)
+    assert first["attested"] == ["R:i:1"]
+    # 同じ配信の再送は重複として捨てる
+    assert (await _post_review(ctx, payload, delivery=delivery))["status"] == "duplicate"
+    # 別の Approve（再検査の run に同じ指摘があり、確定が効いている）でも、確定済みは記録し直さず、
+    # 再検査もしない
+    await _seed_targets(engine, first["run_id"], "R:i:1", "R:i:2")
+    await _mark_applied(engine, first["run_id"], "R:i:1", "R:i:2")
+    again = await _post_review(ctx, payload)
+    assert again["status"] == "handled" and again["attested"] == []
+    assert sorted(await _stored(engine, ctx.slug)) == [
+        ("R:i:1", "attested", GH_APPROVER),
+        ("R:i:2", "acknowledged_violation", GH_APPROVER),
+    ]
+    assert [d for d, _ in await _review_audit(engine, ctx.repo)] == ["accepted", "ignored"]
+
+
+# ---------------------------------------------------------------- 引数なしの `/speclino attest`
+
+
+async def _comment(ctx: Ctx, body: str, login: str, author_id: int | None = None) -> Any:
+    payload = comment_payload(ctx.repo, 1, body, login)
+    if author_id is not None:
+        payload["issue"]["user"] = {"login": "author", "id": author_id}
+    raw, headers = signed(payload, "issue_comment")
+    res = await ctx.c.post("/webhooks/github", content=raw, headers=headers)
+    assert res.status_code == 200, res.text
+    return res.json()
+
+
+async def test_bare_attest_comment_attests_all_reviews(ctx: Ctx, engine: AsyncEngine) -> None:
+    """1 人運用（作成者＝承認者）でも、引数なしのコメントで最新の検査の要確認をまとめて確定する。"""
+    bindings = f"KNOWLEDGE-BINDINGS-001:{HASH}"
+    await _seed_targets(engine, await _pr_run(ctx, ctx.repo), "R:i:1", bindings)
+    await set_project_approvers(engine, ctx.repo, ["dev"])
+    res = await _comment(ctx, "  /speclino attest  ", "dev", author_id=DEV_ID)
+    assert res["status"] == "queued", res  # 確定の後は再検査
+    (cmd,) = res["commands"]
+    assert cmd["accepted"] is True and sorted(cmd["attested"]) == sorted(["R:i:1", bindings])
+    assert cmd["self_attested"] == [True, True]
+    assert sorted(await _stored(engine, ctx.slug)) == sorted(
+        [("R:i:1", "attested", GH_DEV), (bindings, "attested", GH_DEV)]
+    )
+    # 自己確定の対応表の変更には警告が残り、経路は via で区別する
+    async with engine.connect() as conn:
+        rows = (
+            await conn.execute(
+                sql_text(
+                    "SELECT detail->>'via', detail->>'warning' FROM audit_events "
+                    "WHERE action = 'attestation.record' AND target LIKE :t"
+                ),
+                {"t": f"{ctx.slug}:%"},
+            )
+        ).all()
+    assert {v for v, _ in rows} == {"pr_comment_all:https://c/1"}
+    assert sum(1 for _, w in rows if w is not None) == 1
+    detail = (await ctx.c.get(f"/api/review-runs/{res['run_id']}", headers=OWNER)).json()
+    assert detail["trigger"] == "comment" and detail["exec_state"] == "completed"
+
+
+async def test_bare_attest_waits_for_the_latest_head(ctx: Ctx, engine: AsyncEngine) -> None:
+    """最新の run が完了していない（検査中・未検査のコミットがある）なら確定しない。"""
+    await _seed_targets(engine, await _pr_run(ctx, ctx.repo), "R:i:1")
+    await set_project_approvers(engine, ctx.repo, ["dev"])
+    pid = await project_id_of(engine, ctx.repo)
+    from speclino.db.repositories import ReviewRunRepository
+
+    async with async_sessionmaker(engine)() as s, s.begin():
+        await ReviewRunRepository(s).create(
+            project_id=pid,
+            pr_number=1,
+            head_sha="f" * 40,
+            base_sha=ctx.base,
+            trigger="pull_request.synchronize",
+            parent_run_id=None,
+            pr_author_id=None,
+        )
+    res = await _comment(ctx, "/speclino attest", "dev")
+    assert res["status"] == "handled"
+    assert res["commands"][0]["accepted"] is False
+    assert "まだ完了していない" in res["commands"][0]["reason"]
+    assert await _stored(engine, ctx.slug) == []
+
+
+async def test_bare_attest_by_non_approver_does_nothing(ctx: Ctx, engine: AsyncEngine) -> None:
+    await _seed_targets(engine, await _pr_run(ctx, ctx.repo), "R:i:1")
+    await set_project_approvers(engine, ctx.repo, ["dev"])
+    res = await _comment(ctx, "/speclino attest", "stranger")
+    assert res["status"] == "handled" and res["commands"][0]["accepted"] is False
+    assert await _stored(engine, ctx.slug) == []
+
+
+async def test_bare_attest_is_idempotent_and_keeps_ack(ctx: Ctx, engine: AsyncEngine) -> None:
+    await _seed_targets(engine, await _pr_run(ctx, ctx.repo), "R:i:1", "R:i:2")
+    await set_project_approvers(engine, ctx.repo, ["dev"])
+    res = await _comment(ctx, f"/speclino attest R:i:2 {HASH} ack", "dev")
+    await _seed_targets(engine, res["run_id"], "R:i:1", "R:i:2")
+    res = await _comment(ctx, "/speclino attest", "dev")
+    assert res["commands"][0]["attested"] == ["R:i:1"]
+    await _seed_targets(engine, res["run_id"], "R:i:1", "R:i:2")
+    await _mark_applied(engine, res["run_id"], "R:i:1", "R:i:2")
+    again = await _comment(ctx, "/speclino attest", "dev")
+    assert again["status"] == "handled" and again["commands"][0]["attested"] == []
+    assert sorted(await _stored(engine, ctx.slug)) == [
+        ("R:i:1", "attested", GH_DEV),
+        ("R:i:2", "acknowledged_violation", GH_DEV),
+    ]
+
+
+async def _mark_applied(engine: AsyncEngine, run_id: str, *fingerprints: str) -> None:
+    """run の manifest に確定が効いた（検査に反映された）印を付ける。"""
+    applied = [{"fingerprint": fp, "content_hash": HASH} for fp in fingerprints]
+    async with engine.begin() as conn:
+        await conn.execute(
+            sql_text(
+                "UPDATE review_runs SET manifest = jsonb_set(coalesce(manifest, '{}'::jsonb), "
+                "'{attestations}', cast(:a as jsonb)) WHERE id = :id"
+            ),
+            {"a": json.dumps(applied), "id": uuid.UUID(run_id)},
+        )
+
+
+async def test_bulk_attest_rechecks_when_attestation_is_not_applied(
+    ctx: Ctx, engine: AsyncEngine
+) -> None:
+    """確定のあとの再検査の投入に失敗した（確定は残り、検査に反映されていない）とき、再送や
+    2 回目の依頼で新しい確定が 0 件でも再検査を作り直す。"""
+    run_id = await _pr_run(ctx, ctx.repo)
+    await _seed_targets(engine, run_id, "R:i:1")
+    await set_project_approvers(engine, ctx.repo, ["dev"])
+    # 確定だけが保存され、再検査が走らなかった状態
+    async with async_sessionmaker(engine)() as s, s.begin():
+        await attest(
+            s,
+            fingerprint="R:i:1",
+            content_hash=HASH,
+            disposition="attested",
+            actor=GH_DEV,
+            workspace=ctx.slug,
+            project_id=await project_id_of(engine, ctx.repo),
+        )
+    res = await _comment(ctx, "/speclino attest", "dev")
+    assert res["status"] == "queued", res
+    assert res["commands"][0]["attested"] == []
+    # 反映済みなら作らない
+    await _seed_targets(engine, res["run_id"], "R:i:1")
+    await _mark_applied(engine, res["run_id"], "R:i:1")
+    again = await _comment(ctx, "/speclino attest", "dev")
+    assert again["status"] == "handled"
+
+
+async def test_bulk_attest_never_overwrites_a_concurrent_ack(ctx: Ctx, engine: AsyncEngine) -> None:
+    """一括の確定の書込みは「無ければ入れる」だけ。直前に別の経路で保存された ack を覆さない。"""
+    pid = await project_id_of(engine, ctx.repo)
+    async with async_sessionmaker(engine)() as s, s.begin():
+        await attest(
+            s,
+            fingerprint="R:i:1",
+            content_hash=HASH,
+            disposition="acknowledged_violation",
+            actor=GH_DEV,
+            workspace=ctx.slug,
+            project_id=pid,
+        )
+    async with async_sessionmaker(engine)() as s, s.begin():
+        saved = await attest_if_absent(
+            s,
+            fingerprint="R:i:1",
+            content_hash=HASH,
+            actor=GH_APPROVER,
+            workspace=ctx.slug,
+            project_id=pid,
+            via="pr_comment_all:x",
+            self_attested=False,
+            actor_login="gh-approver",
+        )
+    assert saved is None
+    assert await _stored(engine, ctx.slug) == [("R:i:1", "acknowledged_violation", GH_DEV)]

@@ -153,3 +153,15 @@ def test_server_approval_takes_the_head_spec_hash() -> None:
     rule = next(r for r in spec.rules if r.id == "R-CANCEL-04")
     attached = next(a for a in spec.approvals if a.id == rule.approval_ref)
     assert attached.spec_content_hash == "sha256:head-spec"
+
+
+def test_attest_command_accepts_bare_form_and_keeps_hash_form() -> None:
+    settings = {"approvers": ["tanabe-yudai"], "approver_ids": [111]}
+    (bare,) = parse_commands("  /speclino attest  ")
+    assert bare.args == ()
+    assert authorize_command(bare, "tanabe-yudai", author_id=111, settings=settings).accepted
+    assert not authorize_command(bare, "someone", author_id=222, settings=settings).accepted
+    full = parse_commands("/speclino attest R:i:1 sha256:" + "a" * 64 + " ack")[0]
+    assert authorize_command(full, "tanabe-yudai", author_id=111, settings=settings).accepted
+    one = parse_commands("/speclino attest R:i:1")[0]
+    assert not authorize_command(one, "tanabe-yudai", author_id=111, settings=settings).accepted
