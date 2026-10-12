@@ -35,6 +35,10 @@ class InvalidDisplayName(ValueError):
     """表示名が規則（前後の空白を除いて 1〜50 文字、制御文字と `@` なし）に合わない。"""
 
 
+# 表示の添え書き「表示名（メール）」を偽装できる文字（NFKC で全角も畳まれる）
+_RESERVED_CHARS = frozenset("@()[]{}<>\uff08\uff09\u3010\u3011\u300c\u300d\u300e\u300f")
+
+
 def normalize_display_name(raw: str) -> str:
     name = raw.strip()
     if not name:
@@ -43,8 +47,12 @@ def normalize_display_name(raw: str) -> str:
         raise InvalidDisplayName(f"表示名は {DISPLAY_NAME_MAX_LENGTH} 文字まで")
     if any(unicodedata.category(ch) in _REJECTED_CATEGORIES for ch in name):
         raise InvalidDisplayName("表示名に制御文字は使えない")
-    if "@" in name:
-        raise InvalidDisplayName("表示名に @ は使えない（メールアドレスの形を名乗れない）")
+    # 全角・互換文字で検査をすり抜けないよう、正規化した形で見る
+    folded = unicodedata.normalize("NFKC", name)
+    if any(ch in _RESERVED_CHARS for ch in folded):
+        raise InvalidDisplayName(
+            "表示名に @ と括弧は使えない（メールアドレスや表示の添え書きを名乗れない）"
+        )
     return name
 
 

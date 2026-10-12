@@ -53,3 +53,12 @@ def test_two_people_with_the_same_display_name_are_distinguishable() -> None:
     c = profile_label("uid-cccccccccc", "Tanabe", "real@example.com", False)
     assert len({a, b, c}) == 3
     assert short_uid("dev") == "dev"
+
+
+@pytest.mark.parametrize(
+    "raw", ["bob＠example.com", "Alice（alice@example.com）", "Alice (x)", "Alice【admin】"]
+)
+def test_display_name_rejects_email_and_suffix_lookalikes(raw: str) -> None:
+    """全角の ＠ や括弧で、表示の添え書き「表示名（メール）」を偽装できない。"""
+    with pytest.raises(InvalidDisplayName):
+        normalize_display_name(raw)

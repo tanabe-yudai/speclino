@@ -12,7 +12,7 @@ describe('parseDisplayName', () => {
     expect(parseDisplayName('あ'.repeat(51)).ok).toBe(false)
   })
   it('@・改行・制御文字・向きを変える文字は拒否する', () => {
-    for (const bad of ['boss@example.com', 'a@b', 'a\nb', 'a\tb', 'evil\u202etxt', 'a\u2028b']) {
+    for (const bad of ['boss@example.com', 'a@b', 'bob＠example.com', 'Alice（x）', 'Alice (x)', 'a\nb', 'a\tb', 'evil\u202etxt', 'a\u2028b']) {
       expect(parseDisplayName(bad).ok).toBe(false)
     }
   })

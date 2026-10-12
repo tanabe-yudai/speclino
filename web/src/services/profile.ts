@@ -16,6 +16,8 @@ export function parseDisplayName(raw: string): DisplayNameInput {
   }
   if (REJECTED.test(value)) return { ok: false, message: '表示名に改行や制御文字は使えません' }
   // メールアドレスの形を名乗らせない（作者・承認者の表示でなりすませないように）
-  if (value.includes('@')) return { ok: false, message: '表示名に @ は使えません' }
+  if (/[@()[\]{}<>（）【】「」『』]/.test(value.normalize('NFKC'))) {
+    return { ok: false, message: '表示名に @ と括弧は使えません' }
+  }
   return { ok: true, value }
 }
