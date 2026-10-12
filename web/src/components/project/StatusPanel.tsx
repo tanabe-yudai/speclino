@@ -12,7 +12,7 @@ import { HealthRing } from './HealthRing'
 
 
 /** 状態: 状態の見出しと円グラフ（要求と規約を合わせた 5 区分）、件数、最新の検査（design 5.1-1）。 */
-export function StatusPanel({ overview }: { overview: ProjectOverview }) {
+export function StatusPanel({ slug, overview }: { slug: string; overview: ProjectOverview }) {
   const run = overview.run
   const sc = overview.project.status_counts
   const state = overview.project.state
@@ -45,7 +45,7 @@ export function StatusPanel({ overview }: { overview: ProjectOverview }) {
         </div>
       </div>
       <p className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-ink-2">
-        <span>未承認の要求 {overview.unapproved}</span>
+        <span>承認待ちの要求 {overview.unapproved}</span>
         {policies.exempted > 0 && <span>免除の最短の期限 {policies.earliestExpiry ?? '—'}</span>}
       </p>
       <p className="text-xs text-ink-3">
@@ -65,7 +65,7 @@ export function StatusPanel({ overview }: { overview: ProjectOverview }) {
           <span className="text-xs text-ink-3">{formatDateTime(run.created_at)}</span>
           <GateBadge status={run.gate_status} />
           {gateNote && <span className="w-full text-xs text-ink-2 sm:order-last">{gateNote}</span>}
-          <Link className="ml-auto text-primary hover:underline" to={paths.run(run.id)}>
+          <Link className="ml-auto text-primary hover:underline" to={paths.run(slug, run.id)}>
             検査の詳細
           </Link>
         </div>

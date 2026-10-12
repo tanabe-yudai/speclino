@@ -16,14 +16,19 @@ import type { ProjectRun, RequirementView } from '@/types/project'
 /** 開いて根拠を見られる判定（違反・未検証・要確認）。 */
 const OPENABLE = new Set(['VIOLATED', 'UNKNOWN', 'REVIEW'])
 
-/** 要求 1 行。違反・未検証・要確認は開くと、その要求の findings（反例つき）と仕様の該当行へのリンク。 */
+/**
+ * 要求 1 行。違反・未検証・要確認は開くと、その要求の findings（反例つき）と仕様の該当行へのリンク。
+ * 要求を定めた SpecLino の仕様が分かれば（artifact_id）、閉じた行からも仕様のエディタへ移れる。
+ */
 export function RequirementRow({
+  slug,
   req,
   run,
   repo,
   findings,
   onOpen,
 }: {
+  slug: string
   req: RequirementView
   run: ProjectRun
   repo: string
@@ -56,11 +61,18 @@ export function RequirementRow({
   // 題は ID とバッジ（と開閉の矢印）の下の行に、省略せず折り返す（横に並べるとスマホで数文字しか見えない）
   const title = heading === req.id ? null : <code className="w-full font-mono text-xs text-ink-3 break-all">{req.id}</code>
 
+  const specLink = req.artifact_id ? (
+    <Link className="text-xs text-primary hover:underline" to={paths.knowledgeItem(slug, 'spec', req.artifact_id, { from: repo })}>
+      SpecLino の仕様を開く
+    </Link>
+  ) : null
+
   if (!openable) {
     return (
       <li className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5">
         {summary}
         {title}
+        {specLink}
       </li>
     )
   }
@@ -97,7 +109,8 @@ export function RequirementRow({
                 仕様の該当行
               </a>
             )}
-            <Link className="text-primary hover:underline" to={paths.run(run.id)}>
+            {specLink}
+            <Link className="text-primary hover:underline" to={paths.run(slug, run.id)}>
               検査の詳細
             </Link>
           </p>

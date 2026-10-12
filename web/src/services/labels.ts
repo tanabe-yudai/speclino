@@ -13,6 +13,8 @@ import type { ApprovalState, NextActionKind, PolicyLevel, RequirementFilter } fr
 import type { ExecState, GateStatus } from '../types/run'
 import type { VerdictTone } from '../types/components'
 import type { WorkspaceRole } from '../types/me'
+import type { SettingsTab } from '../types/command'
+import type { KnowledgeKind, KnowledgeState, ProjectTab, RunGateFilter, SectionId } from '../types/navigation'
 
 export const VERDICT_LABELS: Record<Verdict, string> = {
   VERIFIED_IN_SCOPE: '適合',
@@ -126,9 +128,10 @@ export function gateTone(status: GateStatus): VerdictTone {
   return status === 'pass' ? 'ok' : status === 'pass_with_exceptions' ? 'exempt' : 'bad'
 }
 
+/** 要求の承認（仕様の要求ごと）。知識の「未承認」（有効な改訂が無い）と混ぜないよう「承認待ち」と呼ぶ。 */
 export const APPROVAL_LABELS: Record<ApprovalState, string> = {
   approved: '承認済み',
-  unapproved: '未承認',
+  unapproved: '承認待ち',
   stale: '承認切れ',
 }
 
@@ -139,7 +142,7 @@ export const REQUIREMENT_FILTER_LABELS: Record<RequirementFilter, string> = {
   violated: '違反',
   unknown: '未検証',
   review: '要確認',
-  unapproved: '未承認',
+  unapproved: '承認待ち',
 }
 
 /** 「次にやること」の種類の名前と色（プロジェクト画面とランディングページの見本で共通）。 */
@@ -149,7 +152,7 @@ export const NEXT_ACTION_KIND: Record<NextActionKind, { label: string; tone: Ver
   review: { label: '要確認', tone: 'rev' },
   exempted: { label: '免除中', tone: 'rev' },
   unknown: { label: '未検証', tone: 'unk' },
-  unapproved: { label: '未承認', tone: 'rev' },
+  unapproved: { label: '承認待ちの要求', tone: 'rev' },
 }
 
 export const ON_MISSING_INPUT_LABELS: Record<OnMissingInput, string> = {
@@ -251,4 +254,57 @@ export const CHAT_SOURCE_LABELS: Record<'knowledge' | 'repo' | 'web', string> = 
   knowledge: '承認済みの知識',
   repo: 'リポジトリ',
   web: 'Web',
+}
+
+// ---------------------------------------------------------------- 画面の行き来（用語はここにそろえる）
+
+/** 第 1 階層の名前。「検査」は run（ゲートは検査の判定の言葉）、「観測」は可観測性の画面。 */
+export const SECTION_LABELS: Record<SectionId, string> = {
+  home: 'ホーム',
+  knowledge: '知識',
+  runs: '検査',
+  observability: '観測',
+  settings: '設定',
+}
+
+/** スマホの画面下のタブの 5 つ目（設定・規約・ワークスペースの切り替え）。 */
+export const MORE_LABEL = 'その他'
+
+export const PROJECT_TAB_LABELS: Record<ProjectTab, string> = {
+  overview: '概要',
+  knowledge: '知識',
+  runs: '検査',
+}
+
+export const AGENT_CONNECTION_LABEL = 'エージェント接続（MCP / A2A）'
+export const REPO_SYNC_LABEL = 'リポジトリ同期（speclino sync）'
+
+export const SETTINGS_TAB_LABELS: Record<SettingsTab, string> = {
+  members: 'メンバー',
+  repositories: 'リポジトリ',
+  agents: 'エージェント接続',
+  projects: 'プロジェクト',
+}
+
+/** 知識の種類（規約はチーム規約）。 */
+export const KNOWLEDGE_KIND_LABELS: Record<KnowledgeKind, string> = {
+  spec: '仕様',
+  skill: 'スキル',
+  instructions: '指示書',
+  policy: '規約',
+}
+
+/** 知識の状態。未承認=有効な改訂がまだ無い、承認待ち=承認を待つ下書きがある。 */
+export const KNOWLEDGE_STATE_LABELS: Record<KnowledgeState, string> = {
+  active: '有効',
+  pending: '承認待ち',
+  unapproved: '未承認',
+  retired: '取り下げ済み',
+}
+
+export const RUN_GATE_FILTER_LABELS: Record<RunGateFilter, string> = {
+  fail: '失敗',
+  pass_with_exceptions: '通過（免除中あり）',
+  pass: '通過',
+  running: '実行中・未判定',
 }

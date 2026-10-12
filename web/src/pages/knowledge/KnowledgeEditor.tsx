@@ -26,6 +26,7 @@ import { useWorkspaceProjects } from '@/hooks/useWorkspaceProjects'
 import {
   KIND_LABELS,
   activeRevision,
+  chatOpenAtStart,
   contentAfterSave,
   describeKnowledgeError,
   editBase,
@@ -37,7 +38,9 @@ import {
   toEditable,
   type EditBase,
 } from '@/services/knowledge'
-import { backLink, findFromProject, scopeForProject } from '@/services/knowledgeNav'
+import { findFromProject, scopeForProject } from '@/services/knowledgeNav'
+import { knowledgeCrumbs } from '@/services/breadcrumbs'
+import { Breadcrumbs } from '@/components/shell/Breadcrumbs'
 import { bodyText, canUndo, decideAutoApply, restoreApplied, touchesFiles } from '@/services/chatDraft'
 import { applyProposal, canSummarize, currentFieldText, editorText, proposalText, proposedName, textHash } from '@/services/knowledgeChat'
 import { paths } from '@/services/paths'
@@ -114,7 +117,8 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
   const [resetKey, setResetKey] = useState(0)
   // 改訂の説明（S73）。下書きを直すときは今の下書きの説明から始める
   const [note, setNote] = useState<NoteState>(() => ({ text: initial.draft?.note ?? '', source: initial.draft?.note_source ?? 'manual' }))
-  const [chatOpen, setChatOpen] = useState(true)
+  const role = useCurrentWorkspace()?.role ?? null
+  const [chatOpen, setChatOpen] = useState(() => chatOpenAtStart(initial.draft, role))
   // AI が本文に反映した記録（元に戻す・差分の表示）と、提案ごとの扱い（S76）
   const [applied, setApplied] = useState<AppliedEdit | null>(null)
   const [outcomes, setOutcomes] = useState<Record<string, ProposalOutcome>>({})
@@ -252,13 +256,10 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
   }
 
   const label = KIND_LABELS[kind]
-  const back = backLink(slug, kind, fromProject)
   return (
     <div className="space-y-6">
       <header className="min-w-0 space-y-3">
-        <Link to={back.to} className="inline-block text-sm text-primary underline-offset-4 hover:underline">
-          {back.label}
-        </Link>
+        <Breadcrumbs items={knowledgeCrumbs({ slug, kind, name: artifactName, fromProject })} />
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <h1 className="min-w-0 truncate text-2xl font-bold tracking-tight">
             {artifactName ? (
@@ -354,7 +355,8 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
           <NoteField id="revision-note" note={note} onChange={setNote} summarize={canSummarize(chat.current) ? chat.summarize : undefined} />
         </div>
 
-        <div className="sticky bottom-0 z-10 -mx-4 flex flex-wrap items-center gap-3 border-t bg-background/80 px-4 py-3 backdrop-blur-md sm:-mx-6 sm:px-6">
+        {/* スマホ幅は画面下のタブ（h-14 ＋安全領域）の上に置く */}
+        <div className="sticky bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-10 -mx-4 sm:bottom-0 flex flex-wrap items-center gap-3 border-t bg-background/80 px-4 py-3 backdrop-blur-md sm:-mx-6 sm:px-6">
           <Button type="submit" disabled={!!saveBlock || saving} aria-describedby="save-status">
             {saving ? '保存しています…' : id ? '下書きを保存' : '下書きを作る'}
           </Button>

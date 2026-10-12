@@ -9,6 +9,7 @@ import { RequirementRow } from './RequirementRow'
 
 /** 要求: 仕様ファイルごとにまとめ、判定と承認の状態で絞り込む（design 5.1-2）。 */
 export function RequirementsPanel({
+  slug,
   requirements,
   unextracted,
   run,
@@ -16,6 +17,7 @@ export function RequirementsPanel({
   findings,
   onOpen,
 }: {
+  slug: string
   requirements: RequirementView[]
   unextracted: string[]
   run: ProjectRun
@@ -54,7 +56,7 @@ export function RequirementsPanel({
             <h3 className="truncate font-mono text-xs text-ink-3">{g.specPath ?? g.behaviorId}</h3>
             <ul className="mt-2 divide-y overflow-hidden rounded-lg border">
               {g.items.map((r) => (
-                <RequirementRow key={r.id} req={r} run={run} repo={repo} findings={findings} onOpen={onOpen} />
+                <RequirementRow key={r.id} slug={slug} req={r} run={run} repo={repo} findings={findings} onOpen={onOpen} />
               ))}
             </ul>
           </section>

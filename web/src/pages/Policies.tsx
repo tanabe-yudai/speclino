@@ -18,6 +18,8 @@ import { useCurrentWorkspace } from '@/hooks/useCurrentWorkspace'
 import { useKnowledgeChat } from '@/hooks/useKnowledgeChat'
 import { applyRuleProposal, canSummarize, currentRuleText, proposalText, ruleEditorText } from '@/services/knowledgeChat'
 import { paths } from '@/services/paths'
+import { policiesCrumbs } from '@/services/breadcrumbs'
+import { Breadcrumbs } from '@/components/shell/Breadcrumbs'
 import { baseForDraft, newRule, removeRule, upsertRule } from '@/services/policyDraft'
 import type { NoteState, RawProposal } from '@/types/knowledgeChat'
 import type { AuditEntry, PoliciesView, PolicyRule, RevisionSummary } from '@/types/policy'
@@ -29,10 +31,10 @@ interface Loaded {
   audit: AuditEntry[]
 }
 
-/** チーム規約（S43、design 6 章）。左に下書きの帯とルール、右に改訂の履歴と監査ログ。 */
+/** 規約（チーム規約、S43、design 6 章。`/w/:slug/knowledge/policies`）。左に下書きの帯とルール、右に改訂の履歴と監査ログ。 */
 export function Policies() {
   const workspace = useCurrentWorkspace()
-  useDocumentTitle('チーム規約')
+  useDocumentTitle('規約')
   if (!workspace) {
     return (
       <Panel className="mx-auto max-w-xl text-center">
@@ -43,11 +45,10 @@ export function Policies() {
       </Panel>
     )
   }
-  return <PoliciesBody key={workspace.slug} slug={workspace.slug} name={workspace.name ?? workspace.slug} />
+  return <PoliciesBody key={workspace.slug} slug={workspace.slug} />
 }
 
-/** embedded: ワークスペースのタブの中に置くとき（見出しはタブ側にあるので出さない）。 */
-export function PoliciesBody({ slug, name, embedded = false }: { slug: string; name: string; embedded?: boolean }) {
+function PoliciesBody({ slug }: { slug: string }) {
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
@@ -66,7 +67,7 @@ export function PoliciesBody({ slug, name, embedded = false }: { slug: string; n
     Promise.all([getPolicies(slug), listRevisions(slug), listPolicyAudit(slug)])
       .then(([view, revisions, audit]) => alive && setLoaded({ view, revisions, audit }))
       .catch((err: unknown) => {
-        if (alive) setError(err instanceof ApiError ? err.message : 'チーム規約を取得できませんでした')
+        if (alive) setError(err instanceof ApiError ? err.message : '規約を取得できませんでした')
       })
     return () => {
       alive = false
@@ -79,7 +80,7 @@ export function PoliciesBody({ slug, name, embedded = false }: { slug: string; n
   }, [])
 
   if (error) return <ErrorState message={error} onRetry={reload} />
-  if (!loaded) return <LoadingState message="チーム規約を取得しています…" />
+  if (!loaded) return <LoadingState message="規約を取得しています…" />
 
   const { view } = loaded
   const pkg = baseForDraft(view)
@@ -140,13 +141,10 @@ export function PoliciesBody({ slug, name, embedded = false }: { slug: string; n
   return (
     <div className="space-y-6">
       <header className="min-w-0">
-        {!embedded && (
-          <>
-            <p className="text-xs font-semibold tracking-widest text-primary uppercase">Policies</p>
-            <h1 className="mt-1 truncate text-2xl font-bold tracking-tight">{name} のチーム規約</h1>
-          </>
-        )}
-        <p className={embedded ? 'text-sm text-ink-2' : 'mt-1 text-sm text-ink-2'}>
+        <Breadcrumbs items={policiesCrumbs(slug)} />
+        <h1 className="mt-2 truncate text-2xl font-bold tracking-tight">規約</h1>
+        <p className="mt-1 text-sm text-ink-2">
+          チームのすべてのプロジェクトに効く規約です。
           {view.active ? `有効な改訂 ${view.active.revision}` : '有効な改訂はまだありません'}
           。ルールの変更は下書きに入り、オーナーか承認者が承認すると、以後の検査に使われます。
         </p>

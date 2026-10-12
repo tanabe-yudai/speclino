@@ -1,6 +1,6 @@
 import { plainTerms } from '../services/displayText'
 import { useCallback, useEffect, useState } from 'react'
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { getReviewMarkdown, getRun, getRunEvents, getSupplements } from '../api/reviewRuns'
@@ -51,6 +51,8 @@ import type { Verdict } from '../types/finding'
 import type { AgentSupplement } from '../types/supplement'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { runPageTitle } from '@/services/documentTitle'
+import { runCrumbs } from '@/services/breadcrumbs'
+import { Breadcrumbs } from '@/components/shell/Breadcrumbs'
 
 type Tab = 'timeline' | 'markdown'
 
@@ -59,17 +61,22 @@ const POLL_INTERVAL_MS = 2000
 
 const DETAIL_VERDICTS = ['VIOLATED', 'REVIEW', 'UNKNOWN'] as const
 
+/**
+ * 検査の詳細（`/w/:slug/runs/:id`）。旧い `/runs/:id` と、URL のワークスペースが run のものと違うときは、
+ * run のワークスペースのパスへ転送する（上部バーのワークスペースは run の値で決まる）。
+ */
 export function RunDetail() {
-  const { id } = useParams<{ id: string }>()
+  const { id, slug } = useParams<{ id: string; slug?: string }>()
   if (!id) {
     return <ErrorState message="検査が指定されていません" />
   }
   // id ごとに key で強制的に再マウントする。前の run の状態を引きずらず、
   // effect 内での明示的なリセット（setState）も不要になる。
-  return <RunDetailView key={id} id={id} />
+  return <RunDetailView key={id} id={id} slug={slug ?? null} />
 }
 
-function RunDetailView({ id }: { id: string }) {
+function RunDetailView({ id, slug }: { id: string; slug: string | null }) {
+  const location = useLocation()
   const [run, setRun] = useState<ReviewRunDetail | null>(null)
   useDocumentTitle(run ? runPageTitle(run.repo_full_name, run.pr_number) : undefined)
   const [events, setEvents] = useState<RunEvent[] | null>(null)
@@ -140,11 +147,13 @@ function RunDetailView({ id }: { id: string }) {
     fetchMarkdown()
   }
 
+  if (run?.workspace && run.workspace !== slug) {
+    return <Navigate to={paths.run(run.workspace, run.id)} replace state={location.state} />
+  }
+
   return (
     <div className="space-y-8">
-      <Link to={paths.home()} className="text-sm text-ink-3 hover:text-foreground">
-        ← ホームへ
-      </Link>
+      <Breadcrumbs items={runCrumbs(slug, run ? runPageTitle(run.repo_full_name, run.pr_number) : '検査の詳細')} />
 
       {run === null && loadError === null && <LoadingState message="検査を取得しています…" />}
       {loadError && <ErrorState message={loadError} onRetry={retryRun} />}
@@ -253,7 +262,7 @@ function RunSummary({ run }: { run: ReviewRunDetail }) {
             <span className="text-ink-3">GitHub へのリンクなし（PR 情報が未設定）</span>
           )}
           <div className="ml-auto">
-            <RerunButton runId={run.id} onStarted={(res) => navigate(paths.run(res.run_id), { state: { rerun: res } })} />
+            <RerunButton runId={run.id} onStarted={(res) => navigate(paths.run(run.workspace, res.run_id), { state: { rerun: res } })} />
           </div>
         </div>
 
@@ -322,7 +331,7 @@ function FindingAttest({ slug, run, finding, mayAttest }: FindingAttestProps) {
             runId={run.id}
             target={target}
             onDone={(recheck) => {
-              if (recheck) navigate(paths.run(recheck))
+              if (recheck) navigate(paths.run(slug, recheck))
             }}
           />
         )

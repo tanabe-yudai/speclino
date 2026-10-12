@@ -29,16 +29,15 @@ import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 const th = 'py-1.5 pr-3 font-medium whitespace-nowrap'
 const td = 'py-2 pr-3 align-top'
 
-/** 利用状況。仕様・スキル・指示書が使われ、守られているか。表示はサーバの集計 1 つだけから作る。 */
+/** 観測（`/w/:slug/observability`）。仕様・スキル・指示書が使われ、守られているか。表示はサーバの集計 1 つだけから作る。 */
 export function Observability() {
   const workspace = useCurrentWorkspace()
-  useDocumentTitle('利用状況')
+  useDocumentTitle('観測')
   if (!workspace) return <NotFoundPanel title="このワークスペースは見つかりません" />
-  return <ObservabilityBody key={workspace.slug} slug={workspace.slug} name={workspace.name ?? workspace.slug} />
+  return <ObservabilityBody key={workspace.slug} slug={workspace.slug} />
 }
 
-/** embedded: ワークスペースのタブの中に置くとき（見出しはタブ側にあるので出さない）。 */
-export function ObservabilityBody({ slug, name, embedded = false }: { slug: string; name: string; embedded?: boolean }) {
+function ObservabilityBody({ slug }: { slug: string }) {
   const [health, setHealth] = useState<WorkspaceHealth | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
@@ -47,7 +46,7 @@ export function ObservabilityBody({ slug, name, embedded = false }: { slug: stri
     let alive = true
     getObservability(slug)
       .then((h) => alive && setHealth(h))
-      .catch((err: unknown) => alive && setError(err instanceof ApiError ? err.message : '利用状況を取得できませんでした'))
+      .catch((err: unknown) => alive && setError(err instanceof ApiError ? err.message : '観測の集計を取得できませんでした'))
     return () => {
       alive = false
     }
@@ -62,18 +61,14 @@ export function ObservabilityBody({ slug, name, embedded = false }: { slug: stri
   return (
     <div className="space-y-6">
       <header className="min-w-0">
-        {!embedded && (
-          <>
-            <p className="text-xs font-semibold tracking-widest text-primary uppercase">Observability</p>
-            <h1 className="mt-1 truncate text-2xl font-bold tracking-tight">{name} の利用状況</h1>
-          </>
-        )}
-        <p className={embedded ? 'text-sm text-ink-2' : 'mt-1 text-sm text-ink-2'}>
+        <p className="text-xs font-semibold tracking-widest text-primary uppercase">Observability</p>
+        <h1 className="mt-1 truncate text-2xl font-bold tracking-tight">観測</h1>
+        <p className="mt-1 text-sm text-ink-2">
           仕様・スキル・指示書が使われ、守られているか。測っていないものは「{UNMEASURED}」と表示し、0% や 100% にはしません。
         </p>
       </header>
       {error && <ErrorState message={error} onRetry={retry} />}
-      {!error && !health && <LoadingState message="利用状況を取得しています…" />}
+      {!error && !health && <LoadingState message="観測の集計を取得しています…" />}
       {health && (
         <>
           <p className="text-xs text-ink-3">集計 {formatDateTime(health.generated_at)}</p>
@@ -126,7 +121,7 @@ function ProjectsPanel({ slug, projects }: { slug: string; projects: ProjectHeal
                   </td>
                   <td className={`${td} whitespace-nowrap`}>
                     {p.latest_run ? (
-                      <Link to={paths.run(p.latest_run.run_id)} className="text-primary underline-offset-4 hover:underline">
+                      <Link to={paths.run(slug, p.latest_run.run_id)} className="text-primary underline-offset-4 hover:underline">
                         {p.latest_run.gate_status ? GATE_STATUS_LABELS[p.latest_run.gate_status] : '判定なし'}・
                         {shortSha(p.latest_run.head_sha)}
                       </Link>

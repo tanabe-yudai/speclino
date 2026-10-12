@@ -525,6 +525,18 @@ async def test_resolve_for_project(ws: Ws) -> None:
             await kr.resolve_for_project(s, tampered, ws.p1)
 
 
+async def test_requirement_artifacts_maps_ids_of_the_project(ws: Ws) -> None:
+    a = await _create(ws, "spec", "orders", _spec(_projects(ws.p1), "REQ-A"))
+    b = await _create(ws, "spec", "billing", _spec(_projects(ws.p2), "REQ-B"))
+    await _approve(ws, a)
+    bundle = await _approve(ws, b)
+    async with ws.f() as s:
+        mine = await kr.requirement_artifacts(s, ws.slug, bundle.generation, ws.p1)
+        missing = await kr.requirement_artifacts(s, ws.slug, bundle.generation + 99, ws.p1)
+    assert mine == {"REQ-A": a}
+    assert missing == {}
+
+
 async def test_sync_token_and_fetch_tables(ws: Ws) -> None:
     """S68 が使う表の最小限の往復（発行・検索・失効・取得の記録）。"""
     from speclino.db.repositories.sync_tokens import KnowledgeFetchRepository, SyncTokenRepository

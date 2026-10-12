@@ -18,11 +18,9 @@ test('チャットで指示書を作り、要約を説明にして保存する',
   await login(page)
   const name = `dev-rules-${Date.now()}`
 
-  // 1. チーム共通の指示書の「作る」→ エディタで AI と作るパネルが最初から開き、告知が出る（一覧に「AI と作る」は無い）
-  await page.goto(`/w/${SLUG}?tab=shared`)
-  const section = page.getByRole('region', { name: '指示書' })
-  await expect(section.getByRole('link', { name: 'AI と作る' })).toHaveCount(0)
-  await section.getByRole('link', { name: /を作る$/ }).click()
+  // 1. 知識の一覧を指示書に絞り「AI と指示書を作る」→ エディタで AI と作るパネルが最初から開き、告知が出る
+  await page.goto(`/w/${SLUG}/knowledge?kind=instructions`)
+  await page.getByRole('link', { name: 'AI と指示書を作る' }).click()
   await expect(page.getByText(NOTICE)).toBeVisible()
 
   // 2. 話しかける → 「本文を編集中…」が会話の返答の下に出て（差分の表は出さない）、編集欄は出たまま（S79）
@@ -89,7 +87,7 @@ test('チャットで指示書を作り、要約を説明にして保存する',
 
 test('チーム規約の画面で、提案をルールの編集欄に入れる', async ({ page }) => {
   await login(page)
-  await page.goto(`/w/${SLUG}/policies`)
+  await page.goto(`/w/${SLUG}/knowledge/policies`)
   await page.getByRole('button', { name: 'AI と作る' }).click()
   await expect(page.getByText(NOTICE)).toBeVisible()
   await page.getByLabel('AI への発言').fill('README を置く規約を足したい')

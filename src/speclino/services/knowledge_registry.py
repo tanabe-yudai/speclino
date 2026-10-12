@@ -26,6 +26,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from speclino.conformance.expected import obligation_levels
 from speclino.db.models import Project
 from speclino.db.repositories.artifacts import ArtifactRepository
 from speclino.db.repositories.audit import AuditRepository
@@ -585,6 +586,35 @@ async def resolve_for_project(
         specs=by_kind["spec"],
         policy=policy,
     )
+
+
+async def requirement_artifacts(
+    session: AsyncSession, workspace: str, generation: int, project_id: str
+) -> dict[str, str]:
+    """bundle の仕様のうち project に当たる改訂の、要求 ID → artifact ID。
+
+    プロジェクト画面の要求の行から仕様のエディタへ移るためだけに使う（判定には使わない）。
+    bundle や改訂が引けなければ、その分は対応なし（空）にする。
+    """
+    bundle = await BundleRepository(session).at(workspace, generation)
+    if bundle is None:
+        return {}
+    repo = ArtifactRepository(session)
+    found: dict[str, str] = {}
+    for m in bundle.members:
+        if m.kind != "spec":
+            continue
+        rev = await repo.revision_at(uuid.UUID(m.artifact_id), m.revision)
+        if rev is None or rev.workspace != workspace or not isinstance(rev.content, SpecContent):
+            continue
+        scope = rev.content.scope
+        if not (scope.workspace or project_id in _normalized_projects(scope)):
+            continue
+        compiled = rev.content.compiled
+        ids = _requirement_ids(rev) | (set(obligation_levels(compiled)) if compiled else set())
+        for rid in sorted(ids):
+            found.setdefault(rid, rev.artifact_id)
+    return found
 
 
 async def list_artifacts(session: AsyncSession, workspace: str) -> list[ArtifactSummary]:

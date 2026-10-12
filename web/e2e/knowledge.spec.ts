@@ -27,10 +27,13 @@ async function login(page: Page) {
 test('仕様の編集・診断・承認、skill、可観測性、検査結果の確定', async ({ page, request }) => {
   await login(page)
 
-  // 1. プロジェクトの仕様タブ → 仕様のエディタ
-  await page.goto(`/w/${SLUG}${PROJECT}/specs`)
+  // 1. 上部バーの「知識」→ 種類を仕様に絞る → 仕様のエディタ
+  await page.getByRole('navigation', { name: '主な画面' }).getByRole('link', { name: '知識', exact: true }).click()
+  await page.getByRole('navigation', { name: '種類で絞る' }).getByRole('link', { name: '仕様', exact: true }).click()
+  await page.waitForURL(/\/knowledge\?kind=spec/)
   await shot(page, 'list')
   await page.getByRole('link', { name: 'shop', exact: true }).click()
+  await expect(page.getByRole('navigation', { name: 'パンくずリスト' }).getByRole('link', { name: '仕様' })).toBeVisible()
   const body = page.getByLabel('仕様の本文（Markdown と ```mermaid の図）')
   await expect(body).toBeVisible()
   const original = await body.inputValue()
@@ -39,6 +42,7 @@ test('仕様の編集・診断・承認、skill、可観測性、検査結果の
   const broken = original.replace('before.inventory.available >= before.order.quantity', 'before.inventory.available >= before.order.qty')
   expect(broken).not.toBe(original)
   await body.fill(broken)
+  await page.getByRole('tab', { name: /診断/ }).click() // 既定の表示はプレビュー
   const diagnostic = page.getByRole('button', { name: /行 \d+ 列へ移る: .*before\.order\.qty/ })
   await expect(diagnostic).toBeVisible()
   await expect(page.getByRole('tab', { name: /診断（[1-9]/ })).toBeVisible()
@@ -82,13 +86,14 @@ test('仕様の編集・診断・承認、skill、可観測性、検査結果の
   await expect(page.getByText(/改訂 \d+ を承認しました/)).toBeVisible()
 
   // 5. skill のエディタ
-  await page.goto(`/w/${SLUG}${PROJECT}/skills`)
+  await page.goto(`/w/${SLUG}${PROJECT}/knowledge?kind=skill`)
   await page.getByRole('link', { name: 'shop-error-format', exact: true }).click()
   await expect(page.getByLabel('SKILL.md')).toHaveValue(/name: shop-error-format/)
   await shot(page, 'skill')
 
-  // 6. 利用状況（ワークスペースのタブ）
+  // 6. 観測（旧いホームのタブ ?tab=usage は観測の画面へ転送される）
   await page.goto(`/w/${SLUG}?tab=usage`)
+  await page.waitForURL(/\/observability$/)
   await expect(page.getByText(/集計 /)).toBeVisible()
   await shot(page, 'observability')
   await page.getByText('AI 判定の状況').evaluate((el) => el.scrollIntoView({ block: 'start' }))

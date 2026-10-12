@@ -40,6 +40,7 @@ from speclino.domain.project_overview import (
 from speclino.domain.semantic_diff import SemanticDiff
 from speclino.domain.spec_ir import Rule, SpecIR
 from speclino.ports.blob_store import BlobStore
+from speclino.services.knowledge_registry import requirement_artifacts
 from speclino.services.workspaces import WorkspaceNotFound, require_member
 
 logger = logging.getLogger(__name__)
@@ -226,6 +227,16 @@ def build_requirements(
     return rows
 
 
+def link_artifacts(
+    requirements: list[RequirementView], artifacts: dict[str, str]
+) -> list[RequirementView]:
+    """要求の行に、それを定めた SpecLino の仕様（artifact ID）を付ける。対応が無ければそのまま。"""
+    return [
+        r.model_copy(update={"artifact_id": artifacts[r.id]}) if r.id in artifacts else r
+        for r in requirements
+    ]
+
+
 def build_policies(
     findings: list[Finding], gate: dict[str, Any] | None, team: PolicyPackage | None
 ) -> list[PolicyView]:
@@ -384,20 +395,24 @@ _ASSEMBLED_CACHE_SIZE = 32
 _assembled_cache: OrderedDict[tuple[uuid.UUID, str, object], _Assembled] = OrderedDict()
 
 
-async def _assemble_cached(session: AsyncSession, blobs: BlobStore, run: ReviewRun) -> _Assembled:
+async def _assemble_cached(
+    session: AsyncSession, blobs: BlobStore, run: ReviewRun, project: Project
+) -> _Assembled:
     key = (run.id, str(run.exec_state), run.updated_at)
     hit = _assembled_cache.get(key)
     if hit is not None:
         _assembled_cache.move_to_end(key)
         return hit
-    assembled = await _assemble(session, blobs, run)
+    assembled = await _assemble(session, blobs, run, project)
     _assembled_cache[key] = assembled
     if len(_assembled_cache) > _ASSEMBLED_CACHE_SIZE:
         _assembled_cache.popitem(last=False)
     return assembled
 
 
-async def _assemble(session: AsyncSession, blobs: BlobStore, run: ReviewRun) -> _Assembled:
+async def _assemble(
+    session: AsyncSession, blobs: BlobStore, run: ReviewRun, project: Project
+) -> _Assembled:
     """最新の完了した run の要求と規約を組み立てる。
 
     成果物が欠けている・壊れている・チーム規約の改訂が引けないときは例外
@@ -430,6 +445,12 @@ async def _assemble(session: AsyncSession, blobs: BlobStore, run: ReviewRun) -> 
 
     findings = await _findings(session, run.id)
     requirements = build_requirements(spec_irs, findings, diff, expected_ids)
+    generation = manifest.get("bundle_generation")
+    if isinstance(generation, int) and project.team is not None:
+        requirements = link_artifacts(
+            requirements,
+            await requirement_artifacts(session, project.team, generation, str(project.id)),
+        )
     present = [r for r in requirements if not r.removed]
     policies = build_policies(findings, gate, team)
     return _Assembled(
@@ -455,7 +476,7 @@ async def latest_assembled(
     status: OverviewStatus = "not_checked"
     if latest is not None:
         try:
-            assembled = await _assemble_cached(session, blobs, latest)
+            assembled = await _assemble_cached(session, blobs, latest, project)
             status = "ok"
         except Exception:  # noqa: BLE001 - 読めない成果物は判定を出さず unavailable として見せる
             logger.warning("run %s の成果物を読めない", latest.id, exc_info=True)

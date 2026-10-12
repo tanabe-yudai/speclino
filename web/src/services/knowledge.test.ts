@@ -3,6 +3,7 @@ import { ApiError } from '@/api/errors'
 import {
   activeRevision,
   approvalState,
+  chatOpenAtStart,
   contentAfterSave,
   describeKnowledgeError,
   editBase,
@@ -154,5 +155,16 @@ describe('contentAfterSave', () => {
     const r = contentAfterSave(sent, typed, saved)
     expect(r).toEqual({ content: typed, replaced: false })
     expect(isSameContent(r.content, toEditable(saved.content))).toBe(false)
+  })
+})
+
+describe('chatOpenAtStart', () => {
+  it('下書きがあり承認できる人なら閉じて始め、それ以外は開いて始める', () => {
+    const draft = rev({ status: 'draft' })
+    expect(chatOpenAtStart(draft, 'owner')).toBe(false)
+    expect(chatOpenAtStart(draft, 'approver')).toBe(false)
+    expect(chatOpenAtStart(draft, 'member')).toBe(true)
+    expect(chatOpenAtStart(null, 'owner')).toBe(true)
+    expect(chatOpenAtStart(draft, null)).toBe(true)
   })
 })

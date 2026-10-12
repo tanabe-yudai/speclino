@@ -1,4 +1,4 @@
-/** 利用状況の画面の表示用の整形（数え直さない。集計はサーバの WorkspaceHealth だけ）。 */
+/** 観測の画面の表示用の整形（数え直さない。集計はサーバの WorkspaceHealth だけ）。 */
 
 import type { VerdictTone } from '@/types/components'
 import type { FetchHealth, Ratio, RuleTier, UnknownBreakdown, UnknownReason } from '@/types/observability'
