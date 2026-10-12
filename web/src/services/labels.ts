@@ -223,6 +223,7 @@ export const TRIGGER_LABELS: Record<string, string> = {
   comment: 'PR のコメント',
   rerun: '画面からの再実行',
   attestation: '人の確定の反映',
+  pr_review: 'PR の Approve（人の確定）',
   mcp: 'エージェントからの依頼',
   a2a: 'エージェントからの依頼',
   manual: '手動',

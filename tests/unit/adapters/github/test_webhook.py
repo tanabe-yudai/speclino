@@ -10,6 +10,7 @@ from speclino.adapters.github.webhook import (
     extract_comment,
     extract_pr,
     extract_rerun,
+    extract_review_approval,
     parse_event,
     verify_signature,
 )
@@ -272,3 +273,50 @@ def test_extract_rerun_ignores_unrelated_event() -> None:
         "pull_request": {"number": 1},
     }
     assert extract_rerun(payload) is None
+
+
+# ---------------------------------------------------------------- extract_review_approval
+
+
+def _review_payload(action: str = "submitted", state: str = "approved") -> dict[str, object]:
+    return {
+        "action": action,
+        "installation": {"id": 42},
+        "repository": {"full_name": "acme/widgets", "id": 4242},
+        "review": {
+            "state": state,
+            "commit_id": "sha-head",
+            "html_url": "https://github.com/acme/widgets/pull/7#pullrequestreview-1",
+            "user": {"login": "lead", "id": 900},
+        },
+        "pull_request": {"number": 7, "user": {"login": "dev", "id": 100}},
+    }
+
+
+def test_extract_review_approval_reads_approved_submission() -> None:
+    ref = extract_review_approval(_review_payload())
+    assert ref is not None
+    assert (ref.repo_id, ref.pr_number, ref.commit_id) == (4242, 7, "sha-head")
+    assert (ref.reviewer_login, ref.reviewer_id, ref.pr_author_id) == ("lead", 900, 100)
+    assert ref.review_url.endswith("pullrequestreview-1")
+
+
+def test_extract_review_approval_ignores_other_states_and_actions() -> None:
+    for state in ("commented", "changes_requested", "dismissed"):
+        assert extract_review_approval(_review_payload(state=state)) is None
+    for action in ("dismissed", "edited"):
+        assert extract_review_approval(_review_payload(action=action)) is None
+
+
+def test_extract_review_approval_requires_commit_and_ids() -> None:
+    payload = _review_payload()
+    payload["review"] = {**payload["review"], "commit_id": ""}  # type: ignore[dict-item]
+    assert extract_review_approval(payload) is None
+    payload = _review_payload()
+    payload["repository"] = {"full_name": "acme/widgets"}
+    assert extract_review_approval(payload) is None
+    # レビューした人の ID が無ければ None のまま渡す（照合側で承認しない）
+    payload = _review_payload()
+    payload["review"] = {**payload["review"], "user": {"login": "lead"}}  # type: ignore[dict-item]
+    ref = extract_review_approval(payload)
+    assert ref is not None and ref.reviewer_id is None

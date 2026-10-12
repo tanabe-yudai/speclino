@@ -115,7 +115,7 @@ test('仕様の編集・診断・承認、skill、可観測性、検査結果の
   await shot(page, 'run-llm-review')
 
   await page.goto(`/runs/${runOf(6)}`)
-  const hint = page.getByText(/対応表・免除・規約の変更の確定は、PR のコメントで行います/)
+  const hint = page.getByText(/対応表・免除・規約の変更の確定は、承認者が PR に \/speclino attest とコメントする/)
   await expect(hint).toBeVisible()
   await page.getByText('PR のコメントで確定するには').first().click()
   await expect(page.locator('code', { hasText: '/speclino attest KNOWLEDGE-BINDINGS-001' })).toBeVisible()

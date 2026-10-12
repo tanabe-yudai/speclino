@@ -321,7 +321,7 @@ function FindingAttest({ slug, run, finding, mayAttest }: FindingAttestProps) {
       )}
       {requiresPrComment(target) ? (
         <p className="text-sm text-ink-2">
-          対応表・免除・規約の変更の確定は、PR のコメントで行います。
+          対応表・免除・規約の変更の確定は、承認者が PR に /speclino attest とコメントする（または PR を Approve する）と行われます。
         </p>
       ) : (
         mayAttest &&

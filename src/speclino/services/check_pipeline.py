@@ -93,7 +93,15 @@ from speclino.domain.code_ir import (
 from speclino.domain.code_ir import Path as CodePath
 from speclino.domain.common import SnapshotRef, SourceRef
 from speclino.domain.domain_spec import DomainSpec
-from speclino.domain.finding import CoverageCounts, Finding, Findings, Verdict, VerdictCounts
+from speclino.domain.finding import (
+    CONTENT_HASH_REF,
+    FINGERPRINT_REF,
+    CoverageCounts,
+    Finding,
+    Findings,
+    Verdict,
+    VerdictCounts,
+)
 from speclino.domain.knowledge import ResolvedKnowledge
 from speclino.domain.policy import PolicyExceptions, PolicyPackage, PolicyRevision, PolicyRule
 from speclino.domain.run import BehaviorAnalysis, RunInputs, RunManifest, RunVersions
@@ -109,7 +117,7 @@ from speclino.services.attestations import (
     self_attested_ids,
 )
 from speclino.services.knowledge_inputs import OperationResolver, SpecUnit, bundle_hash, spec_units
-from speclino.services.llm_policies import CONTENT_HASH_REF, FINGERPRINT_REF
+from speclino.services.llm_policies import ATTEST_ALL_HOW
 from speclino.spec import (
     ValidationReport,
     content_hash,
@@ -1132,8 +1140,7 @@ def _config_change_notice(head_dir: Path, trusted_dir: Path | None) -> Finding |
         ],
         next_steps=[
             "変更をレビューしてから取り込む（取り込んだ後の run で判定に使われる）",
-            "この変更を認めるなら owner / approver が確定する（PR コメント `/speclino attest "
-            f"{CONFIG_CHANGE_REQUIREMENT_ID}:{changed_hash} {changed_hash}`）",
+            f"この変更を認めるなら{ATTEST_ALL_HOW}",
         ],
     )
 

@@ -222,6 +222,25 @@ UNKNOWN の Finding を合成する（`missing_finding`）。規約の検査器�
 - mandatory なら REVIEW でゲートは止まる。人の確定は verdict を書き換えず、**ゲートの処置**として `attestations` に記録する
   （`attested` → その指紋の REVIEW をゲートの阻止から外す、`acknowledged_violation` → 阻止したまま）。確定は指紋と内容のハッシュに
   結びつき、内容が変われば効かない。確定できるのはワークスペースの owner / approver（画面、または S61 縮小版の ID 照合を通した PR コメント）
+- **まとめて確定する経路**: ハッシュつきの `/speclino attest` を 1 件ずつ打つ手間を省くため、承認者の次の 2 つを
+  「その PR の最新の検査の確定できる要確認すべてを attested で確定する」依頼として扱う（`attest_all_in_pr` で共通）
+  - 引数なしの PR コメント `/speclino attest`（`via` は `pr_comment_all:<URL>`）。1 人運用（作成者＝承認者）では GitHub の
+    制約で自分の PR を Approve できないため、こちらが主の経路
+  - GitHub の PR の Approve（`pull_request_review` の `submitted` かつ `state=approved` だけ。commented・changes_requested・
+    dismissed は無視。`via` は `pr_review:<URL>`）
+  - 照合・記録は 1 件ずつのコメントと同じ（`approver_ids` と GitHub のユーザー ID、`attest`。actor は `github:<ID>`、自己確定の印、
+    対応表の変更の警告）。指紋と hash はサーバが run の Findings から取る
+  - 対象はその PR の最新の run で、最新の完了した run と head が一致するもの（検査中・未検査のコミットがあれば確定しない）。
+    Approve はさらに head が `review.commit_id` と一致するときだけ（古いコミットへの Approve で新しい変更を確定しない）。
+    合わなければ何もせず、理由を webhook の応答と監査 `attestation.bulk` に残す（webhook は PR にコメントを書かない）
+  - 確定するのは `attestation_target` が返すもの（VIOLATED などは対象外）。書込みは `INSERT … ON CONFLICT DO NOTHING` で、
+    既に確定がある (指紋, hash) は上書きしない（重複の依頼は冪等、並行して保存された `ack` も覆さない）。確定が 1 件以上
+    あれば同じ head で再検査し、ゲートのコメント・Check を更新する。新しい確定が 0 件でも、最新の完了した run に attested の
+    確定が効いていない要確認があれば（再検査の投入に失敗した後の再送など）再検査を作り直す（未完了の run は superseded）
+  - run を引いてから確定するまでの間の push（TOCTOU）は防がない: 確定は (指紋, 内容の hash) に結びつくので、push で中身が
+    変われば別の hash の要確認になり、古い run の要確認の確定で新しい変更は素通りしない
+  - 案内は「承認者が `/speclino attest` とコメントする（または PR を Approve する）と確定する」。1 件ずつのハッシュつきの形は
+    ゲートのコメントの各指摘の「根拠」に畳んで出す
 - 画面では `no_issue` を「LLM で確認、指摘なし（機械検証ではない）」と独自の区分で出す
 - LLM を呼ぶ処理は `services/` に置き、`conformance/` は結果を Finding として受け取るだけにする（ARCH-002）
 

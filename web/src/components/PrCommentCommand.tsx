@@ -14,6 +14,9 @@ export function PrCommentCommand({ command }: { command: string }) {
   return (
     <details className="text-xs">
       <summary className="cursor-pointer text-ink-3">PR のコメントで確定するには</summary>
+      <p className="mt-1 text-ink-3">
+        承認者が PR に <code className="font-mono">/speclino attest</code> とコメントすると、この PR の要確認をまとめて確定します。この 1 件だけなら:
+      </p>
       <div className="mt-1 flex flex-wrap items-center gap-2">
         <code className="min-w-0 rounded bg-muted px-2 py-1 font-mono break-all">{command}</code>
         <Button type="button" size="sm" variant="secondary" onClick={copy}>

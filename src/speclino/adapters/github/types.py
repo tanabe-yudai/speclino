@@ -56,6 +56,24 @@ class IssueCommentRef(_GitHubModel):
     issue_author_id: int | None = None
 
 
+class PullRequestReviewRef(_GitHubModel):
+    """pull_request_review(submitted) の Approve から抽出した参照。"""
+
+    repo_full_name: str
+    repo_id: int
+    installation_id: int
+    pr_number: int
+    # レビューを付けたコミット（`review.commit_id`）。古いコミットへの Approve で新しい変更を
+    # 確定しないよう、run の head と照合する
+    commit_id: str
+    reviewer_login: str
+    # レビューした人の GitHub ユーザー ID。承認者は ID で照合する。無ければ None（承認しない側）
+    reviewer_id: int | None
+    review_url: str
+    # PR の作成者の GitHub ユーザー ID（自己確定の照合）。無ければ None
+    pr_author_id: int | None = None
+
+
 class RerunRef(_GitHubModel):
     """check_run(rerequested/requested_action) または check_suite(rerequested) からの再実行要求。"""
 
@@ -70,6 +88,7 @@ class RerunRef(_GitHubModel):
 __all__ = [
     "IssueCommentRef",
     "PullRequestRef",
+    "PullRequestReviewRef",
     "RerunRef",
     "WebhookEvent",
 ]

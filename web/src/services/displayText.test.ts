@@ -26,6 +26,12 @@ describe('plainTerms と PR コメントの括弧', () => {
     expect(stripCommands('問題が無ければ owner / approver が確定する（PR コメント `/speclino attest X:y sha256:z`）')).toBe(
       '問題が無ければオーナーか承認者が確定する',
     )
+    expect(stripCommands('問題が無ければ承認者が PR を Approve すると確定する（または PR コメント `/speclino attest X:y sha256:z`）')).toBe(
+      '問題が無ければ承認者が PR を Approve すると確定する',
+    )
+    expect(stripCommands('問題が無ければ承認者が `/speclino attest` とコメントする（または PR を Approve する）と確定する')).toBe(
+      '問題が無ければ承認者が PR に確定のコメントをする（または PR を Approve する）と確定する',
+    )
     expect(plainTerms('LLM による評価（LLM 3 回中 3 回）')).toBe('AI による評価（AI 3 回中 3 回）')
   })
 })
