@@ -56,7 +56,16 @@ def test_two_people_with_the_same_display_name_are_distinguishable() -> None:
 
 
 @pytest.mark.parametrize(
-    "raw", ["bob＠example.com", "Alice（alice@example.com）", "Alice (x)", "Alice【admin】"]
+    "raw",
+    [
+        "bob＠example.com",
+        "Alice（alice@example.com）",
+        "Alice (x)",
+        "Alice【admin】",
+        "a﹫b",
+        "⑴ x",
+        "a〔b〕",
+    ],
 )
 def test_display_name_rejects_email_and_suffix_lookalikes(raw: str) -> None:
     """全角の ＠ や括弧で、表示の添え書き「表示名（メール）」を偽装できない。"""

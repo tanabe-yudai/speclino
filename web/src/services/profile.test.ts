@@ -8,7 +8,8 @@ describe('parseDisplayName', () => {
   })
   it('50 文字まで（コードポイントで数える）', () => {
     expect(parseDisplayName('あ'.repeat(50)).ok).toBe(true)
-    expect(parseDisplayName('😀'.repeat(50)).ok).toBe(true)
+    expect(parseDisplayName('𠮷'.repeat(50)).ok).toBe(true)
+    expect(parseDisplayName('😀').ok).toBe(false) // 記号（絵文字）は許す側に無い
     expect(parseDisplayName('あ'.repeat(51)).ok).toBe(false)
   })
   it('@・改行・制御文字・向きを変える文字は拒否する', () => {
