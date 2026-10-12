@@ -26,8 +26,8 @@ export function ProjectPill() {
   const current = owner && repo ? `${owner}/${repo}` : null
   return (
     <DropdownMenu>
-      {/* スマホ幅でプロジェクトの外にいるときはハンバーガーのメニューから選ぶ（ワークスペース名の幅を残す） */}
-      <DropdownMenuTrigger className={cn(PILL_CLASS, !current && 'hidden sm:inline-flex')}>
+      {/* スマホ幅の上部バーはワークスペース名とアカウントだけ（プロジェクトはホームのカードから選ぶ） */}
+      <DropdownMenuTrigger className={cn(PILL_CLASS, 'hidden lg:inline-flex')}>
         <span className="truncate">{current ? current.split('/')[1] : 'プロジェクト'}</span>
         <ChevronDown className="size-3.5 shrink-0 text-ink-3" />
       </DropdownMenuTrigger>

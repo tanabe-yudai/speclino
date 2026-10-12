@@ -8,7 +8,7 @@ import type { NextAction, ProjectRun } from '@/types/project'
 
 
 /** 次にやること（design 5.3）。並びは services/nextActions.ts の規則。 */
-export function NextActionsCard({ actions, run }: { actions: NextAction[]; run: ProjectRun }) {
+export function NextActionsCard({ slug, actions, run }: { slug: string; actions: NextAction[]; run: ProjectRun }) {
   return (
     <Panel className="space-y-3">
       <PanelTitle>次にやること</PanelTitle>
@@ -18,7 +18,7 @@ export function NextActionsCard({ actions, run }: { actions: NextAction[]; run: 
         <ol className="space-y-2">
           {actions.map((a) => (
             <li key={a.requirementId}>
-              <Link to={paths.run(run.id)} className="row block min-w-0 px-3 py-2">
+              <Link to={paths.run(slug, run.id)} className="row block min-w-0 px-3 py-2">
                 <span className="flex min-w-0 items-center gap-2">
                   {/* システム規約は平易な題が状況を言うので、「承認切れ」などの仕様向けの区分は出さない */}
                   {!systemRuleTitle(a.requirementId) && (

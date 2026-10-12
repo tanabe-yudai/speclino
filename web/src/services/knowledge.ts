@@ -134,6 +134,14 @@ export function retireState(role: WorkspaceRole | null, active: ArtifactRevision
   return { visible, enabled: visible, reason: null }
 }
 
+/**
+ * 「AI と作る」パネルを開いて始めるか。承認を待つ下書きがあり、承認できる人（オーナー・承認者）が
+ * 開いたときは、まず内容を見て承認する場面なので閉じて始める。それ以外は開いて始める。
+ */
+export function chatOpenAtStart(draft: ArtifactRevision | null, role: WorkspaceRole | null): boolean {
+  return !(draft && (role === 'owner' || role === 'approver'))
+}
+
 export type KnowledgeErrorKind = 'conflict' | 'bundle_conflict' | 'not_compilable' | 'forbidden' | 'invalid' | 'other'
 
 /** 保存・承認の失敗を画面の区分と文言にする。conflict は読み直しを促すダイアログで扱う。 */

@@ -43,6 +43,10 @@ class RequirementView(IRModel):
     verdict: Verdict | None = Field(description="findings の最も重い判定。None は未解析")
     finding_ids: list[str] = Field(default_factory=list)
     removed: bool = Field(default=False, description="head の Spec IR から消えた要求")
+    artifact_id: str | None = Field(
+        default=None,
+        description="要求を定めた SpecLino の仕様（run の bundle）。旧形式・不明は None",
+    )
 
 
 class WaiverView(IRModel):

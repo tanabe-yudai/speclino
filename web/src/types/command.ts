@@ -9,4 +9,5 @@ export interface Command {
   path: string
 }
 
-export type SettingsTab = 'members' | 'repositories' | 'integrations' | 'project'
+/** 設定のタブ（`/w/:slug/settings/:tab`）。 */
+export type SettingsTab = 'members' | 'repositories' | 'agents' | 'projects'

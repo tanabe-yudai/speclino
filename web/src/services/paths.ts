@@ -2,11 +2,12 @@
 
 import type { SettingsTab } from '@/types/command'
 import type { ArtifactKind } from '@/types/knowledge'
-import type { ProjectTab, WorkspaceTab } from '@/types/navigation'
+import type { KnowledgeFilter, ProjectTab, RunFilter } from '@/types/navigation'
 import { KIND_SECTION } from './knowledge'
 
 const e = encodeURIComponent
-const kn = (slug: string, kind: ArtifactKind) => `/w/${e(slug)}/knowledge/${KIND_SECTION[kind]}`
+const ws = (slug: string) => `/w/${e(slug)}`
+const kn = (slug: string, kind: ArtifactKind) => `${ws(slug)}/knowledge/${KIND_SECTION[kind]}`
 
 /** エディタ・改訂履歴へ渡すクエリ。`from` は戻り先のプロジェクト（owner/repo）、`chat` は会話の ID（`new` なら新規）。 */
 export interface KnowledgeQuery {
@@ -21,23 +22,47 @@ function query(q?: KnowledgeQuery): string {
   return parts.length > 0 ? `?${parts.join('&')}` : ''
 }
 
+/** 絞り込みのクエリ（値の無いものは書かない。順は引数の順）。 */
+function filterQuery(entries: [string, string | null | undefined][]): string {
+  const parts = entries.filter((x): x is [string, string] => !!x[1]).map(([k, v]) => `${k}=${e(v)}`)
+  return parts.length > 0 ? `?${parts.join('&')}` : ''
+}
+
+function projectBase(slug: string, fullName: string): string {
+  const [owner, repo] = fullName.split('/')
+  return `${ws(slug)}/p/${e(owner)}/${e(repo)}`
+}
+
 export const paths = {
   home: () => '/app',
-  /** ワークスペースのホーム。tab を省く（またはプロジェクト）なら素のパス。 */
-  workspace: (slug: string, tab?: WorkspaceTab) =>
-    `/w/${e(slug)}${tab && tab !== 'projects' ? `?tab=${tab}` : ''}`,
-  /** プロジェクト。tab を省く（または概要）なら素のパス。 */
-  project: (slug: string, fullName: string, tab?: ProjectTab) => {
-    const [owner, repo] = fullName.split('/')
-    return `/w/${e(slug)}/p/${e(owner)}/${e(repo)}${tab && tab !== 'overview' ? `/${tab}` : ''}`
+  /** ワークスペースのホーム（やること・件数・プロジェクトの健全性）。 */
+  workspace: (slug: string) => ws(slug),
+  /** プロジェクト（絞り込みの画面）。概要は素のパス。知識・検査のタブは一覧と同じ絞り込みのクエリを持てる。 */
+  project: (slug: string, fullName: string, tab?: ProjectTab, filter?: Partial<KnowledgeFilter & RunFilter>) => {
+    const base = projectBase(slug, fullName)
+    if (!tab || tab === 'overview') return base
+    const q =
+      tab === 'knowledge'
+        ? filterQuery([['kind', filter?.kind], ['status', filter?.status]])
+        : filterQuery([['gate', filter?.gate]])
+    return `${base}/${tab}${q}`
   },
-  policies: (slug: string) => `/w/${e(slug)}/policies`,
+  /** 知識の一覧（仕様・スキル・指示書・規約）。 */
+  knowledge: (slug: string, filter?: Partial<KnowledgeFilter>) =>
+    `${ws(slug)}/knowledge${filterQuery([['kind', filter?.kind], ['project', filter?.project], ['status', filter?.status]])}`,
+  /** 規約（チーム規約）の画面。 */
+  policies: (slug: string) => `${ws(slug)}/knowledge/policies`,
   knowledgeNew: (slug: string, kind: ArtifactKind, from?: string | null) => `${kn(slug, kind)}/new${query({ from })}`,
   knowledgeItem: (slug: string, kind: ArtifactKind, id: string, q?: KnowledgeQuery) =>
     `${kn(slug, kind)}/${e(id)}${query(q)}`,
   knowledgeRevisions: (slug: string, kind: ArtifactKind, id: string, from?: string | null) =>
     `${kn(slug, kind)}/${e(id)}/revisions${query({ from })}`,
-  observability: (slug: string) => `/w/${e(slug)}/observability`,
-  settings: (slug: string, tab?: SettingsTab) => `/w/${e(slug)}/settings${tab ? `?tab=${tab}` : ''}`,
-  run: (id: string) => `/runs/${e(id)}`,
+  /** 検査の一覧。 */
+  runs: (slug: string, filter?: Partial<RunFilter>) =>
+    `${ws(slug)}/runs${filterQuery([['gate', filter?.gate], ['project', filter?.project]])}`,
+  /** 検査の詳細。ワークスペースが分からない run（未登録のリポジトリ）は旧い `/runs/:id`。 */
+  run: (slug: string | null | undefined, id: string) => (slug ? `${ws(slug)}/runs/${e(id)}` : `/runs/${e(id)}`),
+  observability: (slug: string) => `${ws(slug)}/observability`,
+  /** 設定。タブを省けばメンバー。 */
+  settings: (slug: string, tab?: SettingsTab) => `${ws(slug)}/settings${tab ? `/${tab}` : ''}`,
 }

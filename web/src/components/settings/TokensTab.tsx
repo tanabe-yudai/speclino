@@ -5,7 +5,6 @@ import { issueMcpToken, listMcpTokens, revokeMcpToken } from '@/api/mcpTokens'
 import { ApiError } from '@/api/errors'
 import { Panel, PanelTitle } from '@/components/app/Panel'
 import { ToneBadge } from '@/components/app/ToneBadge'
-import { A2aPanel } from '@/components/settings/A2aPanel'
 import { ErrorState } from '@/components/ErrorState'
 import { LoadingState } from '@/components/LoadingState'
 import { Button } from '@/components/ui/button'
@@ -158,8 +157,6 @@ export function TokensTab({ slug }: { slug: string }) {
           })}
         </ul>
       )}
-
-      <A2aPanel origin={window.location.origin} />
 
       <Dialog open={revoking !== null} onOpenChange={(open) => !open && setRevoking(null)}>
         <DialogContent>
