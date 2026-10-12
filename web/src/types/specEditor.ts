@@ -1,7 +1,6 @@
 /** 仕様エディタの部品（components/spec-editor/）と知識の画面の props 型。 */
 
 import type { ArtifactContent, ArtifactKind, ArtifactRevision, ArtifactScope, SpecDiagnostic, SpecPreview } from './knowledge'
-import type { RequirementTrace } from '@/services/specPreview'
 import type { ProjectSummary } from './project'
 
 export interface MarkdownInputProps {
@@ -34,22 +33,6 @@ export interface DiagnosticsListProps {
   onJump: (line: number, column: number) => void
 }
 
-export interface MermaidPreviewProps {
-  markdown: string
-  onJump: (line: number, column: number) => void
-}
-
-export interface CanonicalViewProps {
-  canonical: string | null
-  pending: boolean
-  hasErrors: boolean
-}
-
-export interface RequirementTraceProps {
-  trace: RequirementTrace
-  hasCompiled: boolean
-}
-
 export interface ScopePickerProps {
   kind: ArtifactKind
   scope: ArtifactScope
@@ -64,12 +47,9 @@ export interface ContentEditorProps<C extends ArtifactContent = ArtifactContent>
 }
 
 export interface SpecPaneProps extends ContentEditorProps<Extract<ArtifactContent, { kind: 'spec' }>> {
-  slug: string
   preview: SpecPreview | null
   previewError: string | null
   previewPending: boolean
-  /** 下書きを保存中（AI の提案を求められない） */
-  saving: boolean
 }
 
 export interface ApprovalPanelProps {

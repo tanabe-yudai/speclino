@@ -252,3 +252,9 @@ export const CHAT_SOURCE_LABELS: Record<'knowledge' | 'repo' | 'web', string> = 
   repo: 'リポジトリ',
   web: 'Web',
 }
+
+/** AI と作る会話の、質問と選択肢の表示（返答の下に出し、選択肢を押すと発言として送る）。 */
+export const CHAT_QUESTION_LABELS = {
+  heading: 'AI からの質問',
+  hint: '選択肢を押すとそのまま送ります。自由に書いて答えることもできます。',
+} as const

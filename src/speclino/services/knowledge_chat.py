@@ -13,9 +13,10 @@
 - 調べてから答える（ストリームの発言、`ChatDeps.research`）: 読むだけの関数で承認済みの知識・
   登録済みのリポジトリ・Web を調べてから最後の JSON を流す（services/knowledge_chat_research.py）。
   予約はターンの予算で 1 回、出典はサーバが組み立てて返答に残し、監査には関数の種類と回数だけ
-- 出力の検査: 説明（explanation）にモデル ID・規則の断片がそのまま含まれていれば、固定の断りの文に
-  置き換えて提案を落とす。ストリームでは送る前に累積を照合し、境界をまたぐモデル ID に備えて
-  末尾を保留して送る。下書き（提案の本文）は検査しない（本文に Gemini CLI 等の正当な記述がありうる）
+- 出力の検査: 説明（explanation）と質問（questions）にモデル ID・規則の断片がそのまま含まれて
+  いれば、固定の断りの文に置き換えて質問と提案を落とす。ストリームでは送る前に累積を照合し、
+  境界をまたぐモデル ID に備えて末尾を保留して送る。下書き（提案の本文）は検査しない
+  （本文に Gemini CLI 等の正当な記述がありうる）
 """
 
 from __future__ import annotations
@@ -52,6 +53,7 @@ from speclino.domain.knowledge_chat import (
     ChatErrorCode,
     ChatMessage,
     ChatProposal,
+    ChatQuestion,
     ChatStreamEvent,
     ChatSummaryDraft,
     ChatTurn,
@@ -85,6 +87,7 @@ from speclino.services.knowledge_chat_prompt import (
 from speclino.services.knowledge_chat_proposal import (
     build_proposal,
     draft_text_field,
+    extract_questions,
     response_schema,
     text_hash,
 )
@@ -583,13 +586,20 @@ def _partial_explanation(raw: str) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
-def _truncated_reply(raw: str) -> tuple[str, Any]:
-    """出力の上限で切れた返答: 提案を省き、説明（あれば）と知らせだけで確定する。"""
+@dataclass(frozen=True)
+class _Reply:
+    explanation: str
+    proposal: Any = None
+    questions: list[ChatQuestion] = field(default_factory=list)
+
+
+def _truncated_reply(raw: str) -> _Reply:
+    """出力の上限で切れた返答: 質問と提案を省き、説明（あれば）と知らせだけで確定する。"""
     explanation = _partial_explanation(raw)[:_EXPLANATION_MAX_CHARS]
-    return (f"{explanation}\n\n{TRUNCATED_NOTICE}" if explanation else TRUNCATED_NOTICE), None
+    return _Reply(f"{explanation}\n\n{TRUNCATED_NOTICE}" if explanation else TRUNCATED_NOTICE)
 
 
-def _parse_reply(gen: JsonGeneration) -> tuple[str, Any]:
+def _parse_reply(gen: JsonGeneration) -> _Reply:
     raw = gen.text
     if gen.truncated:
         return _truncated_reply(raw)
@@ -604,7 +614,11 @@ def _parse_reply(gen: JsonGeneration) -> tuple[str, Any]:
     explanation = data.get("explanation")
     if not isinstance(explanation, str) or not explanation.strip():
         raise ChatError("chat_failed")
-    return explanation.strip()[:_EXPLANATION_MAX_CHARS], data.get("proposal")
+    return _Reply(
+        explanation.strip()[:_EXPLANATION_MAX_CHARS],
+        data.get("proposal"),
+        extract_questions(data.get("questions")),
+    )
 
 
 def _check_input(text: str, editor_text: str) -> None:
@@ -660,15 +674,17 @@ async def _complete_turn(
     断りの文に置き換えて提案を落とす。調べた返答には、サーバが組み立てた出典と検索の候補の
     表示を添える（差し止めた返答には添えない）。
     """
-    explanation, proposal_data = _parse_reply(gen)
+    parsed = _parse_reply(gen)
+    explanation, proposal_data, questions = parsed.explanation, parsed.proposal, parsed.questions
     if (
         blocked
         or find_leak(explanation, secrets=check.explanation)
+        or find_leak(json_strings([q.model_dump() for q in questions]), secrets=check.explanation)
         or find_leak(json_strings(proposal_data), secrets=check.proposal)
     ):
         logger.warning("会話の AI の返答を出力の検査で差し止めた")
         blocked = True
-        explanation, proposal_data = GUARDRAIL_REFUSAL, None
+        explanation, proposal_data, questions = GUARDRAIL_REFUSAL, None, []
     shown = researched if not blocked else None
     proposal: ChatProposal | None = await build_proposal(
         ctx.chat.kind,
@@ -689,6 +705,7 @@ async def _complete_turn(
         created_at=_now(),
         sources=(shown.sources or None) if shown else None,
         search_suggestions=(shown.search_suggestions or None) if shown else None,
+        questions=questions or None,
     )
     extras = {"sources", "search_suggestions"}
     if len(reply.model_dump_json(exclude=extras).encode()) > REPLY_MAX_BYTES:

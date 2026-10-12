@@ -796,3 +796,68 @@ async def test_stream_disconnect_keeps_worst_case_reservation(ctx: Ctx) -> None:
         used = await CostLedgerRepository(s).total_for_day(ctx.deps.today(), uid="alice")
     assert [m.status for m in chat.messages] == ["failed"]
     assert used > Decimal("0.016")
+
+
+QUESTIONS_REPLY = json.dumps(
+    {
+        "explanation": "対象が分からないので、先に確かめます",
+        "questions": [
+            {
+                "question": "  誰が使う指示書ですか？ ",
+                "options": ["開発者", "開発者", "レビュアー", ""],
+            },
+            {"question": "", "options": ["捨てる"]},
+            {"question": "言語は？", "options": ["Python"]},
+            {"question": "テストの方針は？", "options": ["先に書く", "後で書く"]},
+            {"question": "4 問目は捨てる", "options": ["a", "b"]},
+        ],
+    },
+    ensure_ascii=False,
+)
+
+
+async def test_questions_are_validated_saved_and_sent_back_as_history(ctx: Ctx) -> None:
+    ctx.llm.response = QUESTIONS_REPLY
+    cid = await _create(ctx)
+    turn = await _send(ctx, cid)
+    assert turn.reply is not None and turn.reply.proposal is None
+    assert [(q.question, q.options) for q in turn.reply.questions or []] == [
+        ("誰が使う指示書ですか？", ["開発者", "レビュアー"]),
+        ("言語は？", []),  # 選択肢が 2 つに満たなければ自由入力の質問にする
+        ("テストの方針は？", ["先に書く", "後で書く"]),
+    ]
+    async with ctx.deps.session_factory() as s:
+        saved = await kc.get_chat(s, workspace=ctx.slug, owner="alice", chat_id=cid)
+    assert saved.messages[-1].questions == turn.reply.questions
+    # 次の発言では、AI が聞いたことを会話の履歴として渡す
+    ctx.llm.response = REPLY
+    await _send(ctx, cid, key="key-0002")
+    assert "質問: 誰が使う指示書ですか？（選択肢: 開発者 / レビュアー）" in ctx.llm.prompts[-1]
+
+
+async def test_stream_done_carries_the_questions(ctx: Ctx) -> None:
+    ctx.llm.response = QUESTIONS_REPLY
+    cid = await _create(ctx)
+    events = await _stream(ctx, cid)
+    turn = events[-1].turn
+    assert events[-1].type == "done" and turn is not None and turn.reply is not None
+    assert turn.reply.questions is not None and len(turn.reply.questions) == 3
+
+
+async def test_questions_leaking_the_model_or_rules_are_replaced(ctx: Ctx) -> None:
+    ctx.deps = replace(ctx.deps, model_ids=("gemini-3.8-flash",))
+    for i, (question, option) in enumerate(
+        [("Gemini 3.8 Flash で作りますか？", "はい"), ("どちらにしますか？", RULE_LINE)]
+    ):
+        ctx.llm.response = json.dumps(
+            {
+                "explanation": "確かめます",
+                "questions": [{"question": question, "options": [option[:60], "いいえ"]}],
+                "proposal": {"body": "# 指示\n"},
+            },
+            ensure_ascii=False,
+        )
+        cid = await _create(ctx)
+        turn = await _send(ctx, cid, key=f"key-leak-{i}")
+        assert turn.reply is not None and turn.reply.text == kc.GUARDRAIL_REFUSAL
+        assert turn.reply.questions is None and turn.reply.proposal is None

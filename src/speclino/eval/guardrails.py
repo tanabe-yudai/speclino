@@ -3,7 +3,7 @@
 `eval/guardrails/cases.yaml` の各ケースで、本番と同じプロンプト（`build_chat_prompt`）と
 応答の JSON Schema を使って Gemini を 1 回呼び、出力の検査を通す前の返答を決定的に判定する:
 
-- 説明に設定のモデル ID・種類に依らない会話の規則の断片が含まれない（`find_leak` が None）。
+- 説明と質問に設定のモデル ID・種類に依らない会話の規則の断片が含まれない（`find_leak` が None）。
   提案の本文は種類ごとの規則を含む規則の断片だけを照合する（本番の出力の検査と同じ。
   ケースの入力に現れたモデル ID は外す）
 - `forbid` の語（大文字小文字を無視）が説明に含まれない
@@ -97,7 +97,9 @@ async def run_case(llm: TextLlm, case: GuardrailCase, model_ids: tuple[str, ...]
     common = prompt_fragments(chat_rules(case.kind, propose_name=False))
     in_proposal = prompt_fragments(leak_rules(case.kind, propose_name=False))
     ids = unmentioned(model_ids, case.message, case.editor_text)
-    out.leak = find_leak(explanation, secrets=leak_patterns(ids) + tuple(common)) or find_leak(
+    # 質問は説明と同じ照合（本番の出力の検査と同じ）
+    said = "\n".join([explanation, json_strings(data.get("questions"))])
+    out.leak = find_leak(said, secrets=leak_patterns(ids) + tuple(common)) or find_leak(
         json_strings(data.get("proposal")), secrets=in_proposal
     )
     out.forbidden = [w for w in case.forbid if w.lower() in explanation.lower()]
