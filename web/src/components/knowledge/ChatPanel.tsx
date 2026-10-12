@@ -11,10 +11,10 @@ import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion'
 import { cn } from '@/lib/utils'
 import { skipMessage } from '@/services/chatDraft'
 import { formatDateTime } from '@/services/format'
-import { CHAT_SOURCE_LABELS } from '@/services/labels'
-import { CHAT_NOTICE, MESSAGE_MAX_BYTES, errorCount, messageBytesLeft, textHash } from '@/services/knowledgeChat'
+import { CHAT_QUESTION_LABELS, CHAT_SOURCE_LABELS } from '@/services/labels'
+import { CHAT_NOTICE, MESSAGE_MAX_BYTES, errorCount, messageBytesLeft, pickableReplyId, textHash } from '@/services/knowledgeChat'
 import type { ChatDraft, ProposalOutcome } from '@/types/chatDraft'
-import type { ChatMessage, ChatPanelProps, ChatProposal, ChatSource, ChatStreaming, RawProposal } from '@/types/knowledgeChat'
+import type { ChatMessage, ChatPanelProps, ChatProposal, ChatQuestion, ChatSource, ChatStreaming, RawProposal } from '@/types/knowledgeChat'
 
 /** 今の編集欄の本文のハッシュ（提案の土台と比べて、古い提案を反映させない）。計算中は null。 */
 function useTextHash(text: string): string | null {
@@ -174,7 +174,36 @@ function SearchSuggestions({ items }: { items: string[] }) {
   )
 }
 
-function Message({ m, children }: { m: ChatMessage; children?: ReactNode }) {
+/**
+ * AI からの質問と選択肢。最新の返答だけ選択肢を押せ、押すとその文をそのまま発言として送る
+ * （自由入力でも答えられる）。スマホで押しやすいよう、選択肢は高さ 44px 以上で折り返す。
+ */
+function Questions({ questions, onPick }: { questions: ChatQuestion[]; onPick?: (option: string) => void }) {
+  return (
+    <div className="mt-2 space-y-2 border-t pt-2" data-testid="chat-questions">
+      <div className="text-xs font-semibold text-ink-2">{CHAT_QUESTION_LABELS.heading}</div>
+      <ol className="space-y-2">
+        {questions.map((q, i) => (
+          <li key={i} className="space-y-1.5">
+            <p className="break-words">{q.question}</p>
+            {onPick && q.options.length > 0 && (
+              <div className="flex flex-col gap-1.5 sm:flex-row sm:flex-wrap" role="group" aria-label={q.question}>
+                {q.options.map((o) => (
+                  <Button key={o} type="button" variant="outline" className="h-auto min-h-11 justify-start px-3 py-2 text-left whitespace-normal sm:min-h-9" onClick={() => onPick(o)}>
+                    {o}
+                  </Button>
+                ))}
+              </div>
+            )}
+          </li>
+        ))}
+      </ol>
+      {onPick && <p className="text-xs text-ink-3">{CHAT_QUESTION_LABELS.hint}</p>}
+    </div>
+  )
+}
+
+function Message({ m, children, onPick }: { m: ChatMessage; children?: ReactNode; onPick?: (option: string) => void }) {
   const mine = m.role === 'user'
   return (
     <li className={cn('rounded-md px-3 py-2 text-sm', mine ? 'ml-6 bg-muted' : 'mr-6 border bg-background')}>
@@ -186,6 +215,7 @@ function Message({ m, children }: { m: ChatMessage; children?: ReactNode }) {
       </div>
       <p className="break-words whitespace-pre-wrap">{m.text}</p>
       {children}
+      {m.questions && m.questions.length > 0 && <Questions questions={m.questions} onPick={onPick} />}
       {m.sources && m.sources.length > 0 && <Sources sources={m.sources} />}
       {m.search_suggestions && m.search_suggestions.length > 0 && <SearchSuggestions items={m.search_suggestions} />}
     </li>
@@ -286,14 +316,22 @@ export function ChatPanel({ chat, editorText, beforeText, afterText, onApply, in
     current?.id ?? null,
   )
 
-  function submit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    const body = text.trim()
+  function send(body: string, onDone: (ok: boolean) => void) {
     if (!body || chat.sending || messageBytesLeft(body) < 0) return
     followList()
-    // 失敗したら本文を残す（同じ本文の再送は同じ冪等キーで送る）
-    chat.send(body, editorText, { bodyText, onTurn: (turn) => onReply?.(turn, editorText) }).then((ok) => ok && setText(''))
+    chat.send(body, editorText, { bodyText, onTurn: (turn) => onReply?.(turn, editorText) }).then(onDone)
   }
+
+  function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    // 失敗したら本文を残す（同じ本文の再送は同じ冪等キーで送る）
+    send(text.trim(), (ok) => ok && setText(''))
+  }
+
+  // 選択肢はそのまま送る。失敗したら入力欄に入れて、送り直せるようにする
+  const pick = (option: string) => send(option, (ok) => !ok && setText(option))
+  const messages = current?.messages ?? []
+  const pickable = pickableReplyId(messages, chat.sending)
 
   return (
     // 返答や差分が伸びても、ブラウザがページのスクロールを合わせて動かさない（S79）
@@ -343,8 +381,8 @@ export function ChatPanel({ chat, editorText, beforeText, afterText, onApply, in
         <div className="min-w-0 space-y-3">
           {(current && current.messages.length > 0) || chat.streaming ? (
             <ol ref={listRef} onScroll={onListScroll} className="max-h-[min(36rem,60dvh)] space-y-2 overflow-auto" aria-label="会話" aria-live="polite">
-              {current?.messages.map((m) => (
-                <Message key={m.id} m={m}>
+              {messages.map((m) => (
+                <Message key={m.id} m={m} onPick={m.id === pickable ? pick : undefined}>
                   {m.proposal &&
                     (inline ? (
                       <ProposalLine proposal={m.proposal} outcome={outcomes?.[m.id]} currentHash={currentHash} beforeText={beforeText} afterText={afterText} onApply={onApply} />

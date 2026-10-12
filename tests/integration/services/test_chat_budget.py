@@ -1,6 +1,6 @@
 """ChatBudget（S73、設計 C7）: 会話の費用の予約。実 PostgreSQL が必要。
 
-全体の日次の枠（既存と共有）に加えて、ユーザーごと（1 日 50 発言・全体の 20%）と
+全体の日次の枠（既存と共有）に加えて、ユーザーごと（1 日 50 発言・全体の 50%）と
 ワークスペースごと（全体の 50%）の上限を、同じ advisory lock の中で数える。
 """
 
@@ -56,13 +56,13 @@ async def _reserve(b: ChatBudget, day: date, usd: str, ws: str = "w1", uid: str 
     return await b.reserve(day, MODEL, Decimal(usd), workspace=ws, uid=uid, purpose="chat_message")
 
 
-async def test_user_share_is_twenty_percent(engine: AsyncEngine, day: date) -> None:
-    b = _budget(engine)  # 全体 10 → 本人 2、ワークスペース 5
-    assert (await _reserve(b, day, "1.5"))[0] is not None
+async def test_user_share_is_fifty_percent(engine: AsyncEngine, day: date) -> None:
+    b = _budget(engine)  # 全体 10 → 本人 5、ワークスペース 5
+    assert (await _reserve(b, day, "4.5"))[0] is not None
     reservation, code = await _reserve(b, day, "0.6")
     assert reservation is None and code == "cost_limit"
-    # 別の人は数えない
-    assert (await _reserve(b, day, "1.5", uid="u2"))[0] is not None
+    # 別の人は本人の枠では数えない（別のワークスペースなら通る）
+    assert (await _reserve(b, day, "4.5", ws="w2", uid="u2"))[0] is not None
 
 
 async def test_workspace_share_is_fifty_percent(engine: AsyncEngine, day: date) -> None:
@@ -97,16 +97,16 @@ async def test_global_limit_is_shared(engine: AsyncEngine, day: date) -> None:
 
 async def test_settle_attributes_actual_cost_to_user(engine: AsyncEngine, day: date) -> None:
     b = _budget(engine)
-    reservation, _ = await _reserve(b, day, "1.9")
+    reservation, _ = await _reserve(b, day, "4.9")
     assert reservation is not None
     await b.settle(reservation, 100_000, 0)  # 実費 0.1
     async with async_sessionmaker(engine)() as s:
         used = await CostLedgerRepository(s).total_for_day(day, uid="u1")
     assert used == Decimal("0.1")
-    assert (await _reserve(b, day, "1.8"))[0] is not None
+    assert (await _reserve(b, day, "4.8"))[0] is not None
 
 
 async def test_parallel_reserves_respect_user_limit(engine: AsyncEngine, day: date) -> None:
     b = _budget(engine)
-    results = await asyncio.gather(*(_reserve(b, day, "0.5") for _ in range(8)))
-    assert sum(1 for r, _ in results if r is not None) == 4
+    results = await asyncio.gather(*(_reserve(b, day, "0.5") for _ in range(16)))
+    assert sum(1 for r, _ in results if r is not None) == 10  # 本人の枠 5 ÷ 0.5

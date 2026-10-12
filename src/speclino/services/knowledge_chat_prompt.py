@@ -5,9 +5,11 @@
 - 1 回の入力は 64KB（UTF-8）まで。規則・編集欄の本文・新しい発言・知識の名前は必須で、
   これだけで超えれば `PromptTooLarge`。次に文法（仕様だけ、入るなら）、残りに会話を新しい順で
   48KB まで入れる（入らない古い発言は含めない）
-- AI が返すのは JSON（説明と提案）だけ。調べる（`research` を渡した）ときは、読むだけの関数を
-  使える旨と深掘りの規則（`_RESEARCH_RULES`）、登録済みのリポジトリの名前を足す。関数の結果も
-  区切りに入れて渡す（services/knowledge_chat_tools.py）
+- AI が返すのは JSON（説明と、任意の質問・提案）だけ。依頼が曖昧なら提案より先に選択肢つきの
+  質問で聞き、提案の後も決めていない点を質問で示す（`_QUESTION_RULES`）
+- 調べる（`research` を渡した）ときは、読むだけの関数を使える旨と深掘りの規則
+  （`_RESEARCH_RULES`）、登録済みのリポジトリの名前を足す。関数の結果も区切りに入れて渡す
+  （services/knowledge_chat_tools.py）
 """
 
 from __future__ import annotations
@@ -31,15 +33,28 @@ KIND_LABELS: dict[KnowledgeChatKind, str] = {
 }
 
 _COMMON = """\
-できるのは説明（explanation）と、編集欄に入れる下書きの提案（proposal）だけ。
+できるのは説明（explanation）と、利用者への質問（questions）と、編集欄に入れる下書きの提案（proposal）だけ。
 保存・承認・判定はしない。「承認済み」「違反しない」「安全」のような結論を書かない。
 ツールは無い。データベースにも書けない。
 提案は編集欄の欄の全文で、利用者が差分を見て採否を決め、保存と承認も人が行う。
-変える必要が無い・まだ情報が足りないときは proposal を省き、explanation で質問してよい。
-役割の外の依頼を断るときは proposal を省く。
+変える必要が無いときは proposal を省く。
+役割の外の依頼を断るときは proposal と questions を省く。
 {name_rule}
 編集欄の本文が 8KB を超えるときは proposal を省き、変更点（どこを・どう変えるか）を説明で示す。
 explanation は日本語で、短く具体的に書く。
+{question_rules}"""
+
+_QUESTION_RULES = """質問（questions）で会話を進める:
+- 依頼が曖昧・前提が足りない・選び方で結果が大きく変わるときは、proposal を省き、
+  questions で 1〜3 問を聞く。推測で全文を書かない
+- 新規作成の最初の依頼で、目的・対象（誰が何に使うか）・制約のどれかが分からなければ、
+  質問から始める
+- 目的・対象・制約が揃っている依頼には、質問で止めずに proposal を出す。細部の決めていない
+  ことは、置いた前提を explanation に書いて進め、questions で確かめる
+- 提案したあとも、決めていない点や改善の余地があれば、次の一手を questions で示す
+- question は短い 1 文。options は答えの候補を 2〜4 個、それぞれ短い文で書く
+  （押すとそのまま利用者の発言として送られるので、利用者の立場の言葉で書く）
+- explanation では、なぜそれを聞くのか・何を前提にしたかを短く書き、質問の文を繰り返さない
 """
 
 _RESEARCH_RULES = """\
@@ -47,8 +62,6 @@ _RESEARCH_RULES = """\
 - 上の「ツールは無い」は、書き込み・保存・承認の道具が無いという意味で、変わらない。
   このターンは、それとは別に、読むだけの調査の関数（knowledge_list / knowledge_read /
   repo_tree / repo_read / web_search のうち宣言されたもの）を、役割の中で使える
-- 依頼が曖昧・前提が足りないときは、提案の前に具体的な質問を 1〜3 個、選択肢つきで explanation に
-  書き、proposal を省く。推測で全文を書かない
 - 提案するときは、置いた前提・選んだ案と見送った案（トレードオフ）・根拠（調べたもの）を
   explanation に短く書く
 - 既存の承認済みの知識と食い違わないか、knowledge_list / knowledge_read で確かめる
@@ -140,7 +153,11 @@ def chat_rules(kind: KnowledgeChatKind, *, propose_name: bool) -> str:
     """会話の規則のうち種類に依らない部分（共通の規則を含む）。出力の検査の照合にも使う。"""
     name_rule = _NAME_PROPOSED if propose_name and kind != "policy" else _NAME_FIXED
     role = f"SpecLino のチームの知識（{KIND_LABELS[kind]}）の下書きを、利用者と会話しながら手伝う"
-    return guardrail_rules(role) + "\n" + _COMMON.format(name_rule=name_rule)
+    return (
+        guardrail_rules(role)
+        + "\n"
+        + _COMMON.format(name_rule=name_rule, question_rules=_QUESTION_RULES)
+    )
 
 
 def leak_rules(kind: KnowledgeChatKind, *, propose_name: bool) -> str:
@@ -172,7 +189,11 @@ def _names_text(names: list[str]) -> str:
 def _turn(m: ChatMessage) -> str:
     who = "利用者" if m.role == "user" else "AI"
     extra = "（下書きの提案あり）" if m.proposal is not None else ""
-    return f"[{who}]{extra} {m.text}"
+    asked = "".join(
+        f"\n  質問: {q.question}" + (f"（選択肢: {' / '.join(q.options)}）" if q.options else "")
+        for q in m.questions or []
+    )
+    return f"[{who}]{extra} {m.text}{asked}"
 
 
 def _history(history: list[ChatMessage], room: int) -> str:

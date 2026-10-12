@@ -1,7 +1,7 @@
 # uv run の暗黙 sync を止める（macOS 26 で z3-solver が毎回再インストールされ、並列実行がロック待ちになる）
 export UV_NO_SYNC := 1
 
-.PHONY: setup test lint typecheck check format dev db-up db-migrate eval eval-guardrails openapi web-build schemas sandbox-image diagrams selfcheck
+.PHONY: setup test lint typecheck check format dev db-up db-migrate eval eval-guardrails eval-chat-depth openapi web-build schemas sandbox-image diagrams selfcheck
 
 setup:
 	UV_NO_SYNC=0 uv sync --all-groups
@@ -55,6 +55,11 @@ eval:
 # 実 Gemini を呼ぶので費用がかかり、認証が要る。CI では回さない
 eval-guardrails:
 	uv run python -m speclino.eval.guardrails --out build/eval/guardrails.md
+
+# 知識のチャットの深掘り（曖昧な新規作成の依頼には質問で返し、具体的な依頼には提案する）。
+# 実 Gemini を呼ぶので費用がかかり、認証が要る。CI では回さない
+eval-chat-depth:
+	uv run python -m speclino.eval.chat_depth --out build/eval/chat_depth.md
 
 openapi:
 	uv run python -c "from speclino.api.app import create_app; from speclino.settings import Settings; import json; print(json.dumps(create_app(Settings(env='local', role='all')).openapi(), ensure_ascii=False, indent=2, sort_keys=True))" > openapi.json
