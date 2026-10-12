@@ -2,7 +2,7 @@
   "schema_version": "0.1",
   "workspace": "tanabe-yudai",
   "github_repo_id": 1380076715,
-  "bundle_generation": 8,
+  "bundle_generation": 19,
   "policy_revision": 2,
   "policy_hash": "sha256:a4eced43c42285e7bc020bef1548de6b03b05e27bb05b368993b9e5337fe778c",
   "members": [
@@ -28,32 +28,53 @@
       "content_hash": "sha256:84b4dcbceca45b5dc78fe52f73b5a1d5f92b615b6194fefd732739a5ca38daa1"
     },
     {
-      "artifact_id": "5e971919-fe55-404b-ad29-2f059fa1e06d",
+      "artifact_id": "1c95f7fe-1576-4fcb-b3fb-005607e78045",
       "kind": "spec",
-      "name": "spec-gate-001",
+      "name": "spec-ai-001",
       "revision": 1,
-      "content_hash": "sha256:18e9daca6be38ba4f681e791dea6c4ba5132bd906398e09d4290297a25eda34c"
+      "content_hash": "sha256:7b84bdd41a65e1b9d3a3f7393e96c3115a934407aa519763c68c29dcba8bab4e"
     },
     {
-      "artifact_id": "a92c803a-d2fe-407f-9f01-cf8aab05c1c6",
+      "artifact_id": "d762d66b-8fcc-48fa-ab2a-5cd1c8c9dc9d",
       "kind": "spec",
-      "name": "spec-run-001",
+      "name": "spec-gate-002",
       "revision": 1,
-      "content_hash": "sha256:8b1fb063640d1cdf19d1f9761ef84b43e1e17c13cf862b106b9cf217132fe9f7"
+      "content_hash": "sha256:a2770a010266f151d94c2b3bf474f5debc271eeff7cb0fbd211e65e980b54ef7"
     },
     {
-      "artifact_id": "94ba6a9b-8e0f-46b9-bead-175a6a55ef07",
+      "artifact_id": "d45cb628-82e6-42dc-a222-6bb5dece4b72",
       "kind": "spec",
-      "name": "spec-test-002",
+      "name": "spec-know-001",
       "revision": 1,
-      "content_hash": "sha256:d066c5370da8fec4e23d6ee096d7f1229ba95bd224c0a498ce31ad242cacb094"
+      "content_hash": "sha256:487e717b49bacedaeea71804027b1a1984e8649cd72203a6295b6d37d46009fa"
     },
     {
-      "artifact_id": "15d3957f-f990-4e3f-9ed3-6ad88563b7f5",
+      "artifact_id": "3664e237-0194-4dc6-8c0c-d1ab84e03aaa",
       "kind": "spec",
-      "name": "spec-tool-001",
+      "name": "spec-obs-001",
       "revision": 1,
-      "content_hash": "sha256:615042c07f4e18165d784a0167eb75037adab655476884889f22b54849bdb3fe"
+      "content_hash": "sha256:0f428a4290104f2be6ac8648826988c08a10f15275f86db355a886ce5c975b31"
+    },
+    {
+      "artifact_id": "cc80041e-011a-4efd-b4c9-534c929ae616",
+      "kind": "spec",
+      "name": "spec-sync-001",
+      "revision": 1,
+      "content_hash": "sha256:fd821e093a336857222e16fcfcf19fff38730d069aa736fc56d4432b22a2f5f7"
+    },
+    {
+      "artifact_id": "5eb6faf2-1b39-4130-9a6e-7628d12ea39b",
+      "kind": "spec",
+      "name": "spec-sys-001",
+      "revision": 1,
+      "content_hash": "sha256:6fbdf0155a8c5aa6feab9a62aeda658ae8654145eef9df54ba60ca83fe7dfa14"
+    },
+    {
+      "artifact_id": "8d09d4cf-8c1d-45cf-9368-451f9a634c5a",
+      "kind": "spec",
+      "name": "spec-ws-001",
+      "revision": 1,
+      "content_hash": "sha256:21d75aea06546492014cc72e617b04e9010312e8c9c3439ed99da7bd730eec6b"
     }
   ],
   "files": {
@@ -61,19 +82,27 @@
     ".agents/skills/speclino-specification-guide/SKILL.md": "sha256:58a9152c863cb96964a724271fd631eb84f6ce8101fa6487f23c8a7035cfdcbf",
     ".claude/skills/speclino-mcp-guide/SKILL.md": "sha256:5b4d3d5019370d9bb72bf3371a8aa5d478bfbbf922c292ec6f636da20be6ac8b",
     ".claude/skills/speclino-specification-guide/SKILL.md": "sha256:58a9152c863cb96964a724271fd631eb84f6ce8101fa6487f23c8a7035cfdcbf",
-    ".speclino/specs/spec-gate-001.md": "sha256:59bf62bc9e4a95894e5d8fe4c3e478d40c01615032dcf0d0dd4e1ca85787a43a",
-    ".speclino/specs/spec-run-001.md": "sha256:87d7af4744271f4eacceb20fb585621880995822afef01a6c3e52caee3c5e39c",
-    ".speclino/specs/spec-test-002.md": "sha256:8ee5df3cebd36faabef4100ad8ea4af366175d2c5b1afe274a052f8415762490",
-    ".speclino/specs/spec-tool-001.md": "sha256:88dc040b2f64bfb8d4c792f28d444a5d8d3a1ecce45a2bfbd3f858f72ca4479f",
+    ".speclino/specs/spec-ai-001.md": "sha256:76222b9bbd4276986ffedd271f367f31eb8dd3ee360b2b6a454a4cdbb12b7fd6",
+    ".speclino/specs/spec-gate-002.md": "sha256:10125d15164b96c5e3206d6bc559d64529410d93d8d7bceb842dc91928cd4d94",
+    ".speclino/specs/spec-know-001.md": "sha256:465a06c0285c687621b5f7b713c8c6a75941f283270c8e4e8c5b3898f99349dd",
+    ".speclino/specs/spec-obs-001.md": "sha256:1c59edf7e2b24f6f38d89597e1395dcbf61ac18e0c8275d9045070a54066c11e",
+    ".speclino/specs/spec-sync-001.md": "sha256:cf7d5a1970da4f2ed5a67f45c7a559e604ba28d20881acdf72000a81f3a8257a",
+    ".speclino/specs/spec-sys-001.md": "sha256:0a0326baad39a23d68defb4367f86462dbfe90c94c441c4aa32d8304ff3f3fc0",
+    ".speclino/specs/spec-ws-001.md": "sha256:d79c811f1258f12d03de2e2ab653229d3f64b76f71d536c46cce7ccb0f040de7",
     "AGENTS.md": "sha256:1af7f8077666cafcade7aadda7ac2f99ed82d9e6d95b29b9de7afbf8b4a8841e"
   },
-  "absent": [],
+  "absent": [
+    ".speclino/specs/spec-gate-001.md",
+    ".speclino/specs/spec-run-001.md",
+    ".speclino/specs/spec-test-002.md",
+    ".speclino/specs/spec-tool-001.md"
+  ],
   "skill_roots": [
     ".agents/skills",
     ".claude/skills"
   ],
-  "issued_at": "2026-10-11T03:31:22.855800Z",
-  "expires_at": "2026-11-10T03:31:22.855800Z",
+  "issued_at": "2026-10-12T01:51:37.072506Z",
+  "expires_at": "2026-11-11T01:51:37.072506Z",
   "key_id": "d2ca695a75fba22d",
-  "signature": "hmac-sha256:8f4c64385afa357c112582b4435f03c725a0a11b1fe526a85e7b4d7fa053c12a"
+  "signature": "hmac-sha256:579d34e28fd14b0c1e4b0674ae72911a422bf9f96b058936f2433b4f5766b7c1"
 }
