@@ -55,6 +55,8 @@ export interface RequirementView {
   verdict: Verdict | null
   finding_ids: string[]
   removed: boolean
+  /** 要求を定めた SpecLino の仕様（run の bundle）。旧形式・不明は null */
+  artifact_id?: string | null
 }
 
 export interface PolicyView {

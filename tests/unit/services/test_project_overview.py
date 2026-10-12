@@ -20,6 +20,7 @@ from speclino.services.project_overview import (
     build_policies,
     build_requirements,
     count_verdicts,
+    link_artifacts,
     load_spec_irs,
     requirement_verdicts,
     worst_verdict,
@@ -356,3 +357,11 @@ def test_untitled_legacy_rule_takes_title_from_finding_expected() -> None:
     rows = build_requirements([spec], [f], None)
     assert rows[0].title == "注文は取り消せる"
     assert build_requirements([spec], [], None)[0].title is None
+
+
+def test_link_artifacts_sets_only_known_requirements() -> None:
+    rows = build_requirements([_spec()], [], None)
+    first = rows[0].id
+    linked = link_artifacts(rows, {first: "art-1"})
+    assert linked[0].artifact_id == "art-1"
+    assert all(r.artifact_id is None for r in linked[1:])

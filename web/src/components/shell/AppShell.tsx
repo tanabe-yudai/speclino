@@ -5,10 +5,11 @@ import { ApiError } from '@/api/errors'
 import { ErrorState } from '@/components/ErrorState'
 import { MeContext } from '@/hooks/meContext'
 import type { Me } from '@/types/me'
+import { BottomNav } from './BottomNav'
 import { CommandPalette } from './CommandPalette'
 import { TopBar } from './TopBar'
 
-/** ログイン後の全画面の外枠（上部バー・⌘K）。/api/me はここで 1 回だけ取る。 */
+/** ログイン後の全画面の外枠（上部バー・スマホの画面下のタブ・⌘K）。/api/me はここで 1 回だけ取る。 */
 export function AppShell() {
   const [me, setMe] = useState<Me | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -44,10 +45,12 @@ export function AppShell() {
   return (
     <MeContext.Provider value={value}>
       <TopBar onOpenPalette={() => setPaletteOpen(true)} />
-      {/* 長いパスや ID（`::` や `/` を含み空白の無い文字列）でカードが押し広げられないよう、どこでも折り返せるようにする */}
-      <main className="mx-auto w-full max-w-6xl px-4 pt-6 pb-16 [overflow-wrap:anywhere] sm:px-6">
+      {/* 長いパスや ID（`::` や `/` を含み空白の無い文字列）でカードが押し広げられないよう、どこでも折り返せるようにする。
+          スマホ幅は画面下のタブ（BottomNav）の分だけ下を空ける */}
+      <main className="mx-auto w-full max-w-6xl px-4 pt-6 pb-28 [overflow-wrap:anywhere] sm:px-6 sm:pb-16">
         {error && !me ? <ErrorState message={error} onRetry={reload} /> : <Outlet />}
       </main>
+      <BottomNav />
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
     </MeContext.Provider>
   )

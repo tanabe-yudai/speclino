@@ -1,32 +1,32 @@
-import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Panel, PanelTitle } from '@/components/app/Panel'
+import { AgentsTab } from '@/components/settings/AgentsTab'
 import { MembersTab } from '@/components/settings/MembersTab'
-import { IntegrationsTab } from '@/components/settings/IntegrationsTab'
 import { ProjectSettingsTab } from '@/components/settings/ProjectSettingsTab'
 import { RepositoriesTab } from '@/components/settings/RepositoriesTab'
 import { ErrorState } from '@/components/ErrorState'
 import { LoadingState } from '@/components/LoadingState'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useMe } from '@/hooks/useMe'
+import { SETTINGS_TAB_LABELS } from '@/services/labels'
+import { legacyRedirect } from '@/services/legacyRoutes'
 import { paths } from '@/services/paths'
-import { SETTINGS_TABS, pickSettingsTab } from '@/services/settingsTabs'
+import { SETTINGS_TABS, parseSettingsTab } from '@/services/settingsTabs'
 import type { SettingsTab } from '@/types/command'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 
-const TAB_LABELS: Record<SettingsTab, string> = {
-  members: 'メンバー',
-  repositories: 'リポジトリ',
-  integrations: '連携',
-  project: 'プロジェクト',
-}
-
-/** ワークスペースの設定。連携の中のエージェント接続トークンはオーナーにだけ出す。 */
+/** ワークスペースの設定（`/w/:slug/settings/:tab`）。エージェント接続の中のトークンの発行は権限で出し分ける。 */
 export function Settings() {
-  const { slug } = useParams<{ slug: string }>()
+  const { slug, tab: rawTab } = useParams<{ slug: string; tab?: string }>()
+  const { pathname, search } = useLocation()
+  const navigate = useNavigate()
   const { me, reload } = useMe()
-  const [params, setParams] = useSearchParams()
   useDocumentTitle('設定')
   if (!slug) return <ErrorState message="ワークスペースが指定されていません" />
+  // 旧い ?tab= と旧いタブ名は新しいタブのパスへ
+  const legacy = legacyRedirect(pathname, search)
+  const tab = parseSettingsTab(rawTab)
+  if (legacy || tab === null) return <Navigate to={legacy ?? paths.settings(slug)} replace />
   if (!me) return <LoadingState />
   const membership = me.workspaces.find((w) => w.slug === slug) ?? null
   if (!membership) {
@@ -39,7 +39,6 @@ export function Settings() {
       </Panel>
     )
   }
-  const tab = pickSettingsTab(params.get('tab'))
 
   return (
     <div className="space-y-6">
@@ -47,12 +46,12 @@ export function Settings() {
         <p className="text-xs font-semibold tracking-widest text-primary uppercase">Settings</p>
         <h1 className="mt-1 text-2xl font-bold tracking-tight break-words">{membership.name ?? slug} の設定</h1>
       </header>
-      <Tabs value={tab} onValueChange={(v) => setParams({ tab: v }, { replace: true })}>
+      <Tabs value={tab} onValueChange={(v) => navigate(paths.settings(slug, v as SettingsTab), { replace: true })}>
         <div className="-mx-1 overflow-x-auto px-1">
           <TabsList>
             {SETTINGS_TABS.map((t) => (
               <TabsTrigger key={t} value={t}>
-                {TAB_LABELS[t]}
+                {SETTINGS_TAB_LABELS[t]}
               </TabsTrigger>
             ))}
           </TabsList>
@@ -63,10 +62,10 @@ export function Settings() {
         <TabsContent value="repositories" className="mt-6">
           <RepositoriesTab slug={slug} isOwner={membership.role === 'owner'} />
         </TabsContent>
-        <TabsContent value="integrations" className="mt-6">
-          <IntegrationsTab slug={slug} role={membership.role} />
+        <TabsContent value="agents" className="mt-6">
+          <AgentsTab slug={slug} role={membership.role} />
         </TabsContent>
-        <TabsContent value="project" className="mt-6">
+        <TabsContent value="projects" className="mt-6">
           <ProjectSettingsTab slug={slug} role={membership.role} />
         </TabsContent>
       </Tabs>
