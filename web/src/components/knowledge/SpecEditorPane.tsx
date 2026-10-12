@@ -1,24 +1,14 @@
 import { useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { PaneViewSwitch } from "@/components/knowledge/PaneViewSwitch";
-import { CanonicalView } from "@/components/spec-editor/CanonicalView";
 import { DiagnosticsList } from "@/components/spec-editor/DiagnosticsList";
 import { MarkdownInput } from "@/components/spec-editor/MarkdownInput";
-import { MermaidPreview } from "@/components/spec-editor/MermaidPreview";
-import { RequirementTrace } from "@/components/spec-editor/RequirementTrace";
-import { SuggestionPanel } from "@/components/spec-editor/SuggestionPanel";
 import { Label } from "@/components/ui/label";
 import { MarkdownPreview } from "@/components/knowledge/MarkdownPreview";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import { useSuggestions } from "@/hooks/useSuggestions";
 import { focusLine } from "@/lib/textarea";
 import { initialPaneView } from "@/services/paneView";
-import {
-  countErrors,
-  parseJsonField,
-  requirementTrace,
-} from "@/services/specPreview";
+import { countErrors, parseJsonField } from "@/services/specPreview";
 import type { DomainSpecJson, SpecIrJson } from "@/types/knowledge";
 import type { PaneView } from "@/types/paneView";
 import type { PaneValidity, SpecPaneProps } from "@/types/specEditor";
@@ -28,25 +18,19 @@ const pretty = (v: unknown) =>
     ? ""
     : JSON.stringify(v, null, 2);
 
-/** 仕様エディタ（設計 9 章）: 左に本文、右に図・整形した本文・診断・要求の追跡。 */
+/** 仕様エディタ: 左に本文、右に描いた本文（図つき）と診断の件数。 */
 export function SpecEditorPane({
-  slug,
   content,
   onChange,
   preview,
   previewError,
   previewPending,
-  saving,
   onInvalidChange,
   resetKey,
 }: SpecPaneProps & PaneValidity) {
   const textarea = useRef<HTMLTextAreaElement>(null);
   const [view, setView] = useState<PaneView>(() =>
     initialPaneView(content.markdown),
-  );
-  // 本文がある仕様は描いた本文から見せる（狭い画面でプレビューに切り替えたときも本文が出る）
-  const [tab, setTab] = useState(() =>
-    view === "preview" ? "preview" : "diagnostics",
   );
   const [domainText, setDomainText] = useState(() => pretty(content.domain));
   const [legacyText, setLegacyText] = useState(() => pretty(content.legacy_ir));
@@ -67,23 +51,6 @@ export function SpecEditorPane({
 
   const diagnostics = preview?.parse_result.diagnostics ?? [];
   const errors = countErrors(diagnostics);
-  const compiled = preview?.parse_result.compiled ?? null;
-  const trace = requirementTrace(compiled);
-
-  // タブを切り替えても提案を失わないよう、状態はここ（常に表示される親）で持つ
-  const suggestions = useSuggestions(slug, content.markdown, (markdown) =>
-    onChange({ ...content, markdown }),
-  );
-  const suggestBlocked = saving
-    ? "保存中は提案を求められません。"
-    : previewPending
-      ? "診断を更新しています。終わってから提案を求めてください。"
-      : domain.error || legacy.error
-        ? "取り込んだ要求に読めない箇所があるため、AI の提案は使えません。"
-        : !content.markdown.trim()
-          ? "本文を入力すると提案を求められます。"
-          : null;
-
   function jump(line: number, column: number) {
     // 本文が隠れている（狭い画面のプレビュー）と focus できないので、先に本文を出す
     flushSync(() => setView("edit"));
@@ -112,10 +79,7 @@ export function SpecEditorPane({
     <div className="space-y-4 lg:space-y-0">
       <PaneViewSwitch
         view={view}
-        onChange={(next) => {
-          setView(next);
-          if (next === "preview") setTab("preview");
-        }}
+        onChange={setView}
         diagnosticCount={preview ? diagnostics.length : null}
       />
       <div className="grid gap-6 lg:grid-cols-2">
@@ -135,7 +99,7 @@ export function SpecEditorPane({
             invalid={errors > 0}
           />
           <p id="spec-markdown-help" className="text-xs text-ink-3">
-            図の書き方は「診断」タブで確かめられます。
+            図の書き方は右の診断で確かめられます。
           </p>
           {hasLegacy && (
             <details className="rounded-md border p-3" open>
@@ -203,61 +167,20 @@ export function SpecEditorPane({
               {previewError}
             </p>
           )}
-          <Tabs value={tab} onValueChange={setTab}>
-            <div className="-mx-1 overflow-x-auto px-1">
-              <TabsList>
-                <TabsTrigger value="diagnostics">
-                  診断{preview ? `（${diagnostics.length}）` : ""}
-                </TabsTrigger>
-                <TabsTrigger value="preview">プレビュー</TabsTrigger>
-                <TabsTrigger value="diagrams">図</TabsTrigger>
-                <TabsTrigger value="canonical">整形した本文</TabsTrigger>
-                <TabsTrigger value="trace">要求の追跡</TabsTrigger>
-                <TabsTrigger value="suggest">AI の提案</TabsTrigger>
-              </TabsList>
-            </div>
-            <TabsContent value="diagnostics" className="mt-3">
-              {preview ? (
-                <DiagnosticsList diagnostics={diagnostics} onJump={jump} />
-              ) : (
-                <p className="text-sm text-ink-3">
-                  本文を入力すると診断が出ます。
-                </p>
-              )}
-            </TabsContent>
-            <TabsContent value="preview" className="mt-3">
-              <MarkdownPreview markdown={content.markdown} mermaid />
-            </TabsContent>
-            <TabsContent value="diagrams" className="mt-3">
-              <MermaidPreview markdown={content.markdown} onJump={jump} />
-            </TabsContent>
-            <TabsContent value="canonical" className="mt-3">
-              <CanonicalView
-                canonical={preview?.canonical ?? null}
-                pending={previewPending}
-                hasErrors={errors > 0}
-              />
-            </TabsContent>
-            <TabsContent value="trace" className="mt-3">
-              <RequirementTrace trace={trace} hasCompiled={compiled !== null} />
-            </TabsContent>
-            <TabsContent value="suggest" className="mt-3">
-              <SuggestionPanel
-                state={suggestions.state}
-                stale={suggestions.stale}
-                blockedReason={suggestBlocked}
-                onRequest={() =>
-                  suggestions.request({
-                    markdown: content.markdown,
-                    domain: content.domain,
-                    legacy_ir: content.legacy_ir,
-                  })
-                }
-                onApply={suggestions.apply}
-                onReject={suggestions.reject}
-              />
-            </TabsContent>
-          </Tabs>
+          {preview &&
+            (diagnostics.length > 0 ? (
+              <details className="rounded-md border p-3">
+                <summary className="cursor-pointer text-sm font-medium">
+                  診断の内容（{diagnostics.length} 件）
+                </summary>
+                <div className="mt-3">
+                  <DiagnosticsList diagnostics={diagnostics} onJump={jump} />
+                </div>
+              </details>
+            ) : (
+              <p className="text-sm text-ink-3">問題なし</p>
+            ))}
+          <MarkdownPreview markdown={content.markdown} mermaid />
         </div>
       </div>
     </div>

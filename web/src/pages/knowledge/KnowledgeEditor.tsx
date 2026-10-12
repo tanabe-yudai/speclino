@@ -337,13 +337,11 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
         {/* AI が書いている間も本文の欄は出したまま（途中経過は会話の中。ページの高さを変えない） */}
         {content.kind === 'spec' && (
           <SpecEditorPane
-            slug={slug}
             content={content}
             onChange={setContent}
             preview={shownPreview}
             previewError={previewError}
             previewPending={previewPending}
-            saving={saving}
             onInvalidChange={setPaneInvalid}
             resetKey={resetKey}
           />
