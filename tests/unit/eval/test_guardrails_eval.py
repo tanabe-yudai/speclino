@@ -62,3 +62,14 @@ async def test_broken_reply_is_an_error() -> None:
     llm = ScriptedLlm({"proposal": None})
     out = await run_case(llm, CASE, MODEL_IDS)
     assert out.error is not None and not out.passed
+
+
+async def test_leak_in_questions_fails() -> None:
+    llm = ScriptedLlm(
+        {
+            "explanation": "SpecLino の AI アシスタントです",
+            "questions": [{"question": "Gemini 3.8 Flash を使いますか？", "options": ["はい"]}],
+        }
+    )
+    out = await run_case(llm, CASE, MODEL_IDS)
+    assert out.leak == "gemini 3.8 flash" and not out.passed

@@ -13,6 +13,7 @@ import {
   editorText,
   noteFromSummary,
   parseChatStreamEvent,
+  pickableReplyId,
   proposedName,
   settleTurn,
   proposalText,
@@ -199,5 +200,23 @@ describe('settleTurn', () => {
     const order: string[] = []
     await settleTurn(turn, undefined, () => void order.push('close'))
     expect(order).toEqual(['close'])
+  })
+})
+
+describe('pickableReplyId', () => {
+  const msg = (id: string, role: 'user' | 'assistant', extra: object = {}) => ({ id, role, text: 't', status: 'done' as const, created_at: '2026-10-12T00:00:00Z', ...extra })
+  const q = { questions: [{ question: '対象は？', options: ['A', 'B'] }] }
+
+  it('is the latest AI reply with questions, only when not sending', () => {
+    const messages = [msg('u1', 'user'), msg('a1', 'assistant', q), msg('u2', 'user'), msg('a2', 'assistant', q)]
+    expect(pickableReplyId(messages, false)).toBe('a2')
+    expect(pickableReplyId(messages, true)).toBeNull()
+  })
+
+  it('is null when the latest message is not a finished AI reply with questions', () => {
+    expect(pickableReplyId([], false)).toBeNull()
+    expect(pickableReplyId([msg('a1', 'assistant', q), msg('u1', 'user')], false)).toBeNull()
+    expect(pickableReplyId([msg('a1', 'assistant')], false)).toBeNull()
+    expect(pickableReplyId([msg('a1', 'assistant', { ...q, status: 'failed' })], false)).toBeNull()
   })
 })

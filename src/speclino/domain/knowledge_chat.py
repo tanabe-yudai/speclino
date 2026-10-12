@@ -95,6 +95,22 @@ class ChatSource(IRModel):
     url: str | None = Field(default=None, max_length=2000)
 
 
+CHAT_QUESTIONS_MAX = 3
+CHAT_QUESTION_MAX_CHARS = 200
+CHAT_OPTIONS_MAX = 4
+CHAT_OPTION_MAX_CHARS = 60
+
+
+class ChatQuestion(IRModel):
+    """AI から利用者への深掘りの質問 1 件。選択肢は、押すとそのまま発言として送る短い文。
+
+    選択肢が 2 つ未満なら空にする（自由入力で答える質問）。
+    """
+
+    question: str = Field(min_length=1, max_length=CHAT_QUESTION_MAX_CHARS)
+    options: list[str] = Field(default_factory=list, max_length=CHAT_OPTIONS_MAX)
+
+
 class ChatMessage(IRModel):
     id: str = Field(min_length=1)
     role: ChatRole
@@ -106,6 +122,8 @@ class ChatMessage(IRModel):
     # 調べた返答だけ。出典と、Google 検索の候補の表示（HTML。画面は sandbox の iframe で出す）
     sources: list[ChatSource] | None = Field(default=None, max_length=CHAT_SOURCES_MAX)
     search_suggestions: list[str] | None = Field(default=None, max_length=SEARCH_SUGGESTIONS_MAX)
+    # AI の返答だけ。次に決めることの質問と選択肢
+    questions: list[ChatQuestion] | None = Field(default=None, max_length=CHAT_QUESTIONS_MAX)
 
 
 class KnowledgeChat(IRModel):
@@ -188,9 +206,14 @@ __all__ = [
     "ChatMessage",
     "ChatMessageStatus",
     "ChatProposal",
+    "ChatQuestion",
     "ChatRole",
     "ChatStreamEvent",
     "ChatStreamEventType",
+    "CHAT_OPTION_MAX_CHARS",
+    "CHAT_OPTIONS_MAX",
+    "CHAT_QUESTION_MAX_CHARS",
+    "CHAT_QUESTIONS_MAX",
     "CHAT_SOURCES_MAX",
     "SEARCH_SUGGESTIONS_MAX",
     "SEARCH_SUGGESTION_MAX_BYTES",

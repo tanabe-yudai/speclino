@@ -7,6 +7,7 @@ import json
 from speclino.services.knowledge_chat_proposal import (
     build_proposal,
     extract_proposal,
+    extract_questions,
     response_schema,
     text_hash,
 )
@@ -216,3 +217,34 @@ def test_response_schema_has_name_only_when_proposing() -> None:
         assert "name" in props
     policy = response_schema("policy", propose_name=True)["properties"]["proposal"]["properties"]
     assert "name" not in policy
+
+
+def test_questions_are_optional_in_the_schema_and_come_before_the_proposal() -> None:
+    schema = response_schema("skill")
+    assert list(schema["properties"]) == ["explanation", "questions", "proposal"]
+    assert schema["required"] == ["explanation"]
+    assert schema["properties"]["questions"]["maxItems"] == 3
+    # 提案を出すなら本文の欄は必須（名前だけの提案を出させない）
+    assert schema["properties"]["proposal"]["required"] == ["skill_md"]
+    assert response_schema("policy")["properties"]["proposal"]["required"] == ["rule"]
+
+
+def test_extract_questions_drops_empty_and_overlong_and_caps_counts() -> None:
+    long_q = "あ" * 201
+    long_o = "い" * 61
+    data = [
+        {"question": " 対象は？ ", "options": ["A", " A ", "B", "C", "D", "E", long_o, 3]},
+        {"question": long_q, "options": ["A", "B"]},
+        {"question": "   ", "options": ["A", "B"]},
+        "not a dict",
+        {"question": "自由に答える", "options": ["一つだけ"]},
+        {"question": "選択肢なし"},
+        {"question": "4 問目", "options": ["A", "B"]},
+    ]
+    out = extract_questions(data)
+    assert [(q.question, q.options) for q in out] == [
+        ("対象は？", ["A", "B", "C", "D"]),
+        ("自由に答える", []),
+        ("選択肢なし", []),
+    ]
+    assert extract_questions(None) == [] and extract_questions({"question": "x"}) == []

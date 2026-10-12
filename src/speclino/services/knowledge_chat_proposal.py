@@ -9,6 +9,8 @@
   `domain/knowledge.py` の型、規約は `PolicyRule` と検査器の一覧（`validate_package`）。
   型に合わない提案も `raw_proposal` と診断で返す（`ArtifactContent` にはしない）
 - この診断は案内にすぎない。保存・承認の検証は既存の経路が独立に行う
+- 返答には任意で、次に決めることの質問（`questions`、選択肢つき）を添えられる。
+  サーバで個数・長さを検証し、空や上限を超えるものは捨てる（`extract_questions`）
 """
 
 from __future__ import annotations
@@ -28,7 +30,16 @@ from speclino.domain.knowledge import (
     InstructionsContent,
     SkillContent,
 )
-from speclino.domain.knowledge_chat import ChatProposal, KnowledgeChatKind, ProposalDiagnostic
+from speclino.domain.knowledge_chat import (
+    CHAT_OPTION_MAX_CHARS,
+    CHAT_OPTIONS_MAX,
+    CHAT_QUESTION_MAX_CHARS,
+    CHAT_QUESTIONS_MAX,
+    ChatProposal,
+    ChatQuestion,
+    KnowledgeChatKind,
+    ProposalDiagnostic,
+)
 from speclino.domain.policy import PolicyPackage, PolicyRule
 from speclino.domain.spec_ir import SpecIR
 from speclino.services.policy_governance import InvalidPackage, validate_package
@@ -125,23 +136,79 @@ def _proposal_schema(kind: KnowledgeChatKind, *, propose_name: bool) -> dict[str
             "type": "string",
             "description": "新規作成時の名前の案（英小文字・数字・ハイフン、64 文字以内）",
         }
-    return {"type": "object", "properties": props}
+    # 提案を出すなら本文の欄は必ず書かせる（名前だけの提案を出させない）
+    body = _TEXT_FIELDS.get(kind, ("rule",))[0]
+    return {"type": "object", "properties": props, "required": [body]}
 
 
 def response_schema(kind: KnowledgeChatKind, *, propose_name: bool = False) -> dict[str, Any]:
-    """AI の返答の JSON Schema（説明の文と、任意の提案）。
+    """AI の返答の JSON Schema（説明の文と、任意の質問と提案）。
 
-    キーの順（explanation → proposal）が生成の順になる。ストリームで説明を先に見せるため崩さない。
-    `propose_name` は新規作成の会話のとき（提案に名前の案を足す）。
+    キーの順（explanation → questions → proposal）が生成の順になる。ストリームで説明を先に
+    見せるため崩さない。`propose_name` は新規作成の会話のとき（提案に名前の案を足す）。
     """
     return {
         "type": "object",
         "properties": {
             "explanation": {"type": "string", "description": "利用者への説明（日本語）"},
+            "questions": _QUESTIONS_SCHEMA,
             "proposal": _proposal_schema(kind, propose_name=propose_name),
         },
         "required": ["explanation"],
     }
+
+
+_QUESTIONS_SCHEMA: dict[str, Any] = {
+    "type": "array",
+    "maxItems": CHAT_QUESTIONS_MAX,
+    "description": "利用者に決めてほしいことの質問（1〜3 問）。無ければ省く",
+    "items": {
+        "type": "object",
+        "properties": {
+            "question": {"type": "string", "description": "質問の文（短く、1 文）"},
+            "options": {
+                "type": "array",
+                "maxItems": CHAT_OPTIONS_MAX,
+                "items": {"type": "string"},
+                "description": "答えの選択肢 2〜4 個（それぞれ短い文。そのまま利用者の発言になる）",
+            },
+        },
+        "required": ["question", "options"],
+    },
+}
+
+
+def _short(value: Any, limit: int) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = " ".join(value.split())
+    return text if 0 < len(text) <= limit else None
+
+
+def extract_questions(data: Any) -> list[ChatQuestion]:
+    """返答の `questions` を検証して取り出す。空・長すぎる質問と選択肢は捨て、重複した選択肢は
+    1 つにする。質問は 3 問まで、選択肢は 4 個まで。選択肢が 2 個に満たなければ選択肢なしにする。
+    """
+    if not isinstance(data, list):
+        return []
+    out: list[ChatQuestion] = []
+    for item in data:
+        if len(out) >= CHAT_QUESTIONS_MAX:
+            break
+        if not isinstance(item, dict):
+            continue
+        question = _short(item.get("question"), CHAT_QUESTION_MAX_CHARS)
+        if question is None:
+            continue
+        raw_options = item.get("options")
+        options: list[str] = []
+        for o in raw_options if isinstance(raw_options, list) else []:
+            option = _short(o, CHAT_OPTION_MAX_CHARS)
+            if option is not None and option not in options:
+                options.append(option)
+        options = options[:CHAT_OPTIONS_MAX]
+        out.append(ChatQuestion(question=question, options=options if len(options) >= 2 else []))
+    return out
 
 
 def _strings(value: Any) -> list[str] | None:
@@ -344,4 +411,11 @@ async def build_proposal(
     )
 
 
-__all__ = ["build_proposal", "draft_text_field", "extract_proposal", "response_schema", "text_hash"]
+__all__ = [
+    "build_proposal",
+    "draft_text_field",
+    "extract_proposal",
+    "extract_questions",
+    "response_schema",
+    "text_hash",
+]

@@ -10,6 +10,7 @@ import { ApiError, StreamInterruptedError } from '@/api/errors'
 import type { ArtifactContent } from '@/types/knowledge'
 import type { SseMessage } from '@/types/sse'
 import type {
+  ChatMessage,
   ChatProposal,
   ChatStreamEvent,
   ChatStreaming,
@@ -174,6 +175,15 @@ export function applyRuleProposal(rule: PolicyRule, raw: RawProposal): PolicyRul
 
 export function errorCount(proposal: ChatProposal): number {
   return proposal.diagnostics.filter((d) => d.severity === 'error').length
+}
+
+/**
+ * 質問の選択肢を押せる返答の ID。最新の発言が確定した AI の返答で、送信中でないときだけ
+ * （古い質問への答えを、会話の流れと食い違う位置に送らせない）。
+ */
+export function pickableReplyId(messages: ChatMessage[], sending: boolean): string | null {
+  const last = messages[messages.length - 1]
+  return !sending && last?.role === 'assistant' && last.status === 'done' && !!last.questions?.length ? last.id : null
 }
 
 /** 要約できるか（AI が答えた発言が 1 つ以上ある）。 */
