@@ -37,6 +37,7 @@ SPEC-SYS-001 の区画のうち、どの知識の組み合わせで作業・判�
 | R-OBS-09 | mandatory | ホームの状態は 2 章の 5 区分から最も重い区分を選び、免除中を通常の適合と区別する | - |
 | R-OBS-10 | advisory | 集計の問い合わせの数はプロジェクトの数に比例しない | - |
 | R-OBS-11 | advisory | 集計の流れ（図 health） | health#h1, health#h2, health#h3, health#h4, health#h5, health#h6, health#h7, health#o1, health#h8, health#h9, obs-vocab#observability |
+| R-OBS-12 | mandatory | 構成要素のつながり: 集計は今の bundle を読み、1 つの結果（ワークスペース → プロジェクト・取得の遅れ → 率）を組み立てる（クラス図の関係） | obs-vocab#r1, obs-vocab#r2, obs-vocab#r3, obs-vocab#r4, obs-vocab#r5, obs-vocab#r6, obs-vocab#r7 |
 
 ## 4. 語彙（クラス図）
 
@@ -99,6 +100,15 @@ classDiagram
         llm_assisted
         unverified
     }
+    class ProjectHealth
+    class Ratio
+    observability ..> BundleRepository : [r1] 今の bundle
+    observability ..> WorkspaceHealth : [r2] 集計の結果
+    observability ..> ProjectHealth : [r3] プロジェクトごとの集計
+    observability ..> FetchHealth : [r4] 取得の遅れ
+    WorkspaceHealth *-- ProjectHealth : [r5] プロジェクト
+    WorkspaceHealth *-- FetchHealth : [r6] 取得の遅れ
+    ProjectHealth *-- Ratio : [r7] 形式化率・対応率
 ```
 
 ## 5. 集計（シーケンス図）

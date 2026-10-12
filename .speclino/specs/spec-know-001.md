@@ -38,6 +38,7 @@ SPEC-SYS-001 の区画のうち、知識レジストリ（`speclino.services.kno
 | R-KNOW-13 | advisory | Git の旧形式の仕様の取り込み（speclino import-specs）は下書きを作るだけで承認しない。承認は画面か API で人が行う | - |
 | R-KNOW-14 | advisory | 承認の流れ（図 approve） | approve#k1, approve#k2, approve#k3, approve#g1, approve#k4, approve#g2, approve#k5, approve#k6, approve#k7, approve#k8, know-vocab#knowledge_registry |
 | R-KNOW-15 | advisory | 下書きの保存の流れ（図 save-draft） | save-draft#s, save-draft#d, save-draft#u, save-draft#n, save-draft#a, save-draft#z, save-draft#e1, save-draft#e2, save-draft#e3, save-draft#e4, save-draft#e5, save-draft#e6, save-draft#e7, save-draft#e8 |
+| R-KNOW-16 | mandatory | 構成要素のつながり: 知識レジストリは改訂・bundle・ワークスペース・監査の各リポジトリを使って改訂と bundle を作り、bundle はメンバー（改訂と content_hash）を部品として持つ（クラス図の関係） | know-vocab#r1, know-vocab#r2, know-vocab#r3, know-vocab#r4, know-vocab#r5, know-vocab#r6, know-vocab#r7, know-vocab#r8, know-vocab#r9 |
 
 ## 4. 語彙（クラス図）
 
@@ -91,6 +92,18 @@ classDiagram
         instructions
         spec
     }
+    class ArtifactRevision
+    class Bundle
+    class BundleMember
+    knowledge_registry ..> ArtifactRepository : [r1] 改訂の保存
+    knowledge_registry ..> BundleRepository : [r2] bundle の保存
+    knowledge_registry ..> TeamRepository : [r3] ワークスペースのロック・承認者
+    knowledge_registry ..> AuditRepository : [r4] 監査
+    knowledge_registry ..> ArtifactRevision : [r5] 改訂
+    knowledge_registry ..> Bundle : [r6] bundle の作成
+    ArtifactRepository ..> ArtifactRevision : [r7] 改訂の行
+    BundleRepository ..> Bundle : [r8] bundle の行
+    Bundle *-- BundleMember : [r9] メンバーの改訂
 ```
 
 ## 5. 承認（シーケンス図）

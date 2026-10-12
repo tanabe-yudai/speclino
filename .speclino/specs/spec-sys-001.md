@@ -68,6 +68,7 @@ MCP・A2A・`speclino sync` で各自のエージェントに配り、PR のゲ�
 | R-SYS-19 | advisory | 知識のライフサイクルは、下書き → 承認 → bundle → 鮮度の確認と取り込み → PR の run とゲート → 観測の順に進む | - |
 | R-SYS-20 | advisory | 知識の改訂の状態は、下書き → 有効 → 置き換え済み の順にだけ進む | - |
 | R-SYS-21 | mandatory | ゲートの決定はフェイルクローズの順序で出口を選ぶ | gate-decision#s, gate-decision#c1, gate-decision#c2, gate-decision#c3, gate-decision#c4, gate-decision#f, gate-decision#pw, gate-decision#p, gate-decision#z, gate-decision#e1, gate-decision#e2, gate-decision#e3, gate-decision#e4, gate-decision#e5, gate-decision#e6, gate-decision#e7, gate-decision#e8, gate-decision#e9, gate-decision#e10, gate-decision#e11, gate-decision#e12 |
+| R-SYS-22 | mandatory | 構成要素のつながり: worker は検査とゲートを、MCP は配信と知識レジストリを、配信は知識レジストリと適用スクリプトを使い、知識レジストリは改訂を扱う（クラス図の関係） | sys-vocab#r1, sys-vocab#r2, sys-vocab#r3, sys-vocab#r4, sys-vocab#r5, sys-vocab#r6, sys-vocab#r7, sys-vocab#r8 |
 
 ### 4.1 要求と下位の仕様の対応
 
@@ -183,6 +184,14 @@ classDiagram
         mandatory
         advisory
     }
+    ReviewRunService ..> check_pipeline : [r1] run の検査
+    check_pipeline ..> gate : [r2] ゲートの決定
+    ReviewRunService ..> gate : [r3] ゲートの方針
+    mcp_server ..> knowledge_sync : [r4] 鮮度の確認・取り込みの計画
+    mcp_server ..> knowledge_registry : [r5] 承認済みの知識の取得
+    knowledge_sync ..> knowledge_registry : [r6] bundle の解決
+    knowledge_sync ..> sync_apply : [r7] 適用スクリプトの同梱
+    knowledge_registry ..> ArtifactRevision : [r8] 改訂
 ```
 
 ## 6. 知識のライフサイクル
