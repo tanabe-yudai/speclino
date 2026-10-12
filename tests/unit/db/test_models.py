@@ -49,6 +49,7 @@ EXPECTED_TABLES = {
     "attestations",
     "knowledge_chats",
     "sync_plans",
+    "user_profiles",
 }
 
 

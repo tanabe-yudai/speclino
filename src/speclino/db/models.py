@@ -377,6 +377,28 @@ class WorkspaceMember(Base):
     )
 
 
+class UserProfileRecord(Base):
+    """`user_profiles`: 利用者の表示用のプロフィール（uid ごとに 1 行）。
+
+    認可には使わない（識別子は uid）。`display_name` は本人が設定した表示名で、行を作るときだけ
+    ID トークンの name を入れ、以後のサインインでは上書きしない。`email` と `email_verified` は
+    最後に `GET /api/me` を呼んだときの ID トークンの値。メールは同じワークスペースのメンバーにだけ
+    見せる（`services/profiles.py`）。
+    """
+
+    __tablename__ = "user_profiles"
+
+    uid: Mapped[str] = mapped_column(String, primary_key=True)
+    display_name: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    email: Mapped[str | None] = mapped_column(String, nullable=True)
+    email_verified: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class WorkspaceInvitation(Base):
     """`workspace_invitations`: メール宛の招待（S56、design/2026-09-27-workspaces.md）。
 

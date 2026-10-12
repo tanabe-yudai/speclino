@@ -26,7 +26,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { formatDateTime } from '@/services/format'
-import { WORKSPACE_ROLE_LABELS } from '@/services/labels'
+import { PROFILE_LABELS, WORKSPACE_ROLE_LABELS } from '@/services/labels'
 import {
   INVITATION_STATUS_LABELS,
   canManageMembers,
@@ -35,6 +35,7 @@ import {
   isLastOwner,
   isValidEmail,
   memberLabel,
+  memberSubLabel,
   sortMembers,
 } from '@/services/members'
 import type { WorkspaceRole } from '@/types/me'
@@ -43,6 +44,15 @@ import type { Invitation, IssuedInvitation, WorkspaceMember } from '@/types/memb
 const ROLES: WorkspaceRole[] = ['owner', 'approver', 'member']
 const SELECT_CLASS = 'h-8 rounded-md border bg-card px-2 text-sm disabled:opacity-50'
 const ROLE_HELP = 'オーナー: 招待・権限の変更・リポジトリ登録・エージェント接続トークン / 承認者: 規約の承認と設定の変更 / メンバー: 閲覧と検査の開始'
+
+/** メールが確認済みか（未確認のメールは本人のものとは限らない）。 */
+function EmailMark({ verified }: { verified: boolean }) {
+  return (
+    <span className={`ml-2 rounded-full px-2 py-0.5 text-[11px] ${verified ? 'bg-ok-bg text-ok' : 'bg-muted text-ink-3'}`}>
+      {verified ? PROFILE_LABELS.emailVerified : PROFILE_LABELS.emailUnverified}
+    </span>
+  )
+}
 
 const message = (err: unknown, fallback: string) => (err instanceof ApiError ? err.message : fallback)
 
@@ -189,13 +199,21 @@ export function MembersTab({
           <ul className="space-y-2">
             {sorted.map((m) => {
               const locked = isLastOwner(m, sorted)
+              const sub = memberSubLabel(m)
               return (
                 <li key={m.uid} className="row flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-sm">
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium">
                       {memberLabel(m)}
+                      {!sub && m.email && <EmailMark verified={m.email_verified} />}
                       {m.uid === myUid && <span className="ml-2 text-xs text-ink-3">（あなた）</span>}
                     </p>
+                    {sub && (
+                      <p className="truncate text-xs text-ink-3">
+                        {sub}
+                        <EmailMark verified={m.email_verified} />
+                      </p>
+                    )}
                   </div>
                   {isOwner ? (
                     <select

@@ -19,6 +19,7 @@ from speclino.db.repositories.audit import AuditRepository
 from speclino.db.repositories.teams import TeamRepository
 from speclino.domain.workspace import WorkspaceMemberView, WorkspaceRole
 from speclino.services.knowledge_chat import purge_member_chats
+from speclino.services.profiles import member_views
 from speclino.services.workspaces import (
     NotPermitted,
     WorkspaceNotFound,
@@ -40,15 +41,7 @@ async def list_members(
 ) -> list[WorkspaceMemberView]:
     if await role_of(session, slug, actor_uid) is None:
         raise WorkspaceNotFound(slug)
-    stmt = (
-        select(WorkspaceMember)
-        .where(WorkspaceMember.team == slug)
-        .order_by(WorkspaceMember.created_at, WorkspaceMember.uid)
-    )
-    return [
-        WorkspaceMemberView(uid=m.uid, email=m.email, role=m.role, joined_at=m.created_at)
-        for m in (await session.execute(stmt)).scalars()
-    ]
+    return await member_views(session, slug)
 
 
 async def _owner_change_preamble(
@@ -142,14 +135,11 @@ async def change_role(
             action=action,
             detail={"before": current, "after": role},
         )
-    row = (
-        await session.execute(
-            update(WorkspaceMember)
-            .where(WorkspaceMember.team == slug, WorkspaceMember.uid == target_uid)
-            .values(role=role)
-            .returning(WorkspaceMember)
-        )
-    ).scalar_one()
+    await session.execute(
+        update(WorkspaceMember)
+        .where(WorkspaceMember.team == slug, WorkspaceMember.uid == target_uid)
+        .values(role=role)
+    )
     await AuditRepository(session).record(
         actor_uid,
         action,
@@ -157,9 +147,8 @@ async def change_role(
         "changed",
         {"uid": target_uid, "before": current, "after": role},
     )
-    return WorkspaceMemberView(
-        uid=row.uid, email=row.email, role=row.role, joined_at=row.created_at
-    )
+    (view,) = await member_views(session, slug, [target_uid])
+    return view
 
 
 async def remove_member(

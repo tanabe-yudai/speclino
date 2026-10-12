@@ -51,7 +51,7 @@ export function fetchLag(f: FetchHealth): { label: string; tone: VerdictTone } {
 }
 
 export function fetchLabel(f: FetchHealth): string {
-  return f.token_name ?? f.member_email ?? (f.uid ? 'メンバー' : '-')
+  return f.token_name ?? f.member_label ?? f.member_email ?? (f.uid ? 'メンバー' : '-')
 }
 
 export function percent(rate: number | null): string {

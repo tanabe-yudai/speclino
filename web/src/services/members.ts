@@ -1,5 +1,6 @@
 /** メンバーと招待の表示ロジック（S56）。コンポーネントには埋め込まない。 */
 
+import { personLabel } from '@/services/actors'
 import type { Me, WorkspaceRole } from '@/types/me'
 import type { Invitation, InvitationPreview, InvitationStatus, WorkspaceMember } from '@/types/member'
 
@@ -37,7 +38,12 @@ export function isLastOwner(target: WorkspaceMember, members: WorkspaceMember[])
 }
 
 export function memberLabel(member: WorkspaceMember): string {
-  return member.email ?? member.uid
+  return personLabel(member.uid, member.display_name, member.email)
+}
+
+/** 一覧の 2 行目に出すメール（表示名を出しているときだけ。表示名が無ければ 1 行目がメール）。 */
+export function memberSubLabel(member: WorkspaceMember): string | null {
+  return member.display_name ? member.email : null
 }
 
 export function sortMembers(members: WorkspaceMember[]): WorkspaceMember[] {

@@ -26,7 +26,6 @@ from speclino.db.models import (
     Project,
     ReviewRun,
     SyncTokenRecord,
-    WorkspaceMember,
 )
 from speclino.db.repositories.bundles import BundleRepository
 from speclino.db.repositories.policy_revisions import PolicyRevisionRepository
@@ -50,6 +49,7 @@ from speclino.domain.observability import (
 from speclino.domain.policy import PolicyRule
 from speclino.domain.uml import RequirementRow
 from speclino.services.knowledge_sync import LOCK_REQUIREMENT_ID
+from speclino.services.profiles import display_names, member_views
 from speclino.services.project_overview import count_verdicts, policy_rule_id
 
 # 検査器（conformance/・services/check_pipeline.py）が UNKNOWN に付ける決まった言い回しの接頭辞。
@@ -301,10 +301,12 @@ async def _fetches(
     }
     for tid, name, revoked_at in (await session.execute(mcp_stmt)).tuples():
         tokens[tid] = (name, revoked_at is not None)
-    member_stmt = select(WorkspaceMember.uid, WorkspaceMember.email).where(
-        WorkspaceMember.team == workspace
+    members = {
+        v.uid: v for v in await member_views(session, workspace, {r.uid for r in latest if r.uid})
+    }
+    labels = await display_names(
+        session, workspace=workspace, uids=[r.uid for r in latest if r.uid]
     )
-    emails = {uid: email for uid, email in (await session.execute(member_stmt)).tuples()}
 
     out: list[FetchHealth] = []
     for row in latest:
@@ -318,7 +320,8 @@ async def _fetches(
                 token_name=token_name,
                 revoked=revoked,
                 uid=row.uid,
-                member_email=emails.get(row.uid) if row.uid is not None else None,
+                member_email=members[row.uid].email if row.uid in members else None,
+                member_label=labels.get(row.uid) if row.uid is not None else None,
                 project_id=str(row.project_id) if row.project_id is not None else None,
                 repo_full_name=repos.get(row.project_id) if row.project_id is not None else None,
                 last_fetched_at=row.created_at,
@@ -340,6 +343,7 @@ async def _fetches(
                 revoked=False,
                 uid=None,
                 member_email=None,
+                member_label=None,
                 project_id=str(t.project_id),
                 repo_full_name=repos.get(t.project_id),
                 last_fetched_at=None,

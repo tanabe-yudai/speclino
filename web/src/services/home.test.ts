@@ -10,6 +10,7 @@ function fetch(repo: string | null, behind: number | null, extra: Partial<FetchH
     revoked: false,
     uid: null,
     member_email: null,
+    member_label: null,
     project_id: null,
     repo_full_name: repo,
     last_fetched_at: null,

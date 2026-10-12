@@ -33,10 +33,12 @@ def _check_claims(claims: dict[str, Any], project_id: str) -> AuthUser:
     if not uid:
         raise ValueError("利用者を識別できるクレーム（sub）が無い")
     email = claims.get("email")
+    name = claims.get("name")
     return AuthUser(
         uid=str(uid),
         email=str(email) if email else None,
         email_verified=claims.get("email_verified") is True,
+        name=name if isinstance(name, str) and name else None,
     )
 
 

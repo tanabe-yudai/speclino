@@ -168,4 +168,6 @@ async def engine() -> AsyncIterator[AsyncEngine]:
             "teams",
         ):
             await conn.execute(sql_text(f"DELETE FROM {table} WHERE team LIKE 'e2e-%'"))
+        # プロフィールのテストは e2e- で始まる uid を使う
+        await conn.execute(sql_text("DELETE FROM user_profiles WHERE uid LIKE 'e2e-%'"))
     await eng.dispose()

@@ -124,6 +124,14 @@ export const WORKSPACE_ROLE_LABELS: Record<WorkspaceRole, string> = {
   member: 'メンバー',
 }
 
+/** プロフィール（表示名とメール）の用語。 */
+export const PROFILE_LABELS = {
+  displayName: '表示名',
+  editDisplayName: '表示名を変える',
+  emailVerified: '確認済み',
+  emailUnverified: '未確認',
+} as const
+
 /** ゲートの結果を判定の色に対応させる（通過=適合の色、通過（免除中あり）=免除中の色、失敗=違反の色）。 */
 export function gateTone(status: GateStatus): VerdictTone {
   return status === 'pass' ? 'ok' : status === 'pass_with_exceptions' ? 'exempt' : 'bad'

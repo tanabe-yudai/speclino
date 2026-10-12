@@ -50,6 +50,8 @@ export interface FetchHealth {
   revoked: boolean
   uid: string | null
   member_email: string | null
+  /** uid の表示（表示名 → メール → uid の短縮）。メンバーの取得でなければ null。 */
+  member_label: string | null
   project_id: string | null
   repo_full_name: string | null
   last_fetched_at: string | null

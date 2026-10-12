@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useCurrentWorkspace } from '@/hooks/useCurrentWorkspace'
 import { useMe } from '@/hooks/useMe'
+import { useActorLabel } from '@/hooks/useMembers'
 import { approvalState, describeKnowledgeError } from '@/services/knowledge'
 import { textHash } from '@/services/knowledgeChat'
 import type { ApprovalPanelProps } from '@/types/specEditor'
@@ -17,6 +18,7 @@ import type { ApprovalPanelProps } from '@/types/specEditor'
  */
 export function ApprovalPanel({ slug, draft, dirty, previewErrors, previewPending, previewFailed, onApproved, onConflict }: ApprovalPanelProps) {
   const { me } = useMe()
+  const actorLabel = useActorLabel(slug)
   const workspace = useCurrentWorkspace()
   const [confirming, setConfirming] = useState(false)
   const [approving, setApproving] = useState(false)
@@ -52,7 +54,7 @@ export function ApprovalPanel({ slug, draft, dirty, previewErrors, previewPendin
         <PanelTitle>承認</PanelTitle>
         <ToneBadge tone="rev">下書き 改訂 {draft.revision}</ToneBadge>
         <span className="text-xs text-ink-3">
-          作成 <span className="font-mono break-all">{draft.author}</span>
+          作成 <span className="break-all">{actorLabel(draft.author)}</span>
         </span>
       </div>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
