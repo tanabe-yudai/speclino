@@ -45,6 +45,7 @@ SPEC-SYS-001 の区画のうち、テナント（ワークスペース）と利�
 | R-WS-13 | mandatory | 本番の秘密（GitHub App の鍵・webhook の秘密・bundle の署名鍵など）は Secret Manager から環境変数で渡し、コードとリポジトリに置かない | - |
 | R-WS-14 | advisory | 招待の受諾の流れ（図 accept） | accept#s, accept#u, accept#v, accept#rd, accept#l, accept#a, accept#z, accept#e1, accept#e2, accept#e3, accept#e4, accept#e5, accept#e6, accept#e7, accept#e8, ws-vocab#invitations, ws-vocab#workspaces |
 | R-WS-15 | advisory | メンバーの削除の流れ（図 remove） | remove#m1, remove#g1, remove#m2, remove#g2, remove#m3, remove#m4, ws-vocab#members, ws-vocab#knowledge_chat |
+| R-WS-16 | mandatory | 構成要素のつながり: 招待とメンバー管理はワークスペースの権限の確認とメンバーのリポジトリを使い、メンバーの削除は知識のチャットの会話を消す（クラス図の関係） | ws-vocab#r1, ws-vocab#r2, ws-vocab#r3, ws-vocab#r4, ws-vocab#r5, ws-vocab#r6, ws-vocab#r7, ws-vocab#r8 |
 
 ## 4. 語彙（クラス図）
 
@@ -112,6 +113,14 @@ classDiagram
         approver
         member
     }
+    invitations ..> workspaces : [r1] 権限の確認・拒否の監査
+    members ..> workspaces : [r2] 権限の確認・拒否の監査
+    members ..> knowledge_chat : [r3] 会話の消去
+    invitations ..> TeamRepository : [r4] メンバーの追加
+    members ..> TeamRepository : [r5] ロールの変更・削除
+    workspaces ..> TeamRepository : [r6] 所属
+    workspaces ..> AuditRepository : [r7] 拒否の監査
+    knowledge_chat ..> KnowledgeChatRepository : [r8] 会話の消去
 ```
 
 ## 5. 招待の受諾（アクティビティ図）

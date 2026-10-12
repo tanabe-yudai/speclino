@@ -56,6 +56,7 @@ SPEC-SYS-001 の区画のうち、PR の検査（run）からゲートの判定�
 | R-GATEPR-16 | mandatory | replay は manifest の世代の bundle を引いて署名と記録のハッシュを照合し、決定的な検査とゲートを再実行し、LLM 支援は記録で再評価して呼び直さない。記録が欠けていれば差分にする | - |
 | R-GATEPR-17 | advisory | run の実行の流れ（図 run） | run#x1, run#x2, run#x3, run#x4, run#x5, run#x6, run#o1, run#x7, run#x8, run#x9, run#a1, run#x10, run#x11, run#a2, run#x12, gate-vocab#ReviewRunService, gate-vocab#check_pipeline, gate-vocab#run_freshness, gate-vocab#investigation |
 | R-GATEPR-18 | advisory | run の実行の状態は 7 章の表の遷移でだけ変わる | - |
+| R-GATEPR-19 | mandatory | 構成要素のつながり: worker（ReviewRunService）はコードホスト（GitHub）を参照として持ち、費用ガードを任意に持ち、run の記録・承認の記録・検査・公開の判断・調査を使い、検査は規約の検査器の登録簿を使う（クラス図の関係） | gate-vocab#r1, gate-vocab#r2, gate-vocab#r3, gate-vocab#r4, gate-vocab#r5, gate-vocab#r6, gate-vocab#r7, gate-vocab#r8 |
 
 ## 5. 語彙（クラス図）
 
@@ -136,6 +137,16 @@ classDiagram
         attest
         rerun
     }
+    class CodeHost
+    class CostGuard
+    ReviewRunService --> CodeHost : [r1] スナップショット・Check・PR コメント
+    ReviewRunService o-- CostGuard : [r2] LLM の費用（無ければ呼ばない）
+    ReviewRunService ..> ReviewRunRepository : [r3] run の記録
+    ReviewRunService ..> ApprovalRepository : [r4] PR コメントの承認
+    ReviewRunService ..> check_pipeline : [r5] 検査
+    ReviewRunService ..> run_freshness : [r6] 公開の判断
+    ReviewRunService ..> investigation : [r7] 未解決の指摘の調査
+    check_pipeline ..> VerifierRegistry : [r8] 規約の検査器
 ```
 
 ## 6. run の実行（シーケンス図）
