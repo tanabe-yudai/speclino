@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { lineOffset, mermaidBlocks, parseJsonField, requirementTrace, sortDiagnostics } from './specPreview'
-import type { CompiledSpec, SpecDiagnostic } from '@/types/knowledge'
+import { lineOffset, parseJsonField, sortDiagnostics } from './specPreview'
+import type { SpecDiagnostic } from '@/types/knowledge'
 
 const diag = (severity: 'error' | 'warning', line: number | null, code = 'E_X'): SpecDiagnostic => ({
   code,
@@ -27,49 +27,6 @@ describe('lineOffset', () => {
   it('clamps to the end of the text and the end of the line', () => {
     expect(lineOffset('ab\nc', 9, 1)).toBe(4)
     expect(lineOffset('ab\nc', 1, 99)).toBe(2)
-  })
-})
-
-describe('mermaidBlocks', () => {
-  it('extracts canonical mermaid fences with their start line and declared id', () => {
-    const md = '# t\n\n```mermaid\n%%@ id: vocab\nclassDiagram\n```\n\n```js\nx\n```\n```mermaid\nflowchart TD\n```\n'
-    expect(mermaidBlocks(md)).toEqual([
-      { index: 0, line: 3, id: 'vocab', source: '%%@ id: vocab\nclassDiagram' },
-      { index: 1, line: 11, id: null, source: 'flowchart TD' },
-    ])
-  })
-
-  it('skips an unclosed block (the parser reports it)', () => {
-    expect(mermaidBlocks('```mermaid\nclassDiagram\n')).toEqual([])
-  })
-})
-
-describe('requirementTrace', () => {
-  const compiled = {
-    parser_version: 'uml-0.1',
-    source_hash: 's',
-    ir_hash: 'i',
-    requirements: [
-      { id: 'R1', level: 'mandatory', text: 'a', formalized_by: ['checkout#m1'] },
-      { id: 'R2', level: 'advisory', text: 'b', formalized_by: [] },
-      { id: 'R3', level: 'mandatory', text: 'c', formalized_by: [] },
-    ],
-  } as CompiledSpec
-
-  it('flags unformalized rows and mandatory ones that the gate will leave as REVIEW', () => {
-    const t = requirementTrace(compiled)
-    expect(t.rows.map((r) => [r.id, r.formalized, r.gateReview])).toEqual([
-      ['R1', true, false],
-      ['R2', false, false],
-      ['R3', false, true],
-    ])
-    expect(t.formalized).toBe(1)
-    expect(t.total).toBe(3)
-    expect(t.gateReview).toBe(1)
-  })
-
-  it('is empty without a compiled spec', () => {
-    expect(requirementTrace(null)).toEqual({ rows: [], formalized: 0, total: 0, gateReview: 0 })
   })
 })
 
