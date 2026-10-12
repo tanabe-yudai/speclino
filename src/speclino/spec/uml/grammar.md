@@ -88,6 +88,8 @@ OTHER  = 上のどれにも当たらない 1 文字 ;
 - `letter` は ASCII 英字だけ。要素 ID は `NAME` のうちドットを含まないもの
 - 字句解析は全域で失敗しない（どんな文字列もトークン列にする）。意味を決めるのは各図の parser
 - 記号は最長一致。`ARROW` のうち受け付けるのは図ごとに決めたものだけで、ほかは `E_UNKNOWN_ARROW`
+- クラス図の関係線 `*--` と `o--` は字句としては 2 つ（`"*"` か `NAME` の `o` と、間を空けずに続く `"--"`）。
+  間に空白があればその関係線として読まない（4 章）
 
 ## 3. ガード（`Expr`）
 
@@ -120,7 +122,11 @@ enum_lit = EnumType "." VALUE ;                             (* 1 つの NAME ト
 class_diagram = "classDiagram" NL { class_stmt } ;
 class_stmt    = "direction" DIR NL
               | "class" NAME NL
-              | "class" NAME "{" NL { member } "}" NL ;
+              | "class" NAME "{" NL { member } "}" NL
+              | NAME [ mult ] rel_arrow [ mult ] NAME [ ":" [ "[" ID "]" ] { any_token } ] NL ;   (* 関係。1 行に 1 本 *)
+rel_arrow     = "<|--" | "*--" | "o--" | "-->" | "..>" ;
+mult          = '"' ( card | card ".." card ) '"' ;       (* 多重度。表示だけ *)
+card          = INT | "*" | "n" ;
 member        = "<<" ( "enumeration" | "module" ) ">>" NL      (* 1 クラスに 1 種類。同じものの重ね書きは可 *)
               | [ visibility ] NAME NL                         (* 列挙値（enumeration のとき） *)
               | [ visibility ] attr_type NAME NL               (* 属性 *)
@@ -142,7 +148,36 @@ DIR           = "TB" | "TD" | "BT" | "LR" | "RL" ;
 - 属性の型 `NAME` は列挙型として解決する（文書のクラス図か `domain.enums`）。解決できなければ `E_UNKNOWN_TYPE`（`<<module>>` のクラスは型にできない）
 - 操作の引数は名前だけ（型・既定値・戻り値の型はエラー）
 - 操作を 1 つ以上持つクラスごとに `StructureObligation`（id `<図 ID>#<クラス名>`）を作る
-- 関係線（`<|--`、`-->`、`..>` など）、`Class : member` の書式、注記、`class X["label"]`、ジェネリクスはエラー
+- `Class : member` の書式、注記（`note`）、`namespace`、`class X["label"]`、ジェネリクス、`style` などはエラー
+
+### 4.1 関係（クラスの間の線）
+
+| 書き方 | 種類（`kind`） | 意味（`source` → `target` に正規化） |
+| --- | --- | --- |
+| `A <\|-- B` | `inheritance`（継承） | B は A を継承する（source = B、target = A） |
+| `A *-- B` | `composition`（コンポジション） | A は B を部品として持つ（source = A、target = B） |
+| `A o-- B` | `aggregation`（集約） | A は B を持つ（source = A、target = B） |
+| `A --> B` | `association`（関連） | A は B を参照として持つ（source = A、target = B） |
+| `A ..> B` | `dependency`（依存） | A は B を使う（source = A、target = B） |
+
+- source は常に「依存する側」（子・全体・使う側）、target は「依存される側」。IR はこの正規形だけを持つ
+- **向きは上の 5 つだけ**。逆向き（`B --|> A`、`B --* A`、`B --o A`、`B <-- A`、`B <.. A`）、双方向、`--`・`..`
+  （向きの無い線）、`..|>`・`<|..`（実現）、`()--`（ロリポップ）は `E_UNKNOWN_ARROW`（左右を入れ替えて上の形で書く）
+- 両端は**同じ図で宣言したクラス**（宣言は関係の行より後でもよい）。無ければ `E_UNKNOWN_CLASS`（Mermaid のように
+  関係の行でクラスを暗黙に作らない）。端の種類の制約（`E_RELATION_END`）:
+  継承は両端が通常のクラス、コンポジション・集約・関連は source が通常のクラスか `<<module>>`・target が通常のクラスか
+  `<<enumeration>>`、依存は source が通常のクラスか `<<module>>`・target は何でもよい
+- **関係の ID**: ラベルの先頭に `[ID]` を書く（`A --> B : [r1] 使う`）。ID は図の中でクラス名と同じ名前空間で一意
+  （`E_DUPLICATE_ID`）。ID のある関係は要求の表から `図ID#ID` で参照できる（9 章）
+- ID の無い関係も義務になる（照合する）が、要求の表から参照できない（level は常に `mandatory`）。義務 ID は
+  `<図 ID>#<source>-<kind>-<target>`（`-` は要素 ID に使えないので ID と衝突しない）。同じ source・kind・target の
+  ID の無い関係の重複は `E_DUPLICATE_ID`
+- 多重度 `"1"`・`"*"`・`"0..1"`・`"1..*"`・`"n"` などと、ID の後ろのラベルの文は表示・説明だけで IR に入らない（照合しない）
+- 所有の照合は「A が B 型の属性を持ち得る」（has-a）の主張なので、定数以外の条件の下の代入も根拠にする。
+  静的に到達しない代入（定数が偽の `if` / `while` の本体、定数が真の `if` の `else`、同じブロックの
+  `return`・`raise`・`continue`・`break` の後）は根拠にしない
+- 関係ごとに `RelationObligation`（id は ID があれば `<図 ID>#<ID>`）を作る。照合の規則は
+  `design/2026-10-05-team-knowledge-registry.md` 5.1.1
 
 ## 5. シーケンス図
 
@@ -240,13 +275,14 @@ ref        = diagram_id "#" ID | "ir:" RULE_ID ;
 - `形式化` が空か `-` の行は**未形式化**として残す（`formalized_by=[]`）
 - 義務の level: その義務を構成する要素が**すべて**、`advisory` の行だけから参照されているときだけ `advisory`。
   参照の無い要素や `mandatory` の行から参照される要素が 1 つでもあれば `mandatory`
-  （義務の要素: 構造 = そのクラス、順序・包含・遷移 = その図の参照できる要素すべて。9 章）
+  （義務の要素: 構造 = そのクラス、関係 = その関係の ID（ID が無ければ常に `mandatory`）、
+  順序・包含・遷移 = その図の参照できる要素すべて。9 章）
 
 ## 9. 参照できる要素
 
 | 図 | 要素 ID |
 | --- | --- |
-| クラス図 | クラス名 |
+| クラス図 | クラス名、関係の ID（4.1 節） |
 | シーケンス図 | 呼出しの ID、`alt`/`else`/`opt`/`loop` の ID（応答は不可） |
 | 状態遷移図 | 状態名、遷移の ID |
 | アクティビティ図 | ノード ID、辺の ID |
@@ -258,6 +294,7 @@ ref        = diagram_id "#" ID | "ir:" RULE_ID ;
 | 空行、`%%` で始まる行（`%%@`・`%%{` を除く） | コメント |
 | `direction DIR`、`flowchart` の向き | 見た目だけ |
 | クラス図の可視性（`+ - # ~`） | 構造の義務は可視性を見ない |
+| クラス図の関係の多重度 `"…"` と、ID の後ろのラベルの文 | 関係の照合は多重度・説明を見ない（4.1 節） |
 | シーケンス図の送り手と呼出しの引数名 | 順序の義務は受け手の操作だけを見る。引数の数と名前はクラス図で検査する |
 | シーケンス図の応答 `-->>` の全体 | 応答はコード上のイベントにならない |
 | 状態遷移図の終了 `X --> [*]` | 遷移の関係の検査は終了状態を使わない |
@@ -269,6 +306,8 @@ ref        = diagram_id "#" ID | "ir:" RULE_ID ;
 - `source_hash` = Markdown 本文の `content_hash`（`sha256:<hex>`）
 - `ir_hash` = `CompiledSpec` の正規 JSON（キー順、区切りなし）から `source_hash`・`ir_hash`・span の `line` と `column` を除いたものの
   `content_hash`。見た目の違い（空白・コメント・別名・送り手）では変わらず、意味が変われば変わる
+- 関係（4.1 節）の無い文書の `CompiledSpec` は `relations` を出力しない（空の欄を JSON に含めない）。関係を足す前に
+  承認した仕様の IR・`ir_hash` は変わらないので、関係の追加では版を上げていない
 - 往復の等価（`compile(render(compile(s))) == compile(s)`）はこの正規形で比べる。除くものは上と同じ
   （span の行と列は正規形の Markdown では位置が変わるため、`source_hash` は本文そのものが変わるため）
 

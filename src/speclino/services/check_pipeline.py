@@ -61,6 +61,7 @@ from speclino import __version__
 from speclino.analysis.limits import DEFAULT_LIMITS, clamp
 from speclino.analysis.path_analyzer import ANALYZER_VERSION, analyze_repo
 from speclino.analysis.reachability import attribute_writes, reachable_source_hash
+from speclino.analysis.relation_check import RelationChecker
 from speclino.analysis.structure_check import SymbolLocator, check_structure
 from speclino.conformance.engine import ENGINE_VERSION, EngineConfig, EngineInputError, evaluate
 from speclino.conformance.exceptions import (
@@ -745,6 +746,7 @@ def _uml_findings(
     levels: dict[str, RuleLevel] = {}
     failures: dict[tuple[str, str], str] = {}
     locator = SymbolLocator(req.repo_root, req.source_roots, inputs.bindings.modules)
+    relations = RelationChecker(req.repo_root, req.source_roots, inputs.bindings.modules)
     index = RepoIndex(req.repo_root, req.source_roots)
 
     def code_for(
@@ -837,6 +839,11 @@ def _uml_findings(
                     ),
                 )
             )
+        for rel in compiled.relations:
+            ctx = ObligationContext(
+                rel.id, rel.id.split("#", 1)[0], rel.level, "command_invocation"
+            )
+            findings.extend(guarded(ctx, partial(relations.check, rel, stereotypes)))
         for tr in compiled.traces:
             behavior_id = resolver.behavior(tr.entry_operation)
             ctx = ObligationContext(

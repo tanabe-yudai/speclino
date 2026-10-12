@@ -1,7 +1,8 @@
 """`CompiledSpec` → 正規形の Markdown（設計 4.3 の往復、grammar.md 11 章）。
 
 `compile_spec` の出力だけを対象にする（オートマトンは 5.1 節の構成の形をしている前提）。
-正規形では見た目だけの要素（コメント・別名・送り手・応答・判断ノードのラベル・可視性）は落ちる。
+正規形では見た目だけの要素（コメント・別名・送り手・応答・判断ノードのラベル・可視性・
+関係の多重度とラベルの文）は落ちる。
 旧形式の IR は本文に書かない（呼び出し側が同じ `legacy_ir` を渡す）。
 """
 
@@ -13,6 +14,7 @@ from speclino.domain.uml import (
     CallLabel,
     ClassDef,
     CompiledSpec,
+    RelationObligation,
     StateMachine,
     TraceObligation,
 )
@@ -48,7 +50,23 @@ def _class_lines(c: ClassDef) -> list[str]:
     return [f"    class {c.name} {{", *members, "    }"]
 
 
-def _class_diagrams(classes: list[ClassDef]) -> list[str]:
+_REL_ARROW = {
+    "composition": "*--",
+    "aggregation": "o--",
+    "association": "-->",
+    "dependency": "..>",
+}
+
+
+def _relation_line(r: RelationObligation) -> str:
+    if r.kind == "inheritance":
+        line = f"    {r.target} <|-- {r.source}"
+    else:
+        line = f"    {r.source} {_REL_ARROW[r.kind]} {r.target}"
+    return line + (f" : [{r.element_id}]" if r.element_id is not None else "")
+
+
+def _class_diagrams(classes: list[ClassDef], relations: list[RelationObligation]) -> list[str]:
     groups: dict[str, list[ClassDef]] = {}
     for c in classes:
         groups.setdefault(c.span.diagram_id, []).append(c)
@@ -56,6 +74,7 @@ def _class_diagrams(classes: list[ClassDef]) -> list[str]:
         _fence(
             [f"%%@ id: {diagram_id}", "classDiagram"]
             + [line for c in members for line in _class_lines(c)]
+            + [_relation_line(r) for r in relations if r.span.diagram_id == diagram_id]
         )
         for diagram_id, members in groups.items()
     ]
@@ -182,7 +201,7 @@ def render(compiled: CompiledSpec) -> str:
     parts: list[str] = []
     if compiled.requirements:
         parts.append(_requirements(compiled))
-    parts.extend(_class_diagrams(compiled.classes))
+    parts.extend(_class_diagrams(compiled.classes, compiled.relations))
     for t in compiled.traces:
         parts.append(_sequence(t) if t.diagram_kind == "sequence" else _activity(t))
     parts.extend(_state_machine(m) for m in compiled.state_machines)

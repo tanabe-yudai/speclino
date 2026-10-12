@@ -565,6 +565,14 @@
             "title": "Parser Version",
             "type": "string"
           },
+          "relations": {
+            "description": "クラス図の関係線（grammar.md 4.1 節）",
+            "items": {
+              "$ref": "#/components/schemas/RelationObligation"
+            },
+            "title": "Relations",
+            "type": "array"
+          },
           "requirements": {
             "items": {
               "$ref": "#/components/schemas/RequirementRow"
@@ -1553,6 +1561,72 @@
           "path"
         ],
         "title": "Ref",
+        "type": "object"
+      },
+      "RelationObligation": {
+        "additionalProperties": false,
+        "description": "クラス図の関係線（grammar.md 4.1 節）。source が依存する側（子・全体・使う側）。",
+        "properties": {
+          "element_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "図に書いた関係 ID（`[r1]`）",
+            "title": "Element Id"
+          },
+          "id": {
+            "description": "<図 ID>#<関係 ID>、ID が無ければ <図 ID>#<source>-<kind>-<target>",
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "inheritance",
+              "composition",
+              "aggregation",
+              "association",
+              "dependency"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "level": {
+            "enum": [
+              "mandatory",
+              "advisory"
+            ],
+            "title": "Level",
+            "type": "string"
+          },
+          "source": {
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          },
+          "span": {
+            "$ref": "#/components/schemas/SourceSpan"
+          },
+          "target": {
+            "minLength": 1,
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "source",
+          "target",
+          "level",
+          "span"
+        ],
+        "title": "RelationObligation",
         "type": "object"
       },
       "RepoRequest": {

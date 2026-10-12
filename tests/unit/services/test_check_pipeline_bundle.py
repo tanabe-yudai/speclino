@@ -656,3 +656,23 @@ def test_local_specs_fail_closed_on_bad_input(tmp_path: Path) -> None:
     broken = "# x\n\n" + block("%%@ id: s", "sequenceDiagram", "    ???")
     with pytest.raises(check_pipeline.CheckInputError, match="仕様の変換エラー"):
         run_check(_local(root, {"broken.md": broken}))
+
+
+def test_class_relations_are_checked(tmp_path: Path) -> None:
+    root = make_repo(tmp_path / "r")
+    with_relations = CLASSES.replace(
+        "```\n",
+        "    Order --> OrderStatus : [r1] 状態\n    Order ..> Audit : [r2]\n```\n",
+        1,
+    )
+    body = (
+        "# 関係\n\n| ID | level | 要求 | 形式化 |\n| --- | --- | --- | --- |\n"
+        "| R1 | advisory | 注文は監査に依存する | vocab#r2 |\n\n" + with_relations
+    )
+    res = run_check(_local(root, {"rel.md": body}))
+    found = by_req(res.findings.findings)
+    assert found["vocab#r1"].verdict == "VERIFIED_IN_SCOPE", found["vocab#r1"].message
+    assert found["vocab#r2"].verdict == "VIOLATED", found["vocab#r2"].message
+    assert res.gate_levels["vocab#r1"] == "mandatory"
+    assert res.gate_levels["vocab#r2"] == "advisory"
+    assert {"vocab#r1", "vocab#r2"} <= set(res.manifest.expected_requirement_ids)
