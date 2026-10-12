@@ -7,14 +7,23 @@ import {
   isLastOwner,
   isValidEmail,
   memberLabel,
+  memberSubLabel,
   sortMembers,
   tokenFromHash,
 } from './members'
 import type { Invitation, WorkspaceMember } from '@/types/member'
 
-const member = (uid: string, role: WorkspaceMember['role'], email: string | null = null): WorkspaceMember => ({
+const member = (
+  uid: string,
+  role: WorkspaceMember['role'],
+  email: string | null = null,
+  display_name: string | null = null,
+): WorkspaceMember => ({
   uid,
+  display_name,
   email,
+  email_verified: email !== null,
+  label: '',
   role,
   joined_at: '2026-10-01T00:00:00Z',
 })
@@ -73,9 +82,15 @@ describe('sortMembers / memberLabel', () => {
     ])
     expect(sorted.map((m) => m.uid)).toEqual(['y', 'x', 'w', 'z'])
   })
-  it('メールが無ければ uid を出す', () => {
+  it('表示名 → メール → uid の短縮の順に出す', () => {
     expect(memberLabel(member('uid-1', 'member'))).toBe('uid-1')
+    expect(memberLabel(member('Xy12abcdEFGHijkl', 'member'))).toBe('Xy12abcd…')
     expect(memberLabel(member('uid-1', 'member', 'owner@example.com'))).toBe('owner@example.com')
+    expect(memberLabel(member('uid-1', 'member', 'owner@example.com', '田辺'))).toBe('田辺')
+  })
+  it('表示名を出しているときだけ 2 行目にメールを出す', () => {
+    expect(memberSubLabel(member('uid-1', 'member', 'owner@example.com', '田辺'))).toBe('owner@example.com')
+    expect(memberSubLabel(member('uid-1', 'member', 'owner@example.com'))).toBeNull()
   })
 })
 

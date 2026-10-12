@@ -30,6 +30,12 @@ def test_the_identifier_is_the_uid_and_the_email_is_only_for_display() -> None:
     )
 
 
+def test_the_name_claim_is_kept_for_the_initial_display_name() -> None:
+    assert _check_claims(claims(name="Judge One"), PROJECT).name == "Judge One"
+    assert _check_claims(claims(name=""), PROJECT).name is None
+    assert _check_claims(claims(name=42), PROJECT).name is None
+
+
 def test_an_unverified_email_is_marked_as_such() -> None:
     user = _check_claims(claims(email_verified=False), PROJECT)
     assert user.uid == "uid-1"

@@ -78,6 +78,9 @@ class FetchHealth(IRModel):
     revoked: bool = Field(description="トークンが失効済み（遅れに数えない）")
     uid: str | None
     member_email: str | None
+    member_label: str | None = Field(
+        description="uid の表示名（表示名 → メール → uid の短縮。メンバー以外は短縮だけ）"
+    )
     project_id: str | None
     repo_full_name: str | None
     last_fetched_at: datetime | None = Field(description="None は期間内に取得が無い")

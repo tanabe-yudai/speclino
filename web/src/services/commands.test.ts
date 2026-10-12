@@ -6,6 +6,7 @@ const me: Me = {
   uid: 'u1',
   email: 'owner@example.com',
   email_verified: true,
+  display_name: null,
   workspaces: [{ slug: 'ws', name: 'Example', role: 'owner' }],
 }
 

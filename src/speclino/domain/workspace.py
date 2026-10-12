@@ -28,6 +28,22 @@ class AuthUser:
     uid: str
     email: str | None = None
     email_verified: bool = False
+    # ID トークンの `name`（Google などの表示名）。プロフィールの初期値にだけ使う
+    name: str | None = None
+
+
+@dataclass(frozen=True)
+class UserProfile:
+    """利用者のプロフィール（表示用）。認可には使わない。
+
+    display_name は本人が設定した表示名（初回だけ ID トークンの name を入れる）。email と
+    email_verified は最後にサインインしたときの ID トークンの値。
+    """
+
+    uid: str
+    display_name: str | None
+    email: str | None
+    email_verified: bool
 
 
 @dataclass(frozen=True)
@@ -83,13 +99,18 @@ class IssuedMcpToken:
 
 @dataclass(frozen=True)
 class WorkspaceMemberView:
-    """メンバー一覧の 1 人分（S56）。
+    """メンバー一覧の 1 人分。
 
-    email は招待の受諾で入った確認済みのメールだけ（無ければ None）。
+    email はプロフィール（最後のサインインの ID トークン）のメールを優先し、無ければ招待の受諾で
+    入った確認済みのメール。email_verified はそのメールが確認済みか。label は画面に出す名前
+    （表示名 → メール → uid の短縮）。
     """
 
     uid: str
+    display_name: str | None
     email: str | None
+    email_verified: bool
+    label: str
     role: WorkspaceRole
     joined_at: datetime
 
@@ -182,6 +203,7 @@ __all__ = [
     "RegisteredRepository",
     "RepositoryRegistration",
     "AuthUser",
+    "UserProfile",
     "IssuedMcpToken",
     "McpTokenInfo",
     "BackfillIsolationReason",

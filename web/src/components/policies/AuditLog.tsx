@@ -2,10 +2,11 @@ import { Panel, PanelTitle } from '@/components/app/Panel'
 import { ToneBadge } from '@/components/app/ToneBadge'
 import { formatDateTime } from '@/services/format'
 import { auditLabel } from '@/services/labels'
+import type { ActorLabelFn } from '@/types/member'
 import type { AuditEntry } from '@/types/policy'
 
 /** 監査ログ（誰が・いつ・何を。承認の拒否も含む）。 */
-export function AuditLog({ items }: { items: AuditEntry[] }) {
+export function AuditLog({ items, actorLabel }: { items: AuditEntry[]; actorLabel: ActorLabelFn }) {
   return (
     <Panel className="space-y-3">
       <PanelTitle>監査ログ</PanelTitle>
@@ -22,7 +23,7 @@ export function AuditLog({ items }: { items: AuditEntry[] }) {
                   <span className="text-xs text-ink-3">改訂 {a.target.split('@').pop()}</span>
                 </p>
                 <p className="text-xs break-all text-ink-3">
-                  {formatDateTime(a.ts)} · {a.actor}
+                  {formatDateTime(a.ts)} · {actorLabel(a.actor)}
                   {a.detail.self_approved === true && ' · 作成者本人の承認'}
                 </p>
               </li>

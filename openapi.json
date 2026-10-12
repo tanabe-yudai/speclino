@@ -1496,6 +1496,27 @@
         "title": "PolicyVerifierRef",
         "type": "object"
       },
+      "ProfileRequest": {
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          }
+        },
+        "required": [
+          "display_name"
+        ],
+        "title": "ProfileRequest",
+        "type": "object"
+      },
       "ProjectSettings": {
         "additionalProperties": false,
         "description": "`projects.settings` の型。API はこの型で検証してから保存する。\n\n- `fail_on`: ゲートを失敗にする判定。違反・未検証・要確認のどれも外せない（弱められない）\n- `agent_enabled` / `test_run_enabled`: 証拠を集める機能の project ごとの有効・無効。\n  サーバ全体の設定（環境変数）で無効なら、ここで有効にしても動かない（AND で効く）\n- `approvers`: PR コメントの `/speclino approve-spec` を受け付ける GitHub ログイン名（表示用）\n- `approver_ids`: `approvers` と同じ順の GitHub ユーザー ID。照合はこちらで行う（ログイン名は\n  改名後に他人が取得できる）。サーバが保存のときに引いて埋める（送られてきた値は使わない）。\n  空・足りない（ID を保存する前の設定）なら、ID の無い承認者は承認できない（S61）",
@@ -2995,6 +3016,60 @@
           }
         },
         "summary": "Get Me",
+        "tags": [
+          "me"
+        ]
+      }
+    },
+    "/api/me/profile": {
+      "patch": {
+        "description": "本人の表示名を変える（null で消す）。他人のプロフィールを変える API は無い。",
+        "operationId": "update_profile_api_me_profile_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update Profile Api Me Profile Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Update Profile",
         "tags": [
           "me"
         ]

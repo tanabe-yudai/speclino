@@ -4,8 +4,13 @@ import type { WorkspaceRole } from './me'
 
 export interface WorkspaceMember {
   uid: string
-  /** 招待の受諾で入った確認済みのメール。管理者が直接追加したメンバーは null。 */
+  /** 本人が設定した表示名。未設定は null。 */
+  display_name: string | null
+  /** 最後のサインインのメール（無ければ招待の受諾で入ったメール）。どちらも無ければ null。 */
   email: string | null
+  email_verified: boolean
+  /** API が決めた表示（表示名 → メール → uid の短縮）。 */
+  label: string
   role: WorkspaceRole
   joined_at: string
 }
@@ -42,3 +47,6 @@ export interface AcceptedInvitation {
 
 /** 一覧での招待の状態（使用済み・取り消し済みは API が返さない）。 */
 export type InvitationStatus = 'pending' | 'expired'
+
+/** uid → 画面に出す名前（`useActorLabel` が返す）。 */
+export type ActorLabelFn = (uid: string | null | undefined) => string

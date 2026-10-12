@@ -60,7 +60,15 @@ def _not_owner() -> Exception:
 
 
 def _member_view(m: WorkspaceMemberView) -> dict[str, Any]:
-    return {"uid": m.uid, "email": m.email, "role": m.role, "joined_at": m.joined_at.isoformat()}
+    return {
+        "uid": m.uid,
+        "display_name": m.display_name,
+        "email": m.email,
+        "email_verified": m.email_verified,
+        "label": m.label,
+        "role": m.role,
+        "joined_at": m.joined_at.isoformat(),
+    }
 
 
 def _invitation_view(i: InvitationInfo) -> dict[str, Any]:

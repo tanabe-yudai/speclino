@@ -17,6 +17,7 @@ import {
 import { POLICY_LEVEL_LABELS, RULE_FIELD_LABELS } from '@/services/labels'
 import { textHash } from '@/services/knowledgeChat'
 import { diffPackages } from '@/services/policyDraft'
+import type { ActorLabelFn } from '@/types/member'
 import type { PoliciesView, RuleChange } from '@/types/policy'
 
 const KIND_LABELS: Record<RuleChange['kind'], string> = { added: '追加', removed: '削除', changed: '変更' }
@@ -41,7 +42,17 @@ function describe(change: RuleChange, view: PoliciesView): string {
 }
 
 /** 下書きがあるときだけ出す帯（design 6 章）。承認のボタンは owner / approver にだけ出す（API も拒否する）。 */
-export function DraftBanner({ slug, view, onChanged }: { slug: string; view: PoliciesView; onChanged: () => void }) {
+export function DraftBanner({
+  slug,
+  view,
+  onChanged,
+  actorLabel,
+}: {
+  slug: string
+  view: PoliciesView
+  onChanged: () => void
+  actorLabel: ActorLabelFn
+}) {
   const [showDiff, setShowDiff] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const draft = view.draft
@@ -76,7 +87,7 @@ export function DraftBanner({ slug, view, onChanged }: { slug: string; view: Pol
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <ToneBadge tone="rev">下書き 改訂 {draft.revision}</ToneBadge>
         <span className="text-sm text-ink-2">
-          変更 {changes.length} 件 · 作成 <span className="font-mono text-xs break-all">{draft.author}</span>
+          変更 {changes.length} 件 · 作成 <span className="text-xs break-all">{actorLabel(draft.author)}</span>
         </span>
         <div className="ml-auto flex flex-wrap gap-2">
           <Button variant="secondary" size="sm" onClick={() => setShowDiff(!showDiff)} aria-expanded={showDiff}>

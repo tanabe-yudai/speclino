@@ -16,8 +16,24 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' }
 
 // VITE_MOCK 用のインメモリ状態（画面確認だけが目的で、リロードすると消える）。
 let mockMembers: WorkspaceMember[] = [
-  { uid: 'mock-user', email: 'owner@example.com', role: 'owner', joined_at: '2026-09-20T09:00:00Z' },
-  { uid: 'mock-member', email: null, role: 'member', joined_at: '2026-09-25T09:00:00Z' },
+  {
+    uid: 'mock-user',
+    display_name: 'オーナー',
+    email: 'owner@example.com',
+    email_verified: true,
+    label: 'オーナー',
+    role: 'owner',
+    joined_at: '2026-09-20T09:00:00Z',
+  },
+  {
+    uid: 'mock-member',
+    display_name: null,
+    email: null,
+    email_verified: false,
+    label: 'mock-mem…',
+    role: 'member',
+    joined_at: '2026-09-25T09:00:00Z',
+  },
 ]
 let mockInvitations: Invitation[] = []
 

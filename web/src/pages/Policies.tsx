@@ -16,6 +16,7 @@ import { RuleList } from '@/components/policies/RuleList'
 import { Button } from '@/components/ui/button'
 import { useCurrentWorkspace } from '@/hooks/useCurrentWorkspace'
 import { useKnowledgeChat } from '@/hooks/useKnowledgeChat'
+import { useActorLabel } from '@/hooks/useMembers'
 import { applyRuleProposal, canSummarize, currentRuleText, proposalText, ruleEditorText } from '@/services/knowledgeChat'
 import { paths } from '@/services/paths'
 import { baseForDraft, newRule, removeRule, upsertRule } from '@/services/policyDraft'
@@ -56,6 +57,7 @@ function PoliciesBody({ slug }: { slug: string }) {
   // S73: AI と作る。規約の会話は artifact に結び付かない。提案はルールの編集欄に入れる
   const [chatOpen, setChatOpen] = useState(false)
   const chat = useKnowledgeChat(slug, 'policy', null, null)
+  const actorLabel = useActorLabel(slug)
   const [ruleDraft, setRuleDraft] = useState<PolicyRule | null>(null)
   const [seed, setSeed] = useState<{ key: number; rule: PolicyRule } | null>(null)
   const [note, setNote] = useState<NoteState>({ text: '', source: 'manual' })
@@ -166,7 +168,7 @@ function PoliciesBody({ slug }: { slug: string }) {
       )}
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="min-w-0 space-y-6">
-          <DraftBanner slug={slug} view={view} onChanged={reload} />
+          <DraftBanner slug={slug} view={view} onChanged={reload} actorLabel={actorLabel} />
           {editing !== undefined ? (
             <RuleEditor
               key={seed?.key ?? 0}
@@ -193,8 +195,8 @@ function PoliciesBody({ slug }: { slug: string }) {
           )}
         </div>
         <aside className="min-w-0 space-y-6">
-          <RevisionHistory items={loaded.revisions} />
-          <AuditLog items={loaded.audit} />
+          <RevisionHistory items={loaded.revisions} actorLabel={actorLabel} />
+          <AuditLog items={loaded.audit} actorLabel={actorLabel} />
         </aside>
       </div>
     </div>

@@ -547,6 +547,7 @@ async def test_fetch_health(world: World) -> None:
     assert new.last_fetched_at is None and new.behind_by is None
     member = rows[("mcp", "member1")]
     assert member.member_email == "m1@example.com" and member.behind_by == 0
+    assert member.member_label == "m1@example.com"
 
 
 async def test_rule_trend_and_llm(world: World) -> None:
