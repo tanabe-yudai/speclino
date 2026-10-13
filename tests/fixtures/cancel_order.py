@@ -1,4 +1,4 @@
-"""注文キャンセル（PoC 4 章）の手書き IR。検査器の単体試験と Golden の元。"""
+"""注文キャンセルの手書き IR。検査器の単体試験と Golden の元。"""
 
 from __future__ import annotations
 
@@ -230,7 +230,7 @@ P_SUCCESS = path("p3_success", SUCCESS, 204, SUCCESS_EVENTS, SUCCESS_UPDATES)
 
 CORRECT = code_ir([P_FORBIDDEN, P_CONFLICT, P_SUCCESS])
 
-# 在庫復元を管理者経路だけで呼ぶ（PoC 4.3）
+# 在庫復元を管理者経路だけで呼ぶ
 RESTORE_ADMIN_ONLY = code_ir(
     [
         P_FORBIDDEN,

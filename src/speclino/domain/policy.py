@@ -1,4 +1,4 @@
-"""規約パッケージ（PoC 3章 / 7章、`design/product-spec-summary.md` 規約パッケージ節）。
+"""規約パッケージ。
 
 型定義のみ。検証ロジックは `speclino/verifiers/` に置く。
 """
@@ -14,7 +14,7 @@ from speclino.domain.common import SCHEMA_VERSION, IRModel
 
 PolicyLevel = Literal["mandatory", "advisory"]
 OnMissingInput = Literal["violation", "unknown", "skipped"]
-# 規約の検査の段（S70、設計 6.2）。llm_assisted は検査器 `llm.checklist` で LLM が評価し、
+# 規約の検査の段（S70）。llm_assisted は検査器 `llm.checklist` で LLM が評価し、
 # verdict は常に REVIEW（確定は人）。既定は決定的な検査器
 PolicyTier = Literal["deterministic", "llm_assisted"]
 LLM_CHECKLIST_VERIFIER_ID = "llm.checklist"
@@ -150,7 +150,7 @@ class PolicyExceptions(IRModel):
 
 # --------------------------------------------------------------- チーム規約の改訂（S42）
 # 規約はプロジェクト固有ではなくチーム固有なので、正本を対象リポジトリの Git ではなく
-# SpecLino が持つ（design/2026-09-26-team-policies-and-dx.md）。Git に置く代わりに
+# SpecLino が持つ。Git に置く代わりに
 # バージョン・レビュー・監査・再現性の 4 つをこちら側で満たす。
 
 PolicyRevisionStatus = Literal["draft", "active", "superseded"]

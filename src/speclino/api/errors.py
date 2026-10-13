@@ -1,4 +1,4 @@
-"""API エラー応答形式（API-ERR-001、`design/product-spec-summary.md` 規約パッケージ節）。
+"""API エラー応答形式（API-ERR-001）。
 
 全てのエラー応答は `{"error": {"code": ..., "message": ...}}`（ErrorResponse）で返す。
 ルートは `HTTPException(...)` を直書きせず `raise api_error(...)` を使い、FastAPI の既定

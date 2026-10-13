@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 本番デプロイの動作確認（S26 / AC: guides/deploy-runbook.md の手順 8）。
+# 本番デプロイの動作確認（S26 / AC: docs/guides/deploy-runbook.md の手順 8）。
 #
 #   scripts/smoke_prod.sh [<web URL>]
 #

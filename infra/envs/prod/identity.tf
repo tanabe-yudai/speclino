@@ -1,4 +1,4 @@
-# メール/パスワード認証のみ有効化する（design: IAP は Google アカウント必須でハッカソン
+# メール/パスワード認証のみ有効化する（IAP は Google アカウント必須でハッカソン
 # 要項に抵触するため不採用、Identity Platform のメール/パスワードを採用）。
 resource "google_identity_platform_config" "default" {
   project = var.project_id

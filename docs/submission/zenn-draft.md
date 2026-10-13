@@ -193,7 +193,7 @@ TODO: 各 PR の画面のスクリーンショットを貼る
   人への質問。どれも判定はしない。費用は日次の上限（既定 $3）で止める
 - Identity Platform でメール / パスワード認証
 
-TODO: アーキテクチャ図（`design/architecture.png`）を貼る
+TODO: アーキテクチャ図（`docs/diagrams/architecture.png`）を貼る
 
 ## まとめ
 

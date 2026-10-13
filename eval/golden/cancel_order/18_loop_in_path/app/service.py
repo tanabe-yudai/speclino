@@ -3,7 +3,7 @@
 `examples/orders/app/service.py`（正しい実装）を変異させたもの。import は
 `examples.orders.app` のまま保つ（S17 の path_analyzer 入力に使う。S09 では未実行）。
 成功経路で `inventory.restore(order.items)` の代わりに `for item in order.items:
-inventory.restore(item)` を使う。`ast.For` は PoC 3.2 の対応構文（対応構文一覧は
+inventory.restore(item)` を使う。`ast.For` は解析器の対応構文（対応構文一覧は
 `src/speclino/frontend/python/subset.py`）に含まれないため、path_analyzer はこの文に到達した
 時点でその経路の探索を打ち切り、outcome を unresolved・precision を incomplete として終える
 （in-loop の呼出しや、ループより後の audit.record / return も一切観測されない）。成功経路

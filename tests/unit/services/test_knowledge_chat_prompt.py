@@ -1,4 +1,4 @@
-"""会話のプロンプト（S73、設計 C6・C7）。"""
+"""会話のプロンプト（S73）。"""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""python_frontend: ソースを読み、AST・import・シンボルを索引化する（PoC 9.1 の 1〜3）。
+"""python_frontend: ソースを読み、AST・import・シンボルを索引化する。
 
 対象リポジトリのモジュールを import しない。ファイルを読んで `ast.parse` するだけ。
 """

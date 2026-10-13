@@ -1,4 +1,4 @@
-"""conformance_engine（PoC 10 章）。Spec IR と Code IR から Finding を決定的に導く。
+"""conformance_engine。Spec IR と Code IR から Finding を決定的に導く。
 
 各 Rule × Path について
     入口仮定 ∧ ドメイン ∧ 要求の適用条件 ∧ 実装経路の条件 ∧ 経路の終了状態 ∧ ¬保証
@@ -279,7 +279,7 @@ class ConformanceEngine:
 
     # ---------------------------------------------------------------- internals
     def _undocumented_behavior(self, spec: SpecIR, code: CodeIR) -> Finding | None:
-        """仕様に無い追加処理（open-world、PoC 10.5）: どの要求にも現れない操作の呼出しは REVIEW。
+        """仕様に無い追加処理（open-world）: どの要求にも現れない操作の呼出しは REVIEW。
 
         禁止と明記されていれば count 0 の要求が VIOLATED を出すので、ここでは扱わない。
         """
@@ -347,7 +347,7 @@ class ConformanceEngine:
         )
 
     def _next_steps_for_unknown(self, code: CodeIR) -> list[str]:
-        steps = ["対象関数を対応構文（PoC 3.2）だけで書き直す"]
+        steps = ["対象関数を解析器が対応する構文だけで書き直す"]
         codes = {u.code for u in code.unknown_causes} | {
             u.code for p in code.paths for u in p.unknown_causes
         }
@@ -476,7 +476,7 @@ class ConformanceEngine:
 
         if count_fails:
             category = count_category(op, required, sel.min_count)
-            # 不在（回数不足）の根拠は経路のイベント抽出が完了している場合に限る（PoC 6.7）
+            # 不在（回数不足）の根拠は経路のイベント抽出が完了している場合に限る
             if sel.min_count < required and self._blocking_unknowns(path, channel):
                 return _PathResult(
                     "UNKNOWN",

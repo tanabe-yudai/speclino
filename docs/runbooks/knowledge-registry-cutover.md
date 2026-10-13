@@ -80,7 +80,7 @@ gcloud run jobs execute speclino-migrate --project=$P --region=$REGION --wait
 gcloud run jobs executions list --job=speclino-migrate --project=$P --region=$REGION --limit=1
 ```
 
-続けて web / worker の更新は `guides/deploy-runbook.md` の 5 章。0010 / 0011 は**追加だけ**（新しい表と
+続けて web / worker の更新は `docs/guides/deploy-runbook.md` の 5 章。0010 / 0011 は**追加だけ**（新しい表と
 NULL 可の列 `review_runs.pr_author_id`・`bundles.key_id`）なので、サービスの更新より先にスキーマが進んでも
 旧コードは動き続ける。
 
@@ -103,7 +103,7 @@ gcloud run jobs logs read speclino-admin --project=$P --region=$REGION --limit=5
 `cutover-status` の各行について、次を順に行う。
 
 1. **仕様を取り込む**（旧形式 → spec の下書き）。リポジトリの checkout が要るので手元で流す。
-   下書きを作るだけで署名はしないので、署名鍵は要らない（DB だけ。`guides/deploy-runbook.md` 7 章の
+   下書きを作るだけで署名はしないので、署名鍵は要らない（DB だけ。`docs/guides/deploy-runbook.md` 7 章の
    Cloud SQL Auth Proxy）:
 
    ```sh

@@ -3,7 +3,7 @@ title: 在庫復元を管理者経路だけで呼ぶ
 description: 'inventory.restore を `if user.is_admin:` で管理者経路だけに限定する。所有者経路（p4_owner: not is_admin, is_owner,
   PENDING）で呼出しが 0 回になり R-CANCEL-04 が missing_effect。これは回数（構造的）違反であり Z3 モデルを使わないため counterexample.assignments
   は空になる — 「所有者のみの反例」を示す実際の証拠は counterexample.path_id（p4_owner）と、そのガードの記述（not(before.actor.is_admin) を含む）であり、assignments
-  辞書には現れない。この点は PoC 6.7 の「呼出しなしの根拠は経路が完全な場合に限る」という設計と整合する。'
+  辞書には現れない。この点は「呼出しなしの根拠は経路が完全な場合に限る」という設計と整合する。'
 expected:
   R-CANCEL-01:
     verdict: VERIFIED_IN_SCOPE

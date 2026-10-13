@@ -1,4 +1,4 @@
-/** 画面のパス（design 4 章）。組み立てはここだけで行う。 */
+/** 画面のパス。組み立てはここだけで行う。 */
 
 import type { SettingsTab } from '@/types/command'
 import type { ArtifactKind } from '@/types/knowledge'

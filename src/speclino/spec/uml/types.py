@@ -42,7 +42,7 @@ class Token:
 
 @dataclass
 class Coverage:
-    """トークンの網羅（設計 4.3「全か無か」）。
+    """トークンの網羅（「全か無か」）。
 
     各トークンを ir / ignored / error に分類する。
     """

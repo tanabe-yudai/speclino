@@ -1,4 +1,4 @@
-"""承認者の照合（S61、design/2026-10-04-spec-approval-by-pr.md 4 章）。"""
+"""承認者の照合（S61）。"""
 
 from __future__ import annotations
 

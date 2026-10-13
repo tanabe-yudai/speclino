@@ -17,8 +17,8 @@ rules:
         - Makefile
       languages: []
     source:
-      doc: design/product-spec-summary.md
-      anchor: "規約パッケージ"
+      doc: .speclino/specs/spec-sys-001.md
+      anchor: "4. 要求"
     verifier:
       id: makefile.required_targets
       version: "1.0.0"
@@ -40,8 +40,8 @@ rules:
         - "specs/*.md"
       languages: []
     source:
-      doc: design/product-spec-summary.md
-      anchor: "規約パッケージ"
+      doc: .speclino/specs/spec-sys-001.md
+      anchor: "4. 要求"
     verifier:
       id: spec.required_sections
       version: "1.0.0"
@@ -70,8 +70,7 @@ rules:
         - "tests/**/test_*.py"
       languages: []
     source:
-      doc: design/2026-09-26-team-policies-and-dx.md
-      anchor: "検査器あり / 助言のみ"
+      doc: .speclino/specs/spec-know-001.md
     verifier:
       id: spec_tests
       version: "1.0.0"
@@ -97,8 +96,8 @@ rules:
         - ".github/workflows/ci.yml"
       languages: []
     source:
-      doc: design/product-spec-summary.md
-      anchor: "規約パッケージ"
+      doc: .speclino/specs/spec-sys-001.md
+      anchor: "4. 要求"
     verifier:
       id: ci.required_conditions
       version: "1.0.0"
@@ -126,8 +125,8 @@ rules:
         - "src/speclino/api/**/*.py"
       languages: []
     source:
-      doc: design/product-spec-summary.md
-      anchor: "規約パッケージ"
+      doc: .speclino/specs/spec-sys-001.md
+      anchor: "4. 要求"
     verifier:
       id: api.error_format
       version: "1.0.0"
@@ -227,5 +226,53 @@ rules:
     source:
       doc: CLAUDE.md
       anchor: "構成と規約"
+    on_missing_input: unknown
+    exceptions_allowed: true
+  - id: ARCH-005
+    version: "1.0.0"
+    level: advisory
+    title: "解析器・モデル・コードホストなどの外部は ports/ と adapters/ の境界で差し替えられること"
+    text: >
+      解析器・LLM（モデル）・コードホスト（GitHub）・成果物の保存先・タスクキュー・sandbox は
+      src/speclino/ports/ の型（Protocol）で受け、具体的な実装は src/speclino/adapters/ に置く。
+      conformance/・analysis/ は adapters/ を import しない（ARCH-002）。services/ は ports/ の型に依存し、
+      adapters/ の具体的なクラスを作るのは起動時の組み立て（依存の注入）に限る。いまの例外
+      （services/repo_registration.py の GitHub の OAuth、services/review_run_service.py の Check の対応表）は
+      増やさない。外部の差し替えでドメインと検査器を作り直さないため
+      （製品の非機能要求 NFR-008「解析器・モデル・仕様保存先・コード接続先をアダプタ境界で交換可能にする」）。
+    applies_to:
+      paths:
+        - "src/speclino/ports/**/*.py"
+        - "src/speclino/adapters/**/*.py"
+        - "src/speclino/services/**/*.py"
+        - "src/speclino/conformance/**/*.py"
+        - "src/speclino/analysis/**/*.py"
+      languages: []
+    source:
+      doc: .speclino/specs/spec-sys-001.md
+      anchor: "3. 構成要素と責務"
+    on_missing_input: unknown
+    exceptions_allowed: true
+  - id: UI-001
+    version: "1.0.0"
+    level: advisory
+    title: "画面の判定の色と用語は固定し、決まった規則で並べ、個人の環境の値と「デモ」を書かないこと"
+    text: >
+      判定の 4 値（適合 / 違反 / 未検証 / 要確認）の色はデザイントークン（web/src/styles/globals.css）に、
+      用語は web/src/services/labels.ts と knowledge.ts に固定し、画面ごとに色や言い換えを作らない。
+      「次にやること」などの並びは検査結果から決まった規則（web/src/services/nextActions.ts）で作り、
+      LLM で作らない。個人の環境の値（実在のアカウント名・リポジトリ名・URL・メール・プロジェクト ID）を
+      画面と文書に書かず、例は example-org/... や置き換え記号にする。画面・文書・ページのタイトルに
+      「デモ」という言葉を使わず、サービスとして書く。
+    applies_to:
+      paths:
+        - "web/src/**/*.ts"
+        - "web/src/**/*.tsx"
+        - "web/src/styles/*.css"
+        - "web/index.html"
+      languages: []
+    source:
+      doc: .speclino/specs/spec-sys-001.md
+      anchor: "3. 構成要素と責務（Web）"
     on_missing_input: unknown
     exceptions_allowed: true

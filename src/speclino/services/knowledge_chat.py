@@ -1,4 +1,4 @@
-"""対話による知識の作成（S73、design/2026-10-06-knowledge-chat.md）。
+"""対話による知識の作成（S73）。
 
 - 会話は持ち主だけが読み書き・削除できる（C2）。問い合わせは `KnowledgeChatRepository` が
   必ず (workspace, owner_uid) で絞る。他人の会話は存在しないのと同じ（`chat_not_found`）
@@ -125,7 +125,7 @@ async def _finish_detached(coro: Any) -> Any:
 
 
 LLM_TIMEOUT_SECONDS = 120.0
-# 会話の 1 回の出力トークンの上限（設計 C7、思考を含む。費用の予約もこの値で見積もる）。
+# 会話の 1 回の出力トークンの上限（思考を含む。費用の予約もこの値で見積もる）。
 # 思考は LOW にして、枠を本文に残す（api/routes/knowledge_chat.py の配線）
 CHAT_OUTPUT_TOKENS = 16384
 # 出力の上限で返答が切れたとき、提案を省いて説明だけで確定し、利用者にこう伝える

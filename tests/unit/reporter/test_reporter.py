@@ -1,4 +1,4 @@
-"""reporter の単体試験（PoC 13 章 / 17.3）。cancel_order フィクスチャと本物の engine/gate を使う。
+"""reporter の単体試験。cancel_order フィクスチャと本物の engine/gate を使う。
 
 json_out / review_md / check_report をそれぞれ、engine.evaluate と gate.aggregate_gate の
 実際の出力に対して検証する。

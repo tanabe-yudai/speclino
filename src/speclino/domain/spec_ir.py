@@ -1,4 +1,4 @@
-"""Spec IR（PoC 6.2 / 6.5）。各 Rule を独立した判定単位とする。"""
+"""Spec IR。各 Rule を独立した判定単位とする。"""
 
 from __future__ import annotations
 

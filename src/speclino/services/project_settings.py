@@ -1,4 +1,4 @@
-"""project の設定とオンボーディングの段階（S47、design/2026-09-26-team-policies-and-dx.md 4 章）。
+"""project の設定とオンボーディングの段階（S47）。
 
 - 設定（`projects.settings`）: メンバーなら読める。変更は owner / approver だけ（それ以外は
   `NotPermitted` で拒否し、拒否も監査に残す）。保存の前に `ProjectSettings` で検証する
@@ -9,8 +9,8 @@
   行う（S61、`services/approvers.py`）。ID を引けないログイン名があれば保存を断る
 - オンボーディング: 「GitHub App を入れる → `.speclino/` を置く → PR を開く」の各段階を、web の
   役割が既に持っているデータ（`projects.installation_id`・run の状態・失敗の理由）だけから導く。
-  `.speclino/` の有無を直接確かめるには GitHub App の秘密鍵が要り、鍵は worker だけが持つ
-  （design/2026-09-27-workspaces.md 8.2 節）。そこで、完了した検査があれば「ある」、最新の検査が
+  `.speclino/` の有無を直接確かめるには GitHub App の秘密鍵が要り、鍵は worker だけが持つ。
+  そこで、完了した検査があれば「ある」、最新の検査が
   `.speclino/` の不足で失敗していれば「無い」、どちらでもなければ「まだ確かめられない」とする
   （推測で埋めない）
 

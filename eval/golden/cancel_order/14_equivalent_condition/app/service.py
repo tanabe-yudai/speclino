@@ -4,7 +4,7 @@
 `examples.orders.app` のまま保つ（S17 の path_analyzer 入力に使う。S09 では未実行）。
 `not (a or b)` をド・モルガンの法則で `(not a) and (not b)` に、`!= PENDING` を
 `not (== PENDING)` に書き換える。論理的に同値なので Z3 上は同じ充足可能性になり、
-PoC 17.1「同等の条件式へ書き換える → 誤った違反を出さない」を確認できる。
+「同等の条件式へ書き換える → 誤った違反を出さない」を確認できる。
 """
 
 from __future__ import annotations

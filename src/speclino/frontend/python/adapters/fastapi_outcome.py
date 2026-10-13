@@ -1,4 +1,4 @@
-"""FastAPI の応答・例外を outcome へ写す明示アダプター（PoC 3.2: 理解する構文だけに限定）。
+"""FastAPI の応答・例外を outcome へ写す明示アダプター（理解する構文だけに限定）。
 
 `raise HTTPException(status_code=<int>)` と `return Response(status_code=<int>)` だけを
 http_response として認識する。それ以外はサービス層の戻り値（return）または例外として扱う。

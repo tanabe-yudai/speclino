@@ -23,7 +23,7 @@ import type {
 } from '@/types/knowledgeChat'
 import type { PolicyRule } from '@/types/policy'
 
-/** パネルの最初に出す告知（設計 5 章、文言は固定）。 */
+/** パネルの最初に出す告知（文言は固定）。 */
 export const CHAT_NOTICE = '会話は Google の Gemini に送られ、SpecLino の運用者が読む場合があります。ほかのメンバーには見えません'
 
 export const NOTE_MAX_CHARS = 500

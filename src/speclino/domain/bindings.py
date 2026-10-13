@@ -1,4 +1,4 @@
-"""業務語彙とコードの対応付け `.speclino/bindings.yaml` と外部操作の契約（PoC 8）。"""
+"""業務語彙とコードの対応付け `.speclino/bindings.yaml` と外部操作の契約。"""
 
 from __future__ import annotations
 

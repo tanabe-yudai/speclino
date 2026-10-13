@@ -7,7 +7,7 @@ import { diffPackages } from '@/services/policyDraft'
 import type { PoliciesView, PolicyPackage, PolicyRule } from '@/types/policy'
 
 /**
- * ルールの一覧（design 6 章の中央）。下書きがあれば下書きの中身を出し、有効な改訂から変わった行に印を付ける。
+ * ルールの一覧（中央）。下書きがあれば下書きの中身を出し、有効な改訂から変わった行に印を付ける。
  * 直近の成否はワークスペースの各プロジェクトの最新の検査から（結果が無ければ「結果なし」）。
  */
 export function RuleList({

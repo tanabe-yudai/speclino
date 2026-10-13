@@ -1,4 +1,4 @@
-"""semantic_diff（S28 / PoC 12 章）: 新規・既存・解消・判定不能化と、要求・実装の差分。"""
+"""semantic_diff（S28）: 新規・既存・解消・判定不能化と、要求・実装の差分。"""
 
 from __future__ import annotations
 

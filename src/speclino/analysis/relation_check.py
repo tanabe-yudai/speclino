@@ -1,4 +1,4 @@
-"""関係の義務（クラス図の関係線）の検査（grammar.md 4.1 節、設計 5.1.1）。
+"""関係の義務（クラス図の関係線）の検査（grammar.md 4.1 節）。
 
 AST だけを読み、対象を import しない。両端の名前の解決は構造の検査（`structure_check`）と同じ
 規則（クラスは source_roots で一意なモジュール直下の定義、`<<module>>` は bindings の modules か
@@ -18,7 +18,7 @@ AST だけを読み、対象を import しない。両端の名前の解決は�
 見つかれば VERIFIED_IN_SCOPE。見つからないとき、「無い」と確定できない理由（`__getattr__`・
 `setattr`・`exec`・`import *`・型の分からない属性の値・解決できない同名の参照・一意でない基底）が
 あれば UNKNOWN、無ければ VIOLATED。注釈の無いリテラル・コンテナ（`[]`・`{}`）とリポジトリ外の
-関数の呼出しは B とみなさない（注釈は mypy strict で実行時の値と整合する前提。設計 5.1.1）。
+関数の呼出しは B とみなさない（注釈は mypy strict で実行時の値と整合する前提）。
 """
 
 from __future__ import annotations

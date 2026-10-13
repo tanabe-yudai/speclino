@@ -1,11 +1,11 @@
-"""spec_extractor（S33 / PoC 7 章）: 仕様 Markdown から Spec IR の **候補** を生成する。
+"""spec_extractor（S33）: 仕様 Markdown から Spec IR の **候補** を生成する。
 
 LLM は候補を出すだけで承認はしない（approval_ref=None、approvals=[]）。曖昧な表現は
 確定させず、`ambiguities` として返させて Diagnostic（W_AMBIGUOUS）に残す。語彙は
 domain / bindings に宣言されたものだけを使わせ、外れたものは spec_validator が
 E_REF_UNDEFINED 等で弾く（候補が検証を通らなければ承認の対象にならない）。
 
-廃止予定（設計 2026-10-05 4.2・D5）: 新しい仕様（UML の入口）では使わない。本文から IR を作るのは
+廃止予定: 新しい仕様（UML の入口）では使わない。本文から IR を作るのは
 決定的な `spec.uml.compile_spec` だけで、AI の支援は本文の書き換えの提案
 （`services/spec_suggest.py`）に限る。旧形式の `spec_pr_bot`・`speclino spec-extract`・A2A の
 `spec_review` がまだ使うので残している。

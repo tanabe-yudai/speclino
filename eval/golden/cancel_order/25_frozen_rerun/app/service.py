@@ -2,7 +2,7 @@
 
 `examples/orders/app/service.py`（正しい実装）と同一。import は `examples.orders.app` の
 まま保つ（S17 の path_analyzer 入力に使う。S09 では未実行）。このケースは実装ではなく
-再現性（PoC 12.3 / 17.1「同じ凍結入力で再実行する → 時刻等を除いた結果が一致する」）を
+再現性（同じ凍結入力で再実行すると、時刻等を除いた結果が一致すること）を
 確認するためのもの。`tests/unit/eval/test_golden.py` でこのケースを含む golden 全体を
 2 回評価し、run_id を除いた findings が一致することを確認する。
 """

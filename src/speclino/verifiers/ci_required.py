@@ -1,5 +1,4 @@
-"""CI-001: GitHub Actions ワークフローの必須条件を検証する（`design/product-spec-summary.md`
-規約パッケージ節、S36）。
+"""CI-001: GitHub Actions ワークフローの必須条件を検証する（S36）。
 
 ワークフロー YAML は構文的に読むだけで、実行しない（`gh` や `act` を呼ばない）。判定する条件は
 すべて params で調整できる。

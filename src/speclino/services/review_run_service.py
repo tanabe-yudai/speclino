@@ -443,8 +443,8 @@ class ReviewRunService:
                     if self.cost_guard is not None:
                         cost_ok = await self.cost_guard.can_start(datetime.now(UTC).date())
                     # エージェントの失敗で run 全体を落とさない。証拠が増えないだけで、
-                    # 未解決は未解決のまま残りゲートが失敗する（design の「最悪でも
-                    # 証拠不足 → 未検証 → ゲート失敗」）。LLM の 429/5xx や
+                    # 未解決は未解決のまま残りゲートが失敗する（最悪でも
+                    # 証拠不足 → 未検証 → ゲート失敗）。LLM の 429/5xx や
                     # ネットワーク障害はここで吸収する。
                     try:
                         inv = await investigate(ctx, permissions, self.config.model, cost_ok)

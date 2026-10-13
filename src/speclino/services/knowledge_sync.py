@@ -1,5 +1,4 @@
-"""知識の配信（S68・S75、design/2026-10-05-team-knowledge-registry.md 7.1・8 章、
-design/2026-10-07-agent-sync.md）。
+"""知識の配信（S68・S75）。
 
 3 つの面を持つ:
 
@@ -13,7 +12,7 @@ design/2026-10-07-agent-sync.md）。
 - ゲート: `check_lock_snapshot` / `check_lock` が lock の署名・期限・ファイルのハッシュ・
   消したはずのファイル（`absent`）・世代を確かめ、`KNOWLEDGE-LOCK-001`（必須）の Finding を 1 つ返す
 
-書き出しの約束（S76・S77、design/2026-10-07-agent-sync.md 6 章）:
+書き出しの約束（S76・S77）:
 
 - skill: 配置（`SyncLayout`）の `skill_roots`（`.agents/skills` と `.claude/skills` の部分集合）の
   それぞれの `<name>/` に `SKILL.md` と付属ファイル（同じ内容）。ルートの集合は前回の lock の

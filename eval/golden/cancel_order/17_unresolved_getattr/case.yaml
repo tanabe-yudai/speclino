@@ -3,8 +3,7 @@ title: 未解決の getattr で呼び出す
 description: 在庫復元を `getattr(inventory, "restore")(order.items)` で間接的に呼ぶ。
   呼出し先の式が `getattr(...)` の戻り値（`ast.Call`）であり、path_analyzer が呼出し先を
   解決するために辿れる `ast.Name` / `ast.Attribute` の連鎖に還元できないため、unresolved_call
-  として記録し経路の探索は継続する（黙って落とさず、影響する要求を UNKNOWN にする —
-  PoC 3.2 / 10.3）。成功経路が incomplete になり、その経路にだけ関連する
+  として記録し経路の探索は継続する（黙って落とさず、影響する要求を UNKNOWN にする）。成功経路が incomplete になり、その経路にだけ関連する
   R-CANCEL-03/04/05/06 が UNKNOWN（unsupported_analysis）になる。監査記録の呼出しは
   構文的に解決できているが、経路自体が incomplete なため R-CANCEL-05 も UNKNOWN になる
   （`ConformanceEngine._holds` は経路が incomplete なら成立判定も UNKNOWN に倒す）。

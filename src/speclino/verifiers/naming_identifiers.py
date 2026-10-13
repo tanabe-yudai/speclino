@@ -1,5 +1,4 @@
-"""NAMING: Python の識別子の命名規則を検証する（S69、
-`design/2026-10-05-team-knowledge-registry.md` 6.1）。
+"""NAMING: Python の識別子の命名規則を検証する（S69）。
 
 対象は ``rule.applies_to.paths`` に一致する Python ソース。AST で読むだけで、import しない。
 

@@ -1,4 +1,4 @@
-"""メンバーと招待の API（S56、design/2026-09-27-workspaces.md）。
+"""メンバーと招待の API（S56）。
 
 判断は `services/members.py` と `services/invitations.py` に集約し、ここは HTTP の形にするだけ。
 非メンバーは 404（存在を漏らさない）、owner の操作を owner 以外のメンバーが呼ぶと 403。

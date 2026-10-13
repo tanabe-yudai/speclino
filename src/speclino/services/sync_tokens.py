@@ -1,4 +1,4 @@
-"""`speclino sync` 専用のトークン（S68、design/2026-10-05-team-knowledge-registry.md 7.1）。
+"""`speclino sync` 専用のトークン（S68）。
 
 - 読み取り専用で、1 つのワークスペースの 1 つのプロジェクト（リポジトリ）に限る
 - 発行・失効はワークスペースの owner / approver。一覧はメンバー全員（平文もハッシュも出さない）。

@@ -2,7 +2,7 @@ id: 26_wrong_state_shipped_then_cancelled
 title: 更新後の値で評価する（SHIPPED を経由してから CANCELLED にする）
 description: >-
   成功経路で order.status を一度 SHIPPED に更新してから CANCELLED に更新し直す（同じ変数へ
-  2 回 write する）。PoC 9.2「状態変更後に評価した条件は変更後の値に基づいて計算する」により
+  2 回 write する）。「状態変更後に評価した条件は変更後の値に基づいて計算する」により
   `after.order.status` は最後の更新値（CANCELLED）で評価されるため R-CANCEL-03 は
   VERIFIED_IN_SCOPE のままになる。R-CANCEL-07a（拒否経路での order.status への書込み 0 を
   要求）は拒否経路（403/409）だけを applicability に持ち、この 2 回の write はどちらも成功経路

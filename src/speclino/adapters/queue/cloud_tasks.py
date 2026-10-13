@@ -27,7 +27,7 @@ class CloudTasksQueue:
         client: tasks_v2.CloudTasksAsyncClient | None = None,
     ) -> None:
         """dispatch_deadline_s の既定 1500 秒（25分）の根拠は infra/envs/prod/tasks.tf 冒頭の
-        コメント（design/2026-09-22-hackathon-plan.md の「時間と冪等性」）:
+        コメント:
         パイプライン全体 15分 < Cloud Run request timeout 20分 < dispatch deadline 25分。
         """
         self.project = project
@@ -57,7 +57,7 @@ class CloudTasksQueue:
         タスク名を run_id から決定的に作る（`projects/.../tasks/run-<run_id>`）ことで、同じ
         run_id の二重投入（webhook の再配信）を Cloud Tasks 自身に弾かせる。既に同名タスクが
         あれば `AlreadyExists` になるので、それを捕まえて既存のタスク名をそのまま返す
-        （design の「時間と冪等性」: 再配信で同じ run を二重実行しない）。
+        （再配信で同じ run を二重実行しない）。
         """
         parent = tasks_v2.CloudTasksAsyncClient.queue_path(self.project, self.location, self.queue)
         name = tasks_v2.CloudTasksAsyncClient.task_path(

@@ -116,7 +116,7 @@ async def test_worker_url_trailing_slash_does_not_duplicate_path() -> None:
 @pytest.mark.asyncio
 async def test_duplicate_enqueue_returns_existing_task_name_on_already_exists() -> None:
     """webhook の再配信で同じ run_id が二重投入されても Cloud Tasks の AlreadyExists を
-    エラーにせず、既存タスク名をそのまま返す（design の「時間と冪等性」）。"""
+    エラーにせず、既存タスク名をそのまま返す。"""
     run_id = uuid.uuid4()
     client = _FakeTasksClient(raise_already_exists=True)
 

@@ -1,4 +1,4 @@
-"""spec_validator の出力型（PoC 6.1 の Diagnostic）。
+"""spec_validator の出力型（Diagnostic）。
 
 `speclino.domain` に置かないのは、これが IR そのものの語彙ではなく、spec_validator が
 形式検証（JSON Schema／pydantic）の後段で行う意味検証（参照解決・型整合・矛盾・承認ハッシュ）

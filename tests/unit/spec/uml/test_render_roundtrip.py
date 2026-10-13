@@ -1,4 +1,4 @@
-"""render と往復の性質（設計 4.3: `parse(render(parse(s))) == parse(s)`）。
+"""render と往復の性質（`parse(render(parse(s))) == parse(s)`）。
 
 本文は grammar.md の文法から hypothesis で生成する。見た目だけの揺れ（別名・送り手・応答・コメント・
 可視性・空白・ノードの形・判断のラベル・終了の遷移・余分な括弧）も混ぜ、正規形で落ちても意味が

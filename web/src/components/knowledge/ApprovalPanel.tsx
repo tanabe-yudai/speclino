@@ -13,7 +13,7 @@ import { textHash } from '@/services/knowledgeChat'
 import type { ApprovalPanelProps } from '@/types/specEditor'
 
 /**
- * 保存済みの下書きの承認（設計 3.2）。承認者が見た番号と content_hash をサーバが照合する。
+ * 保存済みの下書きの承認。承認者が見た番号と content_hash をサーバが照合する。
  * ボタンは owner / approver にだけ出し、作者本人なら自己承認の印が残ることを先に伝える。
  */
 export function ApprovalPanel({ slug, draft, dirty, previewErrors, previewPending, previewFailed, onApproved, onConflict }: ApprovalPanelProps) {

@@ -5,7 +5,7 @@
 在庫復元を `getattr(inventory, "restore")(order.items)` で間接的に呼ぶ。呼出し先の式が
 `ast.Call`（`getattr(...)` 自体の戻り値）であり `ast.Name` / `ast.Attribute` の連鎖に
 還元できないため、path_analyzer は呼出し先を解決できず unresolved_call として記録するだけで
-経路の探索は継続する（PoC 3.2「対応外」は黙って落とさず、影響する要求を UNKNOWN にする）。
+経路の探索は継続する（影響する要求を UNKNOWN にする）。
 成功経路が incomplete になり、その経路だけに関連する R-CANCEL-03/04/05/06 が UNKNOWN になる。
 拒否経路（403/409, R-CANCEL-01/02/07a/07b/07c）はこの式に到達しないため影響を受けない。
 """

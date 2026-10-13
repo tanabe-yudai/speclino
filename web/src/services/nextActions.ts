@@ -1,4 +1,4 @@
-/** 「次にやること」（design 5.3）。検査結果から決まった規則で並べ、LLM は使わない。 */
+/** 「次にやること」。検査結果から決まった規則で並べ、LLM は使わない。 */
 
 import { SYSTEM_RULES } from './labels'
 import type { NextAction, NextActionKind, PolicyView, RequirementView } from '@/types/project'

@@ -1,4 +1,4 @@
-"""PoC 6.6 / 6.7 の例が IR 型でラウンドトリップできること。"""
+"""IR の例が IR 型でラウンドトリップできること。"""
 
 from __future__ import annotations
 

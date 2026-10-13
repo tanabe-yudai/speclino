@@ -1,4 +1,4 @@
-"""UML の義務（順序・包含・遷移・構造）の Finding を作る共通部品（設計 5.1）。
+"""UML の義務（順序・包含・遷移・構造）の Finding を作る共通部品。
 
 判定ロジックは trace_check / state_check / analysis.structure_check。ここは結果の形と集約だけ。
 """

@@ -1,5 +1,4 @@
-"""`speclino sync`（S68・S75、design/2026-10-05-team-knowledge-registry.md 7.1、
-design/2026-10-07-agent-sync.md A2）。
+"""`speclino sync`（S68・S75）。
 
 チームの承認済みの知識（スキル・指示書・仕様）の書き出し計画をサーバから受け取り、MCP の
 エージェントと同じ実行スクリプト（`speclino.sync_apply.apply_plan`）でこの checkout に当て、

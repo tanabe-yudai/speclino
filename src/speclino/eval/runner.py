@@ -1,8 +1,8 @@
-"""Golden ケースを実行し、期待 verdict / category と反例の一致を測る（PoC 17.1 / 17.3）。
+"""Golden ケースを実行し、期待 verdict / category と反例の一致を測る。
 
 mode:
-  handwritten: expected-code-ir.json（手書き Code IR）を検査器に入力する（PoC M1）
-  source:      app/service.py を解析器に入力し、生成 Code IR で検査する（PoC M2）
+  handwritten: expected-code-ir.json（手書き Code IR）を検査器に入力する
+  source:      app/service.py を解析器に入力し、生成 Code IR で検査する
 一致率だけを出さず、要求数・承認済み数・対応範囲数・判定済み数・未解析数を併記する。
 
 case.yaml に `spec_ir_override: <相対パス>` を指定すると、そのケースだけ共有の
@@ -43,7 +43,7 @@ class CaseResult(BaseModel):
     mismatches: list[str] = Field(default_factory=list)
     counterexample_ok: bool | None = None
     counterexample_detail: str = ""
-    # 有限ドメイン検算（PoC 3.1 / S35）: Z3 の判定と総当たりが食い違った要求
+    # 有限ドメイン検算（S35）: Z3 の判定と総当たりが食い違った要求
     finite_disagreements: list[str] = Field(default_factory=list)
     finite_agreements: int = 0
 
@@ -88,7 +88,7 @@ class EvalReport(BaseModel):
 
     @property
     def violated_detection_rate(self) -> float | None:
-        """既知違反の検出率（PoC 17.3）: 期待 VIOLATED のうち実際 VIOLATED の割合。"""
+        """既知違反の検出率: 期待 VIOLATED のうち実際 VIOLATED の割合。"""
         total = sum(self.confusion["VIOLATED"].values())
         if total == 0:
             return None
@@ -96,21 +96,21 @@ class EvalReport(BaseModel):
 
     @property
     def unknown_rate(self) -> float | None:
-        """UNKNOWN 率（PoC 17.3）: 全 Finding のうち実際 UNKNOWN の割合。"""
+        """UNKNOWN 率: 全 Finding のうち実際 UNKNOWN の割合。"""
         if self.total_findings == 0:
             return None
         return sum(row["UNKNOWN"] for row in self.confusion.values()) / self.total_findings
 
     @property
     def review_rate(self) -> float | None:
-        """要確認率（PoC 17.3）: 全 Finding のうち実際 REVIEW の割合。"""
+        """要確認率: 全 Finding のうち実際 REVIEW の割合。"""
         if self.total_findings == 0:
             return None
         return sum(row["REVIEW"] for row in self.confusion.values()) / self.total_findings
 
     @property
     def counterexample_reproduction_rate(self) -> float | None:
-        """反例の再現率（PoC 17.3）: counterexample_must_include を指定した Finding のうち、
+        """反例の再現率: counterexample_must_include を指定した Finding のうち、
         反例（path_id / assignments）が一致した割合。"""
         if self.counterexample_total == 0:
             return None
@@ -259,7 +259,7 @@ def render_markdown(report: EvalReport) -> str:
         f"一致 {report.finite_check_agreements} / 不一致 **{report.finite_check_disagreements}**"
     )
     lines.append("")
-    lines.append("## 併記（PoC 17.3）")
+    lines.append("## 併記")
     lines.append("")
     lines.append("| 要求数 | 承認済み | 対応範囲 | 判定済み | 未解析 |")
     lines.append("| --- | --- | --- | --- | --- |")
@@ -269,7 +269,7 @@ def render_markdown(report: EvalReport) -> str:
         f"| {report.requirements_decided} | {report.requirements_unanalyzed} |"
     )
     lines.append("")
-    lines.append("## 指標（PoC 17.3: 一致率だけを出さない）")
+    lines.append("## 指標（一致率だけを出さない）")
     lines.append("")
     lines.append("| 既知違反の検出率 | UNKNOWN 率 | 要確認率（REVIEW） | 反例の再現率 |")
     lines.append("| --- | --- | --- | --- |")

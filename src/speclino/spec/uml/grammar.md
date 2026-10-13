@@ -6,7 +6,7 @@
 アクティビティ図の辺のラベルの引用符）では版を上げない。版は `CompiledSpec` に入り `ir_hash` を変えるため、
 上げると承認済みの仕様の IR が意味の変化なしに別物になる。既存の文書の IR が変わる変更のときだけ上げる。
 「明示的に無視する要素」（7 章）に載っているものだけが IR に入らずに通る。
-設計: `design/2026-10-05-team-knowledge-registry.md` 4 章。
+設計: 検査器の判定規則の仕様（SPEC-CONF-001）。
 
 表記: `{ x }` は 0 回以上、`[ x ]` は省略可、`"x"` は字句そのもの、`NL` は行末。
 Mermaid の 1 文は 1 行。行をまたぐ文は無い（ブロックの `alt … end` 等は行の並びで表す）。
@@ -177,7 +177,7 @@ DIR           = "TB" | "TD" | "BT" | "LR" | "RL" ;
   静的に到達しない代入（定数が偽の `if` / `while` の本体、定数が真の `if` の `else`、同じブロックの
   `return`・`raise`・`continue`・`break` の後）は根拠にしない
 - 関係ごとに `RelationObligation`（id は ID があれば `<図 ID>#<ID>`）を作る。照合の規則は
-  `design/2026-10-05-team-knowledge-registry.md` 5.1.1
+  検査器の判定規則の仕様（SPEC-CONF-001）
 
 ## 5. シーケンス図
 
@@ -353,4 +353,4 @@ markdown-it-py のブロック解析だけ（インラインは二次の時間�
 - Mermaid の予約語（`end` など。`_parse.RESERVED_SEQUENCE` / `RESERVED_FLOWCHART`）を参加者・ノード ID に使うと
   警告 `W_RESERVED_WORD`（IR には影響しない。描画できるかの判断はエディタ側）
 - 図の名前（操作・入口・変数・`<<module>>`）とコードの対応は parser の外（検査器）の規則で決める。
-  `design/2026-10-05-team-knowledge-registry.md` 5.1.1
+  検査器の判定規則の仕様（SPEC-CONF-001）

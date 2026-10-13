@@ -4,7 +4,7 @@ Revision ID: 0012
 Revises: 0011
 Create Date: 2026-10-07 10:00:00.000000
 
-追加だけ（S73、design/2026-10-06-knowledge-chat.md 3 章）。既存の表は変えない。
+追加だけ（S73）。既存の表は変えない。
 `knowledge_chats` は知識を AI と作る会話（持ち主だけが読む）。kind は専用の型
 `knowledge_chat_kind`（既存の `artifact_kind` は広げない）。`cost_ledger` には会話の費用を
 ユーザー・ワークスペースごとに数える NULL 可の列（workspace / uid / purpose）を足す。

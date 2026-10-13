@@ -1,4 +1,4 @@
-"""招待とメンバー管理の API の統合試験（S56、design/2026-09-27-workspaces.md）。
+"""招待とメンバー管理の API の統合試験（S56）。
 
 実 PostgreSQL が必要（`SPECLINO_DATABASE_URL` が未設定なら skip）。dev 認証では
 `X-Dev-Email` / `X-Dev-Email-Verified` でメールとその確認状態を与える。

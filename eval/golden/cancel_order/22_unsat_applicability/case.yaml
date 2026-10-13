@@ -7,7 +7,7 @@ description: >-
   `before.order.status == PENDING and before.order.status == SHIPPED`（同一変数が
   同時に 2 つの列挙値を取ることを要求する、恒偽の式）に差し替えてある。
   conformance_engine は要求ごとに「入口仮定 ∧ applicability」の充足性を最初に確認し
-  （PoC 10.3 の判定規則、`ConformanceEngine.evaluate_rule` のステップ2）、UNSAT なら
+  （`ConformanceEngine.evaluate_rule` のステップ2）、UNSAT なら
   空虚な成功として VERIFIED を出さず REVIEW: vacuous_applicability にする。R-CANCEL-04 だけ
   この扱いになり、他の要求は 01_correct と同じ結果になる。
 expected:

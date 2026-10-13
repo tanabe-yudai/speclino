@@ -1,4 +1,4 @@
-"""LLM 支援の評価の単位（S70、設計 6.3 の 1）。"""
+"""LLM 支援の評価の単位（S70）。"""
 
 from __future__ import annotations
 

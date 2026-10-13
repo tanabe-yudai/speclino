@@ -44,7 +44,7 @@ export interface RunVersions {
   settings_hash: string | null
 }
 
-/** 意味差分（PoC 12.2）の件数。src/speclino/domain/semantic_diff.py の SemanticDiffCounts。 */
+/** 意味差分の件数。src/speclino/domain/semantic_diff.py の SemanticDiffCounts。 */
 export interface SemanticDiffCounts {
   new_violation: number
   existing_violation: number

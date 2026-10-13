@@ -1,4 +1,4 @@
-"""A2A の議論役（S59、design/2026-10-04-a2a-spec-agent.md）の型。ロジックを書かない。"""
+"""A2A の議論役（S59）の型。ロジックを書かない。"""
 
 from __future__ import annotations
 

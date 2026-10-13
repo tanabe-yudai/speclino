@@ -1,4 +1,4 @@
-"""`api/routes/projects.py` の統合試験（S45、design/2026-09-30-ui-redesign.md 5.2・8 章）。
+"""`api/routes/projects.py` の統合試験（S45）。
 
 実 PostgreSQL が必要（`SPECLINO_DATABASE_URL` が未設定なら skip）。
 """

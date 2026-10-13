@@ -153,7 +153,7 @@ def _model(state: AppState) -> str:
 
 
 def _llm(state: AppState) -> TextLlm:
-    """会話の LLM。出力の上限は設計 C7 の 16,384 トークン（思考を含む）に固定する。
+    """会話の LLM。出力の上限は 16,384 トークン（思考を含む）に固定する。
 
     Gemini は読むだけの関数で調べてから答える（`GeminiToolLlm`）。思考の量は設定
     `chat_thinking_level`（既定 medium）。

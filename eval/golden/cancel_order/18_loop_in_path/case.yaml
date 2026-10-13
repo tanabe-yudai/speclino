@@ -2,7 +2,7 @@ id: 18_loop_in_path
 title: 関連経路に対応外ループがある
 description: >-
   成功経路で `inventory.restore(order.items)` の代わりに `for item in order.items:
-  inventory.restore(item)` を使う。`ast.For` は PoC 3.2 の対応構文に無い。構造解析（S29）が
+  inventory.restore(item)` を使う。`ast.For` は解析器の対応構文に無い。構造解析（S29）が
   ループ領域を走査し「触れ得る観測は在庫復元の呼出しだけ（return / raise / 束縛変数の書込み
   は無い）」と分かるので、経路は不完全（precision=incomplete、may_affect=[call:inventory_restore_command]）
   のまま後続の audit.record / return まで追跡する。在庫復元の回数に関わる R-CANCEL-04 だけが

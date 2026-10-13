@@ -1,4 +1,4 @@
-"""UML（Mermaid の厳格な部分集合）から変換した IR（S63–S64、設計 4–5 章）。"""
+"""UML（Mermaid の厳格な部分集合）から変換した IR（S63–S64）。"""
 
 from __future__ import annotations
 

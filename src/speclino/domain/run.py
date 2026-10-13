@@ -1,4 +1,4 @@
-"""run-manifest（PoC 5.3 / 12.3）。入力ハッシュと版を固定し、再現可能にする。"""
+"""run-manifest。入力ハッシュと版を固定し、再現可能にする。"""
 
 from __future__ import annotations
 

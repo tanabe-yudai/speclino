@@ -281,8 +281,8 @@ authorized networks とは別経路で **IAM（`roles/cloudsql.client`）+ 一�
 `cloudsql.client` を持つのは web / worker の SA だけ。
 
 パブリック IP を外すにはプライベート IP が要り、そのためには VPC + プライベートサービス
-アクセス + Serverless VPC コネクタ（アイドルでも月 $8〜）が必要になる。design の
-「VPC / NAT は作らない」に従い、**authorized networks を空に保つ**ことで代替している。
+アクセス + Serverless VPC コネクタ（アイドルでも月 $8〜）が必要になる。
+「VPC / NAT は作らない」方針に従い、**authorized networks を空に保つ**ことで代替している。
 
 > Cloud SQL に Security Group に相当するものは無い。ネットワーク層は authorized networks、
 > 認可は IAM、認証は DB ユーザーのパスワードという 3 層で守る。
@@ -418,13 +418,13 @@ SPECLINO_SMOKE_EMAIL=<email> SPECLINO_SMOKE_PASSWORD=<password> \
   scripts/smoke_prod.sh
 ```
 
-その後 `guides/github-app-setup.md` に従って本番 GitHub App の Webhook URL を
+その後 `docs/guides/github-app-setup.md` に従って本番 GitHub App の Webhook URL を
 `$WEB_URL/webhooks/github` に設定し、デモ PR を作る（今のデモは #47・#45・#46。中身は各 PR の説明と
 `docs/submission/form.md`。`demos/` は旧い題材 `examples/orders` の変異の置き場で、今のデモ PR とは別）。
 
 ## 9. ワークスペースの初期設定（S53）
 
-S53 からは、登録されたリポジトリの run しか誰にも見えない（design/2026-09-27-workspaces.md）。
+S53 からは、登録されたリポジトリの run しか誰にも見えない。
 デプロイ直後は既存 project がどのワークスペースにも属していないため、この手順を流すまで
 UI に何も出ない。**リポジトリ直下で実行する**必要は無い（`gcloud run jobs execute` はどこからでもよい）。
 
@@ -455,7 +455,7 @@ curl -s "$WEB_URL/api/me" -H "Authorization: Bearer <ID トークン>"
 ### 9-2. 既存 project の github_repo_id を埋める（Deploy が自動で流す）
 
 改名・削除後の同名リポジトリ再利用を安全に扱うため、まず全 project の GitHub リポジトリ ID を
-確定させる（design の codex レビュー #3。名前一致では自動で埋めない）。
+確定させる（名前一致では自動で埋めない）。
 
 ```sh
 gcloud run jobs execute speclino-admin --project=$P --region=$REGION \
@@ -516,13 +516,13 @@ ID の無い承認者は承認・確定できない（ログイン名では照�
 で引いた ID を確かめてから `--yes` を足して保存するか、画面で保存し直す。
 
 他のワークスペース（自分とデモ以外）を作れるようにするのは S54（ワークスペース単位の MCP
-トークン）の後（design の切り替えの順序）。
+トークン）の後。
 
 ## 10. MCP トークン（S54）
 
 全体共通の静的トークン（`SPECLINO_MCP_TOKEN` / Secret Manager の `mcp-token`）は廃止し、
 ワークスペース単位のトークン（DB の `mcp_tokens`、ハッシュだけ保存）に切り替えた。発行・失効は
-UI から owner だけができる（design/2026-09-27-workspaces.md 8.1 節、切り替えの順序）。
+UI から owner だけができる。
 
 **順序（コード先行、続けて Terraform）**:
 
@@ -546,14 +546,14 @@ UI から owner だけができる（design/2026-09-27-workspaces.md 8.1 節、�
 ## 11. リポジトリの登録（S55）
 
 ワークスペースの owner が画面（「設定」→「リポジトリ」→ 追加）から登録する。GitHub で本人が admin で、
-SpecLino の GitHub App がインストール済みであることを確かめてから登録する（`guides/github-app-setup.md` 1.1）。
+SpecLino の GitHub App がインストール済みであることを確かめてから登録する（`docs/guides/github-app-setup.md` 1.1）。
 
 **順序**（値の無い secret を注入するとリビジョンが起動できないので 2 回に分ける）:
 
 1. `terraform apply`（ユーザー確認の上で）: `github-app-client-secret` の入れ物を作る。`github_client_id` が空の
    あいだは web に注入しない
 2. GitHub App の設定: Callback URL を完全一致で登録（ワイルドカード無効）、client secret を生成して投入
-   （`guides/github-app-setup.md` 1.1）
+   （`docs/guides/github-app-setup.md` 1.1）
 3. `infra/envs/prod/terraform.tfvars` に `github_client_id = "<Client ID>"` を書き、もう一度 `terraform apply`
    （web に `SPECLINO_GITHUB_CLIENT_ID` と client secret が入る）
 4. Deploy（マイグレーション 0006 → サービス更新）。3 と順序は問わないが、両方が済むまで登録は 503

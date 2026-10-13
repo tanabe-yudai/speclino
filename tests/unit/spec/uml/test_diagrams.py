@@ -1,4 +1,4 @@
-"""図ごとの正常系と拒否（grammar.md 4–7 章、設計 4.1）。"""
+"""図ごとの正常系と拒否（grammar.md 4–7 章）。"""
 
 from __future__ import annotations
 

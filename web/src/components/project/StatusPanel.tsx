@@ -11,7 +11,7 @@ import type { ProjectOverview } from '@/types/project'
 import { HealthRing } from './HealthRing'
 
 
-/** 状態: 状態の見出しと円グラフ（要求と規約を合わせた 5 区分）、件数、最新の検査（design 5.1-1）。 */
+/** 状態: 状態の見出しと円グラフ（要求と規約を合わせた 5 区分）、件数、最新の検査。 */
 export function StatusPanel({ slug, overview }: { slug: string; overview: ProjectOverview }) {
   const run = overview.run
   const sc = overview.project.status_counts

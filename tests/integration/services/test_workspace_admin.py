@@ -1,4 +1,4 @@
-"""`services.workspace_admin` の統合試験（S53、design/2026-09-27-workspaces.md）。
+"""`services.workspace_admin` の統合試験（S53）。
 
 実 PostgreSQL が必要。`SPECLINO_DATABASE_URL` が未設定ならモジュール全体を skip する
 （他の統合テストと同じ理由）。後始末は `conftest.py` の `engine` フィクスチャが

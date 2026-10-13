@@ -1,4 +1,4 @@
-"""services: CLI・S20 worker が共有するオーケストレータ（PoC 14章「モジュール分割」の cli 層と
+"""services: CLI・S20 worker が共有するオーケストレータ（cli 層と
 conformance_engine の間）。GitHub・DB・LLM に依存しない。
 
 パッケージ本体では何も re-export しない（各モジュールから直接 import する）。ここで

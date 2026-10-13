@@ -1,4 +1,4 @@
-"""期待する Finding の列挙と欠落の補完（設計 5.2）。
+"""期待する Finding の列挙と欠落の補完。
 
 run は bundle から「出るべき要求 ID」を列挙し、検査の後、一覧にあるのに Finding が無い要求に
 UNKNOWN（`missing_finding`）を合成する。ゲートが「出てきた Finding だけ」で判定して、出なかった

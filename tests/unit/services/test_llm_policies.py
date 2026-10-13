@@ -1,4 +1,4 @@
-"""LLM 支援の規約の評価（S70、設計 6.2–6.3）。LLM は偽物（ネットワークなし）。"""
+"""LLM 支援の規約の評価（S70）。LLM は偽物（ネットワークなし）。"""
 
 from __future__ import annotations
 

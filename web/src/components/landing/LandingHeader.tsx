@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { ThemeToggle } from '@/components/shell/ThemeToggle'
-import { NAV } from '@/services/landingContent'
+import { NAV, REPO_URL } from '@/services/landingContent'
 import { BrandMark } from '@/components/shell/BrandMark'
 
 export function LandingHeader() {
@@ -15,6 +15,9 @@ export function LandingHeader() {
           <a className="hover:text-foreground" href="#principles">{NAV.principles}</a>
         </nav>
         <div className="ml-auto flex items-center gap-2">
+          <a href={REPO_URL} target="_blank" rel="noreferrer" className="px-2 text-sm text-ink-3 hover:text-foreground">
+            {NAV.github}
+          </a>
           <ThemeToggle />
           <Link to="/login" className="rounded-lg bg-card px-3.5 py-1.5 text-sm font-semibold shadow-soft transition-shadow hover:shadow-lift">
             {NAV.login}

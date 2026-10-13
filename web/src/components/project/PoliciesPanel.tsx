@@ -9,7 +9,7 @@ function verifierLabel(v: boolean | null): string {
   return v ? '検査器あり' : '検査器なし'
 }
 
-/** 適用されている規約: チームの改訂とプロジェクト固有の規約（design 5.1-3）。分からない値は「—」。 */
+/** 適用されている規約: チームの改訂とプロジェクト固有の規約。分からない値は「—」。 */
 export function PoliciesPanel({ overview }: { overview: ProjectOverview }) {
   return (
     <Panel className="space-y-3">

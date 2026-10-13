@@ -1,4 +1,4 @@
-/** 判定の 4 値と色の対応（design 3.1。意味と色の対応は固定）。 */
+/** 判定の 4 値と色の対応（意味と色の対応は固定）。 */
 
 import type { VerdictTone } from '@/types/components'
 import type { Verdict } from '@/types/finding'

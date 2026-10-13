@@ -2,8 +2,7 @@
 
 `.speclino/bindings.yaml` の `operations.audit_record_command` が参照するシンボル。
 実際の監査ログ永続化は行わず、呼び出しを `recorded_calls` に記録するだけの観測用スタブとする
-（design/2026-09-22-semantic-conformance-poc-v0.1.md 4.2:
-コマンド呼び出しの観測と永続化の成否は別）。
+（コマンド呼び出しの観測と永続化の成否は別）。
 """
 
 from __future__ import annotations

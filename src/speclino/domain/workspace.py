@@ -1,4 +1,4 @@
-"""ワークスペース（テナント境界）と利用者の型（S53、design/2026-09-27-workspaces.md）。"""
+"""ワークスペース（テナント境界）と利用者の型（S53）。"""
 
 from __future__ import annotations
 

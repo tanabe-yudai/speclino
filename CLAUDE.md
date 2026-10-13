@@ -4,10 +4,11 @@
 
 ## 正本となる文書（実装前に読む）
 
-- `design/2026-10-05-team-knowledge-registry.md` — 現在の位置づけ（知識レジストリ、bundle、UML → IR、配信、LLM 支援の規約、可観測性）。下の 3 つと食い違えばこちらが優先
-- `design/2026-09-22-semantic-conformance-poc-v0.1.md` — 意味検証コアの規範（IR、Python 部分集合、検査アルゴリズム、判定規則、Golden fixtures、モジュール分割）
-- `design/2026-09-22-hackathon-plan.md` — ハッカソン向けの取捨選択、判定モデル（verdict と gate の分離、フェイルクローズ）、アーキテクチャ、バックログ
-- `design/product-spec-summary.md` — 製品全体の要件（規約、ゲート、エージェント権限、NFR）
+設計の正本は SpecLino に登録した仕様（bundle）。MCP の `spec_get` で読むか、sync で書き出した `.speclino/specs/*.md` を読む。
+
+- `SPEC-SYS-001` — 製品全体（構成要素、要求、知識のライフサイクル、ゲートの判定、実行の配置）。下位の仕様の対応表もここ
+- `SPEC-CONF-001` — 検査器の判定規則（IR、Python 部分集合、判定規則、図とコードの対応、Finding、CLI の終了コード）
+- `SPEC-KNOW-001`・`SPEC-GATE-002`・`SPEC-SYNC-001`・`SPEC-WS-001`・`SPEC-AI-001`・`SPEC-OBS-001` — 知識・ゲート・配信・ワークスペース・AI・可観測性
 - `src/speclino/spec/uml/grammar.md` — SpecLino が受け付ける Mermaid の部分集合（parser の正本）
 
 ## タスク管理（必ず守る）
@@ -32,7 +33,7 @@
 - `make dev`（FastAPI、`SPECLINO_ROLE=all`）、`cd web && npm run dev`
 - `uv run speclino import-specs --workspace <slug> --project-id <id> --author <uid> --repo <dir>`（Git の旧形式の仕様を下書きとして取り込む。承認は画面）
 - `SPECLINO_SYNC_TOKEN=... uv run speclino sync --url <SpecLino> --repo . [--repo-id <id>]`（承認済みの知識を書き出し `.speclino/lock.json` を更新）
-- `make schemas` / `make openapi` / `make diagrams`（`design/*.mmd` から png・svg）
+- `make schemas` / `make openapi` / `make diagrams`（`docs/diagrams/*.mmd` から png・svg）
 
 ## 構成と規約
 

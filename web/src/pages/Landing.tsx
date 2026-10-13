@@ -7,12 +7,12 @@ import { SamplePrCheck } from '@/components/landing/SamplePrCheck'
 import { SampleProject } from '@/components/landing/SampleProject'
 import { SampleRepo } from '@/components/landing/SampleRepo'
 import { SampleSpec } from '@/components/landing/SampleSpec'
-import { HERO, INVITE_ONLY, NAV, PRINCIPLES, STEPS } from '@/services/landingContent'
+import { HERO, INVITE_ONLY, NAV, OPEN_SOURCE, PRINCIPLES, REPO_URL, STEPS } from '@/services/landingContent'
 import { landingDecision } from '@/services/landingRoute'
 
 const STEP_SAMPLES = [SampleRepo, SampleSpec, SampleMcp, SampleProject]
 
-/** ランディングページ（S58、design 7 章）。ログイン済みならアプリへ。 */
+/** ランディングページ（S58）。ログイン済みならアプリへ。 */
 export function Landing() {
   const { user, loading } = useAuth()
   const decision = landingDecision(loading, user !== null)
@@ -79,7 +79,14 @@ export function Landing() {
         </section>
 
       </main>
-      <footer className="py-12 text-center text-sm text-ink-3">{INVITE_ONLY}</footer>
+      <footer className="space-y-1 py-12 text-center text-sm text-ink-3">
+        <p>{INVITE_ONLY}</p>
+        <p>
+          <a href={REPO_URL} target="_blank" rel="noreferrer" className="underline-offset-4 hover:text-foreground hover:underline">
+            {OPEN_SOURCE}
+          </a>
+        </p>
+      </footer>
     </div>
   )
 }

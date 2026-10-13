@@ -1,6 +1,6 @@
 """チームの知識（skill / instructions / spec）の改訂・承認と bundle（S62）。
 
-design/2026-10-05-team-knowledge-registry.md 3 章。承認の流れは `policy_governance.py` と同じ:
+承認の流れは `policy_governance.py` と同じ:
 
 - 改訂操作はすべてワークスペース行のロック（`TeamRepository.ensure_and_lock`）で直列化する
 - 承認できるのは owner / approver（`TeamRepository.list_approvers`）。拒否は監査に残す

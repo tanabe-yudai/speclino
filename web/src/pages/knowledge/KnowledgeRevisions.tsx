@@ -28,7 +28,7 @@ import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 
 const STATUS_TONE = { draft: 'rev', active: 'ok' } as const
 
-/** 改訂の一覧・前の改訂との差分・承認（設計 9 章）。 */
+/** 改訂の一覧・前の改訂との差分・承認。 */
 export function KnowledgeRevisions() {
   const { section, id } = useParams<{ section: string; id: string }>()
   const workspace = useCurrentWorkspace()

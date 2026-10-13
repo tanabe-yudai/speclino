@@ -1,6 +1,6 @@
 """SpecLino の知識の書き出し計画（SyncPlan）を checkout に当てる実行スクリプト（S75）。
 
-design/2026-10-07-agent-sync.md の A2–A6・3 章。標準ライブラリだけで書き、Python 3.10 以上で
+標準ライブラリだけで書き、Python 3.10 以上で
 動く（speclino を入れていない環境でも、プラグインの `scripts/speclino_apply.py` として走る）。
 正本は `src/speclino/sync_apply.py` で、プラグインの写しとのバイト一致はテストで固定する。
 

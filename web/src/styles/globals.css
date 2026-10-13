@@ -1,4 +1,4 @@
-/* SpecLino のデザイントークン（design/2026-09-30-ui-redesign.md 3.1「光の空間」）。
+/* SpecLino のデザイントークン。
    shadcn/ui の CSS 変数に当てはめ、.dark で切り替える。 */
 @import "tailwindcss";
 @import "tw-animate-css";
@@ -182,7 +182,7 @@
   .shadow-lift {
     box-shadow: var(--shadow-2);
   }
-  /* 要求・検査の行。ダークでは影ではなく面と縁で浮かせる（design 3.1） */
+  /* 要求・検査の行。ダークでは影ではなく面と縁で浮かせる */
   .row {
     background: var(--row);
     border-radius: var(--radius-md);

@@ -67,7 +67,7 @@ Vertex AI（Gemini）＋ Agent Development Kit、Identity Platform、Artifact Re
 | 権限 | デモ用のワークスペースのメンバー（member）。画面はすべて閲覧できる。知識の承認・規約の変更・PR の要確認の確定は owner / approver だけなので、審査員はできない |
 | 有効期限 | 2026-12-01 まで |
 
-- アカウントは `scripts/create_test_user.sh` で作り、デモ用のワークスペースに登録する（`guides/deploy-runbook.md` 9-4）
+- アカウントは `scripts/create_test_user.sh` で作り、デモ用のワークスペースに登録する（`docs/guides/deploy-runbook.md` 9-4）
 - 認証情報（メールアドレス・パスワード）はリポジトリ・Issue・PR・動画のどこにも出さない
 
 ## 審査員に見てほしい順番

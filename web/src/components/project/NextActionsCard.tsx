@@ -7,7 +7,7 @@ import { paths } from '@/services/paths'
 import type { NextAction, ProjectRun } from '@/types/project'
 
 
-/** 次にやること（design 5.3）。並びは services/nextActions.ts の規則。 */
+/** 次にやること。並びは services/nextActions.ts の規則。 */
 export function NextActionsCard({ slug, actions, run }: { slug: string; actions: NextAction[]; run: ProjectRun }) {
   return (
     <Panel className="space-y-3">

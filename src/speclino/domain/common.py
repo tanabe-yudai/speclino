@@ -1,4 +1,4 @@
-"""IR 全体で共有する基底型と参照型（PoC 6.1）。"""
+"""IR 全体で共有する基底型と参照型。"""
 
 from __future__ import annotations
 

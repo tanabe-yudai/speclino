@@ -1,4 +1,4 @@
-"""spec_validator（PoC 6.1 / 7 章）。形式検証（pydantic）の後段で、参照解決・型整合・
+"""spec_validator。形式検証（pydantic）の後段で、参照解決・型整合・
 語彙対応・矛盾・承認ハッシュを Diagnostic として列挙する。
 
 engine は同じ検査を EngineInputError として投げるが、validator は検査前に全件をまとめて返す。

@@ -91,18 +91,20 @@ def test_demo_sources_stay_in_the_supported_subset_entrypoint(demo: str) -> None
     assert "def cancel_order(user: User, order: Order) -> Response:" in src
 
 
-def test_readme_diagrams_match_design_sources() -> None:
-    """README の mermaid ブロックと `design/*.mmd`（`make diagrams` の入力）が食い違わない。"""
+def test_architecture_doc_diagrams_match_sources() -> None:
+    """architecture.md の mermaid ブロックと docs/diagrams/*.mmd が一致する。"""
     import re
 
     blocks = [
         b.strip()
         for b in re.findall(
-            r"```mermaid\n(.*?)```", (REPO / "README.md").read_text(encoding="utf-8"), re.S
+            r"```mermaid\n(.*?)```",
+            (REPO / "docs" / "architecture.md").read_text(encoding="utf-8"),
+            re.S,
         )
     ]
     for name in ("architecture", "pipeline"):
-        src = (REPO / "design" / f"{name}.mmd").read_text(encoding="utf-8").strip()
+        src = (REPO / "docs" / "diagrams" / f"{name}.mmd").read_text(encoding="utf-8").strip()
         assert blocks.count(src) == 1, (
-            f"{name}: README に design/ と一致するブロックが 1 つだけ無い（make diagrams）"
+            f"{name}: docs/architecture.md に docs/diagrams/ と一致するブロックが 1 つだけ無い"
         )

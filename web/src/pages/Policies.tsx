@@ -30,7 +30,7 @@ interface Loaded {
   audit: AuditEntry[]
 }
 
-/** 規約（チーム規約、S43、design 6 章。`/w/:slug/policies`）。左に下書きの帯とルール、右に改訂の履歴と監査ログ。 */
+/** 規約（チーム規約、S43。`/w/:slug/policies`）。左に下書きの帯とルール、右に改訂の履歴と監査ログ。 */
 export function Policies() {
   const workspace = useCurrentWorkspace()
   useDocumentTitle('規約')

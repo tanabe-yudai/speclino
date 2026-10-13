@@ -4,7 +4,7 @@ Revision ID: 0013
 Revises: 0012
 Create Date: 2026-10-07 18:00:00.000000
 
-追加だけ（S75、design/2026-10-07-agent-sync.md）。既存の表は変えない。
+追加だけ（S75）。既存の表は変えない。
 `sync_plans` は MCP の `knowledge_pull` が作った書き出し計画。本文は MCP の応答で運ばず、
 使い捨ての取得 URL（トークンの SHA-256 だけを保存）で 1 回だけ渡す。
 """

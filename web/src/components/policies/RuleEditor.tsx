@@ -12,7 +12,7 @@ const LEVELS: PolicyLevel[] = ['advisory', 'mandatory']
 const ON_MISSING: OnMissingInput[] = ['unknown', 'violation', 'skipped']
 const SELECT_CLASS = 'h-9 w-full rounded-md border bg-card px-3 text-sm'
 
-/** ルールの編集フォーム（design 6 章）。保存は下書きに入る。rule が null なら追加。 */
+/** ルールの編集フォーム。保存は下書きに入る。rule が null なら追加。 */
 export function RuleEditor({
   rule,
   existingIds,

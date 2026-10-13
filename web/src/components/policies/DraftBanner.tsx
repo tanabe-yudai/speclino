@@ -41,7 +41,7 @@ function describe(change: RuleChange, view: PoliciesView): string {
     .join('・')
 }
 
-/** 下書きがあるときだけ出す帯（design 6 章）。承認のボタンは owner / approver にだけ出す（API も拒否する）。 */
+/** 下書きがあるときだけ出す帯。承認のボタンは owner / approver にだけ出す（API も拒否する）。 */
 export function DraftBanner({
   slug,
   view,

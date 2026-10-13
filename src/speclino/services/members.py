@@ -1,4 +1,4 @@
-"""ワークスペースのメンバーと role（S56、design/2026-09-27-workspaces.md）。
+"""ワークスペースのメンバーと role（S56）。
 
 - 一覧はメンバーなら誰でも見られる（非メンバーは `WorkspaceNotFound` → 404）
 - role の変更とメンバーの削除は owner だけ。owner でないメンバーは `NotPermitted`（403）で拒否し、

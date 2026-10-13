@@ -1,4 +1,4 @@
-"""提案の許可リストと診断（S73、設計 C4・C5）。LLM・DB を使わない。"""
+"""提案の許可リストと診断（S73）。LLM・DB を使わない。"""
 
 from __future__ import annotations
 

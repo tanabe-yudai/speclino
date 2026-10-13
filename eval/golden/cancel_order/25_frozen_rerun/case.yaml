@@ -1,7 +1,7 @@
 id: 25_frozen_rerun
 title: 同じ凍結入力で再実行する
 description: >-
-  実装は 01_correct と同一。このケースは実装の不具合ではなく再現性（PoC 12.3）を確認する
+  実装は 01_correct と同一。このケースは実装の不具合ではなく再現性（同じ凍結入力で再実行すると、時刻等を除いた結果が一致すること）を確認する
   ためのもの。`tests/unit/eval/test_golden.py` の再現性テストで golden 全体（このケースを
   含む）を 2 回評価し、run_id を除いた findings（verdict / category / message / counterexample
   等）が一致することを確認する。

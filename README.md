@@ -1,6 +1,20 @@
 # SpecLino
 
+[![CI](https://github.com/tanabe-yudai/spec-lino/actions/workflows/ci.yml/badge.svg)](https://github.com/tanabe-yudai/spec-lino/actions/workflows/ci.yml)
+[![License: AGPL-3.0-or-later](https://img.shields.io/badge/License-AGPL--3.0--or--later-blue.svg)](LICENSE.md)
+![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
+![TypeScript 6](https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.133%2B-009688?logo=fastapi&logoColor=white)
+![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
+![Z3](https://img.shields.io/badge/Z3-5.1%2B-5C2D91)
+![Google ADK / Gemini](https://img.shields.io/badge/Google%20ADK-2.9%20%2F%20Gemini-4285F4?logo=google&logoColor=white)
+![PostgreSQL 17](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)
+![Cloud Run](https://img.shields.io/badge/Cloud%20Run-4285F4?logo=googlecloud&logoColor=white)
+
 **チームがコーディングエージェントに渡す知識を 1 か所で管理し、守られていることをゲートで保証する。**
+
+- ホスティング版（招待制）: https://speclino-web-6h5m3svkja-an.a.run.app
+- ドキュメント: [docs/README.md](docs/README.md)
 
 コーディングエージェントの出来は、渡す知識で決まる。規約・スキル・AGENTS.md・仕様が各リポジトリや
 各自の手元に散らばっていると、エージェントごとに読むものが違い、守ったかどうかも誰にも分からない。
@@ -26,10 +40,9 @@ AI（Gemini + ADK）は仕様の**書き換えを提案**し、検査の後に**
 仕様を機械可読な形に**変換するのも、判定するのも決定的な処理だけ**で、AI の出力は判定経路に入らない
 （`spec/uml/`・`conformance/`・`analysis/` は LLM・外部 I/O を import できず、テストで強制している）。
 
-> 第5回 Agentic AI Hackathon with Google Cloud 提出作品。デモ URL・テストアカウントは
-> [提出情報](#提出情報)を参照。デモの手順は [docs/demo-knowledge-registry.md](docs/demo-knowledge-registry.md)。
+> 第5回 Agentic AI Hackathon with Google Cloud 提出作品。提出情報は [docs/submission/](docs/submission/README.md)。
 
-## 何を保証し、何を保証しないか
+## 何を保証するか
 
 判定は 4 値を正直に保つ。「解析できなかった」を「適合」と言わない。
 
@@ -41,190 +54,23 @@ AI（Gemini + ADK）は仕様の**書き換えを提案**し、検査の後に**
 | `REVIEW`（要確認） | 人の確認が要る（仕様に無い挙動、LLM 支援の規約、lock が古い、bindings の変更） |
 
 **ゲートはフェイルクローズ**。必須（mandatory）の要求・規約に `VIOLATED` / `UNKNOWN` / `REVIEW` が
-1 件でも残れば GitHub の Check は失敗する。**間に合わない・解析できない部分は UNKNOWN になるだけで、
-偽の VERIFIED_IN_SCOPE を出さない**。出るべき要求の一覧を bundle から先に作り、結果が出なかった要求には
-UNKNOWN（`missing_finding`）を補うので、検査器が黙って落ちても素通りしない。
+1 件でも残れば GitHub の Check は失敗する。間に合わない・解析できない部分は UNKNOWN になるだけで、
+偽の VERIFIED_IN_SCOPE を出さない。詳しくは [docs/concepts.md](docs/concepts.md)。
 
-open-world で読む: 図に無い呼び出しが間にあっても違反にしない。図に無い処理を違反にするのは
-`closed: true` を宣言したアクティビティ図だけ。
+## Get started
 
-## 流れ
+### ホスティング版を使う
 
-1. **書く**: 仕様エディタで Markdown と UML を書く。「AI と作る」の会話で AI が質問を返して要件を詰め、承認済みの知識・
-   リポジトリ・Google 検索で調べてから書き換えを提案する。採用するのは人で、変換と判定には関わらない
-2. **承認する**: owner / approver が原文と正規形を見て承認する。診断にエラーがあれば承認できない
-3. **配る**: 承認のたびに bundle（署名つき）ができ、`speclino sync` と MCP で各自のエージェントに届く
-4. **作る**: 各自のエージェントが、配られたスキル・AGENTS.md・仕様を読んで実装する
-5. **確かめる**: PR のゲートが bundle を固定し、仕様・規約・lock の鮮度を決定的に判定する
-6. **観測する**: 「観測」の画面で、形式化率・対応率・UNKNOWN の内訳・取得の遅れ・規約の推移を見る
+[https://speclino-web-6h5m3svkja-an.a.run.app](https://speclino-web-6h5m3svkja-an.a.run.app)（招待制）。
+ワークスペースに招待されたら、画面で知識を書いて承認し、GitHub App でリポジトリを接続する。
 
-- 承認・規約の有効化のたびに **bundle**（有効な改訂の集合）を作る。run・sync・replay は bundle の番号で固定し、
-  run の途中で承認が進んでも判定は変わらない
-- リポジトリに残すのは、コードと同じ PR で変わるべきもの: `.speclino/bindings.yaml`（操作名とシンボルの対応）、
-  `contracts/`、`exceptions.yaml`（期限つきの免除）、プロジェクト規約。ゲートはこれらを**デフォルトブランチ（信頼側）**から読む
+### CLI だけで 1 件検査する（DB なし）
 
-## アーキテクチャ
-
-Cloud Run を役割別（web / worker / sandbox）に分け、秘密と権限を分離する。
-
-```mermaid
-flowchart TB
-  subgraph USERS["チーム"]
-    direction LR
-    DEV["開発者・承認者<br/>ブラウザ（知識・規約・可観測性）"]
-    ED["各自のコーディングエージェント<br/>（Claude Code / Codex 等）"]
-  end
-
-  subgraph REPO["対象リポジトリ（GitHub）"]
-    direction LR
-    LOCAL["sync の書き出し<br/>.claude/skills ・ .agents/skills<br/>AGENTS.md / CLAUDE.md の管理区画<br/>.speclino/specs ・ lock.json（署名つき）"]
-    TRUSTED["デフォルトブランチ（信頼側）<br/>bindings.yaml ・ contracts/<br/>exceptions.yaml ・ プロジェクト規約"]
-    GHAPP["GitHub App<br/>webhook ・ Checks API ・ PR コメント"]
-  end
-
-  subgraph GCP["GCP プロジェクト（asia-northeast1）"]
-    direction TB
-
-    subgraph GCP_RUN["Cloud Run（同一イメージ、SPECLINO_ROLE で役割切替）"]
-      direction LR
-      WEB["<b>speclino-web</b>（公開）<br/>FastAPI: /api/* ・ /mcp ・ /a2a ・ /api/sync/bundle<br/>/webhooks/github ・ React SPA 配信<br/>知識の改訂・承認 → bundle（署名）"]
-      WORKER["<b>speclino-worker</b>（IAM 必須・Cloud Tasks の OIDC からのみ）<br/>bundle を固定 → 仕様（UML/IR）・規約・lock を検査（Z3）<br/>→ 未解決ならエージェント → gate → Checks 更新"]
-      SANDBOX["<b>speclino-sandbox</b>（IAM 必須・worker からのみ）<br/>権限ゼロ SA・Rule.tests の ID だけを隔離実行"]
-    end
-
-    TASKS[("Cloud Tasks<br/>speclino-runs キュー")]
-
-    subgraph GCP_DATA["データ / 秘密"]
-      direction LR
-      SQL[("Cloud SQL（PostgreSQL）<br/>artifacts / artifact_revisions / bundles<br/>policy_revisions / attestations / llm_assessments<br/>knowledge_fetches / runs / findings / audit")]
-      GCS[("GCS<br/>run-manifest / spec-ir / code-ir<br/>findings / review.md")]
-      SECRETS[("Secret Manager<br/>DB 接続・GitHub App 秘密鍵<br/>webhook 秘密・bundle 署名鍵")]
-    end
-
-    subgraph GCP_AUX["補助サービス"]
-      direction LR
-      IDP["Identity Platform<br/>メール / パスワード"]
-      VERTEX["Vertex AI（Gemini）<br/>執筆の提案・LLM 支援の規約（常に REVIEW）<br/>証拠収集・確認。変換と判定はしない"]
-      OBS["Cloud Logging / Cloud Trace"]
-    end
-
-    subgraph GCP_DEPLOY["デプロイ"]
-      direction LR
-      AR["Artifact Registry"]
-      MIGRATE["Cloud Run Job<br/>speclino-migrate"]
-    end
-
-    NOTE["原則：UML → IR の変換と判定は決定的（parser と Z3）。<br/>AI は提案と証拠収集だけ。<br/>ゲートは必須ルールに UNKNOWN / REVIEW が残れば失敗（フェイルクローズ）"]
-  end
-
-  subgraph GHACTSG["GitHub Actions（CI/CD）"]
-    GHACT["GitHub Actions<br/>push（WIF・長期キー無し）"]
-  end
-
-  DEV -- "ログイン" --> IDP
-  DEV -- "改訂・承認・観測" --> WEB
-  ED -- "MCP / A2A<br/>context_get ・ spec_get ・ skill_get<br/>sync_status ・ spec_suggest" --> WEB
-  ED -- "speclino sync<br/>（sync トークン）" --> WEB
-  ED -. "読み込む" .-> LOCAL
-  GHAPP -- "webhook（HMAC 検証・重複排除）" --> WEB
-  WEB -- "ID トークン検証" --> IDP
-  WEB -- enqueue --> TASKS
-  TASKS -- OIDC --> WORKER
-  WORKER -- "head と信頼側を取得<br/>Checks API ・ PR コメント" --> GHAPP
-  WORKER -- "ツールは ToolGateway 経由・書込みなし" --> VERTEX
-  WEB -- "書き換えの提案のみ" --> VERTEX
-  WORKER -- "Rule.tests の ID のみ" --> SANDBOX
-  WEB --> SQL
-  WORKER --> SQL
-  MIGRATE --> SQL
-  WEB -. "成果物を読んで表示" .-> GCS
-  WORKER --> GCS
-  WEB -. secret参照 .-> SECRETS
-  WORKER -. secret参照 .-> SECRETS
-
-  GHACT --> AR
-  GHACT -- "1) migrate job 実行" --> MIGRATE
-  GHACT -- "2) サービス更新" --> GCP_RUN
-
-  GCP_RUN -.-> OBS
-
-  classDef note fill:#fef7e0,stroke:#f9ab00,stroke-dasharray: 4 3,color:#333
-  class NOTE note
-```
-
-判定はこの順序でしか起きない。エージェントは **5 で未解決が残ったときだけ** 呼ばれ、証拠を足して
-engine に再評価させる。エージェントの文章は判定に入らない。
-
-```mermaid
-flowchart LR
-  S0["<b>0 bundle を固定</b><br/>承認済みの仕様・規約<br/>（署名・ハッシュを照合）"]
-  S1["<b>1 スナップショット</b><br/>head と信頼側<br/>（デフォルトブランチ）"]
-  S2["<b>2 仕様の IR</b><br/>承認時に parser が固定した IR<br/>（UML / 旧形式）"]
-  S3["<b>3 規約の検査器</b><br/>決定的な検査器<br/>LLM 支援は REVIEW のみ<br/>lock の鮮度"]
-  S4["<b>4 path_analyzer</b><br/>Python 部分集合 → Code IR<br/>経路・イベント・上限"]
-  S5["<b>5 conformance</b><br/>Z3 ・ オートマトン照合<br/>欠けた要求は UNKNOWN で補う"]
-  S6{"未解決<br/>UNKNOWN / REVIEW<br/>が残るか"}
-  S7["<b>6 ADK Agent ⇄ ToolGateway</b><br/>analyze_focus / repo_search<br/>test_run / human_ask"]
-  S8["<b>7 gate（フェイルクローズ）</b><br/>確定（attestation）を適用<br/>→ Checks API"]
-
-  S0 --> S1 --> S2 --> S3 --> S4 --> S5 --> S6
-  S6 -- "いいえ" --> S8
-  S6 -- "はい" --> S7
-  S7 -- "証拠を足して再評価<br/>（判定は engine のまま）" --> S5
-  S7 -- "回答待ち / 予算切れ" --> S8
-
-  classDef deterministic fill:#e8f0fe,stroke:#1a73e8
-  classDef agent fill:#fef7e0,stroke:#f9ab00
-  class S0,S1,S2,S3,S4,S5,S8 deterministic
-  class S7 agent
-```
-
-（画像版: [architecture.png](design/architecture.png) / [pipeline.png](design/pipeline.png)。図の正本は
-`design/*.mmd` で、`make diagrams` で作り直す）
-
-ローカルでは同じコードが in-process キュー・ローカル FS・Docker サンドボックスに切り替わる
-（`SPECLINO_QUEUE_KIND` / `SPECLINO_BLOB_KIND` / `SPECLINO_SANDBOX_KIND`）。
-
-エージェントが判定を上書きできないのは、(a) 判定を書くツールが存在しない (b) 検査器は型付きの
-IR と Evidence しか受け取らず、それを作るのは決定的なモジュールだけ (c) LLM の文章は保存されるだけで
-検査器の入力にならない、という構造による。
-
-## クイックスタート（ローカル）
-
-必要なもの: Python 3.12、[uv](https://docs.astral.sh/uv/)、Node.js 20+、Docker（DB とサンドボックス用）。
+必要なもの: Python 3.12、[uv](https://docs.astral.sh/uv/)。DB も GitHub App も無しで動く。
+同梱の題材（`examples/orders/`：注文キャンセル、旧形式の要求 9 件）を検査する。
 
 ```sh
-make setup          # uv sync + npm ci
-make db-up          # ローカル PostgreSQL（docker compose）
-make db-migrate     # alembic upgrade head
-make dev            # FastAPI（http://localhost:8080、SPECLINO_ROLE=all）
-cd web && npm run dev   # 画面（Vite。/api は :8080 に転送）
-```
-
-ローカルの既定は開発用の認証（`SPECLINO_AUTH_KIND=dev`、`SPECLINO_ENV=local` のときだけ有効）。
-ログイン画面の「開発用ログイン」で、利用者 `judge` として入る。ワークスペースは CLI で作る:
-
-```sh
-uv run speclino workspace create <slug> --owner-uid judge --name "<表示名>"
-uv run speclino policy seed --team <slug>   # 既存の規約パッケージを最初の改訂として取り込む（任意）
-```
-
-リポジトリ（プロジェクト）の登録は GitHub App の接続が要る（[guides/github-app-setup.md](guides/github-app-setup.md)）。
-UML の仕様を書いて違反する PR を検査するまでの通しの手順は
-[docs/demo-knowledge-registry.md](docs/demo-knowledge-registry.md)、題材は [examples/shop/](examples/shop/)。
-
-```sh
-make test           # 単体 + 統合（統合は SPECLINO_DATABASE_URL が要る）
-make selfcheck      # SpecLino を自分自身に当てる（下の「自己検証」を参照）
-```
-
-## 1 件の検査を実行する（CLI、DB なし）
-
-CLI は DB も GitHub App も無しで動く（自己検証と、GCP を畳んだ後の手元の確認のため）。仕様の入力は 2 通り:
-リポジトリの `specs/`（旧形式の Spec IR）と、`--specs-dir`（sync で書き出した UML の仕様。下の「自己検証」）。
-まず同梱の題材（`examples/orders/`：注文キャンセル、旧形式の要求 9 件）を検査する。
-
-```sh
+uv sync
 uv run speclino check --repo . --project examples/orders --head WORKTREE --out build/review
 ```
 
@@ -236,508 +82,59 @@ REVIEW: 0
 gate: pass (必須ルールはすべて成立)
 ```
 
-`build/review/` に `run-manifest.json`（入力のハッシュ・版・上限）、`spec-ir.json`、`code-ir.json`、
-`findings.json`、`gate.json`、`review.md` が出る。`run_id` と実行時刻を除けば同じ入力から同じ結果になる
-（`speclino replay build/review` が凍結した IR から再評価し、保存された結果と一致するか確かめる）。
+オプション・終了コード・違反を作って試す手順は [docs/getting-started.md](docs/getting-started.md)。
 
-違反を作って試す: `examples/orders/app/service.py` の `inventory.restore(...)` を `if user.is_admin:` の中に
-移して同じコマンドを実行すると、`R-CANCEL-04` が VIOLATED になり、反例（非管理者の所有者・PENDING）が
-`review.md` に出る。`--base main` を足すと、この変更が**新規に持ち込んだ**違反かどうかも分かる。
+### ローカルでサーバと画面を起動する
 
-主なオプション: `--fail-on VIOLATED --fail-on UNKNOWN --fail-on REVIEW --blocking`（必須運用）、
-`--depth` / `--max-paths` / `--solver-timeout-ms`（解析の上限）、`--code-ir <file>`（手書き Code IR を入力）。
-終了コードは 0（ゲート条件に該当しない）/ 1（該当、`--blocking`）/ 2（入力不正・実行不能）。
-
-## 知識を管理する
-
-### 画面の構成
-
-第 1 階層は 8 つ（URL は `/w/<slug>/…`）。スマホでは画面下のタブ（ホーム・仕様・検査・観測・その他）に、
-スキル・指示書・規約・設定は「その他」に入る。
-
-| 画面 | URL | 中身 |
-| --- | --- | --- |
-| ホーム | `/w/<slug>` | やること（承認待ち・ゲートが失敗の PR・知識が古いリポジトリ）、知識の件数、プロジェクトの健全性、最近の検査 |
-| 仕様 | `/w/<slug>/specs` | 「ワークスペース全体の仕様」と「リポジトリ別の仕様」の 2 節。行からエディタへ |
-| スキル / 指示書 / 規約 | `/w/<slug>/skills`・`/instructions`・`/policies` | 種類ごとの一覧とエディタ |
-| 検査 | `/w/<slug>/runs`、`/w/<slug>/runs/<id>` | PR ごとの検査の一覧（ゲートで絞り込み）と詳細（判定・反例・確定） |
-| 観測 | `/w/<slug>/observability` | 下の「可観測性」 |
-| 設定 | `/w/<slug>/settings/<tab>` | メンバー（表示名とメール）・リポジトリ・エージェント接続（MCP / A2A・リポジトリ同期）・プロジェクト・取り下げ済みの知識 |
-
-プロジェクト（リポジトリ）の画面 `/w/<slug>/p/<owner>/<repo>` は絞り込みで、概要・仕様（そのリポジトリの仕様と
-ワークスペース全体の仕様）・検査の 3 タブ。旧い URL（`/runs/<id>` など）は新しい URL へ転送する。
-メンバーは表示名（アカウントのメニューの「表示名を変える」）とメールで表示し、認可は uid で行う。
-
-### 改訂と承認の単位
-
-種類ごとの画面から改訂を作って承認する。改訂は 下書き → 有効 → 置き換え済み と進み、有効な改訂は書き換えられない。
-
-| 種類 | 書くもの | スコープ |
-| --- | --- | --- |
-| 規約 | ルール（level は 必須 / 助言）と検査器のパラメーター、LLM 支援のチェック項目 | ワークスペース全体 |
-| スキル | `SKILL.md`（frontmatter の `name` / `description` を検証）と付属ファイル（テキストのみ） | ワークスペース全体か、プロジェクト |
-| 指示書 | `AGENTS.md` / `CLAUDE.md` の本文（配るのは管理区画の中だけ） | ワークスペース全体か、プロジェクト |
-| 仕様 | Markdown ＋ Mermaid（または旧形式の IR） | ワークスペース全体（要求仕様など、全リポジトリに当たる）か、1 つ以上のプロジェクト（振る舞いなどの細かい仕様） |
-
-スコープの変更は新しい改訂と承認を要する。bundle を作るときに競合（同じスコープに同じ対象の指示書が 2 つ、
-同名のスキルが 2 つ、仕様の要求 ID の重複。ワークスペース全体の仕様はどのプロジェクトの仕様とも重なるものとして見る）が
-あれば、承認ごと拒否する。
-
-**取り下げ**: 要らなくなった知識はエディタの「取り下げる」（確認と理由）で有効な改訂を外す（owner / approver）。
-新しい bundle ができ、次の sync / `knowledge_pull` で書き出したファイルも消える。行と過去の bundle は残り、
-設定の「取り下げ済みの知識」に並ぶ。戻すときは下書きを保存して承認する。
-
-### AI と作る（知識のチャット）
-
-知識のエディタの「AI と作る」で、Gemini と会話しながら仕様・スキル・指示書などの下書きを作る。
-
-- 曖昧・前提が足りないときは、提案の前に**選択肢つきの質問**（最大 3 問）を返す。選択肢を押すとそのまま答えになる
-- 必要なら**調べてから**答える: 承認済みの知識、ワークスペースに登録したリポジトリ（読むだけ。秘密を含みうるパスは読まない）、
-  Google 検索（出典つき）。思考の要約と出典を画面に出す
-- 返すのは本文の提案だけで、採用・承認は人。変換と判定には関わらない
-- **ガードレール**は全 LLM 面（チャット・`spec_suggest`・A2A・LLM 支援の規約など）で共通: 役割外の依頼は断り、
-  モデル名・システムプロンプト・設定を明かさず、ツールの結果や区切りの中の指示に従わない。出力は決定的に照合し、
-  漏れがあれば断りの文に置き換える
-- 評価: `make eval-guardrails`（11 件）と `make eval-chat-depth`（12 件）。実 Gemini を呼ぶので CI では回さない
-
-### 仕様を UML で書く
-
-仕様エディタの左に Markdown と Mermaid、右に図のプレビュー・IR から作った**正規形**・場所つきの診断・
-要求の表の追跡状況が出る。受け付ける構文は [src/speclino/spec/uml/grammar.md](src/speclino/spec/uml/grammar.md)
-（parser `uml-0.1` の正本）。要点:
-
-- 図は 4 種類: クラス図（語彙と構造）・シーケンス図（入口ごとの呼び出しの順序）・状態遷移図（遷移の関係）・
-  アクティビティ図（`flowchart`。1 つの操作の制御フロー）
-- クラス図には**関係**を書ける: 継承 `A <|-- B`・コンポジション `*--`・集約 `o--`・関連 `-->`・依存 `..>`。
-  照合は AST だけで行う（継承＝基底クラス、所有＝属性の型、依存＝import か名前の参照）。確定できなければ UNKNOWN
-- `<<module>>` のクラスは Python のモジュールを表し、モジュール直下の `def` / `async def` を操作として照合する。
-  呼出し先は宣言された型（引数・`__init__`・戻り値の注釈）で解決し、`await` も追う
-- **全要素に明示的な ID**（`[m1]`、`[t1]`、`[e1]`）。表示ラベルは ID にしない
-- **ガードは式だけ**で、`before.` / `after.` / `outcome.` の名前空間が必須。自然言語のガードはエラー
-- 参照する名前はクラス図か `domain` 節に宣言する（用語集に無い言葉は黙って通さない）
-- 対応しない構文（`par`、`critical`、`subgraph`、未知の矢印 など）と、読めないトークンが 1 つでもあれば
-  **全体がエラー**（全か無か）。Mermaid として描けるかと、SpecLino が意味を読めるかは別の診断に出る
-
-````markdown
-| ID | level | 要求 | 形式化 |
-| --- | --- | --- | --- |
-| R1 | mandatory | 在庫を確保してから課金する | checkout#m1, checkout#m2 |
-| R2 | mandatory | 監査ログを残す | - |
-
-```mermaid
-%%@ id: vocab
-classDiagram
-    class OrderService {
-        +checkout(order, payment)
-    }
-    class InventoryService {
-        +reserve(order)
-        +release(order)
-    }
-    class PaymentGateway {
-        +charge(order)
-    }
-    class Order {
-        int qty
-    }
-```
-
-```mermaid
-%%@ id: checkout
-%%@ entry: OrderService.checkout
-sequenceDiagram
-    participant S as OrderService
-    participant I as InventoryService
-    participant P as PaymentGateway
-    S->>I: [m1] reserve(order)
-    alt [g1] before.order.qty > 0
-        S->>P: [m2] charge(order)
-    else [g2]
-        S->>I: [m3] release(order)
-    end
-```
-````
-
-要求の表の `形式化` は `図ID#要素ID` か `ir:要求ID`（旧形式）。空か `-` の行は**未形式化**として残り、
-可観測性の形式化率に出る（判定ではなく追跡に使う）。
-
-ワークスペース全体の仕様は全リポジトリに当たるが、図が別のリポジトリの話であることもある。そこで run は、
-全体の仕様の**図ごと**に、要素がそのリポジトリに 1 つも無ければ**対象外**にする（義務を出さず、manifest と集計に残す）。
-抜け道を塞ぐ安全柵として、base（デフォルトブランチ）では対象だった図が head で対象外になったら要確認にする
-（必須の図ならゲートを止める。base の判定が無いときも同じ）。
-
-同じ本文と同じ parser の版からは、必ず同じ IR とハッシュが出る（LLM・ネットワーク・時刻に依存しない）。
-`parse(render(parse(s))) == parse(s)` を性質テストで保証し、承認者は原文と正規形を並べて見て承認する。
-エディタの「AI の提案」は本文の差分を出すだけで、採用するかは人が決め、変換には関与しない。
-
-### 旧形式の仕様を取り込む
-
-Git の `specs/*.md` と `specs/ir/*.spec-ir.json`（Spec IR v0.1）、`.speclino/domain.yaml` は、そのまま
-仕様の下書きとして取り込める。IR は失われない（図への書き換えは自動ではしない）。このリポジトリ自身の旧形式の
-仕様 4 本は、UML で書いた俯瞰の仕様 7 本に置き換えて取り下げ、`specs/SPEC-*.md`・`specs/ir` も消した。
+必要なもの: Python 3.12、uv、Node.js 20+、Docker（DB とサンドボックス用）。
 
 ```sh
-uv run speclino import-specs --workspace <slug> --project-id <id> --author <uid> --repo <dir>
+make setup          # uv sync + npm ci
+make db-up          # ローカル PostgreSQL（docker compose）
+make db-migrate     # alembic upgrade head
+make dev            # FastAPI（http://localhost:8080、SPECLINO_ROLE=all）
+cd web && npm run dev   # 画面（Vite。/api は :8080 に転送）
 ```
 
-取り込んだ後は画面で承認する。承認時にサーバが IR を固定する（クライアントが送った IR は信用しない）。
-bundle に仕様が無いのにリポジトリに `specs/ir` がある、または bundle に無い要求 ID がリポジトリにあると、
-ゲートは `KNOWLEDGE-SPEC-001` で知らせる。
+ローカルの既定は開発用の認証（`SPECLINO_AUTH_KIND=dev`、`SPECLINO_ENV=local` のときだけ有効）。
+ログイン画面の「開発用ログイン」で入り、ワークスペースは CLI で作る
+（[docs/getting-started.md](docs/getting-started.md)）。
 
-### 承認する
+## ドキュメント
 
-- 承認できるのはワークスペースの owner / approver。作者本人の承認も認めるが、**自己承認**として監査と画面に印が残る
-- 仕様は、診断にエラーが 1 つでも残っていれば承認できない（サーバ側で拒否）
-- 承認者が見た内容（改訂番号と内容のハッシュ）でなければ拒否する。2 人が同時に承認すれば片方だけが通る
-- 改訂の画面で前の改訂との差分を見られる（仕様は「正規形の差分」も。見た目だけの違いは消え、意味の違いだけが残る）
-
-## 対象関数と bindings を追加する（`.speclino/bindings.yaml`）
-
-図の操作 `<クラス>.<メソッド>` は、まず**名前の一致**でコードのシンボルに対応づける。一致しないものだけ
-`bindings.yaml` で上書きする（キーを図の名前にする）。
-
-```yaml
-behaviors:
-  cancel_order:
-    entrypoint: examples.orders.app.service.cancel_order
-    variables:
-      actor.is_admin: user.is_admin      # before.actor.is_admin ← 実装の user.is_admin
-      order.status: order.status
-
-operations:
-  Inventory.restore:                     # 図の操作名
-    symbol: examples.orders.app.inventory.restore
-    claim_scope: command_invocation
-    summary_ref: inventory_restore_v1    # .speclino/contracts/*.yaml の契約
-```
-
-型と列挙・前提・観測境界は仕様の `domain` 節（旧 `.speclino/domain.yaml`）に、外部呼出しの契約
-（`assumes_success`、`may_modify`、`pure`）は `.speclino/contracts/*.yaml` に置く。契約が無い呼出しは推測せず UNKNOWN。
-
-`bindings.yaml`・`contracts/`・`exceptions.yaml`・プロジェクト規約は、ゲートが**デフォルトブランチから**読む。
-PR でこれらを変えると、判定は変更前の内容で行い、必須の REVIEW `KNOWLEDGE-BINDINGS-001` が出る
-（PR で対応表を書き換えて検査を通す経路を塞ぐ）。変更を認めるなら承認者が PR コメントで確定する（下の「LLM 支援の規約と確定」）。
-
-## 知識を配る（`speclino sync`・MCP・A2A）
-
-### `speclino sync` と lock
-
-設定 → 「エージェント接続」→「リポジトリ同期（speclino sync）」で、プロジェクト限定・読み取り専用の
-リポジトリ同期トークン（`slsync_…`）を発行する（発行・失効は owner / approver）。トークンは環境変数だけで渡す（引数・lock・ログには出さない）。
-
-```sh
-export SPECLINO_SYNC_TOKEN=slsync_...
-uv run speclino sync --url https://<your-speclino> --repo . --repo-id <GitHub のリポジトリ ID>   # 2 回目以降は --repo-id 不要
-```
-
-| 書き出し先 | 中身 |
+| ページ | 中身 |
 | --- | --- |
-| `.claude/skills/<name>/`、`.agents/skills/<name>/` | スキル |
-| `AGENTS.md` / `CLAUDE.md` の管理区画（`<!-- speclino:begin bundle=<n> -->` 〜 `<!-- speclino:end -->`） | 指示書。区画の外は触らない |
-| `.speclino/specs/<name>.md` | 仕様の読み取り専用の写し（判定には使わない） |
-| `.speclino/lock.json` | bundle の世代、各メンバーの改訂と内容のハッシュ、書き出したファイルのハッシュ、サーバの署名、期限（30 日） |
-
-lock の意味は「この checkout が宣言している bundle」で、**利用の証明ではない**。書き出しはパスを検査し
-（`..`・絶対パス・symlink・許可リスト外は拒否）、一時ディレクトリに作ってから置き換える。失敗すれば手元の
-ファイルと lock は前のまま。lock をコミットすると、ゲートが鮮度を確かめる（`KNOWLEDGE-LOCK-001`）。
-
-### MCP / A2A / Claude Code プラグイン
-
-- **MCP**（`/mcp`）: `context_get`（規約）、`spec_get` / `skill_get`、`sync_status`（lock が最新か）、`spec_suggest`
-  （仕様の書き換えの提案）、`knowledge_pull`（取り込みの計画）、`verification_start` / `verification_get`。読み取り系は
-  リポジトリ同期トークンでも呼べ、検査の開始はエージェント接続トークン（`slmcp_…`、設定 →「エージェント接続」で owner が発行）に限る
-- **エージェントの取り込み**: 人は承認するだけで、手元への書き出しはエージェントが行う。`sync_status` で lock の鮮度を
-  確かめ、`pull_needed` なら `knowledge_pull` が返す署名つきの計画（`plan_url`、1 回だけ・10 分で失効）を、サーバが配る
-  実行スクリプト（`apply_script` の URL と sha256）に渡して当て、lock ごと作業の PR にコミットする（スキル
-  `speclino-knowledge-sync`）。書き出し先はクライアントの名乗りで決まる（Claude Code は `.claude/skills`、それ以外は
-  `.agents/skills`。CLAUDE.md があれば管理区画に `@AGENTS.md` の橋を書く）
-- **A2A**（`/a2a`、Agent Card は `/.well-known/agent-card.json`）: 仕様のレビュー・要求の相談・仕様の下書きの相談・
-  検査の後の聞き取り。返すのは提案だけで、判定も承認もしない。`uv run speclino a2a-send --help` が最小のクライアント
-  （サーバ側は `SPECLINO_A2A_ENABLED=true`）
-- **Claude Code プラグイン**: [`plugins/speclino/`](plugins/speclino/) が Skill（仕様の書き方・知識の取り込み）と
-  MCP 接続を配る。`claude plugin marketplace add <owner>/<repo>` → `claude plugin install speclino@speclino`。
-  接続先とトークンは `SPECLINO_MCP_URL` / `SPECLINO_MCP_TOKEN` の環境変数で渡し、`.claude/settings.json` に書かない
-
-取得は記録され（`knowledge_fetches`）、可観測性の画面で「誰が・どのトークンで・どの世代を最後に取ったか」として見える。
-
-## 判定を読む
-
-### UNKNOWN の読み方
-
-UNKNOWN は「壊れている」でも「大丈夫」でもなく、**この道具では確認できなかった**という報告。
-Finding の `category` と `next_steps` が対処を示す。
-
-| 原因 | よくある形 | 対処 |
-| --- | --- | --- |
-| 対応が見つからない | 図の操作・入口に、名前の一致でも `bindings.yaml` でも対応するシンボルが無い | 名前をそろえるか、`bindings.yaml` に上書きを足す |
-| 不完全な経路 | 対応外の構文（一般の `while`、展開できない `for`、`getattr`）、不透明な領域 | その部分を単純化する、または要求に関係する効果だけを関数に切り出す |
-| 解析の上限 | 経路 64 / 深さ / ソルバーの時間 | エージェントが `analyze_focus` で対象の要求だけ上限を上げて再解析する。残るなら構造を単純化する |
-| 判定の欠落（`missing_finding`） | 出るべき要求・規約の結果が出なかった（検査器の例外、LLM の失敗、対応する behavior が無い） | `next_steps` の原因を直す。欠落は通過にならない |
-| 契約の無い外部呼出し | 新しい SDK を呼んだ | `.speclino/contracts/` に要約を登録する |
-| lock | lock が無い・署名が合わない・ファイルが改変された・期限切れ | `speclino sync` し直して lock をコミットする |
-
-VERIFIED / VIOLATED を出すのは、モデルの中で正確な経路（`precision=exact_in_model`）だけ。段階的な
-エスカレーション: 決定的解析 → エージェントの再解析 → 宣言済みテストの隔離実行（`Rule.tests` の ID だけ、
-ネットワーク遮断）→ 承認者への構造化質問 → ゲート失敗。
-
-### 知識の Finding（`KNOWLEDGE-*`）
-
-| ID | 判定 | 意味と対処 |
-| --- | --- | --- |
-| `KNOWLEDGE-LOCK-001` | 適合 / 要確認 / 未検証 | lock が今の bundle と一致すれば適合。世代が古くメンバーが違えば要確認（sync し直す）。lock が無い・署名不一致・改変・期限切れ・別リポジトリなら未検証 |
-| `KNOWLEDGE-SPEC-001` | 未検証 / 要確認 | リポジトリに取り込んでいない仕様（`specs/ir`）がある。`import-specs` で取り込んで承認する |
-| `KNOWLEDGE-BINDINGS-001` | 要確認 | PR が `bindings.yaml`・`contracts/`・`exceptions.yaml`・プロジェクト規約を変えた（判定は変更前の内容）。承認者が確定すれば解除、マージ後の run で効く |
-
-### LLM 支援の規約と確定
-
-決定的に書けない規約（例: エラーメッセージが利用者に次の行動を示しているか）は、規約のルールを
-`tier: llm_assisted`・検査器 `llm.checklist` にして、チェック項目の一覧を書く。
-
-- **verdict は常に REVIEW**。区分を別に持つ: 指摘あり（`issue`）／割れた（`split`）／「LLM で確認、指摘なし
-  （機械検証ではない）」（`no_issue`）。指摘には根拠の引用・場所・チェック項目が付く
-- **必須（mandatory）の LLM 支援の規約は、区分にかかわらず人の確定（`attested`）までゲートを止める**。
-  `no_issue` も機械検証ではないので自動では通さない（画面では「— 人の確定が必要」と出す）。
-  助言（advisory）の規約はどの区分でもゲートを止めない
-- 揺らぎを抑える: 関数・文字列リテラル・エンドポイントの単位で評価し、キー（規約の改訂・ルール・単位の内容の
-  ハッシュ・モデル・プロンプトの版）が同じなら LLM を呼ばず記録を返す。新しいキーは 3 回評価して多数決、
-  `no_issue` は 3 回とも一致したときだけ。replay は記録で再評価し、LLM を呼ばない。LLM の失敗は UNKNOWN
-- **人の確定は verdict を書き換えず、ゲートの処置として記録する**（`attestations`）。指紋と内容のハッシュに結びつき、
-  コードが変われば効かない。確定はプロジェクトに属し、そのプロジェクトの run にだけ効く。画面（REST）からは、
-  開いている run の確定できる指摘だけを確定できる（`run_id` が必須。他の run・他のワークスペースの指摘は 404）。
-  owner / approver が画面（run の詳細の「問題なしとして確定」/「問題として記録」）か、PR コメントで行う:
-
-```text
-/speclino attest <指紋> <sha256:内容のハッシュ>        # 問題なしとして確定（ゲートの阻止から外す）
-/speclino attest <指紋> <sha256:内容のハッシュ> ack    # 問題として記録（阻止したまま）
-```
-
-ふだんは承認者が PR に引数なしの `/speclino attest` とコメントする（または GitHub で PR を **Approve** する）と、
-その PR の最新の検査の要確認をまとめて確定する（ハッシュを打つ必要はない。最新のコミットの検査が完了しているとき
-だけ。設定は `guides/github-app-setup.md`）。
-PR コメント・Approve の承認者は GitHub のユーザー ID で照合する（ログイン名の付け替えでは通らない）。
-`KNOWLEDGE-BINDINGS-001` の確定は ID で照合できる PR コメントか PR の Approve からだけ受け付ける。PR の作成者自身の確定は
-自己確定として gate.json・manifest・画面に残る。
-
-#### LLM に送るもの（データの扱い）
-
-- **送るのは、`tier: llm_assisted` のルールを定義したときだけ**（opt-in）。そのルールの `applies_to` /
-  `params.paths` に一致する Python ファイルから取り出した単位と、ルールの題・本文・チェック項目。
-  リポジトリ全体や差分、PR の本文・コメントは送らない
-- **値は構造で送らない**（主の防御）:
-  - 関数・エンドポイントの単位（`unit_kind: function` / `endpoint`）は、正規形（`ast.unparse`。コメントは
-    落ちる）の中のすべての str / bytes の定数（docstring・f-string の定数部分を含む）を `<str len=N>` /
-    `<bytes len=N>` に、6 桁を超える数値を `<num>` に置き換えてから送る。LLM は名前・構造・呼出しだけで
-    判定する。単位の hash（記録のキー）も置き換えた後の正規形から作る
-  - 文言を見るチェック項目（エラーメッセージの書き方など）は `unit_kind: string_literal` で評価する。
-    `params.call_names`（例 `OrderError`・`HTTPException`・`api_error`）が必須で、その呼出しに渡された
-    リテラルだけを送る。`call_names` の無い string_literal の規約は承認できず、既存のものは UNKNOWN になる
-- 送り先は worker が呼ぶ Gemini（本番は Vertex AI。`GOOGLE_CLOUD_PROJECT` のプロジェクト、
-  `SPECLINO_LLM_POLICIES_MODEL`、未指定なら `SPECLINO_AGENT_MODEL`）。費用は `SPECLINO_DAILY_COST_LIMIT_USD`
-  の枠を共有する
-- **秘密情報・個人情報らしい値を含む単位は送らない**（補助の防御。送る前の単位と、組み立てたプロンプト
-  全体の両方にかける）。検出は 3 段:
-  - 形: 秘密鍵のヘッダー、AWS / GCP / GitHub / Slack / `sk-` 形式のトークン、JWT、認証情報つきの URL、
-    メールアドレス（`example.com` などの例示用ドメインを除く）
-  - 名前: 代入先・キーワード引数・引数の既定値・dict のキー・属性名・比較の相手が秘密らしい名前
-    （password / passwd / pwd / secret / token / api_key / access_key / private_key / credential / auth /
-    cookie / session / signing_key / client_secret など。大文字小文字・区切りを無視した部分一致）なら、
-    結びつくリテラルは形に関係なく秘密とみなす。環境変数・設定から読む式は送ってよい
-  - 値: 文字列リテラルの中の、長さ 20 以上・空白なし・英字と数字が混在する Base64 / 16 進 / URL セーフの
-    連なり（`os.environ` / `getenv` の変数名は除き、既定値は対象）
-
-  その単位は UNKNOWN（「秘密情報らしい値を含むため LLM に送らない」と検出の種類）になり、必須の規約なら
-  ゲートを止める。モデルが返した引用も同じ検出器で伏せてから保存・表示する
-- 定数の式（暗黙の連結・`+`・`*`・f-string・`%`・`.format`・`.join`）は組み立ててから検出する。組み立てると
-  64KB を超える・書式の幅や精度が大きすぎる・入れ子の書式・入れ子が深すぎる単位は「解析できない書式」として
-  送らない（UNKNOWN）。実行時の計算（`chr()` で組み立てる値、`bytes([...])` の整数の並び、外部から読む値など）は
-  検出できない（関数の単位では値そのものを送らないので、これが効くのは文字列の単位だけ）
-- 1MB を超えるファイルは読まずに UNKNOWN（「ファイルが大きすぎる」）。元のソースが単位の上限の 4 倍を超える関数・
-  入れ子や条件つきの関数は、正規形を作らずに UNKNOWN
-- **検出は完全ではない**。LLM 支援の規約は、送ってよいと確かめたパスだけを `params.paths`（無ければ
-  `applies_to.paths`）に指定する。`params.paths` が無い・リポジトリ全体に当たる（`**/*` など）規約は、
-  承認の画面と監査に警告が出る（拒否はしない）
-- 評価の結果（区分・票・伏せた引用）は `llm_assessments` にワークスペースごとに残し、同じ内容の単位は
-  呼び直さない
-- 全体で止めるには `SPECLINO_LLM_POLICIES_ENABLED=false`（LLM 支援のルールはすべて UNKNOWN になる）
-
-## 可観測性
-
-「観測」の画面（`/w/<slug>/observability`）。表示はサーバの集計 1 つから作り、画面ごとに数え直さない。
-数えるものが無い指標は 0 ではなく「未計測」と出す。
-
-| 指標 | 見るもの |
-| --- | --- |
-| 形式化率 | プロジェクトに当たる仕様の要求の表のうち、`形式化` が書かれた行の割合 |
-| 対応率 | 最新の検査の仕様の義務のうち、「対応が見つからない」UNKNOWN が無いものの割合（推定） |
-| UNKNOWN の内訳 | 対応なし / 不完全な経路 / 解析の上限 / 判定の欠落 / lock / その他 |
-| 取得 | メンバー・トークンごとに、最後に取得した bundle の世代と今の世代との遅れ（失効したトークンは「失効済み」） |
-| 規約の推移 | 直近 10 回の完了した検査での、規約ごとの 違反 / 要確認 / 未検証 / 適合 の件数 |
-| LLM 支援の安定度 | 指摘あり・割れた・指摘なしの件数、記録の再利用率、確定の件数（うち自己確定） |
-
-## CI での運用（警告から始める）
-
-最初は警告運用（advisory）から始め、対象を絞ってから必須にするのが安全:
-
-```yaml
-# 警告のみ（ゲート失敗でも終了コード 0。入力不正・実行不能のときだけ 2）
-- run: uv run speclino check --repo . --head WORKTREE --specs-dir .speclino/specs --out build/review
-
-# 必須（必須ルールに未検証が残れば失敗）
-- run: >-
-    uv run speclino check --repo . --head WORKTREE --specs-dir .speclino/specs --out build/self-check
-    --fail-on VIOLATED --fail-on UNKNOWN --fail-on REVIEW --blocking
-```
-
-GitHub App のゲートでも同じ考え方で、規約を `level: advisory`（画面では「助言」）にすればゲートを落とさず
-報告だけできる。仕様の要求も要求の表の `level` を `advisory` にできる。期限つきの免除は
-`.speclino/exceptions.yaml`（全項目必須、期限切れは無効）で、免除された違反は適合に書き換えず「通過（免除中あり）」として別記する。
-
-このリポジトリ自身が [.github/workflows/ci.yml](.github/workflows/ci.yml) で必須運用している（**自己検証**）。
-CLI 側を残しているのは、**GCP を畳んだ後でも / clone した人の手元でも自己検証が回る**ことと、
-**LLM を一切使わずに違反を検出できる**ことを示すため。GitHub App を作って実 PR に接続する手順は
-[guides/github-app-setup.md](guides/github-app-setup.md)、GCP への初回デプロイは [guides/deploy-runbook.md](guides/deploy-runbook.md)。
-
-## 自己検証
-
-SpecLino は自分自身のコードを自分の仕様で検査する。CI が落ちれば自分の規約違反を自分で見つけた
-ということ。
-
-仕様の正本は SpecLino（ワークスペース）にある。このリポジトリの仕様は、UML で書いた**俯瞰の仕様 7 本**
-（`spec-sys-001` はワークスペース全体、`spec-ai-001`・`spec-gate-002`・`spec-know-001`・`spec-obs-001`・
-`spec-sync-001`・`spec-ws-001` は spec-lino に当たる）。CI の self-check ジョブ（`make selfcheck`）は、承認済みの
-仕様を `speclino sync`（または MCP の `knowledge_pull`）で書き出した `.speclino/specs/*.md` を手元の
-parser で変換し、bundle の run と同じ UML の義務の検査に通す（`speclino check --specs-dir .speclino/specs`。
-LLM・DB・GitHub App を使わない）。UML の要求を持たない仕様（旧形式の本文だけのもの）は、IR が手元に
-無いので UNKNOWN（advisory）として「判定していない」ことを残す。
-
-検出のデモ（`make test`）は、凍結した旧形式の Spec IR（`tests/fixtures/selfcheck/`）で、
-`ToolGateway.invoke`・`conformance.gate.decide_gate`・`services.run_freshness.should_publish`・
-`agent.tools.test_run.decide_observation` をわざと壊すと違反が出ることを確かめる。
-
-規約は MAKE-001（`make setup/test/lint` が存在し空でない）、SPEC-FMT-001（仕様の書式）、
-CI-001（pull_request トリガー・必須ステップ・読取り専用権限。`echo make test` や
-`continue-on-error` は通さない）、API-ERR-001（エラー応答形式）。
-
-## 評価（判定品質）
-
-**Golden**（`eval/golden/cancel_order/`）は、**答えを先に決めてある 27 個の題材**。
-「この変異を入れたら、この要求が・この分類で・この反例とともに違反になるはず」を
-`case.yaml` に固定しておき、エンジンがそのとおり判定するかを毎回確かめる
-（正しい実装 / 状態誤り / 409→400 / 所有者拒否 / 在庫復元の削除・管理者経路のみ・2 回 /
-別注文の商品 / 早期 return 後の呼出し / 到達不能分岐 / 変数名変更 / 同値書換え /
-ヘルパー分割 / 未解決の getattr / ループ / 上限到達 / 充足不能な適用条件 / 承認切れ …）。
-
-`make eval` はこれを **2 通りの入力**（人が書いた Code IR / Python ソースを解析器に通したもの）
-で評価する。両方で同じ結果になることが、解析器と検査器を別々に検証したことになる。
-
-| 指標 | 結果 |
-| --- | --- |
-| ケース一致（手書き IR 入力 / Python ソース入力） | 27 / 27 |
-| **誤った VERIFIED** | **0** |
-| 反例の再現 | 15 / 15 |
-| Z3 と有限ドメイン総当たりの照合 | 213 一致 / 0 不一致 |
-
-**holdout**（`eval/holdout/`）は**調整に使わない別題材 3 ケース**。Golden に合わせ込んで
-過学習していないかを確かめるために取り分けてある（Golden の調整中は見ない）。
-
-混同行列と「要求数 / 承認済み / 対応範囲 / 判定済み / 未解析」を併記し、一致率だけを見せない。
-**誤った VERIFIED**（解析できなかったものを適合と言う）は最悪の失敗なので、
-上の表の値は [tests/unit/eval/test_golden.py](tests/unit/eval/test_golden.py) が assert しており、
-崩れると CI の `test (backend)` が落ちる。`make eval` はレポート本文を読みたいときに手元で回す。
-
-## 既知の制約
-
-- **対応する Python は部分集合**（if/elif/else、早期 return、認識済み raise、単純な代入と属性
-  参照、and/or/not、比較、整数加減算、静的な直接呼出し）。それ以外は UNKNOWN として報告する
-- ループは**要素数が静的に分かる `for`**（タプル／リストのリテラル、`range(定数)`、合計 8 回まで、
-  `break`/`continue` なし）だけを展開して解析する。要素は Python と同じくループ前に評価し、
-  `range` はモジュールで再定義され得るときは組込みと確定できないので展開しない。それ以外の
-  `for`/`while` は UNKNOWN（S29 の構造解析で、触れないチャネルは巻き込まない）
-- base を指定した検査では、到達する関数群を含むモジュール全体と仕様側入力（Spec IR・domain・
-  bindings・contracts）のハッシュが base と一致する behavior の経路解析を省き、base の Code IR を
-  再利用する（判定は必ず再実行する）。**再利用したことは run-manifest の `analysis` に残す**。
-  この規模のリポジトリでは時間短縮は測定誤差の範囲で、効果が出るのは呼出しグラフが深い実コード
-- フレームワークの応答は明示アダプター経由（FastAPI の `HTTPException(status_code=定数)` と
-  `Response(status_code=定数)`）
-- 「DB に永続化された」「並行実行で壊れない」は観測範囲外。コマンドの呼出しまでを検査する
-- 動的証拠（`test_run`）は実行した入力の範囲に限る。静的な判定を上書きせず別軸で表示する。
-  **テストの成功は判定を変えない**（テストは head の実装と同じプロセスで動くため、成功という
-  観測そのものを未信頼側が偽造できる）。失敗だけを違反の証拠として受け取る
-- 隔離実行の資源制限は環境で差がある。ローカル（Docker）はメモリ 512MB・CPU 1・pids 256 を
-  コンテナに直接与える。本番（Cloud Run sandboxes）は**サンドボックス単位の上限を指定できず
-  親サービスと資源を共有する**ため、親の側で締めて影響範囲を限っている（メモリ 512Mi・CPU 1・
-  **同時実行 1**・タイムアウト 300s）。同時実行を 1 にしてあるので、未信頼コードが資源を
-  食い潰しても同じコンテナの別の run を巻き込まない。ネットワーク遮断はどちらも効く
-  （本番では DNS 解決の段階で失敗する）
-- トレース取り込み（`trace_importer`）と増分解析は正規化 JSON の契約までで、実装は Stretch
-- **UML の検査は Python の静的な経路との照合**。実行トレースとの照合、`loop` の回数の義務、非同期メッセージ、`par` は
-  対象外。構造・順序の検査は Python だけ（OpenAPI による規約の検査は言語に依存しない）
-- クラス図の関係は多重度とラベルの文を見ない。所有・依存は静的に確定できるもの（注釈・import・名前の参照）だけで、
-  再束縛・動的な定義・解決できないデコレーターは UNKNOWN
-- 状態遷移図は bindings の全 behavior の経路で検査する。属性への代入が対応に 1 つも無ければ UNKNOWN
-- 可観測性の UNKNOWN の内訳と対応率は、検査器の決まった言い回しで分類した推定。合わないものは「その他」に入る。
-  LLM 支援の記録の再利用率は、並行した run の分を外れに数えるので低めに出る
-- `bindings.yaml` 等を変える PR は、承認者が確定するまで必ず REVIEW で止まる（マージ後の run で効く）
-- 旧形式の仕様から図への自動変換はしない（人が移す。エディタで両方を書ける）
+| [docs/concepts.md](docs/concepts.md) | 考え方（保証すること・しないこと、流れ、bundle） |
+| [docs/architecture.md](docs/architecture.md) | アーキテクチャ（Cloud Run の役割分担、判定の順序） |
+| [docs/getting-started.md](docs/getting-started.md) | ローカル起動と CLI の検査 |
+| [docs/knowledge.md](docs/knowledge.md) | 知識の管理（画面、承認、AI と作る、UML の書き方、bindings） |
+| [docs/distribution.md](docs/distribution.md) | 配信（`speclino sync` と lock、MCP / A2A、Claude Code プラグイン） |
+| [docs/verdicts.md](docs/verdicts.md) | 判定の読み方、LLM 支援の規約と確定、LLM に送るもの |
+| [docs/operations.md](docs/operations.md) | 可観測性、CI での運用、自己検証、評価、既知の制約 |
+| [docs/guides/github-app-setup.md](docs/guides/github-app-setup.md) | GitHub App の作成と接続 |
+| [docs/guides/deploy-runbook.md](docs/guides/deploy-runbook.md) | GCP への初回デプロイ |
+| [docs/demo-knowledge-registry.md](docs/demo-knowledge-registry.md) | デモの手順 |
+| [docs/submission/README.md](docs/submission/README.md) | ハッカソンの提出情報と予算計画 |
 
 ## 開発
 
 ```sh
-make lint            # ruff（静的検査・書式）
-make typecheck       # mypy strict
 make check           # lint + typecheck + test + selfcheck をまとめて
+make lint            # ruff
+make typecheck       # mypy strict
+make test            # 単体 + 統合（統合は SPECLINO_DATABASE_URL が要る）
+make selfcheck       # SpecLino を自分自身に当てる
 make eval            # Golden 評価
-make eval-guardrails # LLM のガードレール（実 Gemini。CI では回さない）
-make eval-chat-depth # 知識のチャットの深掘り（実 Gemini。CI では回さない）
 make schemas         # domain/ の pydantic モデルから schemas/*.schema.json
-make diagrams        # design/*.mmd から png・svg
-scripts/story.sh board   # 進捗（GitHub Projects）
+make diagrams        # docs/diagrams/*.mmd から png・svg
 ```
 
-構成の規約は [CLAUDE.md](CLAUDE.md)、設計の正本は [design/2026-10-05-team-knowledge-registry.md](design/2026-10-05-team-knowledge-registry.md)
-（意味検証コアは [design/2026-09-22-semantic-conformance-poc-v0.1.md](design/2026-09-22-semantic-conformance-poc-v0.1.md)）。
-
-## 提出情報
-
-| 項目 | 内容 |
-| --- | --- |
-| デモ URL | TODO（提出前に記載） |
-| テストアカウント | 提出フォームにだけ記載（メール / パスワード。ソーシャルログイン不要）。リポジトリには置かない |
-| デモ PR（12/1 まで open） | [#47](https://github.com/tanabe-yudai/spec-lino/pull/47) デモ1: テストは緑でもゲートの図に違反（反例つき）／[#45](https://github.com/tanabe-yudai/spec-lino/pull/45) デモ3: 仕様の写しを消しても lock の照合で止まる／[#46](https://github.com/tanabe-yudai/spec-lino/pull/46) デモ4: 解析できないループは UNKNOWN でゲート失敗 |
-| デモ動画 | TODO（提出前に記載）。台本は [docs/submission/video-script.md](docs/submission/video-script.md) |
-| Zenn 記事 | TODO（提出前に記載）。下書きは [docs/submission/zenn-draft.md](docs/submission/zenn-draft.md) |
-| 提出フォームの回答 | [docs/submission/form.md](docs/submission/form.md) |
-
-### 12/1 までデプロイを維持する予算計画
-
-費用の大きい順に、構成と上限を Terraform（`infra/envs/prod/`）とアプリの設定で固定している。
-単価は 2026-10-13 に公式の料金ページ（[Cloud Run](https://cloud.google.com/run/pricing)・
-[Cloud SQL](https://cloud.google.com/sql/pricing)）で確かめた USD の表示価格。東京（asia-northeast1）の
-Cloud SQL の単価は公式ページの静的な表で確かめられなかったので**概算**。
-
-| 項目 | 構成（正本） | 費用の見込み（月） | 上限・止め方 |
-| --- | --- | --- | --- |
-| Cloud Run web | 1 vCPU・1 GiB、**min 1**（起動待ちを避ける）、max 2（`run.tf`） | **約 $13**: 待機（idle の最小インスタンス）は東京も Tier 1 で vCPU $0.0000025/秒・メモリ $0.0000025/GiB 秒 → 1 vCPU＋1 GiB × 30 日 = $12.96。リクエストを処理した時間は別（数ドル以内の見込み、無料枠あり） | max-instances=2 |
-| Cloud Run worker / sandbox | min 0、max 2。sandbox は同時実行 1 | 実行した分だけ（待機の費用なし） | Cloud Tasks のキュー、max-instances=2 |
-| Cloud SQL | `db-f1-micro`・HDD 10GB・ゾーン・バックアップなし（`guides/deploy-runbook.md` の 4 章。Terraform 外） | **約 $11（概算）**: インスタンスは us-central1 で $0.0105/時（≒ $7.7）、東京は約 $10。HDD は us-central1 で $0.000123288/GiB 時 × 10GB ≒ $0.9 | 常時起動。止めるとサービスが止まる |
-| Vertex AI（Gemini） | 知識のチャット・仕様の提案・LLM 支援の規約・調査エージェント・A2A | 日次の上限まで（最大 $3 × 日数） | `SPECLINO_DAILY_COST_LIMIT_USD`（既定 $3/日、全用途で共有）。超えたら起動しない。LLM 支援は記録を再利用し、同じコードでは呼ばない |
-| 再実行 | 画面からの再検査 | 上の LLM の枠に含む | `SPECLINO_DEMO_RERUN_LIMIT_PER_DAY`（既定 20 回/日） |
-| GCS・Cloud Tasks・Logging・Secret Manager・Artifact Registry | 既定の構成 | 数ドル以内（概算。Artifact Registry はイメージが溜まるほど増える） | 古いイメージを消す |
-
-- **予算アラート**: `budget.tf` で予算（既定 45,000 円 ≒ $300）の 17% / 33% / 67% / 100%（≒ $50 / $100 / $200 / $300）に
-  通知する（実際の支出ベース）
-- **見込み**: 固定費（web の待機と Cloud SQL）は**月約 $24**、10/15〜12/1（47 日）で**約 $38**。その他の少額を足しても
-  $45 前後。LLM は日次の上限 $3 で最大 **$141**（47 日）。合わせて**最大でも約 $190**で、クーポン（$300）の残りに収まる見込み。
-  ただし 9/28 からの実績（開発中の LLM・検査）がすでにクーポンを使っているので、10/14 時点の請求で残額を確かめる
-- **クーポンの期限に注意**: $300 のクーポンは 2026-09-28 頃に登録し、有効期間は 2 か月。**11 月下旬に切れ、12/1 より前に
-  切れる可能性がある**。切れた後の支出は課金アカウントに請求される（固定費だけなら数日で数ドル）。期限の正確な日付は
-  請求の画面で確かめる
-- **超えそうなとき**: (1) `SPECLINO_AGENT_ENABLED` / `SPECLINO_LLM_POLICIES_ENABLED` / `SPECLINO_SPEC_BOT_ENABLED` を false にする
-  （LLM 支援の規約は UNKNOWN になり、ゲートは安全側に倒れる）、(2) 日次の上限を下げる、(3) web の min-instances を 0 に戻す
-  （月 $13 減る代わりに、起動待ちが 12〜21 秒に戻る）。判定と画面は LLM 無しでも動く
-- 12/1 以降に畳むときは [guides/deploy-runbook.md](guides/deploy-runbook.md) の手順で Cloud SQL を先に止める。
-  CLI の自己検証は GCP が無くても回る
+コードの規約は [CLAUDE.md](CLAUDE.md)・[AGENTS.md](AGENTS.md)・プロジェクト規約
+`.speclino/policy/speclino-core.yaml`。コミットメッセージは Conventional Commits
+（例: `feat: 新機能の説明`）。規約を変えるときは PR で変える。自己検証と評価の詳細は
+[docs/operations.md](docs/operations.md)。
 
 ## ライセンス
 
-未定（提出時に決定）。
+AGPL-3.0-or-later。全文は [LICENSE.md](LICENSE.md)。作者もホスティング版（招待制）を提供している。
+改変版をネットワーク越しに利用者へ提供する場合は、その改変版のソースを公開する義務がある。

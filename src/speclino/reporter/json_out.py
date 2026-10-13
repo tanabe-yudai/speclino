@@ -1,4 +1,4 @@
-"""reporter.json_out（PoC 5.3「出力ファイル」）。成果物一式を決定的に書き出す。
+"""reporter.json_out。成果物一式を決定的に書き出す。
 
 同じ入力なら同じバイト列になる（JSON は indent=2, ensure_ascii=False, sort_keys=True で固定）。
 """
@@ -69,12 +69,12 @@ def write_artifacts(
     semantic_diff: SemanticDiff | None = None,
     waivers: list[Waiver] | None = None,
 ) -> dict[str, Path]:
-    """PoC 5.3 の出力ファイル一式を `out_dir` に書き、書いたパスの辞書を返す。
+    """出力ファイル一式を `out_dir` に書き、書いたパスの辞書を返す。
 
     `code` / `semantic_diff` が None のときはそのファイルを書かない。`gate` が None
     （ゲート計算前の異常終了時など）のときも gate.json は省略するが、review.md は
-    「ゲート: 未計算」として最後まで出す（PoC 5.3「実行エラー時も可能な範囲で
-    run-manifest.json と診断情報を出す」）。
+    「ゲート: 未計算」として最後まで出す（実行エラー時も可能な範囲で
+    run-manifest.json と診断情報を出す）。
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     written: dict[str, Path] = {}

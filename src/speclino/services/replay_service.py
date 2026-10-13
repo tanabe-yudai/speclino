@@ -12,7 +12,7 @@ S42: manifest に `policy_revision` が記録されているとき（チーム�
 理由が分からなくなるため、既定では失敗にする。CLI は DB 接続を持たないため
 `require_policy_check=False`（`--no-policy-check`）で明示的に飛ばす経路を用意する。
 
-S65（design/2026-10-05-team-knowledge-registry.md 8 章）: bundle を固定した run（manifest に
+S65: bundle を固定した run（manifest に
 `bundle_generation` がある）は `replay_bundle` で再現する。その run のプロジェクトのワークスペースの
 bundle だけを世代で引き、署名と manifest の `bundle_hash` を照合してから、決定的な検査（エンジン・
 UML の義務・規約の検査器・lock）を同じ run_id・上限・時刻で再実行し、すべての Finding を比べる

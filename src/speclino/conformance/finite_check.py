@@ -1,4 +1,4 @@
-"""有限ドメインでの検算（PoC 3.1）。Z3 の判定を独立にクロスチェックする。
+"""有限ドメインでの検算。Z3 の判定を独立にクロスチェックする。
 
 engine.py（Z3 による記号実行）とは別に、小さな有限ドメインを総当たりして同じ
 「入口仮定 ∧ 適用条件 ∧ 経路条件 ∧ 終了状態 ∧ ¬保証」を評価する。engine.py は
@@ -44,7 +44,7 @@ class FiniteCheckSkipped(FiniteCheckError):
 
 @dataclass(frozen=True)
 class Bounds:
-    """有限ドメインの範囲。opaque は同一性しか比較しないので 2 値で十分（PoC 3.1）。"""
+    """有限ドメインの範囲。opaque は同一性しか比較しないので 2 値で十分。"""
 
     integers: tuple[int, ...] = (-1, 0, 1, 2, 3)
     opaque_symbols: tuple[str, ...] = ("a", "b")

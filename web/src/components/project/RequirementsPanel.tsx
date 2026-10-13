@@ -7,7 +7,7 @@ import type { Finding } from '@/types/finding'
 import type { ProjectRun, RequirementFilter, RequirementView } from '@/types/project'
 import { RequirementRow } from './RequirementRow'
 
-/** 要求: 仕様ファイルごとにまとめ、判定と承認の状態で絞り込む（design 5.1-2）。 */
+/** 要求: 仕様ファイルごとにまとめ、判定と承認の状態で絞り込む。 */
 export function RequirementsPanel({
   slug,
   requirements,

@@ -1,6 +1,6 @@
-"""Golden 27 ケース（PoC 17.1）が手書き IR とソース入力の両方で期待どおりになる（S09 / S17 /
+"""Golden 27 ケースが手書き IR とソース入力の両方で期待どおりになる（S09 / S17 /
 S34）。holdout 3 ケース（調整に使わない検証用、`make eval` には含めない）と、凍結入力の
-再現性（PoC 12.3）も併せて確認する。
+再現性も併せて確認する。
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ def test_holdout_cases_match(mode: str) -> None:
 @pytest.mark.parametrize("mode", ["handwritten", "source"])
 def test_frozen_rerun_reproducible(mode: str) -> None:
     """S34-25 frozen_rerun: 同じ凍結入力（golden 全体）を 2 回評価しても、時刻や run_id を
-    除いた findings（verdict / category /反例）が一致する（PoC 12.3 / 17.1）。
+    除いた findings（verdict / category /反例）が一致する。
     """
 
     def _key(report: EvalReport) -> list[tuple[object, ...]]:
@@ -74,9 +74,7 @@ def test_frozen_rerun_reproducible(mode: str) -> None:
 
 
 def test_metrics_in_report() -> None:
-    """S34: render_markdown が区分ごとの検出率・UNKNOWN率・REVIEW率・反例再現率を含む
-    （PoC 17.3「一致率だけを出さない」）。
-    """
+    """S34: render_markdown が区分ごとの検出率・UNKNOWN率・REVIEW率・反例再現率を含む。"""
     report = run_golden(GOLDEN, "source")
     assert report.violated_detection_rate == pytest.approx(1.0)
     assert report.unknown_rate is not None and 0 < report.unknown_rate < 1

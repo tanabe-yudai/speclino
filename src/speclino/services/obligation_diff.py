@@ -1,4 +1,4 @@
-"""base/head の Rule 差分と承認の適用（FR 017 / AC-010、PoC 12.1）。
+"""base/head の Rule 差分と承認の適用（FR 017 / AC-010）。
 
 必須の検証集合は信頼済みの base（デフォルトブランチにマージ済み）から確定する。head で
 追加・変更された Rule は、承認記録（`/speclino approve-spec <hash>` または base 由来）が無ければ

@@ -1,12 +1,12 @@
 """check_pipeline: `speclino check`（S10）と S20 の worker が共有する純粋なオーケストレータ。
 
-PoC 15章 / design/2026-09-22-hackathon-plan.md「判定モデル」の手順を、GitHub・DB・LLM に
+検査 → ゲートの手順を、GitHub・DB・LLM に
 依存せず実行する。`repo_root` は解決済みのソーススナップショット（`--head WORKTREE` のときは
 作業ツリーそのもの、それ以外は `adapters.localgit.export_snapshot` で展開済みのディレクトリ）
 であることを前提にする。git 自体の解決・展開は呼び出し側（CLI／S20 worker）の責務であり、
 このモジュールは `head_sha` / `base_sha` を記録用の文字列としてのみ扱う。
 
-手順（PoC 5.1 の必須入力 / hackathon-plan「判定モデル」）:
+手順:
     (a) `.speclino/domain.yaml` `.speclino/bindings.yaml` `.speclino/contracts/*`、
         `specs/ir/*.spec-ir.json`（behavior ごと）と対応する仕様 Markdown を読む
     (b) validate_spec_ir。error は `CheckInputError`（CLI 終了コード2相当）、warning は
@@ -21,15 +21,15 @@ PoC 15章 / design/2026-09-22-hackathon-plan.md「判定モデル」の手順を
     (d) `conformance.engine.evaluate` で Findings を作る（複数 behavior は結合する。再利用した
         Code IR でも findings は必ず作り直す）
     (e) `.speclino/policy/*.yaml` があれば VerifierRegistry で実行し Findings に追加する
-    (e') base の判定と Finding 同士を突き合わせ、意味差分（PoC 12 章）を作る
+    (e') base の判定と Finding 同士を突き合わせ、意味差分を作る
     (f) `conformance.gate.aggregate_gate` でゲート判定する
     (g) `RunManifest` を組み立てる（入力ハッシュ・版・上限・fail_on・mode・増分解析の記録）
 
-S65（design/2026-10-05-team-knowledge-registry.md 5 章・8 章）: `CheckRequest.knowledge` があれば、
+S65: `CheckRequest.knowledge` があれば、
 仕様と規約は run の開始時に固定した bundle だけから読む（リポジトリの `specs/` は読まない）。
     - 仕様は spec の改訂ごとの `content.compiled`（承認時にサーバが作ったもの）と `content.domain`。
-      `bindings.yaml`・`contracts/`・`exceptions.yaml`・`.speclino/policy/*.yaml` はリポジトリから
-      （D9・D10）、チーム規約は `knowledge.policy`
+      `bindings.yaml`・`contracts/`・`exceptions.yaml`・`.speclino/policy/*.yaml` はリポジトリから、
+      チーム規約は `knowledge.policy`
     - 旧形式（`compiled.legacy`）は (b)〜(d) を spec ごとの domain でそのまま通し、UML の義務は
       構造・順序・包含・遷移の検査（S64）に通す。対応できない・解析できないものは UNKNOWN
     - lock の鮮度（S68、`KNOWLEDGE-LOCK-001`、必須）
@@ -686,7 +686,7 @@ def _read_bindings(config_dir: Path) -> tuple[str | None, Bindings]:
 
 
 def _bundle_inputs(req: CheckRequest, project_dir: Path, knowledge: ResolvedKnowledge) -> _Inputs:
-    """bundle の入力: 仕様は spec の改訂の compiled と domain、対応・契約はリポジトリから（D9）。
+    """bundle の入力: 仕様は spec の改訂の compiled と domain、対応・契約はリポジトリから。
 
     `specs/` は読まない。対応・契約は信頼側（`req.trusted_root`）から読む。PR の head は攻撃者が
     書き換えられるので、head の bindings.yaml を読むと PR だけで「呼んでいる」ことにできる。
@@ -903,7 +903,7 @@ def _uml_findings(
     def guarded(ctx: ObligationContext, check: Callable[[], list[Finding]]) -> list[Finding]:
         try:
             return check()
-        except Exception as e:  # noqa: BLE001 - 検査器の例外は UNKNOWN（設計 5.2）
+        except Exception as e:  # noqa: BLE001 - 検査器の例外は UNKNOWN
             return [ctx.unknown(f"検査器の例外で判定できない（{type(e).__name__}: {e}）")]
 
     writes: dict[str, list[str]] = {}
@@ -1060,7 +1060,7 @@ def _implicit_names(
     """bindings に対応の無い図の操作・入口（`<Class>.<method>`）を、名前の一致でコードに写す。
 
     `<Class>` をクラス図のステレオタイプに従って一意なクラス（`<<module>>` なら一意なモジュール）
-    として探し、そこに `<method>` が定義されていれば完全修飾名にする（D9: 名前の一致が既定）。
+    として探し、そこに `<method>` が定義されていれば完全修飾名にする（名前の一致が既定）。
     見つからない・一意でないものは写さない（その要素は UNKNOWN になる）。
     """
     stereotypes = {c.name: c.stereotype for c in compiled.classes}
@@ -1308,7 +1308,7 @@ def _fill_expected(
     is_base: bool,
     by_unit: dict[str, list[Finding]],
 ) -> tuple[Findings, list[str]]:
-    """出るべき要求 ID を列挙し、Finding が欠けたものを UNKNOWN で補う（設計 5.2）。
+    """出るべき要求 ID を列挙し、Finding が欠けたものを UNKNOWN で補う。
 
     仕様の ID は spec（artifact）ごとに、その spec の検査が出した Finding だけと照合する（2 つの
     spec が同じ図 ID・要素 ID を持っても、片方の Finding で他方の欠落が隠れない）。
@@ -1722,13 +1722,13 @@ def _run_policies(
     """チーム規約（`team_policy.package`）と `.speclino/policy/*.yaml`（プロジェクト固有の
     追加規約）の両方を VerifierRegistry で実行する。
 
-    チーム規約を先に評価し、プロジェクト固有を後に足す（design/2026-09-26-team-policies-and-dx.md
-    3章）。同じ rule id が両方にあるときはチーム規約を優先し、プロジェクト側の同 id ルールは
+    チーム規約を先に評価し、プロジェクト固有を後に足す。
+    同じ rule id が両方にあるときはチーム規約を優先し、プロジェクト側の同 id ルールは
     実行しない（チーム規約を無効化できない、という設計）。無視した事実は `texts`
     （`policy_hash` の入力）に注記として残す。
 
     `tolerate_errors`（S65 の bundle の run）: ルールごとに実行し、検査器の例外はそのルールの
-    UNKNOWN にして他のルールを続ける（設計 5.2）。Git の run は従来どおり例外で run を止める。
+    UNKNOWN にして他のルールを続ける。Git の run は従来どおり例外で run を止める。
     """
 
     def run(package: PolicyPackage) -> list[Finding]:

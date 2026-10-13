@@ -4,7 +4,7 @@ Revision ID: 0010
 Revises: 0008
 Create Date: 2026-10-05 12:00:00.000000
 
-追加だけ（S62、design/2026-10-05-team-knowledge-registry.md 3 章）。`policy_revisions` は変えない。
+追加だけ（S62）。`policy_revisions` は変えない。
 旧コードは新しい表を読まない。S61 縮小版が 0009 を入れる場合は、マージ時に
 down_revision を合わせる。
 """

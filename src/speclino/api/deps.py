@@ -192,7 +192,7 @@ class LazyCodeHost:
 
     web ロールは run を作って enqueue するだけで、Check の更新とスナップショット取得は
     worker が行う。起動時に実体を作ると web にも GitHub App の秘密鍵が要ることになり、
-    「秘密鍵は worker だけが持つ」構成（design のサービス構成表）を取れない。
+    「秘密鍵は worker だけが持つ」構成を取れない。
     """
 
     def __init__(self, settings: Settings) -> None:

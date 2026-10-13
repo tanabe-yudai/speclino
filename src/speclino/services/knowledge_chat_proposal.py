@@ -1,4 +1,4 @@
-"""会話の提案の許可リストと診断（S73、design/2026-10-06-knowledge-chat.md C4・C5）。
+"""会話の提案の許可リストと診断（S73）。
 
 - 提案できる欄は種類ごとの許可リストだけ。scope・target・domain・legacy_ir・compiled・
   承認の情報は応答の型（`response_schema`）にも、返す提案（`raw_proposal`）にも入れない。

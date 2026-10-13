@@ -1,4 +1,4 @@
-"""`api/routes/mcp_tokens.py` の統合試験（S54、design/2026-09-27-workspaces.md 4・8.1 節）。
+"""`api/routes/mcp_tokens.py` の統合試験（S54）。
 
 実 PostgreSQL が必要（`SPECLINO_DATABASE_URL` が未設定なら skip）。
 """

@@ -3,7 +3,7 @@
 `examples/orders/app/service.py`（正しい実装）を変異させたもの。import は
 `examples.orders.app` のまま保つ（S17 の path_analyzer 入力に使う。S09 では未実行）。
 成功経路で order.status を一度 SHIPPED に更新してから CANCELLED に更新し直す（同じ変数への
-2 回の write）。PoC 9.2「状態変更後に評価した条件は変更後の値に基づいて計算する」により
+2 回の write）。「状態変更後に評価した条件は変更後の値に基づいて計算する」により
 `after.order.status` は最後の更新値（CANCELLED）で評価されるため、R-CANCEL-03 は
 VERIFIED_IN_SCOPE のままになる。R-CANCEL-07a（拒否経路での order.status への書込み 0）は
 拒否経路（403/409）だけを対象にしており、この 2 回の write はどちらも成功経路にしかないため

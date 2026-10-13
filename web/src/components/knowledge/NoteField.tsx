@@ -7,7 +7,7 @@ import type { ChatSummaryDraft, NoteState } from '@/types/knowledgeChat'
 
 /**
  * 改訂の説明（承認者が読む「変更の説明」）。「会話の要約を使う」は AI が会話から作った案を入れるだけで、
- * 本人が確かめて直してから保存する（自動では入れない、設計 C3）。
+ * 本人が確かめて直してから保存する（自動では入れない）。
  */
 export function NoteField({
   id,

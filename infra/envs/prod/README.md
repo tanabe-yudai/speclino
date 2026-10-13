@@ -58,7 +58,7 @@ openssl rand -hex 32 | tr -d '\n' | gcloud secrets versions add bundle-signing-k
 
 `mcp-token` には値を投入しない。S54 以降、MCP の認証はワークスペース単位のトークン（DB の
 `mcp_tokens`、ハッシュだけ保存）に切り替え、`/workspaces/<slug>/mcp-tokens` で owner が発行する
-（`guides/deploy-runbook.md` の「10. MCP トークン」）。この secret のコンテナとアクセス権は
+（`docs/guides/deploy-runbook.md` の「10. MCP トークン」）。この secret のコンテナとアクセス権は
 ロールバック期間が過ぎるまで残す（消すと secret 自体が削除対象になり戻せなくなるため）。
 
 アクセス権は secret 単位で付与済み（web: `github-webhook-secret` / `session-secret` /

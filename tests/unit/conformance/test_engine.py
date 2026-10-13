@@ -1,4 +1,4 @@
-"""conformance_engine の単体試験（手書き IR、PoC 10 章 / 17.1）。"""
+"""conformance_engine の単体試験（手書き IR）。"""
 
 from __future__ import annotations
 

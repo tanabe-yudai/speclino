@@ -16,9 +16,13 @@ describe('landingContent', () => {
     expect(all.filter((s) => /デモ|demo/i.test(s))).toEqual([])
   })
 
-  it('個人の環境の値を書かない', () => {
+  it('個人の環境の値を書かない（公開リポジトリの URL は除く）', () => {
     const banned = /tanabe|example-project|6h5m3svkja|gmail\.com|run\.app/i
-    expect(all.filter((s) => banned.test(s))).toEqual([])
+    expect(all.filter((s) => s !== content.REPO_URL && banned.test(s))).toEqual([])
+  })
+
+  it('リポジトリの URL は GitHub の公開リポジトリ', () => {
+    expect(content.REPO_URL).toBe('https://github.com/tanabe-yudai/spec-lino')
   })
 
   it('はじめ方は 01〜04、原則は 3 つ', () => {

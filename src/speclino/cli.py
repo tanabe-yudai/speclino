@@ -114,7 +114,7 @@ def check(
         None, "--solver-timeout-ms", help="ソルバー呼出し1回あたりのタイムアウト(ms)"
     ),
 ) -> None:
-    """仕様とコードの意味差分を検査する（PoC 15章）。
+    """仕様とコードの意味差分を検査する。
 
     終了コード: 0=完了しゲート条件に該当しない / 1=ゲート条件に該当（--blocking時）/
     2=入力不正・実行不能。
@@ -723,7 +723,7 @@ def workspace_backfill_repo_ids() -> None:
     """`github_repo_id` が未確定の project 全件にコードホストから引いた ID を埋める。
 
     埋められない行（コードホストが解決できない、または ID が既に他の行に使われている）は
-    埋めずに team を外して隔離する（design/2026-09-27-workspaces.md の codex レビュー #3）。
+    埋めずに team を外して隔離する。
     """
     from speclino.api.deps import build_code_host
     from speclino.services import workspace_admin

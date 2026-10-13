@@ -1,7 +1,6 @@
 """`policy_revisions` の repository（S42）。
 
-チーム規約の改訂は不変・連番で、承認されるまで有効にならない
-（design/2026-09-26-team-policies-and-dx.md 3章）。監査ログは書かない
+チーム規約の改訂は不変・連番で、承認されるまで有効にならない。監査ログは書かない
 （`services/policy_governance.py` が repository と audit をまとめて呼ぶ）。
 """
 

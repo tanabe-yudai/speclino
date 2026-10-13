@@ -1,6 +1,6 @@
 """`knowledge_chats` の repository（S73）。DB 操作だけを担う。
 
-**すべての問い合わせを (workspace, owner_uid) で絞る**（design C2: 画面と API では本人だけが
+**すべての問い合わせを (workspace, owner_uid) で絞る**（画面と API では本人だけが
 読み書き・削除できる）。ID だけで行を引く関数は置かない。誰が呼べるか・件数と大きさの上限・
 監査は `services/knowledge_chat.py`。
 時刻は `clock_timestamp()`（同じトランザクションの中でも進む）。

@@ -1,4 +1,4 @@
-"""知識の配信（S68、design/2026-10-05-team-knowledge-registry.md 7 章）の型。"""
+"""知識の配信（S68）の型。"""
 
 from __future__ import annotations
 
@@ -114,7 +114,7 @@ class SyncLayout:
 
 
 class SyncPlan(IRModel):
-    """書き出しの計画（S75、design/2026-10-07-agent-sync.md A3）。サーバが作って署名する。
+    """書き出しの計画（S75）。サーバが作って署名する。
 
     実行スクリプト（`speclino_apply.py`）が checkout に当てる。lock は最後に書く。
     削除（`delete` / `remove_managed_block`）は、サーバが署名・ワークスペース・リポジトリ ID を

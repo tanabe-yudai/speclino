@@ -136,7 +136,7 @@ class LlmChecklistItem(IRModel):
 
 
 class LlmChecklistParams(IRModel):
-    """`llm.checklist`（S70、設計 6.2–6.3）。
+    """`llm.checklist`（S70）。
 
     `paths` が空なら規約の `applies_to.paths` を使う。`call_names` は string_literal のときだけ
     使い、指定すればその名前の呼出しの引数のリテラルだけを評価する（空ならすべての呼出し）。

@@ -1,4 +1,4 @@
-"""localgit: ローカル git リポジトリを読むアダプター（PoC 15章）。"""
+"""localgit: ローカル git リポジトリを読むアダプター。"""
 
 from speclino.adapters.localgit.code_host import WORKTREE, GitError, export_snapshot, resolve_sha
 

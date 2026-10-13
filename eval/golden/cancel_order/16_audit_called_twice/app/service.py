@@ -1,7 +1,7 @@
 """注文キャンセルサービス（Golden 16_audit_called_twice 用の変異版）。
 
-PoC 17.1 は「未記載の通知を追加する → REVIEW。禁止と明記されていれば VIOLATED」を求める。
-しかし conformance_engine の undocumented_behavior 検出（PoC 10.5）は
+期待される挙動は「未記載の通知を追加する → REVIEW。禁止と明記されていれば VIOLATED」である。
+しかし conformance_engine の undocumented_behavior 検出は
 `code.paths[*].events[*]` のうち kind="call" のイベント（= bindings.operations に登録され
 `_emit_operation` で発行されたイベント）だけを対象にする。このケースで触ってよいのは
 `eval/golden/cancel_order/` 配下の新規ケースディレクトリだけで、bindings.yaml

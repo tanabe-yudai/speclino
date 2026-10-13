@@ -4,8 +4,8 @@
 `examples.orders.app` のまま保つ（S17 の path_analyzer 入力に使う。S09 では未実行）。
 認可されていない利用者を 403 で拒否する直前に order.status を CANCELLED へ書き込む（本来
 拒否する経路で状態を変更してしまう不具合）。この write を認可判定より前（無条件）に置くと
-後続の `order.status != OrderStatus.PENDING` の判定が更新後の定数値で評価されてしまい
-（PoC 9.2）、成功経路自体が到達不能になって無関係な要求（R-CANCEL-02〜06）まで巻き込む。
+後続の `order.status != OrderStatus.PENDING` の判定が更新後の定数値で評価されてしまい、
+成功経路自体が到達不能になって無関係な要求（R-CANCEL-02〜06）まで巻き込む。
 それは意図した不具合の再現ではないため、write は「拒否される分岐の内部」（403 を raise する
 直前）に限定する。これにより拒否経路（p1_forbidden）だけで order.status への書込みが発生し、
 R-CANCEL-07a（拒否経路での書込み 0 を要求）が forbidden_effect で VIOLATED になる。

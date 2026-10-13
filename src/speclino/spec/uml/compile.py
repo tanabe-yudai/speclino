@@ -1,4 +1,4 @@
-"""Markdown（UML）と旧形式の Spec IR → `CompiledSpec`（設計 4 章）。
+"""Markdown（UML）と旧形式の Spec IR → `CompiledSpec`。
 
 決定的（LLM・ネットワーク・時刻に依存しない）で、全か無か
 （分類されないトークンが 1 つでもあればエラー）。

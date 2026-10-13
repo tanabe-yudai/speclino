@@ -4,7 +4,7 @@ Revision ID: 0011
 Revises: 0010
 Create Date: 2026-10-05 18:00:00.000000
 
-追加だけ（S70、design/2026-10-05-team-knowledge-registry.md 6.2–6.3）。既存の表は変えない。
+追加だけ（S70）。既存の表は変えない。
 `llm_assessments` は LLM 支援の評価の記録（キーが同じなら LLM を呼ばない・replay が読む）、
 `attestations` は人の確定（ゲートの処置。verdict は書き換えない）。確定はプロジェクトに属する
 （#114: 同じ指紋でも別のプロジェクトの run には効かせない）。評価の記録はワークスペース

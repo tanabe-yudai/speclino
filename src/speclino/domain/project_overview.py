@@ -1,6 +1,6 @@
 """プロジェクト画面（S45）の応答の型。組み立ては `services/project_overview.py`。
 
-design/2026-09-30-ui-redesign.md 5.2 節。判定は検査器の findings をそのまま使い、ここでは作らない。
+判定は検査器の findings をそのまま使い、ここでは作らない。
 """
 
 from __future__ import annotations

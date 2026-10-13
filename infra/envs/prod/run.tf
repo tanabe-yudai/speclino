@@ -1,12 +1,12 @@
 # web / worker / sandbox は同一イメージを SPECLINO_ROLE で切り替えるだけの
-# 3つの Cloud Run サービス（design: 「本番は同一イメージを役割別 Cloud Run サービスに
-# 分ける」）。sandbox だけ Cloud Run sandboxes（Preview）の launch_stage / sandbox_launcher
+# 3つの Cloud Run サービス（本番は同一イメージを役割別 Cloud Run サービスに
+# 分ける）。sandbox だけ Cloud Run sandboxes（Preview）の launch_stage / sandbox_launcher
 # を使うため、provider を google-beta に揃えている（for_each の1リソース内では
 # provider を条件分岐できないため。google-beta は GA リソースの上位互換）。
 locals {
   # timeout / concurrency も役割ごとに決める。
   # パイプライン全体15分 < Cloud Run timeout 20分 < Cloud Tasks dispatch deadline 25分
-  # （design の「時間と冪等性」）なので web / worker は 1200s。
+  # なので web / worker は 1200s。
   cloud_run_services = {
     # web は人が画面で待つので 1 インスタンスを常に待機させる（起動待ちが 12〜21 秒あった）。
     # 待機中は idle 料金（1 vCPU・1 GiB で月 $13 程度）。worker / sandbox は非同期なので 0 のまま。
@@ -122,7 +122,7 @@ resource "google_cloud_run_v2_service" "services" {
   location = var.region
 
   # IAM (run.invoker) 側で web のみ公開・worker/sandbox は呼出し元 SA に限定する。
-  # ingress 自体は全サービス共通で ALL のままにする（design の構成表どおり）。
+  # ingress 自体は全サービス共通で ALL のままにする。
   ingress = "INGRESS_TRAFFIC_ALL"
 
   # sandbox サービスは Cloud Run sandboxes（Preview）を使うため BETA を指定する。
@@ -239,7 +239,7 @@ resource "google_cloud_run_v2_service_iam_member" "worker_invoker" {
 
 # worker: web SA からも呼出し可能にする（S54）。MCP の context_get はスナップショット取得に
 # GitHub App の秘密鍵が要るが、web はその鍵を持たない（LazyCodeHost）ため、web は OIDC で
-# worker の POST /internal/mcp/context に委譲する（design/2026-09-27-workspaces.md 8.1 節）。
+# worker の POST /internal/mcp/context に委譲する。
 resource "google_cloud_run_v2_service_iam_member" "worker_invoker_web" {
   project  = var.project_id
   location = var.region
@@ -326,7 +326,7 @@ resource "google_cloud_run_v2_job" "migrate" {
 # Cloud Run Job として実行できるようにする。
 # `gcloud run jobs execute speclino-admin --args=workspace,create,... --wait` のように、
 # 実行のたびに `--args` でサブコマンドを渡す（`--args` は実行ごとに置き換えられる。公式ドキュメント
-# で確認済み。design/2026-09-27-workspaces.md 参照）。イメージ・SA・DB 接続は migrate Job と揃える。
+# で確認済み）。イメージ・SA・DB 接続は migrate Job と揃える。
 # worker SA を流用するのは、DB（cloudsql.client / database-url の secretAccessor）と
 # GitHub App 秘密鍵（github-app-private-key の secretAccessor）の参照権を既に持っているため
 # （secrets.tf）。新たな IAM 付与は不要。

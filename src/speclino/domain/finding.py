@@ -1,4 +1,4 @@
-"""Finding（PoC 13.3）と評価結果。severity と verdict は別にする。"""
+"""Finding と評価結果。severity と verdict は別にする。"""
 
 from __future__ import annotations
 
@@ -86,7 +86,7 @@ class VerdictCounts(IRModel):
 
 
 class CoverageCounts(IRModel):
-    """一致率だけを出さないための併記項目（PoC 17.3）。"""
+    """一致率だけを出さないための併記項目。"""
 
     requirements_total: int = 0
     requirements_approved: int = 0

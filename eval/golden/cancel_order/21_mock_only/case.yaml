@@ -6,7 +6,7 @@ description: >-
   展開されるが、副作用もイベントも発行しない。inventory_restore_command の呼出し回数は 0 の
   まま経路は exact_in_model で確定する（未解決要因が無いため UNKNOWN にはならない）ため、
   R-CANCEL-04 は確定的に missing_effect の VIOLATED になる。モック相手への呼び出しは永続化の
-  証拠にならない（design 4.2 / 11.2）ことを、実装の見た目は「呼んでいる」ケースで示す。
+  証拠にならないことを、実装の見た目は「呼んでいる」ケースで示す。
 expected:
   R-CANCEL-01:
     verdict: VERIFIED_IN_SCOPE

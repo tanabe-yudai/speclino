@@ -1,4 +1,4 @@
-"""LLM 支援の Finding と人の確定のゲートでの扱い（S70、設計 6.2・8 章）。"""
+"""LLM 支援の Finding と人の確定のゲートでの扱い（S70）。"""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""compile（図をまたぐ解決・ハッシュ・旧形式・全か無か）。設計 4.2–4.3。"""
+"""compile（図をまたぐ解決・ハッシュ・旧形式・全か無か）。"""
 
 from __future__ import annotations
 

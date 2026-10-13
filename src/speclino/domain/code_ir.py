@@ -1,4 +1,4 @@
-"""Code IR（PoC 6.3 / 6.7）。解析した実装の振る舞いを経路ごとに保持する。"""
+"""Code IR。解析した実装の振る舞いを経路ごとに保持する。"""
 
 from __future__ import annotations
 

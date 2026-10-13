@@ -1,4 +1,4 @@
-/** ランディングページ（S58、design 7 章）の文言と見本データ。画面の部品には文言を埋め込まない。 */
+/** ランディングページ（S58）の文言と見本データ。画面の部品には文言を埋め込まない。 */
 
 import type { LandingStep, Principle, SampleCheck } from '@/types/landing'
 import type { NextActionKind } from '@/types/project'
@@ -88,4 +88,8 @@ export const PRINCIPLES: Principle[] = [
 
 export const INVITE_ONLY = 'SpecLino は現在、招待制で提供しています。'
 
-export const NAV = { start: 'はじめ方', principles: '原則', login: 'ログイン', startHeading: 'はじめ方', principlesHeading: '原則' }
+export const REPO_URL = 'https://github.com/tanabe-yudai/spec-lino'
+
+export const OPEN_SOURCE = 'ソースコードは GitHub で公開しています（AGPL-3.0）。'
+
+export const NAV = { start: 'はじめ方', principles: '原則', login: 'ログイン', github: 'GitHub', startHeading: 'はじめ方', principlesHeading: '原則' }

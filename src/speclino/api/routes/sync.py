@@ -1,4 +1,4 @@
-"""知識の配信 API（S68、design/2026-10-05-team-knowledge-registry.md 7.1）。判断は services/。
+"""知識の配信 API（S68）。判断は services/。
 
 - `/api/workspaces/{slug}/sync-tokens`: sync トークンの発行・失効（owner / approver）と一覧
   （メンバー）。メンバーでなければ 404、role が足りなければ 403

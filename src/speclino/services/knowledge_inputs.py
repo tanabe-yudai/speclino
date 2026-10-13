@@ -1,9 +1,9 @@
-"""bundle → 検査器への入力（S65、design/2026-10-05-team-knowledge-registry.md 5 章・8 章）。
+"""bundle → 検査器への入力（S65）。
 
 - run は開始時に bundle を 1 つ固定する。worker は `make_knowledge_resolver` で
   `ensure_bundle` → `resolve_for_project` を 1 回だけ行い、その `ResolvedKnowledge` だけを使う
 - 仕様は承認時にサーバが作った `content.compiled` をそのまま使う（ここで変換し直さない）
-- 図の操作とコードの対応は D9: 名前の一致を既定にし、`.speclino/bindings.yaml` で上書きする
+- 図の操作とコードの対応は名前の一致を既定にし、`.speclino/bindings.yaml` で上書きする
 
 対応の規則（`OperationResolver`）:
 
@@ -60,7 +60,7 @@ def _tail_matches(symbol: str, name: str) -> bool:
 class OperationResolver:
     """図の名前（`<Class>.<method>`）を bindings の操作 ID・behavior ID に写す。
 
-    implicit は名前の一致で見つけたコードの関数（図の名前 → 完全修飾名。D9 の既定）。bindings に
+    implicit は名前の一致で見つけたコードの関数（図の名前 → 完全修飾名。既定）。bindings に
     対応が無い名前だけに使い、操作 ID・behavior ID は図の名前そのものにする。解析に渡す対応は
     `analysis_bindings` で bindings に足して作る。
     """

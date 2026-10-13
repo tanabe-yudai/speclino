@@ -1,7 +1,7 @@
 id: 04_owner_rejected
 title: 所有者を拒否し管理者だけ許す
 description: 認可判定を「管理者 OR 所有者」から「管理者のみ」に変える。所有者（非管理者）の PENDING 注文がすべて 403（p1_forbidden）へ落ちるため、成功系の要求（R-CANCEL-02〜06）が
-  p1_forbidden 経路を巻き込んで軒並み違反になる。R-CANCEL-06（成功時 204）が PoC 17.1 の見出し行 constraint_mismatch。R-CANCEL-01（無権限者の
+  p1_forbidden 経路を巻き込んで軒並み違反になる。R-CANCEL-06（成功時 204）が見出しの constraint_mismatch。R-CANCEL-01（無権限者の
   403）と R-CANCEL-07a/b/c（拒否経路での禁止事項）は影響を受けない。
 expected:
   R-CANCEL-01:

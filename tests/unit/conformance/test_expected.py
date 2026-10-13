@@ -1,4 +1,4 @@
-"""期待する Finding の列挙と欠落の補完（設計 5.2）。"""
+"""期待する Finding の列挙と欠落の補完。"""
 
 from __future__ import annotations
 

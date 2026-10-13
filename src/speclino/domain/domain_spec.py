@@ -1,4 +1,4 @@
-"""ドメイン定義 `.speclino/domain.yaml`（PoC 5.1 の domain）。
+"""ドメイン定義 `.speclino/domain.yaml`。
 
 状態の列挙値、各変数の型、入口の仮定、観測境界を宣言する。型は boolean / integer /
 列挙型 / opaque ID（同一性だけ比較）の 4 種。

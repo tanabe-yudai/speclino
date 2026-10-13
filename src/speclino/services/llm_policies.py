@@ -1,4 +1,4 @@
-"""LLM 支援の規約の評価（S70、設計 6.2–6.3）。
+"""LLM 支援の規約の評価（S70）。
 
 判定はしない: LLM の答えは常に REVIEW の Finding になり、区分（issue / no_issue / split）は
 `assessment_outcome` に入れる。確定は人（`services/attestations.py`）。
@@ -182,7 +182,7 @@ def assessment_key(
 
 
 def fingerprint(rule_id: str, symbol: str, unit_hash: str, item_id: str) -> str:
-    """指紋（設計 6.3 の 2）。PR コメントに書けるよう空白を含まない形にする。"""
+    """指紋。PR コメントに書けるよう空白を含まない形にする。"""
     material = json.dumps([rule_id, symbol, unit_hash, item_id], ensure_ascii=False)
     return f"{rule_id}:{item_id}:{hashlib.sha256(material.encode()).hexdigest()[:24]}"
 

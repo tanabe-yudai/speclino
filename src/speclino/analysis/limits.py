@@ -1,4 +1,4 @@
-"""解析上限（PoC 9.3）。既定は控えめ、エージェントの analyze_focus で最大値まで引き上げる。"""
+"""解析上限。既定は控えめ、エージェントの analyze_focus で最大値まで引き上げる。"""
 
 from __future__ import annotations
 

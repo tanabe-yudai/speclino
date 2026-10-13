@@ -1,6 +1,6 @@
 """注文キャンセルサービス（Golden 変異版: 到達不能分岐にだけ必須呼び出しがある）。
 
-specs/orders-cancel.md の R-CANCEL-01〜07 に対応する。PoC 3.2 が定める対応構文
+specs/orders-cancel.md の R-CANCEL-01〜07 に対応する。解析器が対応する構文
 （if/elif/else、早期 raise、単純な属性参照・代入、and/or/not、直接呼び出し）だけで書き、
 ループ・try・デコレーター・内包表記・f文字列・getattr は使わない。
 

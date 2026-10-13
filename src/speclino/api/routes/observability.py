@@ -1,4 +1,4 @@
-"""可観測性の API（S71、design/2026-10-05-team-knowledge-registry.md 9 章）。集計は services/。
+"""可観測性の API（S71）。集計は services/。
 
 メンバー以外・存在しないワークスペースは 404（存在を漏らさない）。
 """

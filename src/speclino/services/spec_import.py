@@ -1,4 +1,4 @@
-"""旧形式の仕様の取り込み（S65、design/2026-10-05-team-knowledge-registry.md 3.3）。
+"""旧形式の仕様の取り込み（S65）。
 
 リポジトリの `specs/ir/*.spec-ir.json` を、その要求 ID を含む `specs/*.md` ごとにまとめ、
 spec の下書き（markdown・domain・legacy_ir）として登録する。`.speclino/domain.yaml` は spec の内容の

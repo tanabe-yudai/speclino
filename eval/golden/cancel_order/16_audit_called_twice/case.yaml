@@ -1,9 +1,8 @@
 id: 16_audit_called_twice
 title: "未記載の追加処理（代替: 監査記録を 2 回呼ぶ）"
 description: >-
-  PoC 17.1 の原文は「未記載の通知を追加する → REVIEW。禁止と明記されていれば
-  VIOLATED」。だが conformance_engine の undocumented_behavior 検出（`_undocumented_behavior`,
-  PoC 10.5）は `code.paths[*].events[*]` のうち kind="call" のイベント（= bindings.operations
+  期待される挙動は「未記載の通知を追加する → REVIEW。禁止と明記されていれば
+  VIOLATED」。だが conformance_engine の undocumented_behavior 検出（`_undocumented_behavior`）は `code.paths[*].events[*]` のうち kind="call" のイベント（= bindings.operations
   に登録され `_emit_operation` で発行されたイベント）だけを対象にする。このケースで触ってよいのは
   `eval/golden/cancel_order/` 配下の新規ケースディレクトリだけで、bindings.yaml（在庫復元・監査
   記録の 2 操作のみを登録）と、source モードの一時リポジトリへコピーするファイル一覧を決めている

@@ -6,7 +6,7 @@ import type { RunEvent } from './events'
 import type { RerunResponse, ReviewRunDetail } from './run'
 import type { AgentSupplement } from './supplement'
 
-/** 判定の 4 値の色（design 3.1。意味と色の対応は固定）と、免除中（exempt）の色。 */
+/** 判定の 4 値の色（意味と色の対応は固定）と、免除中（exempt）の色。 */
 export type VerdictTone = 'ok' | 'bad' | 'unk' | 'rev' | 'exempt'
 
 export interface LoadingStateProps {

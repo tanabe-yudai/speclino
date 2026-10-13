@@ -1,6 +1,5 @@
 """SQLAlchemy 2.0 の ORM モデル定義（S14）。
 
-テーブル定義は `design/2026-09-22-hackathon-plan.md` の「データモデル（MVP）」節に従う。
 主キーは UUID（Python 側で `uuid.uuid4` を割り当てる。DB 拡張への依存を避けるため）。
 JSON カラムは PostgreSQL の JSONB。時刻カラムは timezone-aware（timestamptz）。
 
@@ -335,7 +334,7 @@ class WebhookDelivery(Base):
 
 
 class TeamRecord(Base):
-    """`teams`: チーム単位の統治設定（統治の穴修正、design/2026-09-26-team-policies-and-dx.md）。
+    """`teams`: チーム単位の統治設定（統治の穴修正）。
 
     承認者の許可集合はここに持つ。`policy_revisions`（改訂）には持たせない。改訂の中に
     承認者リストを入れると、改訂を作る人（author）が自分を承認者に足せてしまうため、
@@ -400,7 +399,7 @@ class UserProfileRecord(Base):
 
 
 class WorkspaceInvitation(Base):
-    """`workspace_invitations`: メール宛の招待（S56、design/2026-09-27-workspaces.md）。
+    """`workspace_invitations`: メール宛の招待（S56）。
 
     リンクの平文トークンは発行時の応答で 1 回だけ返し、保存は SHA-256 だけ。期限つき・1 回限り
     （`accepted_at`）・owner が取り消せる（`revoked_at`）。監査のため行は消さない。
@@ -474,7 +473,7 @@ class RepoLinkAttempt(Base):
 
 
 class PolicyRevisionRecord(Base):
-    """`policy_revisions`: チーム規約の 1 改訂（S42、design/2026-09-26-team-policies-and-dx.md）。
+    """`policy_revisions`: チーム規約の 1 改訂（S42）。
 
     `policy_rules` という別テーブルには正規化しない。ルールは常に改訂単位でまとめて
     読む・比較する（`active_revision` は改訂全体を返し、run-manifest も改訂番号ごと

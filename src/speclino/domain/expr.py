@@ -1,4 +1,4 @@
-"""型付き式木 Expr（PoC 6.5）。文字列の Python コードは持たず、eval しない。"""
+"""型付き式木 Expr。文字列の Python コードは持たず、eval しない。"""
 
 from __future__ import annotations
 

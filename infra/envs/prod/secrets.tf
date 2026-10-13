@@ -16,7 +16,7 @@
 # secret 自体が削除対象になり戻せなくなるため）。値をもう投入する必要は無い。
 #
 # アクセス権は secret 単位で付与する（web: webhook-secret, session-secret, （legacy）mcp-token /
-# worker: github-app-private-key）。design のアーキテクチャ表に従う。
+# worker: github-app-private-key）。
 
 locals {
   secret_accessors = {
@@ -25,7 +25,7 @@ locals {
     # S54: 静的トークンでの MCP 認証は廃止し、ワークスペース単位のトークン（DB の
     # mcp_tokens、UI から owner が発行）に切り替えた。web はもうこの secret を env に
     # マウントしない（下の secret_env.web 参照）。ただし secret 自体とアクセス権は
-    # ロールバック期間が過ぎるまで残す（切り替え直後に戻せるように。design の切り替え順序）。
+    # ロールバック期間が過ぎるまで残す（切り替え直後に戻せるように）。
     "mcp-token"      = ["web"]
     "session-secret" = ["web"]
     # S55: GitHub App のユーザー認可（リポジトリ登録）の client secret。web だけが使う

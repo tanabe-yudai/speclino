@@ -1,5 +1,7 @@
 {
   "name": "speclino",
   "description": "SpecLino: チームが承認した知識（規約・スキル・指示書・仕様）を取り込み、仕様とコードの照合を検査する MCP 接続と、Skill（仕様の書き方 speclino-spec-authoring・知識の取り込み speclino-knowledge-sync）。",
-  "version": "0.2.1"
+  "version": "0.2.1",
+  "license": "AGPL-3.0-or-later",
+  "repository": "https://github.com/tanabe-yudai/spec-lino"
 }

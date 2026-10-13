@@ -1,4 +1,4 @@
-"""`api/routes/policies.py` の統合試験（S43、design/2026-09-30-ui-redesign.md 6・8 章）。
+"""`api/routes/policies.py` の統合試験（S43）。
 
 fixture は test_projects_api.py と同じ作り（メンバーは owner1 / member1）。
 

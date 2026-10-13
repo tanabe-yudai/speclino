@@ -1,6 +1,6 @@
 id: 11_call_after_return
 title: 早期 return 後に必須呼び出しがある
-description: inventory.restore の呼出しを return の後（到達しないコード）に移す。PoC 9.2「早期 return より後のコードを実行済みにしない」により、成功経路の
+description: inventory.restore の呼出しを return の後（到達しないコード）に移す。「早期 return より後のコードを実行済みにしない」により、成功経路の
   events には restore が含まれない。Code IR の形は 06_restore_removed と同一になる（analyzer にとって「削除された」のと「return 後に置かれて到達しない」のは区別できない実行結果のため）。R-CANCEL-04
   のみ missing_effect。
 expected:

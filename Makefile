@@ -74,9 +74,9 @@ schemas:
 sandbox-image:
 	docker build -t speclino-sandbox-runner:latest docker/sandbox
 
-# アーキテクチャ図（design/*.mmd が正本。README の mermaid ブロックと同じ内容）
+# アーキテクチャ図（docs/diagrams/*.mmd が正本。docs/architecture.md の mermaid ブロックと同じ内容）
 diagrams:
-	npx --yes @mermaid-js/mermaid-cli@11 -i design/architecture.mmd -o design/architecture.png -b white -s 2
-	npx --yes @mermaid-js/mermaid-cli@11 -i design/architecture.mmd -o design/architecture.svg -b white
-	npx --yes @mermaid-js/mermaid-cli@11 -i design/pipeline.mmd -o design/pipeline.png -b white -s 2
-	npx --yes @mermaid-js/mermaid-cli@11 -i design/pipeline.mmd -o design/pipeline.svg -b white
+	npx --yes @mermaid-js/mermaid-cli@11 -i docs/diagrams/architecture.mmd -o docs/diagrams/architecture.png -b white -s 2
+	npx --yes @mermaid-js/mermaid-cli@11 -i docs/diagrams/architecture.mmd -o docs/diagrams/architecture.svg -b white
+	npx --yes @mermaid-js/mermaid-cli@11 -i docs/diagrams/pipeline.mmd -o docs/diagrams/pipeline.png -b white -s 2
+	npx --yes @mermaid-js/mermaid-cli@11 -i docs/diagrams/pipeline.mmd -o docs/diagrams/pipeline.svg -b white

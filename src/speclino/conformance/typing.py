@@ -1,6 +1,6 @@
 """Expr の型推論と型検査。spec_validator と conformance_engine が共有する。
 
-型は boolean / integer / 列挙型 / opaque ID の 4 種（PoC 6.1）。outcome 名前空間には
+型は boolean / integer / 列挙型 / opaque ID の 4 種。outcome 名前空間には
 モデル化した終了結果の組込み変数だけがある。
 """
 

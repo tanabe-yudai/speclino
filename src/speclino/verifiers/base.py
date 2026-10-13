@@ -1,7 +1,7 @@
 """規約検証器の共通インターフェース（S11）。
 
 conformance_engine とは別系統。`applies_to` に一致するスナップショットを読み取るだけで、
-何も実行しない（`design/product-spec-summary.md` 規約パッケージ節: Makefile・CI 定義は
+何も実行しない（Makefile・CI 定義は
 読み取りで検査し、未信頼の Makefile をホスト上で評価しない）。
 """
 

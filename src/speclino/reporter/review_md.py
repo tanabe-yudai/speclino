@@ -1,4 +1,4 @@
-"""reporter.review_md（PoC 13 章「レポートの仕様」/ 17.3「一致率だけを出さない」）。
+"""reporter.review_md。
 
 Findings と GateResult を人間向け Markdown（`review.md`）に圧縮する。GitHub Checks の
 summary/text にも使うため見出しは `##` 以下、表は GFM で書く。
@@ -235,7 +235,7 @@ def _render_behavior_changes(behaviors: list[BehaviorDelta]) -> list[str]:
 
 
 def render_semantic_diff(diff: SemanticDiff) -> str:
-    """PoC 12.2 の結果分類（新規／既存／解消／判定不能化、要求と実装の差分）。"""
+    """結果分類（新規／既存／解消／判定不能化、要求と実装の差分）。"""
     if not diff.base_available:
         reason = f"（{diff.base_error}）" if diff.base_error else ""
         return f"base 側の判定が無いため差分を出せない{reason}。head の判定を「追加」として扱う。"
@@ -269,13 +269,13 @@ def render_review(
     behavior_id: str,
     semantic_diff: SemanticDiff | None = None,
 ) -> str:
-    """PoC 13.1（一覧）+ 17.3（対応状況の併記）+ 12.2（意味差分）+ 13.2（詳細）の review.md。"""
+    """一覧・対応状況の併記・意味差分・詳細からなる review.md。"""
     parts = [
         "## 一覧",
         "",
         _render_overview(manifest, findings, gate, behavior_id),
         "",
-        "## 対応状況（PoC 17.3）",
+        "## 対応状況",
         "",
         _render_coverage(findings),
         "",

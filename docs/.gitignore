@@ -1,0 +1,5 @@
+# 公開しないローカルだけのファイル
+secret.md
+*.pdf
+github_appid.png
+SpecLino_暫定仕様書_*.md

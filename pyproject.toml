@@ -1,8 +1,10 @@
 [project]
 name = "speclino"
 version = "0.1.0"
-description = "仕様とコードの意味差分をエージェントと決定的な検査器で検証する"
+description = "コーディングエージェントに渡すチームの知識を承認・配信し、守られているかを決定的に検査する"
 readme = "README.md"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE.md"]
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "fastapi>=0.133",

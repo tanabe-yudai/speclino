@@ -1,4 +1,4 @@
-"""意味差分（PoC 12 章）。base / head それぞれの適合結果と Code IR を突き合わせた分類。"""
+"""意味差分。base / head それぞれの適合結果と Code IR を突き合わせた分類。"""
 
 from __future__ import annotations
 

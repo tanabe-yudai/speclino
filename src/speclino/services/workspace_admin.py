@@ -1,4 +1,4 @@
-"""ワークスペースの管理操作（S53、design/2026-09-27-workspaces.md）。
+"""ワークスペースの管理操作（S53）。
 
 管理 CLI（`speclino workspace ...`）と本番の Cloud Run Job（`speclino-admin`）から呼ばれる。
 `services/policy_governance.py` と同じ流儀で、DB 操作は repositories に委ね、ここでは
@@ -38,7 +38,7 @@ from speclino.services.project_settings import resolve_approver_ids
 ADMIN_ACTOR = "admin-cli"
 
 # 改名・削除後に同名で作られた別リポジトリとの衝突を退避した行の目印
-# （webhook 側の同一性解決と同じ命名規則。design/2026-09-27-workspaces.md 5章）。
+# （webhook 側の同一性解決と同じ命名規則）。
 _STALE_MARK = "#stale-"
 
 
@@ -117,7 +117,7 @@ async def add_project(session: AsyncSession, *, slug: str, repo_full_name: str) 
             await session.execute(select(Project.team).where(Project.id == project.id))
         ).scalar_one()
         if current_team == slug:
-            # 同じワークスペースへの再登録は冪等に成功扱い（design のとおり安全側）。
+            # 同じワークスペースへの再登録は冪等に成功扱い（安全側）。
             return
         raise ValueError(f"{repo_full_name} は既に別のワークスペース {current_team} に登録済み")
 
@@ -200,9 +200,9 @@ async def backfill_repo_ids(session: AsyncSession, code_host: CodeHost) -> list[
     """`github_repo_id` が NULL の project 全件に、コードホストから引いた ID を埋める。
 
     埋められない（コードホストが解決できない、または同じ ID が既に他の行に使われている）
-    行は、埋めずに `team` を NULL にして隔離する（design/2026-09-27-workspaces.md の
-    codex レビュー #3: 名前一致で ID を自動で埋めると、改名・削除後に同名で作られた別
-    リポジトリが旧 project の team・承認者・過去 run を引き継いでしまう）。
+    行は、埋めずに `team` を NULL にして隔離する（名前一致で ID を自動で埋めると、
+    改名・削除後に同名で作られた別リポジトリが旧 project の team・承認者・過去 run を
+    引き継いでしまう）。
 
     `#stale-` を名前に含む行（webhook の同一性解決が退避した旧行）は対象外。
     """

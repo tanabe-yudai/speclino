@@ -5,8 +5,7 @@
 entrypoint の引数名（user / order）は bindings.yaml の variables が実装上の参照
 （"user.is_admin" 等）として直接埋め込んでいるため変更できない。そこで、02_wrong_state 等の
 既存ケースには無い「認可判定・状態判定の結果を一度ローカル変数に受ける」形へ書き換え、その
-ローカル変数名（_perm / _pending）を変える。式の構造は同一のため、PoC 17.1
-「ローカル変数名だけを変える → 誤った意味差分を出さない」を確認できる。
+ローカル変数名（_perm / _pending）を変える。式の構造は同一のため、「ローカル変数名だけを変える → 誤った意味差分を出さない」を確認できる。
 """
 
 from __future__ import annotations

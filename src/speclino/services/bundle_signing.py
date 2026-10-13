@@ -1,4 +1,4 @@
-"""知識の bundle・lock の署名（S62、design/2026-10-05-team-knowledge-registry.md 3.2・7.1）。
+"""知識の bundle・lock の署名（S62）。
 
 HMAC-SHA256。鍵は `SPECLINO_BUNDLE_SIGNING_KEY`（本番は Secret Manager）。未設定のとき、
 env=local（テスト・手元）は固定の開発鍵を使い、env=prod は `RuntimeError`（`build_state` が

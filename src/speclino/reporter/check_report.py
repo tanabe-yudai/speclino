@@ -1,4 +1,4 @@
-"""reporter.check_report（PoC 13 章 / hackathon-plan「判定モデル」の Check summary）。
+"""reporter.check_report（Check summary）。
 
 GitHub Checks に出す title/summary/text と、code_refs に位置情報がある Finding の
 annotation を作る。
@@ -68,7 +68,7 @@ def render_check(
 
     判定は仕様の 4 値の名前で分けて出す（未検証と要確認を合算しない）。
 
-    意味差分があれば summary に「新規違反 / 解消 / 判定不能化」の件数を添える（PoC 12.2）。
+    意味差分があれば summary に「新規違反 / 解消 / 判定不能化」の件数を添える。
     """
     counts = findings.counts
     gate_label = GATE_STATUS_LABELS[gate.status]

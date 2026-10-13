@@ -11,7 +11,7 @@ import { WorkspacePill } from './WorkspacePill'
 import { BrandMark } from './BrandMark'
 
 /**
- * ログイン後の上部に固定するバー（design 3.3）。PC 幅ではワークスペースの第 1 階層
+ * ログイン後の上部に固定するバー。PC 幅ではワークスペースの第 1 階層
  * （ホーム・仕様・スキル・指示書・規約・検査・観測・設定）を並べ、スマホ幅ではワークスペース名とアカウントだけ（画面の行き来は下のタブ）。
  */
 export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {

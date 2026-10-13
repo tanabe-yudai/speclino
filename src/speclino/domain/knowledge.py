@@ -1,4 +1,4 @@
-"""チームの知識レジストリの型（S62–S68、design/2026-10-05-team-knowledge-registry.md 3 章）。"""
+"""チームの知識レジストリの型（S62–S68）。"""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""`CompiledSpec` → 正規形の Markdown（設計 4.3 の往復、grammar.md 11 章）。
+"""`CompiledSpec` → 正規形の Markdown（往復は grammar.md 11 章）。
 
 `compile_spec` の出力だけを対象にする（オートマトンは 5.1 節の構成の形をしている前提）。
 正規形では見た目だけの要素（コメント・別名・送り手・応答・判断ノードのラベル・可視性・

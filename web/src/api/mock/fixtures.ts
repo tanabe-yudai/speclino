@@ -1,5 +1,5 @@
 /**
- * `VITE_MOCK=1` のときに使う fixture。design/api-sample.json（実際の API 応答サンプル）の
+ * `VITE_MOCK=1` のときに使う fixture。実際の API 応答サンプルの
  * run / Finding（VIOLATED・VERIFIED_IN_SCOPE）/ events を核に、画面確認のため
  * REVIEW・UNKNOWN・他ゲート状態・実行中の run を補って構成している（バックエンド未実装）。
  */
@@ -369,7 +369,7 @@ export const MOCK_REVIEW_MARKDOWN: Record<string, string> = {
 - 確認範囲: 4 経路（呼出し深さ 2、経路上限 64、ソルバー 500ms、解析器 0.1.0）
 - 仮定: stock.release は契約未登録のため語彙対応が未確認
 
-## 対応状況（PoC 17.3）
+## 対応状況
 
 | 指標 | 件数 |
 | --- | --- |

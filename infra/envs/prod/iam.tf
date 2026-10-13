@@ -1,5 +1,5 @@
-# サービスアカウントと IAM。ロール構成は design/2026-09-22-hackathon-plan.md の
-# 「アーキテクチャ」節にある3サービスの IAM 構成表に従う。
+# サービスアカウントと IAM。ロール構成は web / worker / sandbox の3サービスごとに
+# 下表のとおり。
 #
 #   web:      cloudsql.client / aiplatform.user（S59: A2A の議論役）/ cloudtasks.enqueuer / tasks SA への serviceAccountUser /
 #             worker サービスへの run.invoker（run.tf、S54: MCP の context_get を委譲） /

@@ -1,5 +1,4 @@
-"""API-ERR-001: API のエラー応答形式を検証する（`design/product-spec-summary.md` 規約パッケージ節、
-AC-003 / AC-005 相当、S36）。
+"""API-ERR-001: API のエラー応答形式を検証する（AC-003 / AC-005 相当、S36）。
 
 対象アプリは import しない。openapi.json は JSON として、`api_glob` に一致する Python ソースは
 AST として構文的に読むだけで判定する。

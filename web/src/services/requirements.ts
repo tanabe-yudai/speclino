@@ -1,4 +1,4 @@
-/** 要求の一覧の絞り込みとまとめ方（design 5.1）。 */
+/** 要求の一覧の絞り込みとまとめ方。 */
 
 import type { RequirementFilter, RequirementGroup, RequirementView } from '@/types/project'
 

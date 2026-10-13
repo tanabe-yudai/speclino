@@ -1,4 +1,4 @@
-"""`llm.checklist` の登録（S70、設計 6.2）。
+"""`llm.checklist` の登録（S70）。
 
 この検査器は LLM を呼ばない（`verifiers/` は判定の層で、LLM は `services/llm_policies.py`）。
 worker が run の前に評価した Finding（ルール ID → Finding の列）を受け取り、そのまま返すだけ。

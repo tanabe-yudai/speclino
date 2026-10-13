@@ -1,7 +1,6 @@
 id: 01_correct
 title: 正しい実装
-description: examples/orders/app/service.py と同一の正しい実装。対応範囲の要求は全て VERIFIED_IN_SCOPE になることを確認する（PoC 17.1
-  一行目）。
+description: examples/orders/app/service.py と同一の正しい実装。対応範囲の要求は全て VERIFIED_IN_SCOPE になることを確認する。
 expected:
   R-CANCEL-01:
     verdict: VERIFIED_IN_SCOPE

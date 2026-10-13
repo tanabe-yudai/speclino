@@ -4,7 +4,7 @@ description: >-
   認可されていない利用者を 403 で拒否する直前（`if not (user.is_admin or ...):` の分岐内）で
   order.status を CANCELLED へ書き込んでしまう不具合。この write を認可判定より前（無条件）に
   置くと、後続の `order.status != OrderStatus.PENDING` 判定が更新後の定数値で評価されて
-  しまい（PoC 9.2）成功経路自体が到達不能になり、無関係な要求（R-CANCEL-02〜06）まで巻き込む
+  しまい、成功経路自体が到達不能になり、無関係な要求（R-CANCEL-02〜06）まで巻き込む
   ため、意図した不具合（拒否経路での禁止された書込み）の再現として不適切と判断した。そこで write
   は「拒否される分岐の内部」に限定する。この結果 p1_forbidden 経路だけで order.status への
   書込みが 1 回発生し、R-CANCEL-07a（拒否経路での書込み 0 を要求）が forbidden_effect で

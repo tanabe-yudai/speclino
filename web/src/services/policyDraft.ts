@@ -1,4 +1,4 @@
-/** チーム規約の下書きの編集（S43、design 6 章）。画面の部品から使う純粋関数。 */
+/** チーム規約の下書きの編集（S43）。画面の部品から使う純粋関数。 */
 
 import type { PoliciesView, PolicyPackage, PolicyRule, RuleChange } from '@/types/policy'
 

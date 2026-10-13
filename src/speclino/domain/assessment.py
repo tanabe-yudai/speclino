@@ -1,4 +1,4 @@
-"""LLM 支援の規約の評価記録と人の確定（S70、設計 6.2–6.3）。"""
+"""LLM 支援の規約の評価記録と人の確定（S70）。"""
 
 from __future__ import annotations
 

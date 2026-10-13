@@ -1,4 +1,4 @@
-"""A2A のスキル `spec_suggest`（S67、設計 7.2）: 仕様の下書きの書き換えの提案を返す。
+"""A2A のスキル `spec_suggest`（S67）: 仕様の下書きの書き換えの提案を返す。
 
 返すのは本文の置換の提案（`suggestions.json`）と要約だけ。IR の候補も判定も返さない。
 本文から IR を作るのは決定的な parser（`compile_spec`）で、提案は当てた本文をその parser で

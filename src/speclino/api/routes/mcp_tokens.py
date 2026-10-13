@@ -1,4 +1,4 @@
-"""ワークスペース単位の MCP トークン API（S54、design/2026-09-27-workspaces.md 4・8.1 節）。
+"""ワークスペース単位の MCP トークン API（S54）。
 
 発行・一覧・失効はワークスペースの owner だけ（判断は `services/mcp_tokens.py` に集約）。
 ここは HTTP の形にするだけで、`WorkspaceNotFound`（owner ではない・ワークスペースが無い・

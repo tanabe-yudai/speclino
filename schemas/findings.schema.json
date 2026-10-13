@@ -58,7 +58,7 @@
     },
     "CoverageCounts": {
       "additionalProperties": false,
-      "description": "一致率だけを出さないための併記項目（PoC 17.3）。",
+      "description": "一致率だけを出さないための併記項目。",
       "properties": {
         "requirements_total": {
           "default": 0,

@@ -1,4 +1,4 @@
-"""finite_check の単体試験（PoC 3.1: 有限ドメインでの検算）。"""
+"""finite_check の単体試験。"""
 
 from __future__ import annotations
 

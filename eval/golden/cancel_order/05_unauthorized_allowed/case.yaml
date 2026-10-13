@@ -1,8 +1,7 @@
 id: 05_unauthorized_allowed
 title: 無権限者のキャンセルを許す
 description: '認可判定 (if not (user.is_admin or user.id == order.owner_id): raise 403) を削除する。Code IR は認可を一切参照しない
-  2 経路（非 PENDING→409、PENDING→成功）になる。R-CANCEL-01（無権限者は403のはず）は p1_success 経路（204）との比較で最初に見つかり constraint_mismatch（PoC
-  17.1 の見出し）。加えて R-CANCEL-07a/b/c（拒否されるべき経路での書込み・呼出し禁止）も p1_success 経路で forbidden_effect になる — 無認可の利用者が実際に状態変更・副作用を起こしてしまうため、これも意味のある検出。経路の並び順（成功経路を先に置く）が
+  2 経路（非 PENDING→409、PENDING→成功）になる。R-CANCEL-01（無権限者は403のはず）は p1_success 経路（204）との比較で最初に見つかり constraint_mismatch（このケースの見出しの検出）。加えて R-CANCEL-07a/b/c（拒否されるべき経路での書込み・呼出し禁止）も p1_success 経路で forbidden_effect になる — 無認可の利用者が実際に状態変更・副作用を起こしてしまうため、これも意味のある検出。経路の並び順（成功経路を先に置く）が
   worst 集約の代表経路選択に影響するため、この順序を採用した。'
 expected:
   R-CANCEL-01:

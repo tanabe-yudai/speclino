@@ -1,5 +1,4 @@
-"""ERRMSG: エラーメッセージの書き方を検証する（S69、
-`design/2026-10-05-team-knowledge-registry.md` 6.1）。
+"""ERRMSG: エラーメッセージの書き方を検証する（S69）。
 
 対象は ``rule.applies_to.paths`` に一致する Python ソース。AST で読むだけで、import しない。
 ``call_names``（既定 ``api_error`` / ``HTTPException``）の呼び出しの、メッセージ引数を検査する。

@@ -1,6 +1,6 @@
 """project ごとの設定（`projects.settings`）とオンボーディングの段階の型（S47）。
 
-design/2026-09-26-team-policies-and-dx.md 4 章の「設定」「オンボーディング」。読み方・導出は
+「設定」と「オンボーディング」の型。読み方・導出は
 `services/project_settings.py`。
 """
 

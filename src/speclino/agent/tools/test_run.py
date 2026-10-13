@@ -1,7 +1,7 @@
 """test_run: 宣言済みテストを隔離環境で実行し、観測証拠として判定に反映する（エスカレーション③）。
 
 - 実行できるのは Rule.tests に宣言されたテスト ID だけ（任意のコマンドは受けない）
-- テスト・設定は base 由来、実装は head 由来（PoC 16 章 / codex 指摘 #3）
+- テスト・設定は base 由来、実装は head 由来
 - assertion 失敗 → VIOLATED（observed_counterexample）
 - 全て成功 → **判定は変えない**。test_observation=OBSERVED を別軸に記録するだけ
 - error / skipped / timeout / ID 不在は判定を変えない

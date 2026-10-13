@@ -22,7 +22,7 @@ S38 で「マーカーは付いているが Spec IR の ``tests`` は空」と�
 
 Spec IR は ``json.loads`` で読む（``speclino.spec.load_spec_ir`` は使わない。検査器は
 スナップショットからテキストを読むだけで、ファイルパスの実在を前提にしない）。テストは
-``ast.parse`` で読み、対象リポジトリのコードを import・実行しない（PoC 16 章）。
+``ast.parse`` で読み、対象リポジトリのコードを import・実行しない。
 
 Finding は2方向・宣言（rule, test_id）ごと・マーカー（path, name, requirement_id）ごとに
 1件。同じ入力からは同じ順序・同じ ``id`` になる（決定的）。

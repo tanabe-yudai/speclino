@@ -1,4 +1,4 @@
-"""semantic_diff（PoC 12 章）: base / head の適合結果と Code IR から意味差分を作る。
+"""semantic_diff: base / head の適合結果と Code IR から意味差分を作る。
 
 比較するのは「base 仕様 + base コード」と「head 仕様 + head コード」それぞれの判定結果であり、
 head コードを base 仕様に照合しない（正式な仕様変更を実装違反にしない）。実装の意味差分は

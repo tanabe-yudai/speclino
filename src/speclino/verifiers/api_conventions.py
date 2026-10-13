@@ -1,5 +1,4 @@
-"""API-CONV: API のパス・メソッド・response_model の規約を検証する（S69、
-`design/2026-10-05-team-knowledge-registry.md` 6.1）。
+"""API-CONV: API のパス・メソッド・response_model の規約を検証する（S69）。
 
 対象アプリは import しない。OpenAPI は JSON として、``api_glob`` の Python ソースは AST として
 構文的に読むだけで判定する。入力は ``openapi_path`` と ``api_glob`` の一方または両方。

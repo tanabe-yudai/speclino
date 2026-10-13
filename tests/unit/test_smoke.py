@@ -84,7 +84,7 @@ async def test_spa_deep_links_fall_back_to_index() -> None:
 
 
 def test_web_role_starts_without_github_credentials() -> None:
-    """秘密鍵は worker だけが持つ（design のサービス構成表）。web は遅延生成で起動できる。"""
+    """秘密鍵は worker だけが持つ。web は遅延生成で起動できる。"""
     from speclino.api.deps import LazyCodeHost, build_state
 
     state = build_state(
