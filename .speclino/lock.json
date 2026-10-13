@@ -1,8 +1,8 @@
 {
   "schema_version": "0.1",
   "workspace": "tanabe-yudai",
-  "github_repo_id": 1380076715,
-  "bundle_generation": 31,
+  "github_repo_id": 1417522006,
+  "bundle_generation": 39,
   "policy_revision": 2,
   "policy_hash": "sha256:a4eced43c42285e7bc020bef1548de6b03b05e27bb05b368993b9e5337fe778c",
   "members": [
@@ -24,74 +24,77 @@
       "artifact_id": "1c95f7fe-1576-4fcb-b3fb-005607e78045",
       "kind": "spec",
       "name": "spec-ai-001",
-      "revision": 3,
-      "content_hash": "sha256:83a92def58e296ddced1819e7f8eb3fe55458b045691d8562241859610c4ac63"
+      "revision": 4,
+      "content_hash": "sha256:175e08be61f63bba76bdc4f033d228f5ddcf42c5660b0f9b16d05c407a0c9ecc"
+    },
+    {
+      "artifact_id": "d6dd1f3e-5d9f-4988-a47b-b2bca0c07d1b",
+      "kind": "spec",
+      "name": "spec-conf-001",
+      "revision": 1,
+      "content_hash": "sha256:5f30ea9d43f617b95c4c57e7cc6cbcc3c6e3af30693eb94d78abb584d9536374"
     },
     {
       "artifact_id": "d762d66b-8fcc-48fa-ab2a-5cd1c8c9dc9d",
       "kind": "spec",
       "name": "spec-gate-002",
-      "revision": 3,
-      "content_hash": "sha256:fc608d8a51be7d9428ed5af126509f7f13065d1491e7b6e35b14f3ec0cae0cdc"
+      "revision": 4,
+      "content_hash": "sha256:85f269784d31f74d166d2c6c81a97d1566facb49915f98107431b82d14fcd475"
     },
     {
       "artifact_id": "d45cb628-82e6-42dc-a222-6bb5dece4b72",
       "kind": "spec",
       "name": "spec-know-001",
-      "revision": 2,
-      "content_hash": "sha256:babb1d7b042389326ea345a192f18280d9682d7fb265da0d75f3368dd8d65826"
+      "revision": 3,
+      "content_hash": "sha256:d4c3a6c0beaff4cc55f99d273fe3e1b42b2eb6d2818d32b4e87c417bcd12531b"
     },
     {
       "artifact_id": "3664e237-0194-4dc6-8c0c-d1ab84e03aaa",
       "kind": "spec",
       "name": "spec-obs-001",
-      "revision": 2,
-      "content_hash": "sha256:86db201397bbec8662cbe0bb6e06b608f1fb140e04b6215e4ed4181c98ca4992"
+      "revision": 3,
+      "content_hash": "sha256:e25b640f7730e216457d24785b129fed8c7ff5e766f14fd229fe7eb750a4b517"
     },
     {
       "artifact_id": "cc80041e-011a-4efd-b4c9-534c929ae616",
       "kind": "spec",
       "name": "spec-sync-001",
-      "revision": 2,
-      "content_hash": "sha256:9ccf6af2dc4514e856be48f891147796ff4d51e31a659841eba06a1d68cd3ec6"
+      "revision": 3,
+      "content_hash": "sha256:3ca3d5e33b037b75e2ad15f59b0721bfcf309a6bbbc6c3b17bf9abfa14ca9c7c"
     },
     {
       "artifact_id": "5eb6faf2-1b39-4130-9a6e-7628d12ea39b",
       "kind": "spec",
       "name": "spec-sys-001",
-      "revision": 3,
-      "content_hash": "sha256:1e338e31b71cc9a8eee439488b97909388b124055d287c14fd79315218213404"
+      "revision": 4,
+      "content_hash": "sha256:566d1a130a23d85cbc19cb9a71c02b56ee454a4c0e7173fcff8d377b0c5d4658"
     },
     {
       "artifact_id": "8d09d4cf-8c1d-45cf-9368-451f9a634c5a",
       "kind": "spec",
       "name": "spec-ws-001",
-      "revision": 2,
-      "content_hash": "sha256:e4159a778c2fb0ee1d5e094e2cfe5c012fafee25d9eb0c70d624d2a7aae75457"
+      "revision": 3,
+      "content_hash": "sha256:5bab7cbc9daf2606dcdf9ed59e0ff5666b376dd9bf0fe834ccacc84ad5eafe93"
     }
   ],
   "files": {
-    ".agents/skills/speclino-mcp-guide/SKILL.md": "sha256:be670b2be6e278d9c1892bdcdd9a03cc9de8b2e0368bd713c2a49ae40204cd81",
     ".claude/skills/speclino-mcp-guide/SKILL.md": "sha256:be670b2be6e278d9c1892bdcdd9a03cc9de8b2e0368bd713c2a49ae40204cd81",
-    ".speclino/specs/spec-ai-001.md": "sha256:f958733ca86a868e2a7db5cddbfb21d022857a59b6a6490215bc9e8738fbd18d",
-    ".speclino/specs/spec-gate-002.md": "sha256:71cd82fe66226e7f15da1154b56876ec03ac35edbc7ca58ea1e2a9bad0d9acc3",
-    ".speclino/specs/spec-know-001.md": "sha256:e441cfd167b974b8584bfad4e9c488f024788a655361971d3e98d0fdb066c8c7",
+    ".speclino/specs/spec-ai-001.md": "sha256:41001377d023c7df25a8a6336daccd33e364ab13d78df588e1fc1ed25c52cdf1",
+    ".speclino/specs/spec-conf-001.md": "sha256:52d6eb23e5b123222580d7ee9c0aeaeb51dfa5fe845128b276ec8ef97214e298",
+    ".speclino/specs/spec-gate-002.md": "sha256:95d4b6a460903cce622b7e64174044dd91618e41122ca33a488e5a5760f6bfcf",
+    ".speclino/specs/spec-know-001.md": "sha256:3ec93a23f09bbae566d25504531afdb0c597c9e2df125a09a78ead548b0b7f2b",
     ".speclino/specs/spec-obs-001.md": "sha256:73483dc7f1b9bc250dfac671d7074ed4c1a7450e97991ce1a753863ddb2918b9",
-    ".speclino/specs/spec-sync-001.md": "sha256:51534553861ec3cf08efd2d9facd3abab84df2a851e2bd5573b618a29602cdaf",
-    ".speclino/specs/spec-sys-001.md": "sha256:77e06d618b00208f0fa2152c78f27cc34527c4a87f9ee1fb6c1e4e1c7a324167",
-    ".speclino/specs/spec-ws-001.md": "sha256:1136a89f918f1feb21664df03792d512cc0dee72959056c1320ab8f534830a8b",
+    ".speclino/specs/spec-sync-001.md": "sha256:bc017c2800c15f05818590ec776b722d6d9fe6981508a7cfaa5c966d63610f35",
+    ".speclino/specs/spec-sys-001.md": "sha256:15765b595499191a12d0171a346b07a3e9569eb7058176f421200e3d5c5cfc18",
+    ".speclino/specs/spec-ws-001.md": "sha256:c4fc4f737356f131844a0d9261c5aeae35f8b430e3a24a615f9c8f045dd6fa72",
     "AGENTS.md": "sha256:1af7f8077666cafcade7aadda7ac2f99ed82d9e6d95b29b9de7afbf8b4a8841e"
   },
-  "absent": [
-    ".agents/skills/speclino-specification-guide/SKILL.md",
-    ".claude/skills/speclino-specification-guide/SKILL.md"
-  ],
+  "absent": [],
   "skill_roots": [
-    ".agents/skills",
     ".claude/skills"
   ],
-  "issued_at": "2026-10-13T06:48:45.406461Z",
-  "expires_at": "2026-11-12T06:48:45.406461Z",
+  "issued_at": "2026-10-13T17:15:19.972030Z",
+  "expires_at": "2026-11-12T17:15:19.972030Z",
   "key_id": "d2ca695a75fba22d",
-  "signature": "hmac-sha256:916567bf6e9f7253a50956fdf910ca6dc5cef43268ecac892339556fe38b27c7"
+  "signature": "hmac-sha256:e2bc357906759260e83a23b0048dc8a70a27140c5e7d380747177eac31e3b3ce"
 }

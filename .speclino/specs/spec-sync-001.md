@@ -38,6 +38,25 @@ lock の鮮度の判定を定める。全体の要求 R-SYS-05、R-SYS-06、R-SY
 | 世代が古く、このプロジェクトに当たるメンバーか規約が違う | REVIEW | members_changed / policy_changed |
 | それ以外（世代が古くてもこのプロジェクトに関係する変化が無ければ含む） | VERIFIED_IN_SCOPE | なし |
 
+`sync_status` だけが出す理由 `layout_change`（ゲートの判定には使わない。`pull_needed` にする）: 前回の lock が無ければ出さない。lock のスキルの
+ルートが分かっていて、取り込み直したときのルート（2 章の R）と違うとき、または lock が本文を載せた指示書のファイルが求める置き場所
+（既定は AGENTS.md、`instructions_file=CLAUDE.md` を明示したときは CLAUDE.md）と違うとき。スキルのルートの分からない古い lock では
+スキルを比べない（仕様だけの lock で永久に `layout_change` を出さない）。
+
+## 3.1 旧い配置からの移行
+
+前回の lock が CLAUDE.md に指示書の本文を載せていた（旧い配置）リポジトリを取り込み直すときの規則。手で直した区画を黙って上書きしない。
+
+- サーバは CLAUDE.md を `absent` に入れず、削除・片付けの op も出さず、橋の op（`set_managed_block`、`inner` は `@AGENTS.md`、`if_exists: true`）に
+  前回の lock の CLAUDE.md のハッシュを `expected_inner_sha256` として付ける。同じパスに 2 つの op を出さない
+- CLAUDE.md に本文を書くとき（明示）は、前回の記録が無ければ橋のハッシュを期待値にする（区画の中身が橋なら置き換える）
+- 適用スクリプトは、CLAUDE.md が無ければ何もしない（作らない）。区画の中身が既に橋なら世代を問わずそのまま。期待値があるのに区画が
+  取り除かれている、または中身のハッシュが期待値と違えば、何も書かずに終了コード 2 で止まる
+- 適用スクリプトは、ルートに CLAUDE.md が無く（symlink も「ある」とみなす）`.claude/CLAUDE.md` か `CLAUDE.local.md` があるとき、Claude Code が
+  AGENTS.md を読まない可能性を `warnings` で知らせる（自分では書かない。ゲートは判定しない）
+- 旧い適用スクリプトは橋の op を lock の照合で拒否し（終了コード 2）、旧い `speclino sync` は lock の `skill_roots` と op の `if_exists` を未知の欄として
+  拒否する。手順書でプラグインの適用スクリプトを最新にするよう案内する
+
 ## 4. 要求
 
 | ID | level | 要求 | 形式化 |
@@ -60,6 +79,9 @@ lock の鮮度の判定を定める。全体の要求 R-SYS-05、R-SYS-06、R-SY
 | R-SYNC-16 | advisory | 計画の取得（図 redeem） | redeem#t1, redeem#o1, redeem#t2 |
 | R-SYNC-17 | advisory | 計画の適用（図 apply） | apply#s, apply#r, apply#o, apply#l, apply#d, apply#st, apply#c, apply#z, apply#e1, apply#e2, apply#e3, apply#e4, apply#e5, apply#e6, apply#e7, apply#e8, apply#e9, apply#e10, apply#e11, sync-vocab#sync_apply |
 | R-SYNC-18 | mandatory | 構成要素のつながり: MCP は配信と取得の記録を使い、配信は適用スクリプト・計画の保存・取得の記録を使う（クラス図の関係） | sync-vocab#r1, sync-vocab#r2, sync-vocab#r3, sync-vocab#r4, sync-vocab#r5 |
+| R-SYNC-19 | mandatory | 旧い配置（前回の lock の CLAUDE.md に本文）から取り込み直す計画は、CLAUDE.md を消さず片付けず、橋の op に前回の区画のハッシュを expected_inner_sha256 として付け、適用スクリプトは区画の中身がそれか既に橋のときだけ置き換え、区画が無い・違えば何も書かずに終了コード 2 で止まる | - |
+| R-SYNC-20 | mandatory | sync_status は 3 章の条件で layout_change を理由に加えて pull_needed にし、前回の lock が無い・スキルのルートが分からない古い lock ではスキルの配置を比べない | - |
+| R-SYNC-21 | advisory | 適用スクリプトは、ルートに CLAUDE.md が無く .claude/CLAUDE.md か CLAUDE.local.md があるとき、AGENTS.md が読まれない可能性を warnings で知らせ、自分では書かない | - |
 
 ## 5. 語彙（クラス図）
 

@@ -23,8 +23,8 @@ SPEC-SYS-001 の区画のうち、テナント（ワークスペース）と利�
 | 操作 | owner | approver | member |
 | --- | --- | --- | --- |
 | 知識・規約の下書き、AI と作る、観測、メンバーの一覧、リポジトリの一覧、sync トークンの一覧 | 可 | 可 | 可 |
-| 知識・規約の承認、LLM 支援の指摘の確定（画面）、sync トークンの発行・失効、プロジェクト設定の編集 | 可 | 可 | 不可（403） |
-| ロールの変更、メンバーの削除、招待の発行・一覧・取消、MCP トークンの発行・一覧・失効、リポジトリの登録 | 可 | 不可 | 不可 |
+| 知識・規約の承認と取り下げ、LLM 支援の指摘の確定（画面）、sync トークンの発行・失効、プロジェクト設定の編集（PR の承認者を除く） | 可 | 可 | 不可（403） |
+| ロールの変更、メンバーの削除、招待の発行・一覧・取消、MCP トークンの発行・一覧・失効、リポジトリの登録、プロジェクト設定の PR の承認者（`approvers`）の変更 | 可 | 不可 | 不可 |
 
 ## 3. 要求
 
@@ -46,6 +46,13 @@ SPEC-SYS-001 の区画のうち、テナント（ワークスペース）と利�
 | R-WS-14 | advisory | 招待の受諾の流れ（図 accept） | accept#s, accept#u, accept#v, accept#rd, accept#l, accept#a, accept#z, accept#e1, accept#e2, accept#e3, accept#e4, accept#e5, accept#e6, accept#e7, accept#e8, ws-vocab#invitations, ws-vocab#workspaces |
 | R-WS-15 | advisory | メンバーの削除の流れ（図 remove） | remove#m1, remove#g1, remove#m2, remove#g2, remove#m3, remove#m4, ws-vocab#members, ws-vocab#knowledge_chat |
 | R-WS-16 | mandatory | 構成要素のつながり: 招待とメンバー管理はワークスペースの権限の確認とメンバーのリポジトリを使い、メンバーの削除は知識のチャットの会話を消す（クラス図の関係） | ws-vocab#r1, ws-vocab#r2, ws-vocab#r3, ws-vocab#r4, ws-vocab#r5, ws-vocab#r6, ws-vocab#r7, ws-vocab#r8 |
+| R-WS-17 | mandatory | リポジトリの登録は GitHub App のユーザー認可（web application flow）で行い、認可 URL に state（ハッシュだけを保存、10 分で失効、条件付きの更新で 1 回だけ消費、別の uid・期限切れ・使用済みは拒否）と PKCE（S256）を付ける | - |
+| R-WS-18 | mandatory | 本人の権限は、ユーザーのトークンで /user/installations と /user/installations/{id}/repositories に列挙され、かつ permissions.admin が真であることで確かめる（GET /repos の 200 はインストールの証明にしない）。列挙に無ければ not_installed、admin でなければ not_admin で拒否する | - |
+| R-WS-19 | mandatory | 確認が済んだら DELETE /applications/{client_id}/grant で認可ごと取り消し、取り消せたときだけ登録する（失敗は github_revoke_failed）。拒否・例外の経路でも取り消しを試み、ユーザーのトークンを DB・ログ・監査・例外の文面に出さず保存しない | - |
+| R-WS-20 | mandatory | 招待のリンクはトークンを URL のフラグメント（/invite#トークン）に載せてサーバのアクセスログに残さず、プレビューと受諾は POST の本文でトークンを送る | - |
+| R-WS-21 | mandatory | プロジェクト設定は型で検証してから保存し、fail_on は VIOLATED・UNKNOWN・REVIEW をすべて含むもの以外を拒否する（ゲートを弱められない）。設定の変更は owner と approver ができるが、PR の承認者（approvers）を変えられるのは owner だけで、approver_ids は owner の保存のときにサーバが GitHub から引いて埋める（送られた値は使わない） | - |
+| R-WS-22 | mandatory | 調査エージェントとテストの実行は、サーバの設定とプロジェクト設定の両方で有効なときだけ動く（AND） | - |
+| R-WS-23 | mandatory | 保存されたプロジェクト設定が型に合わなければ安全側の値（エージェントとテストの実行は無効、承認者なし、fail_on は既定）に置き換え、そのプロジェクトでは誰も PR の承認者にしない | - |
 
 ## 4. 語彙（クラス図）
 
@@ -172,5 +179,6 @@ sequenceDiagram
 
 - 構造の義務（`TeamRepository`・`McpTokenRepository`・`SyncTokenRepository`・`KnowledgeChatRepository`・`AuditRepository`）は
   コードで照合できる。権限の表と 404 の分離は結合テスト（`tests/integration/services/`）で確かめる
+- リポジトリの登録（R-WS-17〜19）は GitHub の API を相手にするので図にせず、単体テスト（GitHub の応答の差し替え）で確かめる
 - 招待の受諾とメンバーの削除の流れは、入口・操作は名前の一致でコードに対応するが、ガードの変数（`invitee.*`、
   `removal.last_owner`）は DB の問合せの結果で入口の値に対応づけられないため UNKNOWN（advisory）

@@ -1,13 +1,14 @@
 # SPEC-GATE-002 PR のゲート全体
 
 SPEC-SYS-001 の区画のうち、PR の検査（run）からゲートの判定・公開までを定める: webhook、run の実行、検査器、
-期待する要求の補完、例外（免除）、PR コメントのコマンドと人の確定（attest）、古い run の扱い、replay。
+期待する要求の補完、ワークスペース全体の仕様の図の対象外、例外（免除）、PR コメントのコマンドと人の確定（attest。まとめて確定を含む）、
+テストの実行による観測（test_run）、古い run の扱い、replay。
 全体の要求 R-SYS-05〜09、R-SYS-15、R-SYS-16 を詳しくする。ゲートの決定のフェイルクローズは SPEC-SYS-001 の図 gate-decision が定める。
 
 ## 1. 目的と範囲
 
 - 対象: GitHub の PR のイベントから Check「SpecLino / gate」と PR コメントの更新まで（worker の `ReviewRunService`）
-- 範囲外: lock の判定の中身（SPEC-SYNC-001 の 3 章）、AI による調査の中身（SPEC-AI-001）
+- 範囲外: lock の判定の中身（SPEC-SYNC-001 の 3 章）、AI による調査の中身（SPEC-AI-001）、検査器の判定の規則（SPEC-CONF-001）
 
 ## 2. 判定の対象と検査器
 
@@ -46,7 +47,7 @@ SPEC-SYS-001 の区画のうち、PR の検査（run）からゲートの判定�
 | R-GATEPR-06 | mandatory | VIOLATED と VERIFIED_IN_SCOPE を出すのは解析が厳密（exact_in_model）な経路だけで、不完全な経路・未解決の呼び出し・対応の無い図の要素・上限（既定で深さ 2・64 経路・500ms、最大 4・256・1000ms）の超過・検査器の例外は UNKNOWN にする | gate-vocab#VerifierRegistry |
 | R-GATEPR-07 | mandatory | KNOWLEDGE-LOCK-001 は必須の要求として毎回評価し、プロジェクトのリポジトリ ID が未登録なら UNKNOWN にする | - |
 | R-GATEPR-08 | mandatory | bundle の run では、対応・契約・免除・規約をデフォルトブランチの先端（信頼側）から読み、PR の head のものでは判定しない | - |
-| R-GATEPR-09 | mandatory | 信頼側と head の `.speclino/` の設定が違うとき、または信頼側を取得できないときは必須の REVIEW（KNOWLEDGE-BINDINGS-001）にし、その確定は PR コメントだけで受け付ける（画面の API は拒否する） | - |
+| R-GATEPR-09 | mandatory | 信頼側と head の `.speclino/` の設定が違うとき、または信頼側を取得できないときは必須の REVIEW（KNOWLEDGE-BINDINGS-001）にし、その確定は PR コメントか PR の Approve（9 章）だけで受け付ける（画面の API は拒否する） | - |
 | R-GATEPR-10 | mandatory | 例外は id・rule・対象のパス・理由・承認者・期限・代替策を必須とし、期限内のものだけが VIOLATED だけを免除する。exceptions_allowed が偽のルールは免除しない。免除があれば pass_with_exceptions にし、verdict は VIOLATED のまま残す | - |
 | R-GATEPR-11 | mandatory | 人の確定は指紋と内容のハッシュに結び付けて attestations に記録し、attested は REVIEW だけを阻止から外し、acknowledged_violation は阻止したままにする。内容が変われば確定は効かない。PR の作成者自身の確定は拒否せず印を残す | gate-vocab#AttestationRepository |
 | R-GATEPR-12 | mandatory | verdict を書き換える経路は無い。エージェントの調査は証拠を集めて決定的な再解析を促すだけで、ゲートは再評価後の検査器の Finding で決め直す | - |
@@ -57,6 +58,15 @@ SPEC-SYS-001 の区画のうち、PR の検査（run）からゲートの判定�
 | R-GATEPR-17 | advisory | run の実行の流れ（図 run） | run#x1, run#x2, run#x3, run#x4, run#x5, run#x6, run#o1, run#x7, run#x8, run#x9, run#a1, run#x10, run#x11, run#a2, run#x12, gate-vocab#ReviewRunService, gate-vocab#check_pipeline, gate-vocab#run_freshness, gate-vocab#investigation |
 | R-GATEPR-18 | advisory | run の実行の状態は 7 章の表の遷移でだけ変わる | - |
 | R-GATEPR-19 | mandatory | 構成要素のつながり: worker（ReviewRunService）はコードホスト（GitHub）を参照として持ち、費用ガードを任意に持ち、run の記録・承認の記録・検査・公開の判断・調査を使い、検査は規約の検査器の登録簿を使う（クラス図の関係） | gate-vocab#r1, gate-vocab#r2, gate-vocab#r3, gate-vocab#r4, gate-vocab#r5, gate-vocab#r6, gate-vocab#r7, gate-vocab#r8 |
+| R-GATEPR-20 | mandatory | ワークスペース全体の仕様についてだけ、図ごとに要素（8 章）を解決し、要素が 1 つも解決できない図は対象外として義務を出さず出るべき要求 ID にも入れない。1 つでも解決できれば照合し、欠けている要素は VIOLATED のまま残す。プロジェクトに絞った仕様には使わない | - |
+| R-GATEPR-21 | mandatory | 対象外の図は manifest の out_of_scope_diagrams（仕様の名前と図 ID）に残し、参照する図がすべて対象外の要求の行は coverage の requirements_out_of_scope に数え、対応範囲にも未解析にも入れない | - |
+| R-GATEPR-22 | mandatory | 同じ bundle の base の run で対象だった図が head で対象外になったら、要求 ID `<図 ID>#scope`・分類 scope_changed の REVIEW を出す（図の義務に mandatory が 1 つでもあるか level が取れなければ mandatory）。base の run が無いときは以前は対象だったとみなして同じ REVIEW を出す | - |
+| R-GATEPR-23 | mandatory | scope_changed の確定は、仕様の改訂の内容の hash・図 ID・head のコミットから作った内容の hash に結び付け、別の PR や次の push に古い確定を使い回させない | - |
+| R-GATEPR-24 | mandatory | 承認者の引数なしの PR コメント `/speclino attest` と、PR の Approve（submitted かつ state が approved だけ。commented・changes_requested・dismissed は無視）を、その PR の最新の検査の確定できる要確認すべてを attested で確定する依頼として扱う。照合は 1 件ずつのコマンドと同じく承認者の GitHub ユーザー ID で行い、ワークスペースに未登録のリポジトリは拒否する | - |
+| R-GATEPR-25 | mandatory | まとめて確定する対象は PR の最新の run で、最新の完了した run と head が一致するときだけ（検査中・未検査のコミットがあれば確定しない）。Approve はさらに head が review の commit_id と一致するときだけ。合わなければ何も確定せず、理由を webhook の応答と監査 attestation.bulk に残す（PR にはコメントしない） | - |
+| R-GATEPR-26 | mandatory | まとめて確定するのは REVIEW のうち LLM 支援・KNOWLEDGE-BINDINGS-001・scope_changed で指紋と hash を持つものだけで、書き込みは ON CONFLICT DO NOTHING で既存の確定（並行して保存された acknowledged_violation を含む）を上書きしない。確定が 1 件以上あるか、確定済みの attested が最新の完了した run に効いていなければ、同じ head で再検査を作る | - |
+| R-GATEPR-27 | mandatory | テストの実行（test_run）はサーバの設定とプロジェクト設定の両方で有効なときだけ調査エージェントのツールとして登録し、要求に宣言したテスト ID だけを、テストと設定は base・実装は head から別に置いて、ネットワークを遮断した sandbox で実行する（上限 120 秒） | - |
+| R-GATEPR-28 | mandatory | テストの失敗は観測した反例として VIOLATED（test_observation は CONTRADICTED）にし、全件の成功は verdict を変えず test_observation を OBSERVED にするだけ、error・skipped・欠落・タイムアウトは verdict を変えず次の手に残す | - |
 
 ## 5. 語彙（クラス図）
 
@@ -198,6 +208,52 @@ sequenceDiagram
 | x6 | `running` | `superseded` | `supersede_open_runs` | - |
 | x7 | `awaiting_answer` | `superseded` | `supersede_open_runs` | - |
 
+## 8. ワークスペース全体の仕様の図の対象外
+
+ワークスペース全体の仕様はすべてのリポジトリに当たるが、図が別のリポジトリの話であることもある。そのまま照合すると、
+クラスが無い・入口が無いことが偽の VIOLATED や欠落の UNKNOWN になる。そこで run は、ワークスペース全体の仕様についてだけ
+図ごとに対象・対象外を決める（`conformance/diagram_scope.py` の 1 か所。要素の解決は `services/check_pipeline.py`）。
+
+| 図 | 要素 | 解決できる条件 |
+| --- | --- | --- |
+| クラス図 | 操作を持つクラスと、関係の両端のクラス（`<<module>>` はモジュール） | 定義がある（あいまいでも「ある」） |
+| シーケンス図・アクティビティ図 | 入口の操作と、入口・呼出しの持ち主のクラス・モジュール | クラス・モジュールは定義がある、入口は振る舞いに写せる（SPEC-CONF-001 の 5 章） |
+| 状態遷移図 | 状態の属性 | どれかの振る舞いの `variables` にあるか、同じ名前の属性への代入がある |
+
+抜け道の安全柵: PR で図のクラスを改名・削除して義務を黙って消すことを防ぐため、base（デフォルトブランチ）の run では対象だった図が
+head で対象外になったら要確認（scope_changed）を出す。比べるのは同じ bundle の base の run の manifest だけで、base の解析は増やさない。
+承認者は確定できる（9 章の経路を含む）。
+
+## 9. 人の確定をまとめて行う
+
+ハッシュつきの `/speclino attest <指紋> <hash>` を 1 件ずつ打つ手間を省く経路。1 人で運用する（作成者＝承認者）ときは GitHub の制約で
+自分の PR を Approve できないため、引数なしのコメントが主の経路になる。
+
+| 経路 | 契機 | 記録の `via` | run の契機 |
+| --- | --- | --- | --- |
+| 引数なしの PR コメント | `/speclino attest` | `pr_comment_all:<コメントの URL>` | `comment` |
+| PR の Approve | `pull_request_review` の `submitted` かつ `state=approved`（commit_id が空なら無視） | `pr_review:<レビューの URL>` | `pr_review` |
+
+- 指紋と hash はサーバが run の Findings から取る。actor は `github:<ID>`、自己確定の印と対応表の変更の警告は 1 件ずつの確定と同じ
+- 監査は一括の結果を `attestation.bulk`（target `<リポジトリ>#<PR 番号>`、決定は accepted・ignored・rejected）、1 件ごとの確定を `attestation.record` に残す
+- run を引いてから確定するまでの間の push（TOCTOU）は防がない: 確定は (指紋, 内容の hash) に結び付くので、push で中身が変われば別の hash の
+  要確認になり、古い run の要確認の確定で新しい変更は素通りしない
+- 案内は「承認者が `/speclino attest` とコメントする（または PR を Approve する）と確定する」。1 件ずつのハッシュつきの形はゲートのコメントの
+  各指摘の「根拠」に畳んで出す
+
+## 10. テストの実行による観測（test_run）
+
+調査エージェントのツール（`agent/tools/test_run.py`）。静的な判定とは別の軸（SPEC-CONF-001 の 8 章）に観測を記録する。
+
+| 項目 | 内容 |
+| --- | --- |
+| 有効になる条件 | サーバの設定（sandbox の種類が disabled でない）AND プロジェクト設定 `test_run_enabled`。無効ならツールを登録しない |
+| 実行するテスト | 旧形式の要求の `tests` に宣言したテスト ID だけ |
+| 配置 | テストと pytest の設定は base、実装は head から別に置く（`PYTHONSAFEPATH=1`、`-p no:cacheprovider`、junit で結果を取る） |
+| 隔離 | 手元は Docker（`--network none --read-only --cap-drop ALL --security-opt no-new-privileges`、メモリ・CPU・プロセス数の上限、nobody で実行）。本番は Cloud Run の sandbox（ネットワークの遮断はプラットフォームに任せ、プローブのテストで確かめる） |
+| 上限 | 1 回 120 秒 |
+| 結果 | 失敗 → VIOLATED（観測した反例、CONTRADICTED）／全件成功 → verdict はそのまま OBSERVED／error・skipped・欠落・タイムアウト → verdict はそのまま、次の手に残す |
+
 ## 観測境界
 
 - 構造の義務（`ReviewRunService`・`ReviewRunRepository`・`GitHubClient`・`AttestationRepository`・`ApprovalRepository`・
@@ -208,3 +264,7 @@ sequenceDiagram
   （リポジトリの結合テストで確かめる）
 - 実行の状態 `cancelled` は型にはあるが、run に設定する経路は無い（Check の結論としてだけ使う）
 - ゲートの決定そのものは SPEC-SYS-001 の図 gate-decision（R-SYS-21）が検証する。古い run の公開の判断は図にせず、結合テストで確かめる
+- 図の対象外・まとめて確定・test_run（R-GATEPR-20〜28）は図にせず、単体・結合テストで確かめる
+- fork の PR で test_run を止める処理は今のコードに無い（webhook の応答に fork を載せるだけ）。テストは宣言済みの ID だけ・ネットワークを遮断した
+  sandbox で動き、成功は判定を上書きしないので、fork の PR の head の実装が走りうることは残余のリスク
+- Cloud Run の sandbox では pytest に `--import-mode=importlib` と `-c` / `--rootdir` を付けていない（Docker だけが付ける）

@@ -2,7 +2,7 @@
 
 SpecLino 全体を上から見た仕様。個々の関数の振る舞いではなく、利用者・構成要素・知識のライフサイクル・判定のモデルと、
 システム全体で守る要求を定める。各要求の詳細は下位の仕様（SPEC-KNOW-001、SPEC-SYNC-001、SPEC-GATE-002、
-SPEC-WS-001、SPEC-AI-001、SPEC-OBS-001）が定め。
+SPEC-WS-001、SPEC-AI-001、SPEC-OBS-001、SPEC-CONF-001）が定め。
 
 ## 1. 目的と範囲
 
@@ -66,9 +66,11 @@ MCP・A2A・`speclino sync` で各自のエージェントに配り、PR のゲ�
 | R-SYS-17 | mandatory | 可観測性と状態の表示は 1 つの集計から作り、測っていないものを 0 や 100% と表示しない | - |
 | R-SYS-18 | advisory | 構成要素の語彙: 図に現れる処理の持ち主（モジュールとクラス）と操作 | sys-vocab#knowledge_registry, sys-vocab#mcp_server, sys-vocab#knowledge_sync, sys-vocab#sync_apply, sys-vocab#ReviewRunService, sys-vocab#check_pipeline, sys-vocab#gate, sys-vocab#observability |
 | R-SYS-19 | advisory | 知識のライフサイクルは、下書き → 承認 → bundle → 鮮度の確認と取り込み → PR の run とゲート → 観測の順に進む | - |
-| R-SYS-20 | advisory | 知識の改訂の状態は、下書き → 有効 → 置き換え済み の順にだけ進む | - |
+| R-SYS-20 | advisory | 知識の改訂の状態は、下書き → 有効 → 置き換え済み の順にだけ進み、有効から置き換え済みへは次の改訂の承認か取り下げで移る（7 章の表） | - |
 | R-SYS-21 | mandatory | ゲートの決定はフェイルクローズの順序で出口を選ぶ | gate-decision#s, gate-decision#c1, gate-decision#c2, gate-decision#c3, gate-decision#c4, gate-decision#f, gate-decision#pw, gate-decision#p, gate-decision#z, gate-decision#e1, gate-decision#e2, gate-decision#e3, gate-decision#e4, gate-decision#e5, gate-decision#e6, gate-decision#e7, gate-decision#e8, gate-decision#e9, gate-decision#e10, gate-decision#e11, gate-decision#e12 |
 | R-SYS-22 | mandatory | 構成要素のつながり: worker は検査とゲートを、MCP は配信と知識レジストリを、配信は知識レジストリと適用スクリプトを使い、知識レジストリは改訂を扱う（クラス図の関係） | sys-vocab#r1, sys-vocab#r2, sys-vocab#r3, sys-vocab#r4, sys-vocab#r5, sys-vocab#r6, sys-vocab#r7, sys-vocab#r8 |
+| R-SYS-23 | mandatory | run の実行権は queued の行を running にする条件付きの更新で 1 回だけ取り、取れなかった実行は何もせずに終わる（Cloud Tasks の再送や重複の配信で同じ run を 2 回実行しない） | - |
+| R-SYS-24 | mandatory | 時間の上限は内側ほど短くする: Cloud Run の web と worker の要求のタイムアウト 20 分 < Cloud Tasks の配信の期限（dispatch deadline）25 分。run の中の上限（エージェント 600 秒、LLM 支援の規約の評価 60 秒など）はその内側に収める | - |
 
 ### 4.1 要求と下位の仕様の対応
 
@@ -80,13 +82,13 @@ MCP・A2A・`speclino sync` で各自のエージェントに配り、PR のゲ�
 | R-SYS-04 | SPEC-KNOW-001 | R-KNOW-08、R-KNOW-09、R-KNOW-10 |
 | R-SYS-05 | SPEC-KNOW-001、SPEC-SYNC-001、SPEC-GATE-002 | R-KNOW-11、R-SYNC-01、R-SYNC-02、R-GATEPR-02 |
 | R-SYS-06 | SPEC-SYNC-001、SPEC-GATE-002 | R-SYNC-07、R-SYNC-08、R-GATEPR-07 |
-| R-SYS-07 | SPEC-GATE-002 | R-GATEPR-04、R-GATEPR-05 |
-| R-SYS-08 | SPEC-GATE-002 | R-GATEPR-10、R-GATEPR-11、R-GATEPR-12 |
-| R-SYS-09 | SPEC-GATE-002 | R-GATEPR-03、R-GATEPR-06 |
+| R-SYS-07 | SPEC-GATE-002、SPEC-CONF-001 | R-GATEPR-04、R-GATEPR-05、R-CONF-11、R-CONF-16 |
+| R-SYS-08 | SPEC-GATE-002 | R-GATEPR-10、R-GATEPR-11、R-GATEPR-12、R-GATEPR-24、R-GATEPR-25、R-GATEPR-26 |
+| R-SYS-09 | SPEC-GATE-002、SPEC-CONF-001 | R-GATEPR-03、R-GATEPR-06、R-GATEPR-20、R-GATEPR-22、R-CONF-04、R-CONF-06、R-CONF-07、R-CONF-09 |
 | R-SYS-10 | SPEC-WS-001、SPEC-AI-001 | R-WS-07、R-WS-08、R-AI-02 |
-| R-SYS-11 | SPEC-AI-001 | R-AI-01、R-AI-02、R-AI-03、R-AI-04、R-AI-06、R-AI-12 |
+| R-SYS-11 | SPEC-AI-001、SPEC-CONF-001 | R-AI-01、R-AI-02、R-AI-03、R-AI-04、R-AI-06、R-AI-12、R-CONF-01 |
 | R-SYS-12 | SPEC-AI-001 | R-AI-08、R-AI-09 |
-| R-SYS-13 | SPEC-WS-001、SPEC-KNOW-001、SPEC-AI-001、SPEC-GATE-002 | R-WS-09、R-KNOW-12、R-AI-05、R-GATEPR-14 |
+| R-SYS-13 | SPEC-WS-001、SPEC-KNOW-001、SPEC-AI-001、SPEC-GATE-002 | R-WS-09、R-KNOW-12、R-KNOW-18、R-AI-05、R-GATEPR-14、R-GATEPR-25 |
 | R-SYS-14 | SPEC-WS-001、SPEC-AI-001、SPEC-SYNC-001 | R-WS-10、R-WS-13、R-AI-10、R-SYNC-10 |
 | R-SYS-15 | SPEC-GATE-002 | R-GATEPR-08、R-GATEPR-09 |
 | R-SYS-16 | SPEC-GATE-002 | R-GATEPR-13 |
@@ -218,7 +220,8 @@ worker が bundle を固定して検査し、ゲートを決める。owner と�
 ## 7. 知識の改訂の状態
 
 改訂（`ArtifactRevision`）は下書きで始まり、下書きは作者・メンバーが何度でも直せる（同じ改訂番号のまま置き換わる）。
-承認で有効になり、同じ知識の次の改訂が承認されると、それまでの有効な改訂は置き換え済みになる。有効と置き換え済みは不変。
+承認で有効になり、同じ知識の次の改訂が承認されると、それまでの有効な改訂は置き換え済みになる。有効な改訂を取り下げると、
+後継の有効な改訂を作らずに置き換え済みになる（SPEC-KNOW-001 の R-KNOW-17・R-KNOW-18）。有効と置き換え済みは不変。
 1 つの知識に有効な改訂と下書きはそれぞれ最大 1 つ。却下の状態は無い（下書きを直すか、そのまま残す）。
 
 初期状態は `draft`。
@@ -228,6 +231,7 @@ worker が bundle を固定して検査し、ゲートを決める。owner と�
 | k1 | `draft` | `draft` | `update_draft` | - |
 | k2 | `draft` | `active` | `approve` | `before.artifactRevision.status == RevisionStatus.draft` |
 | k3 | `active` | `superseded` | `approve` | - |
+| k4 | `active` | `superseded` | `retire` | - |
 
 ## 8. ゲートの判定（アクティビティ図）
 
@@ -277,6 +281,16 @@ flowchart TD
 web は公開（API は ID トークン必須）、worker は Cloud Tasks からの IAM 呼び出しだけ、sandbox は worker からだけ呼べる。
 データは Cloud SQL（PostgreSQL）、成果物は GCS（`runs/{run_id}/`）、秘密は Secret Manager から環境変数で渡す。
 
+| 上限 | 値 | 場所 |
+| --- | --- | --- |
+| Cloud Run の要求のタイムアウト（web・worker） | 1200 秒（20 分） | `infra/envs/prod/run.tf` |
+| Cloud Run の要求のタイムアウト（sandbox） | 300 秒 | `infra/envs/prod/run.tf` |
+| Cloud Tasks の配信の期限（dispatch deadline） | 1500 秒（25 分）。タスクの作成時に指定する | `settings.cloud_tasks_dispatch_deadline_s`、`adapters/queue/cloud_tasks.py` |
+| Cloud Tasks のキュー | 最大 3 回の試行、同時 2、毎秒 5 | `infra/envs/prod/tasks.tf` |
+
+worker は Cloud Tasks からの再送（期限切れ・5xx）を受けうるので、実行権を `ReviewRunRepository.try_acquire`（`exec_state='queued'` を条件に
+`running` にする UPDATE。更新した行が 0 なら取れない）で 1 回だけ取る。
+
 ## 観測境界
 
 - モジュールの関数は `<<module>>` のクラスとして書き、構造の義務でモジュール直下の関数と照合する
@@ -284,4 +298,6 @@ web は公開（API は ID トークン必須）、worker は Cloud Tasks から
   未形式化。各段は下位の仕様の図で検査する）
 - 改訂の状態（7 章）は DB の行（`artifact_revisions.status`）が持ち、SQL の更新で変わるので AST の解析で代入を観測できない。
   表で定め、R-SYS-20 は未形式化（`tests/integration/db/test_repositories.py` などの結合テストで確かめる）
+- run のパイプライン全体の時間の上限（15 分）はコードで強制していない（インフラの設定のコメントにある目安）。強制しているのは 9 章の
+  Cloud Run・Cloud Tasks の上限と、run の中の個別の上限だけ
 - 全体の要求（R-SYS-01〜17）は形式化していない。検証は下位の仕様と、その下の関数単位の仕様・テストで行う
