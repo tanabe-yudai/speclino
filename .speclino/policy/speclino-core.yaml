@@ -54,35 +54,6 @@ rules:
     on_missing_input: unknown
     exceptions_allowed: true
 
-  - id: SPEC-TEST-001
-    version: "1.0.0"
-    level: advisory
-    title: "@pytest.mark.spec と Spec IR の tests は一致すること"
-    text: >
-      Spec IR（specs/ir/*.spec-ir.json）の rules[].tests に宣言したテスト ID は実在する
-      ファイル::関数を指し、@pytest.mark.spec("R-...") の付いたテストは対応する rule.tests
-      に宣言されていること。二重管理（Spec IR の tests とテストのマーカー）がずれると
-      test_run が no_declared_tests で何もしなくなる（S38）。このリポジトリの仕様の正本は
-      SpecLino にあり specs/ir を置かないので、マーカーも付けない。advisory のまま残す。
-    applies_to:
-      paths:
-        - "specs/ir/*.spec-ir.json"
-        - "tests/**/test_*.py"
-      languages: []
-    source:
-      doc: .speclino/specs/spec-know-001.md
-    verifier:
-      id: spec_tests
-      version: "1.0.0"
-      params:
-        spec_ir_paths:
-          - "specs/ir/*.spec-ir.json"
-        test_paths:
-          - "tests/**/test_*.py"
-        marker: spec
-    on_missing_input: unknown
-    exceptions_allowed: true
-
   - id: CI-001
     version: "1.0.0"
     level: mandatory
