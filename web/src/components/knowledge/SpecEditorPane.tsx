@@ -76,17 +76,17 @@ export function SpecEditorPane({
   }
 
   return (
-    <div className="space-y-4 lg:space-y-0">
+    <div className="space-y-4">
       <PaneViewSwitch
         view={view}
         onChange={setView}
         diagnosticCount={preview ? diagnostics.length : null}
       />
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div>
         <div
           className={cn(
             "min-w-0 space-y-4",
-            view !== "edit" && "hidden lg:block",
+            view !== "edit" && "hidden",
           )}
         >
           <MarkdownInput
@@ -99,7 +99,7 @@ export function SpecEditorPane({
             invalid={errors > 0}
           />
           <p id="spec-markdown-help" className="text-xs text-ink-3">
-            図の書き方は右の診断で確かめられます。
+            図の書き方はプレビューの診断で確かめられます。
           </p>
           {hasLegacy && (
             <details className="rounded-md border p-3" open>
@@ -152,7 +152,7 @@ export function SpecEditorPane({
         <div
           className={cn(
             "min-w-0 space-y-3",
-            view !== "preview" && "hidden lg:block",
+            view !== "preview" && "hidden",
           )}
         >
           <div aria-live="polite" className="text-xs text-ink-3">

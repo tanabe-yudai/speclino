@@ -341,6 +341,7 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
           </div>
         )}
         <ScopePicker scope={content.scope} onChange={(scope) => setContent({ ...content, scope })} projects={projects} error={projectsError} />
+        <NoteField id="revision-note" note={note} onChange={setNote} summarize={canSummarize(chat.current) ? chat.summarize : undefined} />
         {applied && (
           <AppliedDiffPanel applied={applied} undoable={canUndo(applied, editorText(content), content)} onUndo={undoApplied} onClose={() => setApplied(null)} />
         )}
@@ -358,10 +359,6 @@ function EditorForm({ slug, kind, id, initial, onReload }: { slug: string; kind:
         )}
         {content.kind === 'skill' && <SkillEditorPane content={content} onChange={setContent} onInvalidChange={setPaneInvalid} resetKey={resetKey} />}
         {content.kind === 'instructions' && <InstructionsEditorPane content={content} onChange={setContent} />}
-
-        <div className="max-w-3xl">
-          <NoteField id="revision-note" note={note} onChange={setNote} summarize={canSummarize(chat.current) ? chat.summarize : undefined} />
-        </div>
 
         {/* スマホ幅は画面下のタブ（h-14 ＋安全領域）の上に置く */}
         <div className="sticky bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-10 -mx-4 sm:bottom-0 flex flex-wrap items-center gap-3 border-t bg-background/80 px-4 py-3 backdrop-blur-md sm:-mx-6 sm:px-6">
