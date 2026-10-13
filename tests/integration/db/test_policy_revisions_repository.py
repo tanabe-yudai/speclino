@@ -240,6 +240,8 @@ async def test_seed_from_package_loads_speclino_core_as_revision_1(session: Asyn
         "ARCH-003",
         "ARCH-004",
         "VERDICT-001",
+        "ARCH-005",
+        "UI-001",
     }
 
     repo = PolicyRevisionRepository(session)
