@@ -1,6 +1,6 @@
 {
   "name": "speclino",
-  "description": "SpecLino: 仕様とコードの意味差分を Z3 で検査する PR レビュー基盤のプラグイン。",
+  "description": "SpecLino: チームがコーディングエージェントに渡す知識を管理・配信し、守られていることをゲートで保証するサービスのプラグイン。",
   "owner": {
     "name": "SpecLino"
   },
@@ -8,7 +8,7 @@
     {
       "name": "speclino",
       "source": "./plugins/speclino",
-      "description": "SpecLino の Skill（仕様の書き方・検証結果の読み方）と MCP 接続（context_get / verification_start / verification_get）。"
+      "description": "SpecLino の Skill（仕様の書き方・知識の取り込み）と MCP 接続（context_get / spec_get / skill_get / sync_status / knowledge_pull / spec_suggest / verification_start / verification_get）。"
     }
   ]
 }

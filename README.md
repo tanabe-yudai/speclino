@@ -50,12 +50,13 @@ open-world で読む: 図に無い呼び出しが間にあっても違反にし�
 
 ## 流れ
 
-1. **書く**: 仕様エディタで Markdown と UML を書く。AI は書き換えを提案するだけ
+1. **書く**: 仕様エディタで Markdown と UML を書く。「AI と作る」の会話で AI が質問を返して要件を詰め、承認済みの知識・
+   リポジトリ・Google 検索で調べてから書き換えを提案する。採用するのは人で、変換と判定には関わらない
 2. **承認する**: owner / approver が原文と正規形を見て承認する。診断にエラーがあれば承認できない
 3. **配る**: 承認のたびに bundle（署名つき）ができ、`speclino sync` と MCP で各自のエージェントに届く
 4. **作る**: 各自のエージェントが、配られたスキル・AGENTS.md・仕様を読んで実装する
 5. **確かめる**: PR のゲートが bundle を固定し、仕様・規約・lock の鮮度を決定的に判定する
-6. **観測する**: 可観測性の画面で、形式化率・対応率・UNKNOWN の内訳・取得の遅れ・規約の推移を見る
+6. **観測する**: 「観測」の画面で、形式化率・対応率・UNKNOWN の内訳・取得の遅れ・規約の推移を見る
 
 - 承認・規約の有効化のたびに **bundle**（有効な改訂の集合）を作る。run・sync・replay は bundle の番号で固定し、
   run の途中で承認が進んでも判定は変わらない
@@ -201,7 +202,7 @@ cd web && npm run dev   # 画面（Vite。/api は :8080 に転送）
 ```
 
 ローカルの既定は開発用の認証（`SPECLINO_AUTH_KIND=dev`、`SPECLINO_ENV=local` のときだけ有効）。
-ログイン画面の「開発モードで入る」で、利用者 `judge` として入る。ワークスペースは CLI で作る:
+ログイン画面の「開発用ログイン」で、利用者 `judge` として入る。ワークスペースは CLI で作る:
 
 ```sh
 uv run speclino workspace create <slug> --owner-uid judge --name "<表示名>"
@@ -219,8 +220,9 @@ make selfcheck      # SpecLino を自分自身に当てる（下の「自己検�
 
 ## 1 件の検査を実行する（CLI、DB なし）
 
-CLI はリポジトリの `specs/` を読む Git の流れでも動く（自己検証と、GCP を畳んだ後の手元の確認のため）。
-同梱の題材（`examples/orders/`：注文キャンセル、要求 9 件）を検査する。
+CLI は DB も GitHub App も無しで動く（自己検証と、GCP を畳んだ後の手元の確認のため）。仕様の入力は 2 通り:
+リポジトリの `specs/`（旧形式の Spec IR）と、`--specs-dir`（sync で書き出した UML の仕様。下の「自己検証」）。
+まず同梱の題材（`examples/orders/`：注文キャンセル、旧形式の要求 9 件）を検査する。
 
 ```sh
 uv run speclino check --repo . --project examples/orders --head WORKTREE --out build/review
@@ -248,18 +250,55 @@ gate: pass (必須ルールはすべて成立)
 
 ## 知識を管理する
 
-画面の上部の「知識」（仕様・スキル・指示書）と「規約」から、種類ごとに改訂を作って承認する。
-改訂は 下書き → 有効 → 置き換え済み と進み、有効な改訂は書き換えられない。
+### 画面の構成
+
+第 1 階層は 8 つ（URL は `/w/<slug>/…`）。スマホでは画面下のタブ（ホーム・仕様・検査・観測・その他）に、
+スキル・指示書・規約・設定は「その他」に入る。
+
+| 画面 | URL | 中身 |
+| --- | --- | --- |
+| ホーム | `/w/<slug>` | やること（承認待ち・ゲートが失敗の PR・知識が古いリポジトリ）、知識の件数、プロジェクトの健全性、最近の検査 |
+| 仕様 | `/w/<slug>/specs` | 「ワークスペース全体の仕様」と「リポジトリ別の仕様」の 2 節。行からエディタへ |
+| スキル / 指示書 / 規約 | `/w/<slug>/skills`・`/instructions`・`/policies` | 種類ごとの一覧とエディタ |
+| 検査 | `/w/<slug>/runs`、`/w/<slug>/runs/<id>` | PR ごとの検査の一覧（ゲートで絞り込み）と詳細（判定・反例・確定） |
+| 観測 | `/w/<slug>/observability` | 下の「可観測性」 |
+| 設定 | `/w/<slug>/settings/<tab>` | メンバー（表示名とメール）・リポジトリ・エージェント接続（MCP / A2A・リポジトリ同期）・プロジェクト・取り下げ済みの知識 |
+
+プロジェクト（リポジトリ）の画面 `/w/<slug>/p/<owner>/<repo>` は絞り込みで、概要・仕様（そのリポジトリの仕様と
+ワークスペース全体の仕様）・検査の 3 タブ。旧い URL（`/runs/<id>` など）は新しい URL へ転送する。
+メンバーは表示名（アカウントのメニューの「表示名を変える」）とメールで表示し、認可は uid で行う。
+
+### 改訂と承認の単位
+
+種類ごとの画面から改訂を作って承認する。改訂は 下書き → 有効 → 置き換え済み と進み、有効な改訂は書き換えられない。
 
 | 種類 | 書くもの | スコープ |
 | --- | --- | --- |
 | 規約 | ルール（level は 必須 / 助言）と検査器のパラメーター、LLM 支援のチェック項目 | ワークスペース全体 |
 | スキル | `SKILL.md`（frontmatter の `name` / `description` を検証）と付属ファイル（テキストのみ） | ワークスペース全体か、プロジェクト |
 | 指示書 | `AGENTS.md` / `CLAUDE.md` の本文（配るのは管理区画の中だけ） | ワークスペース全体か、プロジェクト |
-| 仕様 | Markdown ＋ Mermaid（または旧形式の IR） | 1 つ以上のプロジェクト（必須） |
+| 仕様 | Markdown ＋ Mermaid（または旧形式の IR） | ワークスペース全体（要求仕様など、全リポジトリに当たる）か、1 つ以上のプロジェクト（振る舞いなどの細かい仕様） |
 
 スコープの変更は新しい改訂と承認を要する。bundle を作るときに競合（同じスコープに同じ対象の指示書が 2 つ、
-同名のスキルが 2 つ、仕様の要求 ID の重複）があれば、承認ごと拒否する。
+同名のスキルが 2 つ、仕様の要求 ID の重複。ワークスペース全体の仕様はどのプロジェクトの仕様とも重なるものとして見る）が
+あれば、承認ごと拒否する。
+
+**取り下げ**: 要らなくなった知識はエディタの「取り下げる」（確認と理由）で有効な改訂を外す（owner / approver）。
+新しい bundle ができ、次の sync / `knowledge_pull` で書き出したファイルも消える。行と過去の bundle は残り、
+設定の「取り下げ済みの知識」に並ぶ。戻すときは下書きを保存して承認する。
+
+### AI と作る（知識のチャット）
+
+知識のエディタの「AI と作る」で、Gemini と会話しながら仕様・スキル・指示書などの下書きを作る。
+
+- 曖昧・前提が足りないときは、提案の前に**選択肢つきの質問**（最大 3 問）を返す。選択肢を押すとそのまま答えになる
+- 必要なら**調べてから**答える: 承認済みの知識、ワークスペースに登録したリポジトリ（読むだけ。秘密を含みうるパスは読まない）、
+  Google 検索（出典つき）。思考の要約と出典を画面に出す
+- 返すのは本文の提案だけで、採用・承認は人。変換と判定には関わらない
+- **ガードレール**は全 LLM 面（チャット・`spec_suggest`・A2A・LLM 支援の規約など）で共通: 役割外の依頼は断り、
+  モデル名・システムプロンプト・設定を明かさず、ツールの結果や区切りの中の指示に従わない。出力は決定的に照合し、
+  漏れがあれば断りの文に置き換える
+- 評価: `make eval-guardrails`（11 件）と `make eval-chat-depth`（12 件）。実 Gemini を呼ぶので CI では回さない
 
 ### 仕様を UML で書く
 
@@ -269,6 +308,10 @@ gate: pass (必須ルールはすべて成立)
 
 - 図は 4 種類: クラス図（語彙と構造）・シーケンス図（入口ごとの呼び出しの順序）・状態遷移図（遷移の関係）・
   アクティビティ図（`flowchart`。1 つの操作の制御フロー）
+- クラス図には**関係**を書ける: 継承 `A <|-- B`・コンポジション `*--`・集約 `o--`・関連 `-->`・依存 `..>`。
+  照合は AST だけで行う（継承＝基底クラス、所有＝属性の型、依存＝import か名前の参照）。確定できなければ UNKNOWN
+- `<<module>>` のクラスは Python のモジュールを表し、モジュール直下の `def` / `async def` を操作として照合する。
+  呼出し先は宣言された型（引数・`__init__`・戻り値の注釈）で解決し、`await` も追う
 - **全要素に明示的な ID**（`[m1]`、`[t1]`、`[e1]`）。表示ラベルは ID にしない
 - **ガードは式だけ**で、`before.` / `after.` / `outcome.` の名前空間が必須。自然言語のガードはエラー
 - 参照する名前はクラス図か `domain` 節に宣言する（用語集に無い言葉は黙って通さない）
@@ -318,6 +361,11 @@ sequenceDiagram
 要求の表の `形式化` は `図ID#要素ID` か `ir:要求ID`（旧形式）。空か `-` の行は**未形式化**として残り、
 可観測性の形式化率に出る（判定ではなく追跡に使う）。
 
+ワークスペース全体の仕様は全リポジトリに当たるが、図が別のリポジトリの話であることもある。そこで run は、
+全体の仕様の**図ごと**に、要素がそのリポジトリに 1 つも無ければ**対象外**にする（義務を出さず、manifest と集計に残す）。
+抜け道を塞ぐ安全柵として、base（デフォルトブランチ）では対象だった図が head で対象外になったら要確認にする
+（必須の図ならゲートを止める。base の判定が無いときも同じ）。
+
 同じ本文と同じ parser の版からは、必ず同じ IR とハッシュが出る（LLM・ネットワーク・時刻に依存しない）。
 `parse(render(parse(s))) == parse(s)` を性質テストで保証し、承認者は原文と正規形を並べて見て承認する。
 エディタの「AI の提案」は本文の差分を出すだけで、採用するかは人が決め、変換には関与しない。
@@ -325,7 +373,8 @@ sequenceDiagram
 ### 旧形式の仕様を取り込む
 
 Git の `specs/*.md` と `specs/ir/*.spec-ir.json`（Spec IR v0.1）、`.speclino/domain.yaml` は、そのまま
-仕様の下書きとして取り込める。IR は失われない（図への書き換えは自動ではしない）。
+仕様の下書きとして取り込める。IR は失われない（図への書き換えは自動ではしない）。このリポジトリ自身の旧形式の
+仕様 4 本は、UML で書いた俯瞰の仕様 7 本に置き換えて取り下げ、`specs/SPEC-*.md`・`specs/ir` も消した。
 
 ```sh
 uv run speclino import-specs --workspace <slug> --project-id <id> --author <uid> --repo <dir>
@@ -373,8 +422,8 @@ PR でこれらを変えると、判定は変更前の内容で行い、必須�
 
 ### `speclino sync` と lock
 
-設定 → 「sync トークン」で、プロジェクト限定・読み取り専用のトークン（`slsync_…`）を発行する
-（発行・失効は owner / approver）。トークンは環境変数だけで渡す（引数・lock・ログには出さない）。
+設定 → 「エージェント接続」→「リポジトリ同期（speclino sync）」で、プロジェクト限定・読み取り専用の
+リポジトリ同期トークン（`slsync_…`）を発行する（発行・失効は owner / approver）。トークンは環境変数だけで渡す（引数・lock・ログには出さない）。
 
 ```sh
 export SPECLINO_SYNC_TOKEN=slsync_...
@@ -395,12 +444,17 @@ lock の意味は「この checkout が宣言している bundle」で、**利�
 ### MCP / A2A / Claude Code プラグイン
 
 - **MCP**（`/mcp`）: `context_get`（規約）、`spec_get` / `skill_get`、`sync_status`（lock が最新か）、`spec_suggest`
-  （仕様の書き換えの提案）、`verification_start` / `verification_get`。読み取り系は sync トークンでも呼べ、
-  検査の開始はワークスペースの MCP トークン（`slmcp_…`、設定 → トークンで owner が発行）に限る
+  （仕様の書き換えの提案）、`knowledge_pull`（取り込みの計画）、`verification_start` / `verification_get`。読み取り系は
+  リポジトリ同期トークンでも呼べ、検査の開始はエージェント接続トークン（`slmcp_…`、設定 →「エージェント接続」で owner が発行）に限る
+- **エージェントの取り込み**: 人は承認するだけで、手元への書き出しはエージェントが行う。`sync_status` で lock の鮮度を
+  確かめ、`pull_needed` なら `knowledge_pull` が返す署名つきの計画（`plan_url`、1 回だけ・10 分で失効）を、サーバが配る
+  実行スクリプト（`apply_script` の URL と sha256）に渡して当て、lock ごと作業の PR にコミットする（スキル
+  `speclino-knowledge-sync`）。書き出し先はクライアントの名乗りで決まる（Claude Code は `.claude/skills`、それ以外は
+  `.agents/skills`。CLAUDE.md があれば管理区画に `@AGENTS.md` の橋を書く）
 - **A2A**（`/a2a`、Agent Card は `/.well-known/agent-card.json`）: 仕様のレビュー・要求の相談・仕様の下書きの相談・
   検査の後の聞き取り。返すのは提案だけで、判定も承認もしない。`uv run speclino a2a-send --help` が最小のクライアント
   （サーバ側は `SPECLINO_A2A_ENABLED=true`）
-- **Claude Code プラグイン**: [`plugins/speclino/`](plugins/speclino/) が Skill（仕様の書き方・結果の読み方・sync）と
+- **Claude Code プラグイン**: [`plugins/speclino/`](plugins/speclino/) が Skill（仕様の書き方・知識の取り込み）と
   MCP 接続を配る。`claude plugin marketplace add <owner>/<repo>` → `claude plugin install speclino@speclino`。
   接続先とトークンは `SPECLINO_MCP_URL` / `SPECLINO_MCP_TOKEN` の環境変数で渡し、`.claude/settings.json` に書かない
 
@@ -508,7 +562,7 @@ PR コメント・Approve の承認者は GitHub のユーザー ID で照合す
 
 ## 可観測性
 
-上部の「可観測性」（`/w/<slug>/observability`）。表示はサーバの集計 1 つから作り、画面ごとに数え直さない。
+「観測」の画面（`/w/<slug>/observability`）。表示はサーバの集計 1 つから作り、画面ごとに数え直さない。
 数えるものが無い指標は 0 ではなく「未計測」と出す。
 
 | 指標 | 見るもの |
@@ -526,11 +580,11 @@ PR コメント・Approve の承認者は GitHub のユーザー ID で照合す
 
 ```yaml
 # 警告のみ（ゲート失敗でも終了コード 0。入力不正・実行不能のときだけ 2）
-- run: uv run speclino check --repo . --head WORKTREE --out build/review
+- run: uv run speclino check --repo . --head WORKTREE --specs-dir .speclino/specs --out build/review
 
 # 必須（必須ルールに未検証が残れば失敗）
 - run: >-
-    uv run speclino check --repo . --head WORKTREE --out build/self-check
+    uv run speclino check --repo . --head WORKTREE --specs-dir .speclino/specs --out build/self-check
     --fail-on VIOLATED --fail-on UNKNOWN --fail-on REVIEW --blocking
 ```
 
@@ -548,7 +602,9 @@ CLI 側を残しているのは、**GCP を畳んだ後でも / clone した人�
 SpecLino は自分自身のコードを自分の仕様で検査する。CI が落ちれば自分の規約違反を自分で見つけた
 ということ。
 
-仕様の正本は SpecLino（ワークスペース）にある。CI の self-check ジョブ（`make selfcheck`）は、承認済みの
+仕様の正本は SpecLino（ワークスペース）にある。このリポジトリの仕様は、UML で書いた**俯瞰の仕様 7 本**
+（`spec-sys-001` はワークスペース全体、`spec-ai-001`・`spec-gate-002`・`spec-know-001`・`spec-obs-001`・
+`spec-sync-001`・`spec-ws-001` は spec-lino に当たる）。CI の self-check ジョブ（`make selfcheck`）は、承認済みの
 仕様を `speclino sync`（または MCP の `knowledge_pull`）で書き出した `.speclino/specs/*.md` を手元の
 parser で変換し、bundle の run と同じ UML の義務の検査に通す（`speclino check --specs-dir .speclino/specs`。
 LLM・DB・GitHub App を使わない）。UML の要求を持たない仕様（旧形式の本文だけのもの）は、IR が手元に
@@ -616,6 +672,8 @@ CI-001（pull_request トリガー・必須ステップ・読取り専用権限�
 - トレース取り込み（`trace_importer`）と増分解析は正規化 JSON の契約までで、実装は Stretch
 - **UML の検査は Python の静的な経路との照合**。実行トレースとの照合、`loop` の回数の義務、非同期メッセージ、`par` は
   対象外。構造・順序の検査は Python だけ（OpenAPI による規約の検査は言語に依存しない）
+- クラス図の関係は多重度とラベルの文を見ない。所有・依存は静的に確定できるもの（注釈・import・名前の参照）だけで、
+  再束縛・動的な定義・解決できないデコレーターは UNKNOWN
 - 状態遷移図は bindings の全 behavior の経路で検査する。属性への代入が対応に 1 つも無ければ UNKNOWN
 - 可観測性の UNKNOWN の内訳と対応率は、検査器の決まった言い回しで分類した推定。合わないものは「その他」に入る。
   LLM 支援の記録の再利用率は、並行した run の分を外れに数えるので低めに出る
@@ -629,6 +687,8 @@ make lint            # ruff（静的検査・書式）
 make typecheck       # mypy strict
 make check           # lint + typecheck + test + selfcheck をまとめて
 make eval            # Golden 評価
+make eval-guardrails # LLM のガードレール（実 Gemini。CI では回さない）
+make eval-chat-depth # 知識のチャットの深掘り（実 Gemini。CI では回さない）
 make schemas         # domain/ の pydantic モデルから schemas/*.schema.json
 make diagrams        # design/*.mmd から png・svg
 scripts/story.sh board   # 進捗（GitHub Projects）
@@ -643,6 +703,7 @@ scripts/story.sh board   # 進捗（GitHub Projects）
 | --- | --- |
 | デモ URL | TODO（提出前に記載） |
 | テストアカウント | 提出フォームにだけ記載（メール / パスワード。ソーシャルログイン不要）。リポジトリには置かない |
+| デモ PR（12/1 まで open） | [#47](https://github.com/tanabe-yudai/spec-lino/pull/47) デモ1: テストは緑でもゲートの図に違反（反例つき）／[#45](https://github.com/tanabe-yudai/spec-lino/pull/45) デモ3: 仕様の写しを消しても lock の照合で止まる／[#46](https://github.com/tanabe-yudai/spec-lino/pull/46) デモ4: 解析できないループは UNKNOWN でゲート失敗 |
 | デモ動画 | TODO（提出前に記載）。台本は [docs/submission/video-script.md](docs/submission/video-script.md) |
 | Zenn 記事 | TODO（提出前に記載）。下書きは [docs/submission/zenn-draft.md](docs/submission/zenn-draft.md) |
 | 提出フォームの回答 | [docs/submission/form.md](docs/submission/form.md) |
@@ -650,22 +711,30 @@ scripts/story.sh board   # 進捗（GitHub Projects）
 ### 12/1 までデプロイを維持する予算計画
 
 費用の大きい順に、構成と上限を Terraform（`infra/envs/prod/`）とアプリの設定で固定している。
+単価は 2026-10-13 に公式の料金ページ（[Cloud Run](https://cloud.google.com/run/pricing)・
+[Cloud SQL](https://cloud.google.com/sql/pricing)）で確かめた USD の表示価格。東京（asia-northeast1）の
+Cloud SQL の単価は公式ページの静的な表で確かめられなかったので**概算**。
 
-| 項目 | 構成（正本） | 費用の見込み | 上限・止め方 |
+| 項目 | 構成（正本） | 費用の見込み（月） | 上限・止め方 |
 | --- | --- | --- | --- |
-| Cloud Run web | 1 vCPU・1 GiB、**min 1**（起動待ちを避ける）、max 2（`run.tf`） | 待機で月 $13 程度（`run.tf` の注記） | max-instances=2 |
-| Cloud Run worker / sandbox | min 0、max 2。sandbox は同時実行 1 | 実行した分だけ。TODO（実績で更新） | Cloud Tasks のキュー、max-instances=2 |
-| Cloud SQL | `db-f1-micro`・HDD 10GB・ゾーン・バックアップなし（`guides/deploy-runbook.md`） | TODO（請求の実績で記入） | 常時起動。止めるとサービスが止まる |
-| Vertex AI（Gemini） | エージェント・仕様の提案・LLM 支援の規約・A2A | 日次の上限まで | `SPECLINO_DAILY_COST_LIMIT_USD`（既定 $3/日、全用途で共有）。超えたら起動しない。LLM 支援は記録を再利用し、同じコードでは呼ばない |
+| Cloud Run web | 1 vCPU・1 GiB、**min 1**（起動待ちを避ける）、max 2（`run.tf`） | **約 $13**: 待機（idle の最小インスタンス）は東京も Tier 1 で vCPU $0.0000025/秒・メモリ $0.0000025/GiB 秒 → 1 vCPU＋1 GiB × 30 日 = $12.96。リクエストを処理した時間は別（数ドル以内の見込み、無料枠あり） | max-instances=2 |
+| Cloud Run worker / sandbox | min 0、max 2。sandbox は同時実行 1 | 実行した分だけ（待機の費用なし） | Cloud Tasks のキュー、max-instances=2 |
+| Cloud SQL | `db-f1-micro`・HDD 10GB・ゾーン・バックアップなし（`guides/deploy-runbook.md` の 4 章。Terraform 外） | **約 $11（概算）**: インスタンスは us-central1 で $0.0105/時（≒ $7.7）、東京は約 $10。HDD は us-central1 で $0.000123288/GiB 時 × 10GB ≒ $0.9 | 常時起動。止めるとサービスが止まる |
+| Vertex AI（Gemini） | 知識のチャット・仕様の提案・LLM 支援の規約・調査エージェント・A2A | 日次の上限まで（最大 $3 × 日数） | `SPECLINO_DAILY_COST_LIMIT_USD`（既定 $3/日、全用途で共有）。超えたら起動しない。LLM 支援は記録を再利用し、同じコードでは呼ばない |
 | 再実行 | 画面からの再検査 | 上の LLM の枠に含む | `SPECLINO_DEMO_RERUN_LIMIT_PER_DAY`（既定 20 回/日） |
-| GCS・Cloud Tasks・Logging・Secret Manager | 既定の構成 | 少額。TODO（実績で更新） | — |
+| GCS・Cloud Tasks・Logging・Secret Manager・Artifact Registry | 既定の構成 | 数ドル以内（概算。Artifact Registry はイメージが溜まるほど増える） | 古いイメージを消す |
 
-- **予算アラート**: `budget.tf` で予算（既定 45,000 円 ≒ $300）の 17% / 33% / 67% / 100% に通知する（実際の支出ベース）
-- **見込み**: 固定費（web の待機と Cloud SQL）が月 TODO ドル、10/15〜12/1 の約 1.5 か月で TODO ドル。LLM は日次の上限 $3 で
-  最大でも約 $140（47 日）。合計がクーポン（$300）に収まることを TODO（10/14 時点の請求で確認）
+- **予算アラート**: `budget.tf` で予算（既定 45,000 円 ≒ $300）の 17% / 33% / 67% / 100%（≒ $50 / $100 / $200 / $300）に
+  通知する（実際の支出ベース）
+- **見込み**: 固定費（web の待機と Cloud SQL）は**月約 $24**、10/15〜12/1（47 日）で**約 $38**。その他の少額を足しても
+  $45 前後。LLM は日次の上限 $3 で最大 **$141**（47 日）。合わせて**最大でも約 $190**で、クーポン（$300）の残りに収まる見込み。
+  ただし 9/28 からの実績（開発中の LLM・検査）がすでにクーポンを使っているので、10/14 時点の請求で残額を確かめる
+- **クーポンの期限に注意**: $300 のクーポンは 2026-09-28 頃に登録し、有効期間は 2 か月。**11 月下旬に切れ、12/1 より前に
+  切れる可能性がある**。切れた後の支出は課金アカウントに請求される（固定費だけなら数日で数ドル）。期限の正確な日付は
+  請求の画面で確かめる
 - **超えそうなとき**: (1) `SPECLINO_AGENT_ENABLED` / `SPECLINO_LLM_POLICIES_ENABLED` / `SPECLINO_SPEC_BOT_ENABLED` を false にする
   （LLM 支援の規約は UNKNOWN になり、ゲートは安全側に倒れる）、(2) 日次の上限を下げる、(3) web の min-instances を 0 に戻す
-  （起動待ちが 12〜21 秒に戻る）。判定と画面は LLM 無しでも動く
+  （月 $13 減る代わりに、起動待ちが 12〜21 秒に戻る）。判定と画面は LLM 無しでも動く
 - 12/1 以降に畳むときは [guides/deploy-runbook.md](guides/deploy-runbook.md) の手順で Cloud SQL を先に止める。
   CLI の自己検証は GCP が無くても回る
 

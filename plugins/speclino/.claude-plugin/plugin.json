@@ -1,5 +1,5 @@
 {
   "name": "speclino",
-  "description": "SpecLino: 仕様とコードの意味差分を Z3 で検査する MCP サーバーと、使い方を教える Skill。",
-  "version": "0.2.0"
+  "description": "SpecLino: チームが承認した知識（規約・スキル・指示書・仕様）を取り込み、仕様とコードの照合を検査する MCP 接続と、Skill（仕様の書き方 speclino-spec-authoring・知識の取り込み speclino-knowledge-sync）。",
+  "version": "0.2.1"
 }

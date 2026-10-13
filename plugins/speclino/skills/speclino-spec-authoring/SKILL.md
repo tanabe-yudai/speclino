@@ -1,21 +1,20 @@
 ---
 name: speclino-spec-authoring
-description: SpecLino で検査できる仕様（specs/*.md と Spec IR）を書き、候補を抽出し、検証して承認に回すまでの手順と、実装前にチーム規約を読む手順。仕様の追加・変更、承認済み仕様に沿った実装、要求 ID の付け方、Spec IR の語彙、チーム規約、検証結果（VIOLATED / UNKNOWN / REVIEW）の読み方が必要なときに使う。
+description: SpecLino で検査できる仕様（Markdown と厳格な UML）を書き、承認済みの仕様と規約に沿って実装し、検査の結果（VIOLATED / UNKNOWN / REVIEW）を読む手順。仕様の追加・変更の下書き、要求 ID と図の要素 ID の付け方、チーム規約の読み方、ゲートの要確認の確定の仕方が必要なときに使う。
 ---
 
 # SpecLino の仕様を書く
 
 <!-- mcp-instructions:start -->
-SpecLino は「仕様（Spec IR）」と「コード（Code IR）」を Z3 で突き合わせ、要求ごとに
-VERIFIED_IN_SCOPE / VIOLATED / UNKNOWN / REVIEW の 4 値を出す。実装の前に `context_get` で
-語彙・既存の要求・チーム規約を読み、`verification_start` で検証を開始し、`verification_get` で
-結果を読む。LLM（あなた）は証拠を集め候補を書くだけで、判定も承認もしない。判定はエンジンだけが
-行う（verdict を書き換える手段は無い）。承認は人が PR コメントで行う（`/speclino approve-spec`）。
-承認済みの判定は書き換えない。チームが承認したスキル・指示書・仕様は `skill_get` / `spec_get`
-で読む。作業の前に `sync_status` で手元の `.speclino/lock.json` の鮮度を確かめ、`pull_needed` なら
-`knowledge_pull` が返す最新の実行スクリプト（`apply_script`）に `--plan-url` を渡して当て、lock ごと作業の
-PR にコミットする
-（手順はスキル `speclino-knowledge-sync`。ファイルや lock を手で書かない）。
+SpecLino はチームの知識（規約・スキル・指示書・仕様）を承認済みの bundle として配り、仕様（Markdown と
+UML）とコードを Z3 で照合して VERIFIED_IN_SCOPE / VIOLATED / UNKNOWN / REVIEW の 4 値を出す。
+作業の前に `sync_status` で `.speclino/lock.json` の鮮度を確かめ、`pull_needed` なら `knowledge_pull` が返す
+実行スクリプト（`apply_script`）に `--plan-url` を渡して当て、lock ごと作業の PR にコミットする（手順はスキル
+`speclino-knowledge-sync`。ファイルや lock を手で書かない）。実装の前に `context_get` で規約を、`spec_get` /
+`skill_get` で承認済みの仕様・スキルを読む。検査は `verification_start` → `verification_get`。
+あなた（LLM）は証拠を集め提案を書くだけで、判定も承認もしない（verdict を書き換える手段は無い）。
+知識の承認は人が SpecLino の画面で行い、ゲートの要確認の確定は承認者が PR に `/speclino attest` と
+コメントするか PR を Approve する。
 <!-- mcp-instructions:end -->
 
 ## SpecLino エージェントに相談する（A2A）
@@ -30,7 +29,7 @@ PR にコミットする
   読み取りは、こちらで行う
 
 接続先は Agent Card（`https://<your-host>/.well-known/agent-card.json`、認証不要）に書いてある。
-`/a2a` への送信にはワークスペースの MCP トークン（`slmcp_…`）を Bearer で付ける。
+`/a2a` への送信にはエージェント接続トークン（`slmcp_…`。設定 → エージェント接続で owner が発行）を Bearer で付ける。
 
 スキルは、メッセージの本文の先頭に YAML front matter を書いて選ぶ（DataPart で
 `{"skill": ...}` を送れるクライアントはそれでもよい）。本文は front matter の後ろに続ける。
@@ -74,7 +73,7 @@ run_id: 00000000-0000-0000-0000-000000000000
 本文だけを送る。
 
 **補足は正式な回答ではない。** 聞き取りで記録した補足は判定にもゲートにも効かない。判定は
-検査器だけが行い、承認は人が PR で行う。
+検査器だけが行い、知識の承認は人が SpecLino の画面で、要確認の確定は承認者が PR で行う。
 
 ## チームの知識を取り込む（`knowledge_pull` / `speclino sync`）
 
@@ -114,87 +113,61 @@ MCP の `knowledge_pull` で計画の取得 URL と最新の実行スクリプ�
 SpecLino 側。MCP の `context_get(repo_full_name)` の `policies` を読んでから作業する。
 
 - `origin`: `team`（チームの承認済み改訂。`team_policy` に改訂番号）か `project`（`.speclino/policy/` の追加規約）
-- `level`: `mandatory` は違反・未検証があるとゲートが落ちる。`advisory` は警告
-- `verifier`: `null` の規約は機械検証されない（助言のみ）。検査で落ちなくても守る対象であることは変わらない
+- `level`: `mandatory` は違反・未検証・要確認があるとゲートが落ちる。`advisory` は警告
+- `verifier`: `null` の規約は機械検証されない（助言のみ）。`llm.checklist` は LLM 支援で、判定は常に REVIEW
+  （人の確定まで必須ならゲートを止める）
 - `ignored_project_policies`: チーム規約と同じ id なので無視されたプロジェクト側の規約。チーム規約は
   プロジェクト側で上書き・無効化できない。免除が必要なら `.speclino/exceptions.yaml`（期限・承認者つき。
   `exceptions_allowed: false` の規約は免除できない）
 
-## 1. 語彙を先に読む
+## 1. 承認済みの仕様を読む
 
-仕様で使ってよい名前は `.speclino/domain.yaml`（変数・列挙・opaque 型）と
-`.speclino/bindings.yaml`（振る舞い `behaviors` と操作 `operations`）に宣言されたものだけ。
-MCP が使えるなら `context_get(repo_full_name)` で同じ内容と既存の要求一覧が取れる。
+仕様の正本は SpecLino の bundle にある。リポジトリの `.speclino/specs/<name>.md` は sync で書き出した
+読み取り専用の写しで、ゲートは写しではなく bundle の仕様で検査する（写しを直すと lock の照合で UNKNOWN）。
+本文は `spec_get(repo_full_name, name)` で読む。仕様にはワークスペース全体のもの（要求仕様など、全リポジトリに
+当たる）とリポジトリ別のもの（振る舞いなど）がある。
 
-- 変数参照: `before.<変数>`（入口の値）、`after.<変数>`（終了時の値）、`outcome.status`（HTTP 状態）
-- 列挙値は宣言された値だけ（例 `OrderStatus.PENDING`）。「未発送」のような自然言語で状態集合を作らない
-- 操作は `operations` のキー（例 `inventory_restore_command`）。コードのシンボル名は書かない
-- 語彙に無い概念が必要なら、仕様を近似せず domain / bindings への追加を提案する
+## 2. 仕様を書く（Markdown ＋ UML）
 
-## 2. Markdown を書く（SPEC-FMT-001）
+文法の正本は `src/speclino/spec/uml/grammar.md`（parser は決定的・全か無か）。要点:
 
-`specs/<名前>.md` に次の節を必ず置く。要求 ID は `### <ID>` 見出しで宣言し、重複させない。
+- 図は Mermaid の部分集合 4 種: クラス図（語彙・構造・関係）、シーケンス図（入口ごとの呼出しの順序）、
+  状態遷移図（遷移の関係）、アクティビティ図（`flowchart`。1 つの操作の制御フロー。`%%@ closed: true` のときだけ
+  図に無い処理を違反にする）
+- 各図の前に `%%@ id: <図 ID>`。シーケンス図・アクティビティ図は `%%@ entry: <クラス>.<メソッド>`、状態遷移図は
+  `%%@ attribute: <変数名>`（例 `order.status`）
+- **全要素に明示的な ID**（`[m1]`・`[t1]`・`[e1]`・関係は `A --> B : [r1] …`）。表示ラベルは ID にしない
+- **ガードは式だけ**で、`before.` / `after.` / `outcome.` の名前空間が必須。自然言語のガードはエラー
+- 参照する名前はクラス図か `domain` 節に宣言する。モジュール直下の関数は `<<module>>` のクラスの操作として書く
+- 対応しない構文（`par`・`critical`・`subgraph`・`Note` など）や読めないトークンが 1 つでもあれば全体がエラー
+- 要求の表（`| ID | level | 要求 | 形式化 |`）の `形式化` に `図ID#要素ID` を書くと、その要素の義務の判定が要求に
+  結びつく。空か `-` は未形式化として追跡だけされる
+- 1 要求 = 1 判定単位。「適切に」「速やかに」は書かない。決められないことは観測境界に「未確定」と書く
 
-```markdown
----
-id: SPEC-XXX-001
-version: "1.0"
-owner: <担当>
----
+書いたら `spec_suggest(markdown, repo_full_name?)` で書き換えの提案と当てた後の診断を受けられる（IR は返さない。
+提案は人に見せて 1 件ずつ採否を決める）。仕様の追加・変更は SpecLino の画面（エディタの「AI と作る」を含む）で
+下書きを保存し、owner / approver が承認すると新しい bundle になる。**リポジトリのファイルを直しても承認にはならない。**
 
-# <対象の振る舞い>
-
-## 前提
-- 入口までに済んでいること、検査しないこと
-
-## 要求
-### R-XXX-01
-- 条件: `before.…` で書ける入口条件
-- 期待する結果: 状態（after）・応答（outcome）・操作の呼出し回数と引数
-
-## 観測境界
-- 何を観測して判定するか、何が対象外か（永続化・外部サービス内部など）
-```
-
-書き方の規則:
-
-- 1 要求 = 1 判定単位。「〜し、〜しない」は 2 つの要求に分ける（`R-X-01` と `R-X-01b`）
-- 条件は入口の値だけで書く（`before`）。期待する結果は終了時の値・応答・呼出し回数で書く
-- 「適切に」「速やかに」「必要に応じて」は書かない。決められないなら前提か観測境界に「未確定」と明記する
-- 拒否経路の「〜しない」は回数 0 の要求として明示する（open-world では未記載の呼出しは REVIEW 止まり）
-
-## 3. Spec IR の候補を作る
+## 3. 検査して読む
 
 ```sh
-speclino spec-extract --spec specs/<名前>.md --behavior <behaviors のキー> \
-  --project . --out specs/ir/<名前>.spec-ir.json
+speclino check --repo . --head WORKTREE --specs-dir .speclino/specs --out build/review   # ローカル（LLM・DB なし）
 ```
 
-- 出力は候補（`approval_ref` 無し）。`W_AMBIGUOUS`（曖昧語）と `W_UNEXTRACTED`（語彙で表せない要求）は
-  本文を直すか語彙を足して解消する。`E_REF_UNDEFINED` 等の error が残る候補は承認できない
-- 手で書く／直すときは `schemas/spec-ir.schema.json` に従う。式は JSON の木（`ref` / `const` /
-  `not` / `and` / `or` / `eq` / `ne` / `lt` / `le` / `gt` / `ge` / `add` / `sub`）で、Python の式文字列は書かない
-- 呼出しの要求は `event_requirement`（`event_kind: call`, `phase: invoked`, `count: {operator, value}`,
-  必要なら `arguments_equal`）。状態・応答は `expression`
+MCP なら `verification_start(repo_full_name, head_sha, base_sha)` → `verification_get(run_id)`（bundle の仕様で検査する）。
 
-## 4. 検証して読む
+- `VIOLATED`: 反例（条件と実装の観測）が付く。仕様が正しいならコードを直す。仕様が古いなら画面で改訂して承認を通す
+- `UNKNOWN`: 対応外の構文（要素数が静的に分からないループ、`getattr` など）・対応の見つからない操作・契約の無い外部呼出し・
+  上限・lock の不整合。Finding の `next_steps` の具体策を行う。UNKNOWN は確定でも免除でも通らない（フェイルクローズ）
+- `REVIEW`: LLM 支援の規約、bindings・契約・免除・プロジェクト規約の変更（`KNOWLEDGE-BINDINGS-001`）、lock が古い、
+  全体の仕様の図が head で対象外になった、など。人の確定が要る
 
-```sh
-speclino check --repo . --head WORKTREE --out build/review   # ローカル
-speclino check --repo . --base main --head HEAD --out build/review  # base との意味差分も出す
-```
+## 4. 確定（人が行う）
 
-MCP なら `verification_start(repo_full_name, head_sha, base_sha)` → `verification_get(run_id)`。
+ゲートの要確認は、プロジェクトの承認者（GitHub のユーザー ID で照合）が PR に引数なしの `/speclino attest` と
+コメントするか、PR を Approve すると、その PR の最新の検査の分がまとめて確定する（最新のコミットの検査が完了している
+ときだけ）。1 件ずつ・問題として記録する（`ack`）ときは `/speclino attest <指紋> <sha256:…> [ack]`（形はゲートの
+コメントの根拠に出る）。確定は verdict を書き換えず、内容のハッシュに結びつく。
 
-- `VIOLATED`: 反例（条件と実装の観測）が付く。仕様が正しいならコードを直す。仕様が古いなら本文を直して再承認
-- `UNKNOWN`: 対応外の構文・契約の無い外部呼出し・上限。Finding の `next_steps` にある具体策
-  （契約の登録、構文の単純化、テストの宣言）を行う。UNKNOWN のまま通過はしない（フェイルクローズ）
-- `REVIEW`: 未承認の解釈、削除された要求、近似された経路、仕様に無い操作の呼出し。人の確認が要る
-- `semantic-diff.json` / review.md の「意味差分」で、この変更が新規違反・解消・判定不能化のどれを
-  起こしたかを見る
-
-## 5. 承認
-
-Spec IR の追加・変更は PR で行い、承認者が PR コメントで `/speclino approve-spec <sha256:…>` を書く
-（ハッシュは Check の指摘に出る）。削除は `/speclino approve-spec removed:<sha256:…>`。
-デフォルトブランチにマージ済みの要求は base 由来として自動的に承認済み扱いになる。
+`/speclino approve-spec <sha256:…>` は、リポジトリの `specs/ir` に置く旧形式の Spec IR の要求を PR で承認するための
+コマンドで、今も使えるが旧形式専用。UML の仕様の承認には使わない（画面で承認する）。
