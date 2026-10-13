@@ -114,13 +114,16 @@ cloudflared tunnel --url http://localhost:8080
 export SPECLINO_GITHUB_APP_ID=<App ID>
 export SPECLINO_GITHUB_PRIVATE_KEY_PATH=$HOME/.secrets/speclino-dev.pem
 export SPECLINO_GITHUB_WEBHOOK_SECRET=<作成時の secret>
-export SPECLINO_APPROVERS='["<自分の GitHub ログイン>"]'
 export SPECLINO_PUBLIC_URL=https://xxxx.trycloudflare.com
 export SPECLINO_AGENT_ENABLED=false   # まず静的判定だけで確認する（費用ゼロ）
 
 # 3) DB とサーバー
 make db-up && make db-migrate && make dev
 ```
+
+PR の上での承認者（`/speclino approve-spec`・`/speclino attest`・PR の Approve）は環境変数ではなく、プロジェクトごとに
+画面の「設定」→「プロジェクト」の「仕様の承認者（GitHub のログイン名）」で保存する（保存時に GitHub のユーザー ID を引き、
+照合は ID で行う）。
 
 秘密鍵と secret は **リポジトリに入れない**（`*.pem` と `.env` は `.gitignore` 済み。CI の gitleaks でも検査する）。
 
@@ -177,4 +180,4 @@ gh pr create --fill
 | Webhook が 401 | `SPECLINO_GITHUB_WEBHOOK_SECRET` が App の secret と違う。App の Advanced → Recent Deliveries で本文と署名を確認する |
 | Check が作られない | インストール先にリポジトリが含まれていない、または Checks 権限が Read-only。権限を変えたら **インストール側で承認**が要る |
 | `installation token` の取得に失敗 | App ID と秘密鍵の組が違う。`.pem` は改行を含めてそのまま渡す |
-| コマンド（`/speclino ...`）が無視される | `SPECLINO_APPROVERS` に自分のログインが無い。承認者はサーバー側設定でのみ決まる |
+| コマンド（`/speclino ...`）・Approve が無視される | プロジェクトの「仕様の承認者」に自分がいない、または GitHub のユーザー ID が未登録（画面で保存し直す）。承認者はサーバー側の設定でのみ決まる。`attest` は最新のコミットの検査が完了していないと何もしない（理由は Recent Deliveries の応答と監査 `attestation.bulk`） |

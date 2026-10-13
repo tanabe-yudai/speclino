@@ -1,4 +1,8 @@
-# チームの知識レジストリ: 3 分の通し手順
+# チームの知識レジストリ: 3 分の通し手順（ローカル）
+
+この手順は手元で DB から作り直して通すもの（題材 `examples/shop`）。本番のデモ（このリポジトリ自身の仕様と
+デモ PR #47・#45・#46）の見せ方は [docs/submission/video-script.md](submission/video-script.md) と
+[docs/submission/form.md](submission/form.md) を参照。
 
 題材は `examples/shop`（注文の確定・出荷・取消）。仕様は Mermaid の UML（クラス・シーケンス・状態遷移・
 アクティビティ）で書き、SpecLino が決定的に IR へ変換して、PR のコードを 4 値（VERIFIED_IN_SCOPE /
@@ -43,11 +47,12 @@ export SPECLINO_LLM_POLICIES_MODEL=scripted-checklist SPECLINO_AGENT_ENABLED=fal
 uv run uvicorn speclino.api.app:app --port 8080
 ```
 
-ブラウザで `http://localhost:8080/login` →「開発モードで入る」。
+ブラウザで `http://localhost:8080/login` →「開発用ログイン」。ワークスペース `shop-team` のホーム
+（`/w/shop-team`）に入り、「やること」に承認待ち・ゲートが失敗の PR・知識が古いリポジトリが並ぶ。
 
 ## 1. 仕様を書く（0:00–1:00）
 
-「仕様」→ `shop`。今の bundle は世代 4（仕様・skill・指示・規約の 4 回の承認）。
+上部の「仕様」（`/w/shop-team/specs`）→「リポジトリ別の仕様」の `shop`。今の bundle は世代 4（仕様・skill・指示・規約の 4 回の承認）。
 
 ![知識の一覧](screenshots/knowledge-list.png)
 
@@ -57,7 +62,7 @@ uv run uvicorn speclino.api.app:app --port 8080
 
 ![ガードの誤りの診断](screenshots/knowledge-spec-diagnostic.png)
 
-元に戻すと診断は 0 件になり、「図」のタブで 4 つの図がすべて描ける（Mermaid そのもので描くので、
+元に戻すと診断は 0 件になり、図のプレビューで 4 つの図がすべて描ける（Mermaid そのもので描くので、
 GitHub でも同じ図が見える）。アクティビティ図の辺のラベルは `-->|"[e2] guard"|` と引用符で囲む。
 
 ![図のプレビュー](screenshots/knowledge-spec-preview.png)
@@ -69,7 +74,7 @@ GitHub でも同じ図が見える）。アクティビティ図の辺のラベ�
 
 ## 2. skill と指示（1:00–1:20）
 
-「スキル」→ `shop-error-format`。`SKILL.md` と付属ファイルを同じ承認の流れで管理する。
+「スキル」（スマホでは「その他」→「スキル」）→ `shop-error-format`。`SKILL.md` と付属ファイルを同じ承認の流れで管理する。
 `speclino sync` は `.claude/skills/` と `.agents/skills/`、`AGENTS.md` の管理区画、`.speclino/specs/` に書き出し、
 署名つきの `.speclino/lock.json` を置く（`build/shop-repo` の main には seed が sync した結果が入っている）。
 
@@ -78,7 +83,8 @@ GitHub でも同じ図が見える）。アクティビティ図の辺のラベ�
 ## 3. PR を検査する（1:20–2:30）
 
 `build/shop-repo` の `pr/<変異>` ブランチが PR。変異は `examples/shop/mutations/*.patch`（README に一覧）。
-seed が検査済みなので、プロジェクトの画面か `/runs/<id>`（seed の出力）で開く。
+seed が検査済みなので、「検査」（`/w/shop-team/runs`）の一覧か、プロジェクトの画面の「検査」タブから開く
+（seed の出力の `/runs/<id>` も `/w/shop-team/runs/<id>` に転送される）。
 
 | PR | 変異 | 判定 |
 | --- | --- | --- |
@@ -94,7 +100,9 @@ PR #1: 反例（`before.order.status = PENDING`、在庫と数量）と、どの
 
 ![VIOLATED と反例](screenshots/knowledge-run-violated.png)
 
-PR #6: bindings の変更は PR の head からは読まない。確定は PR コメントで行う（PR の作成者と照合するため）。
+PR #6: bindings の変更は PR の head からは読まない。確定は GitHub 側で行う（承認者を GitHub のユーザー ID で照合するため）:
+承認者が PR に引数なしの `/speclino attest` とコメントするか、PR を Approve すると、その PR の最新の検査の要確認を
+まとめて確定する（ローカルの `example/shop` には GitHub が無いので、この画面では案内だけを見る）。
 
 ![bindings の変更の REVIEW](screenshots/knowledge-run-bindings-review.png)
 
@@ -112,9 +120,9 @@ PR #7: LLM 支援の規約は 3 回の評価の多数で「指摘あり」。ver
 
 ![確定済みの表示](screenshots/knowledge-run-recheck-attested.png)
 
-## 4. 可観測性（2:30–3:00）
+## 4. 観測（2:30–3:00）
 
-「可観測性」: 今の bundle の世代、リポジトリごとの形式化率（要求の表のうち図に結びついた割合、4/5）と
+上部の「観測」（`/w/shop-team/observability`）: 今の bundle の世代、リポジトリごとの形式化率（要求の表のうち図に結びついた割合、4/5）と
 検査の bundle の遅れ、規約ごとの推移、LLM 支援の安定度（指摘あり / なし / split、記録の当たり率、人の確定）。
 測っていないものは「未計測」と出す。
 

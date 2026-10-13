@@ -2,7 +2,7 @@
   "schema_version": "0.1",
   "workspace": "tanabe-yudai",
   "github_repo_id": 1380076715,
-  "bundle_generation": 29,
+  "bundle_generation": 31,
   "policy_revision": 2,
   "policy_hash": "sha256:a4eced43c42285e7bc020bef1548de6b03b05e27bb05b368993b9e5337fe778c",
   "members": [
@@ -14,18 +14,11 @@
       "content_hash": "sha256:c8ef0846cf493ffad333a50793228e3baa25a110f2297ae94d0927f701289076"
     },
     {
-      "artifact_id": "cb6371f4-5e7c-4757-951c-c28b9ce737a9",
-      "kind": "skill",
-      "name": "spec-write",
-      "revision": 2,
-      "content_hash": "sha256:9b60dabec044056b5a734b7eda1f8049a70809dcd7bf8efe754810ec5ad07d33"
-    },
-    {
       "artifact_id": "61c44e3d-a748-49c7-84a4-29ec7c65cc11",
       "kind": "skill",
       "name": "speclino-mcp-guide",
-      "revision": 1,
-      "content_hash": "sha256:84b4dcbceca45b5dc78fe52f73b5a1d5f92b615b6194fefd732739a5ca38daa1"
+      "revision": 2,
+      "content_hash": "sha256:addb48e222d1a30c15d3d91151e577a72aeb3d3206222474a225f48c79386cca"
     },
     {
       "artifact_id": "1c95f7fe-1576-4fcb-b3fb-005607e78045",
@@ -78,10 +71,8 @@
     }
   ],
   "files": {
-    ".agents/skills/speclino-mcp-guide/SKILL.md": "sha256:5b4d3d5019370d9bb72bf3371a8aa5d478bfbbf922c292ec6f636da20be6ac8b",
-    ".agents/skills/speclino-specification-guide/SKILL.md": "sha256:58a9152c863cb96964a724271fd631eb84f6ce8101fa6487f23c8a7035cfdcbf",
-    ".claude/skills/speclino-mcp-guide/SKILL.md": "sha256:5b4d3d5019370d9bb72bf3371a8aa5d478bfbbf922c292ec6f636da20be6ac8b",
-    ".claude/skills/speclino-specification-guide/SKILL.md": "sha256:58a9152c863cb96964a724271fd631eb84f6ce8101fa6487f23c8a7035cfdcbf",
+    ".agents/skills/speclino-mcp-guide/SKILL.md": "sha256:be670b2be6e278d9c1892bdcdd9a03cc9de8b2e0368bd713c2a49ae40204cd81",
+    ".claude/skills/speclino-mcp-guide/SKILL.md": "sha256:be670b2be6e278d9c1892bdcdd9a03cc9de8b2e0368bd713c2a49ae40204cd81",
     ".speclino/specs/spec-ai-001.md": "sha256:f958733ca86a868e2a7db5cddbfb21d022857a59b6a6490215bc9e8738fbd18d",
     ".speclino/specs/spec-gate-002.md": "sha256:71cd82fe66226e7f15da1154b56876ec03ac35edbc7ca58ea1e2a9bad0d9acc3",
     ".speclino/specs/spec-know-001.md": "sha256:e441cfd167b974b8584bfad4e9c488f024788a655361971d3e98d0fdb066c8c7",
@@ -91,13 +82,16 @@
     ".speclino/specs/spec-ws-001.md": "sha256:1136a89f918f1feb21664df03792d512cc0dee72959056c1320ab8f534830a8b",
     "AGENTS.md": "sha256:1af7f8077666cafcade7aadda7ac2f99ed82d9e6d95b29b9de7afbf8b4a8841e"
   },
-  "absent": [],
+  "absent": [
+    ".agents/skills/speclino-specification-guide/SKILL.md",
+    ".claude/skills/speclino-specification-guide/SKILL.md"
+  ],
   "skill_roots": [
     ".agents/skills",
     ".claude/skills"
   ],
-  "issued_at": "2026-10-12T13:04:06.713221Z",
-  "expires_at": "2026-11-11T13:04:06.713221Z",
+  "issued_at": "2026-10-13T06:48:45.406461Z",
+  "expires_at": "2026-11-12T06:48:45.406461Z",
   "key_id": "d2ca695a75fba22d",
-  "signature": "hmac-sha256:096324c75a8927ca5085badd4180dcd242bcc8275aeef361bb2b584ee811b432"
+  "signature": "hmac-sha256:916567bf6e9f7253a50956fdf910ca6dc5cef43268ecac892339556fe38b27c7"
 }

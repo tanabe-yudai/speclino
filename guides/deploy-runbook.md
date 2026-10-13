@@ -188,7 +188,7 @@ echo "WEBHOOK_SECRET=$WEBHOOK_SECRET"
 ```
 
 > MCP トークンはここでは作らない（S54 以降、静的トークンは廃止）。ワークスペースの owner が
-> UI（`/workspaces/<slug>/mcp-tokens`）から発行する。手順は「10. MCP トークン（S54）」を参照。
+> 画面の「設定」→「エージェント接続」（`/w/<slug>/settings/agents`）でエージェント接続トークンを発行する。手順は「10. MCP トークン（S54）」を参照。
 
 ### 3-2. GitHub App を作る（秘密鍵はここで生成される）
 
@@ -204,7 +204,8 @@ echo "WEBHOOK_SECRET=$WEBHOOK_SECRET"
 
 権限: Checks = Read and write / Contents = Read-only / **Issues = Read-only** /
 Pull requests = Read and write / Metadata = Read-only。
-イベント: Pull request・Issue comment・Check run・Check suite。
+イベント: Pull request・Pull request review・Issue comment・Check run・Check suite
+（Pull request review は PR の Approve で要確認をまとめて確定するのに使う。引数なしの `/speclino attest` のコメントだけなら不要）。
 
 > **先に権限を設定して保存する**。イベントの選択肢は選んだ権限で絞り込まれるため、
 > Checks を設定するまで Check run / Check suite は、Issues を設定するまで Issue comment は
@@ -348,7 +349,7 @@ done
 ```
 
 > ローカルが Apple Silicon なので `--platform linux/amd64` が要る（付け忘れると
-> Cloud Run が起動に失敗する）。build-arg を省くとログイン画面が「開発モードで入る」に
+> Cloud Run が起動に失敗する）。build-arg を省くとログイン画面が「開発用ログイン」に
 > なってしまうので、本番では必ず渡す。
 
 GitHub Actions から自動デプロイする場合は、リポジトリ変数に
@@ -418,7 +419,8 @@ SPECLINO_SMOKE_EMAIL=<email> SPECLINO_SMOKE_PASSWORD=<password> \
 ```
 
 その後 `guides/github-app-setup.md` に従って本番 GitHub App の Webhook URL を
-`$WEB_URL/webhooks/github` に設定し、デモ PR（`demos/README.md`）を作る。
+`$WEB_URL/webhooks/github` に設定し、デモ PR を作る（今のデモは #47・#45・#46。中身は各 PR の説明と
+`docs/submission/form.md`。`demos/` は旧い題材 `examples/orders` の変異の置き場で、今のデモ PR とは別）。
 
 ## 9. ワークスペースの初期設定（S53）
 
@@ -500,13 +502,18 @@ gcloud run jobs logs read speclino-admin --project=$P --region=$REGION --limit=5
 
 ### 9-6. PR コメントの承認者を設定する
 
-`/speclino approve-spec` を受け付ける GitHub ログイン名を project ごとに設定する（ワークスペースの
-approver ロールはチーム規約の承認用で、別物）。引数を省くと全員外す:
+PR の上での承認者（`/speclino approve-spec`・`/speclino attest`・PR の Approve による確定を受け付ける人）を
+project ごとに設定する（ワークスペースの approver ロールは画面での知識の承認用で、別物）。ふだんは画面の
+「設定」→「プロジェクト」の「仕様の承認者（GitHub のログイン名）」で owner / approver が保存する（保存すると
+worker が GitHub のユーザー ID を引き、照合は ID で行う）。Job から設定するとき（引数を省くと全員外す）:
 
 ```sh
 gcloud run jobs execute speclino-admin --project=$P --region=$REGION \
   --args=workspace,set-pr-approvers,<owner>/<repo>,<GitHub のログイン名> --wait
 ```
+
+ID の無い承認者は承認・確定できない（ログイン名では照合しない）。Job で設定したときは、`--args=workspace,backfill-approver-ids,--repo,<owner>/<repo>`
+で引いた ID を確かめてから `--yes` を足して保存するか、画面で保存し直す。
 
 他のワークスペース（自分とデモ以外）を作れるようにするのは S54（ワークスペース単位の MCP
 トークン）の後（design の切り替えの順序）。
@@ -527,8 +534,8 @@ UI から owner だけができる（design/2026-09-27-workspaces.md 8.1 節、�
    web → worker の呼び出しが 403 になり失敗する**（verification_start / verification_get は動く）。
    `mcp-token` の Secret 自体とアクセス権（`secret_accessors`）はロールバック期間が過ぎるまで残す
    （消すと secret が削除対象になり戻せなくなるため）
-3. **UI からトークンを発行する**: owner としてログインし、`$WEB_URL/workspaces/<slug>/mcp-tokens`
-   を開く。名前を付けて発行すると平文がその場に 1 回だけ表示される（画面を閉じると二度と見えない。
+3. **UI からトークンを発行する**: owner としてログインし、「設定」→「エージェント接続」
+   （`$WEB_URL/w/<slug>/settings/agents`）の「エージェント接続トークン」を開く。名前を付けて発行すると平文がその場に 1 回だけ表示される（画面を閉じると二度と見えない。
    紛失したら失効させて新しく発行し直す）
 4. **エディタの MCP 設定を差し替える**: Claude Code 等の MCP クライアント設定にある
    `Authorization: Bearer <旧 MCP_TOKEN>` を、3 で発行した値に置き換える
@@ -538,7 +545,7 @@ UI から owner だけができる（design/2026-09-27-workspaces.md 8.1 節、�
 
 ## 11. リポジトリの登録（S55）
 
-ワークスペースの owner が画面（ヘッダーの「リポジトリ」→ 追加）から登録する。GitHub で本人が admin で、
+ワークスペースの owner が画面（「設定」→「リポジトリ」→ 追加）から登録する。GitHub で本人が admin で、
 SpecLino の GitHub App がインストール済みであることを確かめてから登録する（`guides/github-app-setup.md` 1.1）。
 
 **順序**（値の無い secret を注入するとリビジョンが起動できないので 2 回に分ける）:
