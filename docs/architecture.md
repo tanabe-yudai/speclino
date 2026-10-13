@@ -2,6 +2,10 @@
 
 Cloud Run の役割分担と、判定が起きる順序。
 
+![SpecLino のアーキテクチャ（概要）](diagrams/overview.png)
+
+以下は詳細な構成図と、判定の順序。
+
 Cloud Run を役割別（web / worker / sandbox）に分け、秘密と権限を分離する。
 
 ```mermaid

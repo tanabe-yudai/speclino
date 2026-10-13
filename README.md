@@ -16,6 +16,8 @@
 - ホスティング版（招待制）: https://speclino-web-6h5m3svkja-an.a.run.app
 - ドキュメント: [docs/README.md](docs/README.md)
 
+![SpecLino のアーキテクチャ](docs/diagrams/overview.png)
+
 コーディングエージェントの出来は、渡す知識で決まる。規約・スキル・AGENTS.md・仕様が各リポジトリや
 各自の手元に散らばっていると、エージェントごとに読むものが違い、守ったかどうかも誰にも分からない。
 SpecLino は、チームの知識を画面で改訂・承認し、各自のエージェントに MCP / A2A / `speclino sync` で配り、
