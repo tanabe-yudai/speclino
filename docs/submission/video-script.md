@@ -5,9 +5,9 @@
 
 - 画面は本番の SpecLino（ログイン済みのテストアカウント）と、GitHub の PR、手元のエディタ（Claude Code）の 3 つ
 - 題材はこのリポジトリ自身の仕様（俯瞰の仕様 7 本）と、デモ PR 3 本:
-  [#47](https://github.com/tanabe-yudai/spec-lino/pull/47)（デモ1: 図に違反・反例）、
-  [#45](https://github.com/tanabe-yudai/spec-lino/pull/45)（デモ3: 仕様の写しの改変を lock で止める）、
-  [#46](https://github.com/tanabe-yudai/spec-lino/pull/46)（デモ4: 解析できないループで UNKNOWN → 失敗）。
+  [#47](https://github.com/tanabe-yudai/speclino/pull/47)（デモ1: 図に違反・反例）、
+  [#45](https://github.com/tanabe-yudai/speclino/pull/45)（デモ3: 仕様の写しの改変を lock で止める）、
+  [#46](https://github.com/tanabe-yudai/speclino/pull/46)（デモ4: 解析できないループで UNKNOWN → 失敗）。
   番号は PR の題に合わせている（デモ2・5 は無い）
 - 撮影前に、3 本の PR の検査が最新の main を取り込んだうえで完了していることを確かめる
 - 時間は目安。ナレーションは 1 秒あたり 6〜7 文字で数えている

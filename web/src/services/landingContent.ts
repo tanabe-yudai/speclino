@@ -88,7 +88,7 @@ export const PRINCIPLES: Principle[] = [
 
 export const INVITE_ONLY = 'SpecLino は現在、招待制で提供しています。'
 
-export const REPO_URL = 'https://github.com/tanabe-yudai/spec-lino'
+export const REPO_URL = 'https://github.com/tanabe-yudai/speclino'
 
 export const OPEN_SOURCE = 'ソースコードは GitHub で公開しています（AGPL-3.0）。'
 

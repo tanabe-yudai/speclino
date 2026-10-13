@@ -19,7 +19,7 @@ PR ごとに「承認済みの知識どおりか」を決定的に判定する�
 
 - デモ: TODO（URL）
 - 動画: TODO（URL）
-- リポジトリ: https://github.com/tanabe-yudai/spec-lino
+- リポジトリ: https://github.com/tanabe-yudai/speclino
 
 ## 解きたい問題: 知識が散らばり、守られたか分からない
 

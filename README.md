@@ -1,6 +1,6 @@
 # SpecLino
 
-[![CI](https://github.com/tanabe-yudai/spec-lino/actions/workflows/ci.yml/badge.svg)](https://github.com/tanabe-yudai/spec-lino/actions/workflows/ci.yml)
+[![CI](https://github.com/tanabe-yudai/speclino/actions/workflows/ci.yml/badge.svg)](https://github.com/tanabe-yudai/speclino/actions/workflows/ci.yml)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/License-AGPL--3.0--or--later-blue.svg)](LICENSE.md)
 ![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![TypeScript 6](https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white)

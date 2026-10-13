@@ -22,7 +22,7 @@ describe('landingContent', () => {
   })
 
   it('リポジトリの URL は GitHub の公開リポジトリ', () => {
-    expect(content.REPO_URL).toBe('https://github.com/tanabe-yudai/spec-lino')
+    expect(content.REPO_URL).toBe('https://github.com/tanabe-yudai/speclino')
   })
 
   it('はじめ方は 01〜04、原則は 3 つ', () => {

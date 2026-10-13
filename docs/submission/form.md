@@ -49,8 +49,8 @@ Vertex AI（Gemini）＋ Agent Development Kit、Identity Platform、Artifact Re
 | 項目 | URL |
 | --- | --- |
 | デモ | TODO（本番の web の URL） |
-| リポジトリ | https://github.com/tanabe-yudai/spec-lino |
-| デモ PR | [#47](https://github.com/tanabe-yudai/spec-lino/pull/47)・[#45](https://github.com/tanabe-yudai/spec-lino/pull/45)・[#46](https://github.com/tanabe-yudai/spec-lino/pull/46)（12/1 まで open） |
+| リポジトリ | https://github.com/tanabe-yudai/speclino |
+| デモ PR | [#47](https://github.com/tanabe-yudai/speclino/pull/47)・[#45](https://github.com/tanabe-yudai/speclino/pull/45)・[#46](https://github.com/tanabe-yudai/speclino/pull/46)（12/1 まで open） |
 | 動画 | TODO |
 | Zenn 記事 | TODO |
 
@@ -80,11 +80,11 @@ Vertex AI（Gemini）＋ Agent Development Kit、Identity Platform、Artifact Re
 2. **仕様**: 「ワークスペース全体の仕様」（SPEC-SYS-001）と「リポジトリ別の仕様」（spec-lino の 6 本）。開くと Markdown と UML
    （クラス図・シーケンス図・状態遷移図・アクティビティ図）、IR から作り直した正規形、要求の表の追跡状況が見える
 3. **デモ PR の検査結果**: 「検査」の一覧から、または GitHub の PR の `SpecLino / gate` の詳細から開く
-   - [#47](https://github.com/tanabe-yudai/spec-lino/pull/47) デモ1: 単体テストは全部緑なのに、ゲートの判定（アクティビティ図 `gate-decision`、必須の R-SYS-21）に
+   - [#47](https://github.com/tanabe-yudai/speclino/pull/47) デモ1: 単体テストは全部緑なのに、ゲートの判定（アクティビティ図 `gate-decision`、必須の R-SYS-21）に
      違反。反例（`has_findings かつ not has_mandatory`）つきで VIOLATED
-   - [#45](https://github.com/tanabe-yudai/spec-lino/pull/45) デモ3: リポジトリの仕様の写しから必須の要求を消しても、検査は承認済みの bundle で行われ、
+   - [#45](https://github.com/tanabe-yudai/speclino/pull/45) デモ3: リポジトリの仕様の写しから必須の要求を消しても、検査は承認済みの bundle で行われ、
      写しの改変は署名つきの lock の照合（`KNOWLEDGE-LOCK-001`）で UNKNOWN になりゲートが閉じる
-   - [#46](https://github.com/tanabe-yudai/spec-lino/pull/46) デモ4: 振る舞いを変えない `for` を入れただけで解析できなくなり、UNKNOWN。
+   - [#46](https://github.com/tanabe-yudai/speclino/pull/46) デモ4: 振る舞いを変えない `for` を入れただけで解析できなくなり、UNKNOWN。
      「確認できなかった」を「適合」と言わず、ゲートは失敗する
 4. **観測**: 形式化率・対応率・UNKNOWN の内訳・各自のエージェントが取った知識の世代の遅れ・規約の推移・LLM 支援の安定度
 
