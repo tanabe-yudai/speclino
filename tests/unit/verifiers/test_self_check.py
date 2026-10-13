@@ -15,7 +15,6 @@ from speclino.verifiers.make_targets import MakeTargetsVerifier
 from speclino.verifiers.registry import VerifierRegistry
 from speclino.verifiers.snapshot import DirectorySnapshot
 from speclino.verifiers.spec_format import SpecFormatVerifier
-from speclino.verifiers.spec_tests import SpecTestsVerifier
 
 from .conftest import REPO_ROOT
 
@@ -31,7 +30,6 @@ def test_speclino_core_package_is_valid() -> None:
     assert {rule.id for rule in package.rules} == {
         "MAKE-001",
         "SPEC-FMT-001",
-        "SPEC-TEST-001",
         "CI-001",
         "API-ERR-001",
         "ARCH-001",
@@ -52,7 +50,6 @@ def test_this_repository_conforms_to_speclino_core() -> None:
     registry.register(SpecFormatVerifier())
     registry.register(CiRequiredVerifier())
     registry.register(ApiErrorFormatVerifier())
-    registry.register(SpecTestsVerifier())
     snapshot = DirectorySnapshot(root=REPO_ROOT)
     exceptions = PolicyExceptions(schema_version="0.1", exceptions=[])
 
@@ -67,7 +64,7 @@ def test_this_repository_conforms_to_speclino_core() -> None:
     ci_finding = by_requirement["CI-001:.github/workflows/ci.yml"]
     assert ci_finding.verdict == "VERIFIED_IN_SCOPE", ci_finding.message
 
-    # API-ERR-001 / SPEC-TEST-001 は advisory。前者は既存ルートの HTTPException 直書きが
+    # API-ERR-001 は advisory。既存ルートの HTTPException 直書きが
     # 未置換のため、このリポジトリ自身は現状 VIOLATED を許容する
     # （規約違反を自分に対して検出するデモ、S49）。
     # mandatory ルールにだけ「VIOLATED が無いこと」を要求する。

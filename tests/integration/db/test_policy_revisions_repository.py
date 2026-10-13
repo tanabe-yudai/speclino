@@ -226,13 +226,9 @@ async def test_seed_from_package_loads_speclino_core_as_revision_1(session: Asyn
     assert revision.author == "seed"
     assert revision.approver == "seed"
     rule_ids = {rule.id for rule in revision.package.rules}
-    # SPEC-TEST-001 は本タスクと無関係な別ストーリー（S49、#59）で speclino-core.yaml に
-    # 追加された規約。ここでの変更ではないが、既存アサーションが古いままだと本タスクの
-    # 統合テストが赤くなるため、実際の内容に合わせる。
     assert rule_ids == {
         "MAKE-001",
         "SPEC-FMT-001",
-        "SPEC-TEST-001",
         "CI-001",
         "API-ERR-001",
         "ARCH-001",

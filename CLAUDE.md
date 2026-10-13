@@ -43,7 +43,7 @@
 - **配信と鮮度**: `speclino sync`・MCP（`context_get` / `spec_get` / `skill_get` / `sync_status` / `spec_suggest`）・A2A。`lock.json` の署名と書き出したファイルを `KNOWLEDGE-LOCK-001` で検査する。取得は `knowledge_fetches` に残し、可観測性の画面（`/w/:slug/observability`）は 1 つの集計（`services/observability.py`）から作る
 - **コードの規約の正本は SpecLino のプロジェクト規約**（`.speclino/policy/speclino-core.yaml`）。実装前に読む。MCP の `context_get` でも、チーム規約と合わせて読める。主なもの:
   - `ARCH-001` domain/ は型だけ／`ARCH-002` conformance/・analysis/ は LLM・adapters に依存しない／`ARCH-003` ロジックを api/・web/ に置かない／`ARCH-004` 対象を import・eval しない／`VERDICT-001` 判定 4 値とフェイルクローズ
-  - 機械検証つき: `MAKE-001`・`SPEC-FMT-001`・`SPEC-TEST-001`・`CI-001`・`API-ERR-001`
+  - 機械検証つき: `MAKE-001`・`SPEC-FMT-001`・`CI-001`・`API-ERR-001`
   - 規約を変えるときは、このファイルを PR で変える（ここに規約を書き足さない）
 - 間に合わない・解析できない部分は UNKNOWN にするだけで、偽の VERIFIED_IN_SCOPE を出さない（範囲を広げても守る不変条件）
 - Python 3.12、`uv`、ruff、mypy strict。TypeScript の型は `web/src/types/`。画面の用語は `web/src/services/labels.ts`・`knowledge.ts` にそろえる
