@@ -1,7 +1,7 @@
 # チームの知識レジストリ: 3 分の通し手順（ローカル）
 
 この手順は手元で DB から作り直して通すもの（題材 `examples/shop`）。本番のデモ（このリポジトリ自身の仕様と
-デモ PR #47・#45・#46）の見せ方は [docs/submission/video-script.md](submission/video-script.md) と
+デモ PR #1・#2・#3）の見せ方は [docs/submission/video-script.md](submission/video-script.md) と
 [docs/submission/form.md](submission/form.md) を参照。
 
 題材は `examples/shop`（注文の確定・出荷・取消）。仕様は Mermaid の UML（クラス・シーケンス・状態遷移・

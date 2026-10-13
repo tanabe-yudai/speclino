@@ -419,7 +419,7 @@ SPECLINO_SMOKE_EMAIL=<email> SPECLINO_SMOKE_PASSWORD=<password> \
 ```
 
 その後 `docs/guides/github-app-setup.md` に従って本番 GitHub App の Webhook URL を
-`$WEB_URL/webhooks/github` に設定し、デモ PR を作る（今のデモは #47・#45・#46。中身は各 PR の説明と
+`$WEB_URL/webhooks/github` に設定し、デモ PR を作る（今のデモは #1・#2・#3。中身は各 PR の説明と
 `docs/submission/form.md`。`demos/` は旧い題材 `examples/orders` の変異の置き場で、今のデモ PR とは別）。
 
 ## 9. ワークスペースの初期設定（S53）

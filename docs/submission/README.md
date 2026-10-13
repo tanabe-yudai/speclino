@@ -8,7 +8,7 @@
 | --- | --- |
 | デモ URL | https://speclino-web-6h5m3svkja-an.a.run.app |
 | テストアカウント | 提出フォームにだけ記載（メール / パスワード。ソーシャルログイン不要）。リポジトリには置かない |
-| デモ PR（12/1 まで open） | [#47](https://github.com/tanabe-yudai/speclino/pull/47) デモ1: テストは緑でもゲートの図に違反（反例つき）／[#45](https://github.com/tanabe-yudai/speclino/pull/45) デモ3: 仕様の写しを消しても lock の照合で止まる／[#46](https://github.com/tanabe-yudai/speclino/pull/46) デモ4: 解析できないループは UNKNOWN でゲート失敗 |
+| デモ PR（12/1 まで open） | [#1](https://github.com/tanabe-yudai/speclino/pull/1) デモ1: テストは緑でもゲートの図に違反（反例つき）／[#2](https://github.com/tanabe-yudai/speclino/pull/2) デモ3: 仕様の写しを消しても lock の照合で止まる／[#3](https://github.com/tanabe-yudai/speclino/pull/3) デモ4: 解析できないループは UNKNOWN でゲート失敗 |
 | デモ動画 | TODO（提出前に記載）。台本は [video-script.md](video-script.md) |
 | Zenn 記事 | TODO（提出前に記載）。下書きは [zenn-draft.md](zenn-draft.md) |
 | 提出フォームの回答 | [form.md](form.md) |
