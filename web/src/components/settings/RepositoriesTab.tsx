@@ -8,7 +8,7 @@ import { LoadingState } from '@/components/LoadingState'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { githubRepoUrl, isRepoFullName } from '@/services/repositories'
+import { GITHUB_APP_INSTALL_URL, githubRepoUrl, isRepoFullName } from '@/services/repositories'
 import type { RegisteredRepository } from '@/types/repository'
 
 /** ワークスペースに登録されたリポジトリの一覧と、owner による追加（S55）。 */
@@ -78,7 +78,15 @@ export function RepositoriesTab({ slug, isOwner }: { slug: string; isOwner: bool
       )}
       {isOwner && (
         <Panel>
-          <PanelTitle>リポジトリを追加</PanelTitle>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <PanelTitle>リポジトリを追加</PanelTitle>
+            <Button asChild variant="outline" size="sm">
+              <a href={GITHUB_APP_INSTALL_URL} target="_blank" rel="noreferrer">
+                GitHub App をインストール
+                <ExternalLink className="size-3.5" />
+              </a>
+            </Button>
+          </div>
           <form className="mt-3 flex flex-wrap items-end gap-3" onSubmit={handleAdd}>
             <div className="grid min-w-[16rem] flex-1 gap-1.5">
               <Label htmlFor="repo-name">リポジトリ</Label>
@@ -95,8 +103,8 @@ export function RepositoriesTab({ slug, isOwner }: { slug: string; isOwner: bool
             </Button>
           </form>
           <p className="mt-3 text-xs text-ink-3">
-            GitHub で本人確認し、あなたがそのリポジトリの admin で、SpecLino の GitHub App
-            がインストールされていることを確かめてから登録します。
+            先に「GitHub App をインストール」で対象のリポジトリに SpecLino の GitHub App を入れてください。登録時は
+            GitHub で本人確認し、あなたがそのリポジトリの admin で、App がインストールされていることを確かめます。
           </p>
           {startError && <p className="mt-2 text-sm text-bad">{startError}</p>}
         </Panel>

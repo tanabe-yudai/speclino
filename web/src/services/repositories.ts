@@ -10,3 +10,6 @@ export function isRepoFullName(value: string): boolean {
 export function githubRepoUrl(fullName: string): string {
   return `https://github.com/${fullName}`
 }
+
+/** SpecLino の GitHub App をアカウント・リポジトリに入れる GitHub の画面。 */
+export const GITHUB_APP_INSTALL_URL = 'https://github.com/apps/speclino/installations/new'
