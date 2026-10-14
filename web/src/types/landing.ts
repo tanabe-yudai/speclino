@@ -1,4 +1,4 @@
-/** ランディングページ（S58）の文言と見本データの型。 */
+/** ランディングページの文言と見本データの型。 */
 
 import type { Verdict } from './finding'
 
@@ -17,7 +17,25 @@ export interface LandingStep {
   body: string
 }
 
-export interface Principle {
+/** エージェントの仕組みの図に置く 1 役。icon は Landing 側で対応づける。 */
+export interface AgentRole {
+  key: 'coding' | 'writer' | 'investigator' | 'a2a'
+  name: string
+  /** どこから働くか（MCP・画面・PR・A2A） */
+  via: string
+  points: string[]
+  /** 代表的なツール名。無ければ空 */
+  tools: string[]
+}
+
+/** エージェントの見本のセッションの 1 行。kind で色を分ける。 */
+export interface SessionLine {
+  kind: 'user' | 'tool' | 'result' | 'wait'
+  text: string
+}
+
+export interface TrustItem {
+  key: 'fail-closed' | 'ai-proposes' | 'approved-only' | 'traceable'
   title: string
   body: string
 }
