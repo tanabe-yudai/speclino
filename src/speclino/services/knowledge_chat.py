@@ -130,6 +130,8 @@ LLM_TIMEOUT_SECONDS = 120.0
 CHAT_OUTPUT_TOKENS = 16384
 # 出力の上限で返答が切れたとき、提案を省いて説明だけで確定し、利用者にこう伝える
 TRUNCATED_NOTICE = "本文が長いため提案を省きました。範囲を絞って頼んでください"
+# 調べる歩の終わりの合図（knowledge_chat_prompt の調査の規則）。最後の返答の説明には使わない
+_READY = "準備完了"
 # これより古い保留の発言は、処理が途中で止まったものとして扱う（再送を永久に断らない）
 PENDING_STALE_AFTER = timedelta(minutes=10)
 _EXPLANATION_MAX_CHARS = 16_000
@@ -593,13 +595,22 @@ class _Reply:
     questions: list[ChatQuestion] = field(default_factory=list)
 
 
+def _placeholder(text: str) -> bool:
+    """中身の無い文（空・記号だけ・調べる歩の合図の「準備完了」）。"""
+    body = text.strip()
+    return re.search(r"\w", body) is None or body == _READY
+
+
 def _truncated_reply(raw: str) -> _Reply:
     """出力の上限で切れた返答: 質問と提案を省き、説明（あれば）と知らせだけで確定する。"""
     explanation = _partial_explanation(raw)[:_EXPLANATION_MAX_CHARS]
+    if _placeholder(explanation):
+        explanation = ""
     return _Reply(f"{explanation}\n\n{TRUNCATED_NOTICE}" if explanation else TRUNCATED_NOTICE)
 
 
-def _parse_reply(gen: JsonGeneration) -> _Reply:
+def _parse_reply(gen: JsonGeneration, kind: KnowledgeChatKind) -> _Reply:
+    """応答の JSON を返答にする。説明・提案の本文が中身の無い文なら失敗（成功として残さない）。"""
     raw = gen.text
     if gen.truncated:
         return _truncated_reply(raw)
@@ -612,8 +623,14 @@ def _parse_reply(gen: JsonGeneration) -> _Reply:
     if not isinstance(data, dict):
         raise ChatError("chat_failed")
     explanation = data.get("explanation")
-    if not isinstance(explanation, str) or not explanation.strip():
+    if not isinstance(explanation, str) or _placeholder(explanation):
         raise ChatError("chat_failed")
+    proposal = data.get("proposal")
+    draft_field = draft_text_field(kind)
+    if isinstance(proposal, dict) and draft_field is not None:
+        draft = proposal.get(draft_field)
+        if isinstance(draft, str) and _placeholder(draft):
+            raise ChatError("chat_failed")
     return _Reply(
         explanation.strip()[:_EXPLANATION_MAX_CHARS],
         data.get("proposal"),
@@ -674,7 +691,7 @@ async def _complete_turn(
     断りの文に置き換えて提案を落とす。調べた返答には、サーバが組み立てた出典と検索の候補の
     表示を添える（差し止めた返答には添えない）。
     """
-    parsed = _parse_reply(gen)
+    parsed = _parse_reply(gen, ctx.chat.kind)
     explanation, proposal_data, questions = parsed.explanation, parsed.proposal, parsed.questions
     if (
         blocked

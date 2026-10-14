@@ -76,6 +76,13 @@ _RESEARCH_RULES = """\
 """
 
 
+# 調べ終えた後、最後の返答（JSON）を求める発言。調べる歩の「準備完了」の後に送る
+FINAL_REQUEST = """\
+調べるのはここまで。今ある情報で、指定の JSON の形で最後の返答を書いてください。
+explanation には説明を、提案するなら proposal に本文の全文を書く（「準備完了」や「...」のような
+仮の文字を入れない）。"""
+
+
 def research_rules() -> str:
     """深掘りと調査の規則（調べるターンだけプロンプトに足す）。出力の検査の照合にも使う。"""
     return _RESEARCH_RULES
@@ -282,6 +289,7 @@ def build_summary_prompt(kind: KnowledgeChatKind, history: list[ChatMessage]) ->
 
 
 __all__ = [
+    "FINAL_REQUEST",
     "KIND_LABELS",
     "MAX_HISTORY_BYTES",
     "MAX_PROMPT_BYTES",

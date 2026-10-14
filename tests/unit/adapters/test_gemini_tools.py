@@ -129,6 +129,22 @@ async def test_final_stream_forbids_calls_and_separates_thoughts() -> None:
     assert config.temperature is None
 
 
+async def test_final_request_is_a_separate_user_turn_after_results() -> None:
+    call = types.Part(function_call=types.FunctionCall(id="c1", name="knowledge_list", args={}))
+    chunks = [_response([types.Part(text='{"explanation":"ok"}')], types.FinishReason.STOP)]
+    models = _Models([_response([call])], chunks)
+    session = _llm(models).open("依頼")
+    step = await session.step([SPEC])
+    session.add_results([ToolResult(step.calls[0], "一覧")])
+    events = [e async for e in session.stream_final({"type": "object"}, [SPEC], "答えて")]
+    assert isinstance(events[-1], JsonGeneration)
+    sent = models.stream_calls[0]["contents"]
+    # 関数の結果の Content には文を混ぜず、別の利用者の Content として末尾に足す
+    assert [c.role for c in sent] == ["user", "model", "user", "user"]
+    assert all(p.function_response is not None for p in sent[2].parts or [])
+    assert [p.text for p in sent[3].parts or []] == ["答えて"]
+
+
 async def test_search_returns_sources_entry_point_and_query_count() -> None:
     meta = types.GroundingMetadata(
         grounding_chunks=[

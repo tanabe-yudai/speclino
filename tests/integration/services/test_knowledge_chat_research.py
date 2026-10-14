@@ -29,6 +29,7 @@ from speclino.services import knowledge_chat as kc
 from speclino.services import knowledge_registry as kr
 from speclino.services.cost_guard import SEARCH_QUERY_USD, CostGuard, InMemoryLedger
 from speclino.services.knowledge_chat_budget import ChatBudget, ChatLimits
+from speclino.services.knowledge_chat_prompt import FINAL_REQUEST
 from speclino.services.knowledge_chat_research import ChatResearch
 from tests.integration.services.conftest import register_repo, repo_id_of
 from tests.integration.services.test_knowledge_registry import stub_compiler
@@ -168,6 +169,8 @@ async def test_research_stream_saves_sources_and_settles(world: World) -> None:
     ]
     # プロンプトに深掘りの規則と読めるリポジトリが入る
     assert "深掘りと調査" in world.llm.prompts[0] and world.repo in world.llm.prompts[0]
+    # 調べ終えた後、最後の返答を求める発言を足してから求める
+    assert world.llm.final_request == FINAL_REQUEST
     # 知識の結果は承認済みの本文（区切りの中）
     outputs = {r.call.id: r.output for batch in world.llm.results for r in batch}
     assert "dev-guide（改訂 1）" in outputs["k1"]

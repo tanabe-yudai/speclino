@@ -225,6 +225,27 @@ async def test_broken_reply_is_a_failure(ctx: Ctx) -> None:
     assert e.value.code == "chat_failed"
 
 
+@pytest.mark.parametrize(
+    ("kind", "response"),
+    [
+        ("instructions", '{"explanation": "..."}'),
+        ("instructions", '{"explanation": "…"}'),
+        ("instructions", '{"explanation": "準備完了"}'),
+        ("spec", '{"explanation": "...", "proposal": {"markdown": "...", "name": "..."}}'),
+        ("spec", '{"explanation": "下書きを作りました", "proposal": {"markdown": "..."}}'),
+    ],
+)
+async def test_placeholder_reply_is_a_failure(ctx: Ctx, kind: str, response: str) -> None:
+    cid = await _create(ctx, kind=kind)
+    ctx.llm.response = response
+    with pytest.raises(kc.ChatError) as e:
+        await _send(ctx, cid)
+    assert e.value.code == "chat_failed"
+    async with ctx.deps.session_factory() as s:
+        chat = await kc.get_chat(s, workspace=ctx.slug, owner="alice", chat_id=cid)
+    assert [m.status for m in chat.messages] == ["failed"]
+
+
 async def test_message_limit_marks_failed(ctx: Ctx) -> None:
     deps = kc.ChatDeps(
         ctx.deps.session_factory,
