@@ -12,6 +12,7 @@ UML）とコードを Z3 で照合して VERIFIED_IN_SCOPE / VIOLATED / UNKNOWN 
 実行スクリプト（`apply_script`）に `--plan-url` を渡して当て、lock ごと作業の PR にコミットする（手順はスキル
 `speclino-knowledge-sync`。ファイルや lock を手で書かない）。実装の前に `context_get` で規約を、`spec_get` /
 `skill_get` で承認済みの仕様・スキルを読む。検査は `verification_start` → `verification_get`。
+仕様を書いたら `spec_draft_save` で下書きとして保存し、返る `editor_url` を人に渡して承認を頼む。
 あなた（LLM）は証拠を集め提案を書くだけで、判定も承認もしない（verdict を書き換える手段は無い）。
 知識の承認は人が SpecLino の画面で行い、ゲートの要確認の確定は承認者が PR に `/speclino attest` と
 コメントするか PR を Approve する。
@@ -25,8 +26,8 @@ UML）とコードを Z3 で照合して VERIFIED_IN_SCOPE / VIOLATED / UNKNOWN 
 - **A2A（会話）**: 仕様の下書きのレビュー、要求の意味や判定の理由の説明、検査の後の聞き取り。
   あいまいな点は質問が返り（入力待ち）、同じタスクに文章で答えると続きが進む
 - **MCP（関数呼び出し）**: `context_get` / `verification_start` / `verification_get`、
-  チームの知識を読む `sync_status` / `knowledge_pull` / `spec_get` / `skill_get`。語彙の取得と検証の実行・結果の
-  読み取りは、こちらで行う
+  チームの知識を読む `sync_status` / `knowledge_pull` / `spec_get` / `skill_get`、仕様の下書きを保存する
+  `spec_draft_save`。語彙の取得と検証の実行・結果の読み取りは、こちらで行う
 
 接続先は Agent Card（`https://<your-host>/.well-known/agent-card.json`、認証不要）に書いてある。
 `/a2a` への送信にはエージェント接続トークン（`slmcp_…`。設定 → エージェント接続で owner が発行）を Bearer で付ける。
@@ -145,8 +146,19 @@ SpecLino 側。MCP の `context_get(repo_full_name)` の `policies` を読んで
 - 1 要求 = 1 判定単位。「適切に」「速やかに」は書かない。決められないことは観測境界に「未確定」と書く
 
 書いたら `spec_suggest(markdown, repo_full_name?)` で書き換えの提案と当てた後の診断を受けられる（IR は返さない。
-提案は人に見せて 1 件ずつ採否を決める）。仕様の追加・変更は SpecLino の画面（エディタの「AI と作る」を含む）で
-下書きを保存し、owner / approver が承認すると新しい bundle になる。**リポジトリのファイルを直しても承認にはならない。**
+提案は人に見せて 1 件ずつ採否を決める）。
+
+書き上げたら `spec_draft_save(repo_full_name, name, markdown, note?, expected_revision?, expected_hash?)` で
+SpecLino に下書きとして保存する（ワークスペースの MCP トークンだけ。作者はトークンを発行した人）。
+
+- 新しい名前なら、そのリポジトリに当たる仕様の改訂 1 ができる
+- 既にある仕様を直すときは、`spec_get` か前回の `spec_draft_save` が返した `revision` / `content_hash` を
+  `expected_revision` / `expected_hash` に渡す。違うと言われたら他の人の下書きがあるので、上書きせず人に確かめる
+- 返り値の `errors` が 0 でなければ `diagnostics` を見て直し、同じ名前で保存し直す（承認はエラー 0 が条件）
+- `note` には何をなぜ変えたかを書く（承認者が読む）。保存したら `editor_url` を人に渡し、画面で承認を頼む
+
+画面（エディタの「AI と作る」を含む）からも下書きを保存できる。owner / approver が承認すると新しい bundle になる。
+**リポジトリのファイルを直しても、下書きを保存しても、承認にはならない。**
 
 ## 3. 検査して読む
 

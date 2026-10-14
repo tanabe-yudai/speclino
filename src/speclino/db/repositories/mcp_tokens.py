@@ -58,6 +58,19 @@ class McpTokenRepository:
         )
         return (await self._session.execute(stmt)).scalar_one_or_none()
 
+    async def lock_active(self, *, token_id: uuid.UUID, team: str) -> McpTokenRecord | None:
+        """有効なトークンの行をトランザクションの終わりまでロックして返す（失効と直列化する）。"""
+        stmt = (
+            select(McpTokenRecord)
+            .where(
+                McpTokenRecord.id == token_id,
+                McpTokenRecord.team == team,
+                McpTokenRecord.revoked_at.is_(None),
+            )
+            .with_for_update()
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none()
+
     async def touch(self, token_id: uuid.UUID) -> None:
         stmt = (
             update(McpTokenRecord)
