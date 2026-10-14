@@ -2,7 +2,8 @@
 
 作った人が owner になる。管理 CLI の `workspace_admin.create_workspace` と違い、既存の `teams` 行は
 引き取らない（メンバーのいない行にも規約の改訂や知識が残りうるので、他人の行を乗っ取らせない）。
-1 人が owner のワークスペースの数に上限を置き、作成は監査に残す。
+1 人が owner のワークスペースの数に上限を置き、作成は監査に残す。作ったワークスペースには
+プリセットの知識（`knowledge_presets`）を承認済みで入れる。
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from speclino.db.models import TeamRecord, WorkspaceMember
 from speclino.db.repositories.audit import AuditRepository
 from speclino.db.repositories.teams import TeamRepository
+from speclino.services.knowledge_presets import install_presets
 
 # URL（/w/:slug）と run-manifest に残る識別子。
 # 英小文字・数字・ハイフンで 2〜40 文字、端はハイフン以外
@@ -99,4 +101,5 @@ async def create_own_workspace(
         decision="created",
         detail={"name": display_name, "via": "self_service"},
     )
+    await install_presets(session, slug)
     return display_name
