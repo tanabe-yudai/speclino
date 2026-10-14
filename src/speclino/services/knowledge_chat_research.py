@@ -40,6 +40,7 @@ from speclino.ports.text_llm import (
     WebSearcher,
 )
 from speclino.services.cost_guard import CostGuard
+from speclino.services.knowledge_chat_prompt import FINAL_REQUEST
 from speclino.services.knowledge_chat_tools import PRIVATE_READS, ChatTools, ToolOutcome
 
 logger = logging.getLogger(__name__)
@@ -243,7 +244,7 @@ async def research(
             results.append(ToolResult(call, output))
         session.add_results(results)
     final_tools = list(turn.declared.values())
-    async for event in session.stream_final(schema, final_tools):
+    async for event in session.stream_final(schema, final_tools, FINAL_REQUEST):
         if isinstance(event, JsonGeneration):
             gen = JsonGeneration(
                 event.text,

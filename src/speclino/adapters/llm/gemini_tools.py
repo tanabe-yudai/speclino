@@ -5,7 +5,9 @@
   まとめて受け、結果（FunctionResponse）もまとめて 1 つの Content で返す。応答の `id` と
   `name` は呼出しのものと同じにする。SDK の自動の関数呼出しは止める
 - 最後の返答だけ generate_content_stream で流す。関数の宣言は履歴のために渡すが、
-  function_calling_config の mode=NONE で呼ばせない。思考の要約（include_thoughts）も流す
+  function_calling_config の mode=NONE で呼ばせない。思考の要約（include_thoughts）も流す。
+  最後の返答を求める文（`request`）は、別の利用者の Content として末尾に足す（関数の結果と
+  同じ Content に文を混ぜると Vertex AI が拒否する）
 - temperature などの生成の設定は送らない（Gemini 3 の推奨は既定値）。思考の量は thinking_level
 - 会話の要約など単発の JSON（`TextLlm`）も同じ設定で答える
 """
@@ -193,10 +195,14 @@ class GeminiToolSession:
         self._pending = []
 
     async def stream_final(
-        self, schema: dict[str, Any], tools: Sequence[ToolSpec]
+        self, schema: dict[str, Any], tools: Sequence[ToolSpec], request: str | None = None
     ) -> AsyncIterator[ToolStreamEvent]:
         if self._pending:
             raise RuntimeError("前の呼出しの結果をまだ返していない")
+        if request is not None:
+            self._contents.append(
+                types.Content(role="user", parts=[types.Part.from_text(text=request)])
+            )
         stream = await self._llm.client.aio.models.generate_content_stream(
             model=self._llm.model,
             contents=list(self._contents),

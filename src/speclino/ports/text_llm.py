@@ -112,9 +112,13 @@ class ToolSession(Protocol):
         ...
 
     def stream_final(
-        self, schema: dict[str, Any], tools: Sequence[ToolSpec]
+        self, schema: dict[str, Any], tools: Sequence[ToolSpec], request: str | None = None
     ) -> AsyncIterator[ToolStreamEvent]:
-        """関数を呼ばせずに、schema に従う最後の返答を流す。`tools` は履歴の関数の宣言。"""
+        """関数を呼ばせずに、schema に従う最後の返答を流す。`tools` は履歴の関数の宣言。
+
+        `request` を渡すと、利用者の側の発言として履歴の末尾に足してから求める（調べ終えた
+        ことと、最後の返答を書く番であることをモデルに伝える）。
+        """
         ...
 
 

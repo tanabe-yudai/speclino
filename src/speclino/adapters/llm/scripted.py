@@ -131,6 +131,7 @@ class ScriptedToolLlm:
         self.declared: list[list[str]] = []
         self.results: list[list[ToolResult]] = []
         self.final_declared: list[str] | None = None
+        self.final_request: str | None = None
         self.step_hook: Any = None
 
     def open(self, prompt: str) -> _ScriptedToolSession:
@@ -160,11 +161,12 @@ class _ScriptedToolSession:
         self.pending = []
 
     async def stream_final(
-        self, schema: dict[str, Any], tools: Sequence[ToolSpec]
+        self, schema: dict[str, Any], tools: Sequence[ToolSpec], request: str | None = None
     ) -> AsyncIterator[ToolStreamEvent]:
         assert not self.pending
         llm = self.llm
         llm.final_declared = [t.name for t in tools]
+        llm.final_request = request
         yield Thought(llm.thought)
         for i in range(0, len(llm.final), llm.chunk_size):
             yield llm.final[i : i + llm.chunk_size]
