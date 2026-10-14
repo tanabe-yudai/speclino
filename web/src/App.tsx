@@ -18,6 +18,7 @@ import { Project } from './pages/Project'
 import { RunDetail } from './pages/RunDetail'
 import { Runs } from './pages/Runs'
 import { Settings } from './pages/Settings'
+import { Workspaces } from './pages/Workspaces'
 
 /** 旧いパス（services/legacyRoutes.ts の表）は新しい画面へ、それ以外はホームへ。 */
 function Fallback() {
@@ -34,6 +35,7 @@ function App() {
           <Route path="/" element={<Landing />} />
           <Route element={<RequireAuth />}>
             <Route path="/app" element={<HomeRedirect />} />
+            <Route path="/workspaces" element={<Workspaces />} />
             <Route path="/w/:slug" element={<Home />} />
             <Route path="/w/:slug/p/:owner/:repo/:tab?" element={<Project />} />
             <Route path="/w/:slug/specs" element={<KnowledgeList kind="spec" />} />

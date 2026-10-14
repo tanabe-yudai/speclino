@@ -159,6 +159,11 @@ async def engine() -> AsyncIterator[AsyncEngine]:
         await conn.execute(
             sql_text("DELETE FROM audit_events WHERE action LIKE 'a2a.%' AND target LIKE 'e2e-%'")
         )
+        await conn.execute(
+            sql_text(
+                "DELETE FROM audit_events WHERE action = 'workspace.create' AND target LIKE 'e2e-%'"
+            )
+        )
         for table in (
             "mcp_tokens",
             "repo_link_attempts",

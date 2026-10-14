@@ -37,6 +37,8 @@ function projectBase(slug: string, fullName: string): string {
 
 export const paths = {
   home: () => '/app',
+  /** 自分のワークスペース（所属の一覧と作成）。 */
+  workspaces: () => '/workspaces',
   /** ワークスペースのホーム（やること・件数・プロジェクトの健全性）。 */
   workspace: (slug: string) => ws(slug),
   /** プロジェクト（絞り込みの画面）。概要は素のパス。仕様・検査のタブは一覧と同じ絞り込みのクエリを持てる。 */
