@@ -25,13 +25,14 @@ describe('landingContent', () => {
     expect(content.REPO_URL).toBe('https://github.com/tanabe-yudai/speclino')
   })
 
-  it('はじめ方は 01〜04、原則は 3 つ', () => {
+  it('はじめ方は 01〜04', () => {
     expect(content.STEPS.map((s) => s.number)).toEqual(['01', '02', '03', '04'])
-    expect(content.PRINCIPLES).toHaveLength(3)
   })
 
-  it('承認コメントの見本は内容ハッシュを取る形', () => {
-    expect(content.SAMPLE_SPEC.comment).toMatch(/^\/speclino approve-spec sha256:/)
+  it('エージェントの役割は 4 つで、利用者のエージェントは MCP で仕様を書ける', () => {
+    expect(content.AGENT_ROLES.map((r) => r.key)).toEqual(['coding', 'writer', 'investigator', 'a2a'])
+    expect(content.AGENT_ROLES[0].tools).toContain('spec_draft_save')
+    expect(content.SAMPLE_SESSION.lines.map((l) => l.text).join(' ')).toContain('spec_draft_save')
   })
 
   it('見本の検査は 4 値だけを使い、違反には反例がある', () => {
@@ -45,16 +46,22 @@ describe('landingContent', () => {
     expect(content.INVITE_ONLY).toBe('SpecLino は現在、招待制で提供しています。')
   })
 
-  it('原則の 4 値の名前は、画面の判定の名前と同じ', () => {
+  it('4 値の名前は、画面の判定の名前と同じ', () => {
     const labels = Object.values(VERDICT_LABELS).join(' ')
     for (const name of ['適合', '違反', '未検証', '要確認']) {
-      expect(content.PRINCIPLES[0].body).toContain(name)
+      expect(content.TRUST_ITEMS[0].body).toContain(name)
       expect(labels).toContain(name)
     }
   })
 
-  it('エディタの段は、判定するのが検査器だと書く（エージェントが判定するように読ませない）', () => {
-    expect(content.STEPS[2].body).toContain('検査器')
-    expect(content.STEPS[2].body).not.toMatch(/検証します/)
+  it('判定するのは検査器だと書き、エージェントが判定するようには読ませない', () => {
+    expect(content.AGENTS_SECTION.hubNote).toContain('検査器')
+    const agentText = strings(content.AGENT_ROLES).join(' ')
+    expect(agentText).not.toMatch(/判定する|検証します/)
+  })
+
+  it('承認するのは人だと書く', () => {
+    expect(content.SAMPLE_SESSION.lines.some((l) => l.kind === 'wait' && l.text.includes('人'))).toBe(true)
+    expect(content.AGENTS_SECTION.human.body).toContain('承認')
   })
 })

@@ -1,15 +1,70 @@
-/** ランディングページ（S58）の文言と見本データ。画面の部品には文言を埋め込まない。 */
+/** ランディングページの文言と見本データ。画面の部品には文言を埋め込まない。 */
 
-import type { LandingStep, Principle, SampleCheck } from '@/types/landing'
-import type { NextActionKind } from '@/types/project'
+import type { AgentRole, LandingStep, SampleCheck, SessionLine, TrustItem } from '@/types/landing'
 
 export const HERO = {
-  eyebrow: 'SPEC × CODE × AGENT',
-  titleLead: '仕様はいつもの場所に。',
-  titleAccent: '検証はエージェントと。',
-  body: '承認した仕様と実装の「意味の差」を、検査器が反例つきで示します。テストが通っても残る違反を、PR の中で見つけます。',
+  eyebrow: 'KNOWLEDGE × AGENTS',
+  titleLead: 'チームの知識を、',
+  titleAccent: 'すべてのエージェントへ。',
+  body: '規約・スキル・指示書・仕様を 1 か所で書いて承認し、MCP で各自のコーディングエージェントに配ります。エージェントは知識を読むだけでなく、仕様を書いて下書きに出すこともできます。PR では、承認済みの仕様と実装の食い違いを反例つきで示します。',
   cta: '使い方を見る',
 }
+
+/** ヒーローの見本: 利用者のコーディングエージェントが MCP で仕様を書き、検査まで回す流れ。 */
+export const SAMPLE_SESSION: { label: string; lines: SessionLine[] } = {
+  label: 'あなたのエディタ · coding agent',
+  lines: [
+    { kind: 'user', text: '注文キャンセルの仕様に「発送済みは在庫を変えない」を足して' },
+    { kind: 'tool', text: 'spec_get spec-cancel-001' },
+    { kind: 'result', text: '改訂 3 · 要求 4 · 図 2' },
+    { kind: 'tool', text: 'spec_draft_save spec-cancel-001' },
+    { kind: 'result', text: '下書き 改訂 4 · 図の診断 0 件' },
+    { kind: 'wait', text: '承認待ち — 承認するのはチームの人です' },
+    { kind: 'tool', text: 'verification_start' },
+    { kind: 'result', text: '違反 1 · 反例 status=shipped → stock +1' },
+  ],
+}
+
+export const AGENTS_SECTION = {
+  eyebrow: 'AGENTS',
+  heading: 'エージェントの仕組み',
+  lead: 'あなたのコーディングエージェントと、SpecLino の中で Gemini と Agent Development Kit（ADK）で動くエージェントが、承認済みの知識を中心に働きます。',
+  hubTitle: 'SpecLino',
+  hubPoints: ['承認済みの知識（bundle）', '決定的な検査器'],
+  hubNote: '判定を出すのは検査器だけ',
+  human: { title: 'チームの人', body: '知識の承認と、要確認の確定をする' },
+}
+
+export const AGENT_ROLES: AgentRole[] = [
+  {
+    key: 'coding',
+    name: 'あなたのコーディングエージェント',
+    via: 'MCP',
+    points: ['承認済みの規約・スキル・仕様を取り込む', '仕様を書いて下書きに出す（図の診断つき）', '書いたコードをその場で検査にかける'],
+    tools: ['knowledge_pull', 'spec_draft_save', 'verification_start'],
+  },
+  {
+    key: 'writer',
+    name: '執筆エージェント',
+    via: '画面の「AI と作る」',
+    points: ['選択肢つきの質問で要件を詰める', '承認済みの知識・リポジトリ・Google 検索で調べる', '書き換えを差分で提案する（採るかは人）'],
+    tools: [],
+  },
+  {
+    key: 'investigator',
+    name: '調査エージェント',
+    via: 'PR の検査のあと',
+    points: ['未検証が残ったときだけ動く', '再解析・コード検索・テストの隔離実行で証拠を集める', '分からないことは承認者に質問する'],
+    tools: [],
+  },
+  {
+    key: 'a2a',
+    name: 'ほかのエージェント',
+    via: 'A2A',
+    points: ['承認済みの知識を読む', '知識の書き換えを提案する'],
+    tools: [],
+  },
+]
 
 export const SAMPLE_PR: { label: string; checks: SampleCheck[] } = {
   label: 'PR #42 · 注文キャンセル',
@@ -33,18 +88,18 @@ export const STEPS: LandingStep[] = [
   },
   {
     number: '02',
-    title: '仕様を書いて、PR で承認',
-    body: '仕様は Markdown のまま Git に置きます。承認は PR のコメント 1 行。承認した内容はハッシュで記録され、変われば承認し直すまで通りません。',
+    title: '知識を書いて、画面で承認',
+    body: '規約・スキル・指示書・仕様を、画面の「AI と作る」か、エディタのエージェントから MCP で書きます。承認すると番号つきの bundle になり、配信も検査も同じ番号を読みます。',
   },
   {
     number: '03',
-    title: 'エディタから使う',
-    body: 'ワークスペースの MCP トークンで、エージェントが仕様の語彙と規約を読んで実装し、その場で検査器にかけます。判定するのは検査器です。',
+    title: 'エージェントに配る',
+    body: 'エディタに MCP を登録すると、エージェントが承認済みの知識を取り込み、AGENTS.md・スキル・仕様の写しを書き出します。エージェントの無い環境では speclino sync で同じものを書き出します。',
   },
   {
     number: '04',
     title: 'PR で確かめる',
-    body: '検査器が反例つきで判定します。確認できなかったものは通しません。プロジェクトの画面で、全体の状態と次にやることが分かります。',
+    body: '承認済みの仕様と実装を検査器が照合し、違反は反例つきで示します。確認できなかったものは通さず、調査エージェントが証拠を集めます。',
   },
 ]
 
@@ -55,35 +110,51 @@ export const SAMPLE_REPO = {
   action: 'GitHub で確認して追加',
 }
 
-export const SAMPLE_SPEC = {
-  path: 'specs/cancel_order.md',
-  lines: ['## 発送済みの場合', '', 'キャンセルを受け付けず、在庫数を変更しない。'],
-  comment: '/speclino approve-spec sha256:3f9a…c21e',
+export const SAMPLE_APPROVE = {
+  name: 'spec-cancel-001',
+  kind: '仕様',
+  revision: '改訂 4 · 下書き',
+  author: '作成: エディタのエージェント（MCP）',
+  diff: [
+    { sign: '+', text: '| R-CANCEL-04 | mandatory | 発送済みはキャンセルを受け付けず、在庫を変えない |' },
+    { sign: ' ', text: '| R-CANCEL-05 | mandatory | 返金は 1 回だけ |' },
+  ],
+  diagnostics: '図の診断 0 件',
+  action: '承認して有効にする',
+  done: '改訂 4 を承認しました。以後の検査に使われます',
 }
 
 export const SAMPLE_MCP = {
   command: 'claude mcp add --transport http speclino https://<your-speclino>/mcp --header "Authorization: Bearer slmcp_…"',
-  responses: ['context_get → 語彙 9 · 規約 5 · 要求 23', 'verification_start → 検査を開始', 'verification_get → 違反 1 · 未検証 1'],
+  responses: ['knowledge_pull → bundle 41 · 書き出し 11 件', 'AGENTS.md · .claude/skills/ · .speclino/specs/', 'lock.json を更新（署名つき）'],
 }
 
-export const SAMPLE_PROJECT: {
-  name: string
-  counts: { violated: number; review: number; unknown: number; exempted: number; ok: number }
-  next: { kind: NextActionKind; id: string; hint: string }[]
-} = {
-  name: 'orders',
-  counts: { violated: 1, review: 1, unknown: 1, exempted: 1, ok: 24 },
-  next: [
-    { kind: 'violated', id: 'R-CANCEL-04', hint: '反例を見る' },
-    { kind: 'review', id: 'R-REFUND-02', hint: '人の確認が要る質問に答える' },
-    { kind: 'unknown', id: 'R-CANCEL-05', hint: 'エージェントの調査の結果を見る' },
-  ],
+export const TRUST = {
+  heading: '安心して任せられる理由',
+  lead: 'エージェントに書かせても、チームが承認していないものは効かず、確かめられないものは通りません。',
 }
 
-export const PRINCIPLES: Principle[] = [
-  { title: '判定は 4 値のまま', body: '適合 / 違反 / 未検証 / 要確認。分からないものを適合と言いません。' },
-  { title: 'AI は判定しない', body: '判定は検査器が行います。エージェントは証拠集めと人への質問だけを担います。' },
-  { title: '記録が残る', body: '仕様も規約も承認の履歴つき。過去の判定は同じ入力から再現できます。' },
+export const TRUST_ITEMS: TrustItem[] = [
+  {
+    key: 'fail-closed',
+    title: '分からないものを「適合」にしない',
+    body: '判定は 適合 / 違反 / 未検証 / 要確認 の 4 つ。解析できない部分は未検証にし、必須の要求に未検証や要確認が残れば PR は通りません。',
+  },
+  {
+    key: 'ai-proposes',
+    title: 'AI は書いて、調べるだけ',
+    body: 'どのエージェントにも、判定を書くツールを持たせていません。判定は決定的な検査器が出し、AI の提案を採るかどうかは人が決めます。',
+  },
+  {
+    key: 'approved-only',
+    title: '承認したものだけが届く',
+    body: '承認のたびに署名つきの bundle を作り、配信も PR の検査も同じ番号を読みます。手元の写しが古かったり書き換えられていたりすれば、lock の照合で止まります。',
+  },
+  {
+    key: 'traceable',
+    title: 'あとから辿れる',
+    body: '検査は bundle とコミットで固定し、同じ入力から再現できます。どのエージェントがいつ知識を取り込んだかも記録し、観測の画面で見られます。',
+  },
 ]
 
 export const INVITE_ONLY = 'SpecLino は現在、招待制で提供しています。'
@@ -92,4 +163,10 @@ export const REPO_URL = 'https://github.com/tanabe-yudai/speclino'
 
 export const OPEN_SOURCE = 'ソースコードは GitHub で公開しています（AGPL-3.0）。'
 
-export const NAV = { start: 'はじめ方', principles: '原則', login: 'ログイン', github: 'GitHub', startHeading: 'はじめ方', principlesHeading: '原則' }
+export const NAV = {
+  agents: 'エージェント',
+  start: 'はじめ方',
+  trust: '任せられる理由',
+  login: 'ログイン',
+  github: 'GitHub',
+}
