@@ -174,3 +174,9 @@ variable "mount_bundle_signing_keys_old" {
   type        = bool
   default     = false
 }
+
+variable "workspace_limit_raised_uids" {
+  description = "自分で作れるワークスペースの上限を引き上げる利用者の uid（カンマ区切り）。複数の審査員が共有するアカウント向け。秘密ではない"
+  type        = string
+  default     = ""
+}

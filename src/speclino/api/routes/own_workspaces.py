@@ -29,10 +29,11 @@ async def create_workspace(
     user: AuthUser = Depends(require_user),
 ) -> dict[str, Any]:
     """ログインしている人を owner とするワークスペースを作る。応答は `/api/me` の所属と同じ形。"""
+    limit = service.owned_limit(user.uid, state.settings.workspace_limit_raised_uids)
     try:
         async with state.session_factory() as session, session.begin():
             name = await service.create_own_workspace(
-                session, uid=user.uid, slug=body.slug, name=body.name
+                session, uid=user.uid, slug=body.slug, name=body.name, max_owned=limit
             )
     except service.InvalidWorkspace as e:
         raise api_error(422, "invalid_workspace", str(e)) from e
@@ -46,6 +47,6 @@ async def create_workspace(
         raise api_error(
             409,
             "workspace_limit",
-            f"オーナーのワークスペースは {service.MAX_OWNED_WORKSPACES} 個までです",
+            f"オーナーのワークスペースは {limit} 個までです",
         ) from e
     return {"slug": body.slug, "name": name, "role": "owner"}
