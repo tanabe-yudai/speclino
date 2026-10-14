@@ -6,7 +6,7 @@
 - **所要時間**: 本編（1〜11）は約 20 分です。手順 12（任意）は約 5 分です。付録 A の手元の CLI（任意）は、さらに約 10 分かかります
 - **必要なもの**: PC のブラウザ（Chrome 推奨）と、提出フォームに記載したテストアカウント（メールアドレスとパスワード）
 - **URL**
-  - SpecLino: https://speclino-web-6h5m3svkja-an.a.run.app
+  - SpecLino: https://speclino.dev
   - リポジトリ: https://github.com/tanabe-yudai/speclino
 - **テストアカウントの権限**: ワークスペース `tanabe-yudai` の「メンバー」です。閲覧、下書きの編集、AI との会話はできます。
   承認・確定・トークンの発行など、オーナーと承認者だけの操作はできません。画面にはその旨の案内が出ます
@@ -36,8 +36,8 @@
 
 ## 1. ログイン（1 分）
 
-1. https://speclino-web-6h5m3svkja-an.a.run.app を開きます。紹介ページ（LP）が表示されます
-2. 右上の「ログイン」を押します（https://speclino-web-6h5m3svkja-an.a.run.app/login を直接開いても構いません）
+1. https://speclino.dev を開きます。紹介ページ（LP）が表示されます
+2. 右上の「ログイン」を押します（https://speclino.dev/login を直接開いても構いません）
 3. 「メールアドレス」と「パスワード」に、提出フォームに記載したテストアカウントを入力して「ログイン」を押します
 
 **確かめること**: ワークスペース `tanabe-yudai` のホーム（`/w/tanabe-yudai`）が開きます。
@@ -188,7 +188,7 @@ SpecLino の画面に戻ります。
 
 1. 上部の「**検査**」を押します。PR ごとの検査が並びます（「speclino #1」など）
 2. 「speclino **#1**」の行を押します。直接開く場合は次の URL です
-   https://speclino-web-6h5m3svkja-an.a.run.app/w/tanabe-yudai/runs/965d7530-b259-4c2b-9a09-29e960ceeed6
+   https://speclino.dev/w/tanabe-yudai/runs/965d7530-b259-4c2b-9a09-29e960ceeed6
 3. 画面上部で次を確かめます
    - ゲートの表示が「**失敗**」であること
    - 件数のタイル（違反・要確認・未検証・適合・確定済み・情報）
@@ -207,12 +207,12 @@ SpecLino の画面に戻ります。
 - 「解析範囲」に、経路の数・ソルバーの上限・前提が書かれます。判定がどの範囲で成り立つかを明示しています
 - 下のタブ「**レビュー（review.md）**」で、同じ内容を Markdown の報告書として読めます
 
-5. 一覧に戻り、「speclino **#3**」（https://speclino-web-6h5m3svkja-an.a.run.app/w/tanabe-yudai/runs/6be75cfb-1c31-4a3c-bdfb-f9c133e4f0c3 ）を開きます。
+5. 一覧に戻り、「speclino **#3**」（https://speclino.dev/w/tanabe-yudai/runs/6be75cfb-1c31-4a3c-bdfb-f9c133e4f0c3 ）を開きます。
    「未検証」の中の `gate-decision#gate.decide_gate` のカードを読みます
 
 **確かめること**: 「解析の精度が incomplete のため判定しない（For は対応外の構文 …）」と、解析できなかった理由が具体的に出ます。
 
-6. 「speclino **#2**」（https://speclino-web-6h5m3svkja-an.a.run.app/w/tanabe-yudai/runs/68c4de69-6c45-4740-96ab-62648b773a76 ）を開きます。
+6. 「speclino **#2**」（https://speclino.dev/w/tanabe-yudai/runs/68c4de69-6c45-4740-96ab-62648b773a76 ）を開きます。
    「未検証」の中の `KNOWLEDGE-LOCK-001` のカードを読みます
 
 **確かめること**: 「sync で書き出した知識が改変されているか欠けています」と出ます。
@@ -223,7 +223,7 @@ SpecLino の画面に戻ります。
 ## 8. プロジェクト画面: 要求ごとの状態（2 分）
 
 1. ホームの「プロジェクトの健全性」で `speclino` を押します。直接開く場合は次の URL です
-   https://speclino-web-6h5m3svkja-an.a.run.app/w/tanabe-yudai/p/tanabe-yudai/speclino
+   https://speclino.dev/w/tanabe-yudai/p/tanabe-yudai/speclino
 2. 「**概要**」タブで、次の 4 つを確かめます
    - 状態のパネル（要求と規約の判定の件数）
    - 「次にやること」
