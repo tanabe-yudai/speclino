@@ -3,8 +3,8 @@
 > **今の本番のデモ PR はこれではない。** 提出のデモは、このリポジトリ自身の UML の仕様（俯瞰の仕様 7 本）に対する
 > 3 本の PR で、中身は各 PR の説明が正本:
 > [#1](https://github.com/tanabe-yudai/speclino/pull/1) デモ1（テストは緑でもゲートの図に違反・反例）、
-> [#2](https://github.com/tanabe-yudai/speclino/pull/2) デモ3（仕様の写しの改変を lock の照合で止める）、
-> [#3](https://github.com/tanabe-yudai/speclino/pull/3) デモ4（解析できないループで UNKNOWN → ゲート失敗）。
+> [#2](https://github.com/tanabe-yudai/speclino/pull/2) デモ2（仕様の写しの改変を lock の照合で止める）、
+> [#3](https://github.com/tanabe-yudai/speclino/pull/3) デモ3（解析できないループで UNKNOWN → ゲート失敗）。
 > 見せ方は `docs/submission/form.md` と `docs/submission/video-script.md`。
 
 ここに残すのは、旧形式の題材 `examples/orders`（注文キャンセル、要求 9 件）に変異を入れて、**期待どおりの判定に
