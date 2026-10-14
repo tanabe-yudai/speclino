@@ -42,7 +42,7 @@ AI（Gemini + ADK）は仕様の**書き換えを提案**し、検査の後に**
 仕様を機械可読な形に**変換するのも、判定するのも決定的な処理だけ**で、AI の出力は判定経路に入らない
 （`spec/uml/`・`conformance/`・`analysis/` は LLM・外部 I/O を import できず、テストで強制している）。
 
-> 第5回 Agentic AI Hackathon with Google Cloud 提出作品。提出情報は [docs/submission/](docs/submission/README.md)。
+> 第5回 Agentic AI Hackathon with Google Cloud 提出作品。審査員向けの操作手順は [docs/submission/judge-guide.md](docs/submission/judge-guide.md)、提出情報は [docs/submission/](docs/submission/README.md)。
 
 ## 何を保証するか
 

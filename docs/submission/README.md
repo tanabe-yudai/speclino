@@ -1,6 +1,6 @@
 # ハッカソン提出
 
-第5回 Agentic AI Hackathon with Google Cloud の提出情報。デモの手順は [../demo-knowledge-registry.md](../demo-knowledge-registry.md)。
+第5回 Agentic AI Hackathon with Google Cloud の提出情報。**審査員向けの操作手順は [judge-guide.md](judge-guide.md)**（本番の画面と GitHub のデモ PR）。手元で DB から作り直す通し手順は [../demo-knowledge-registry.md](../demo-knowledge-registry.md)。
 
 ## 提出情報
 
