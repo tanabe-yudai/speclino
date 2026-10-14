@@ -11,18 +11,6 @@
 - `SPEC-KNOW-001`・`SPEC-GATE-002`・`SPEC-SYNC-001`・`SPEC-WS-001`・`SPEC-AI-001`・`SPEC-OBS-001` — 知識・ゲート・配信・ワークスペース・AI・可観測性
 - `src/speclino/spec/uml/grammar.md` — SpecLino が受け付ける Mermaid の部分集合（parser の正本）
 
-## タスク管理（必ず守る）
-
-進捗は GitHub Project「SpecLino」（https://github.com/users/tanabe-yudai/projects/3）で、ストーリー = Issue（`story` ラベル、`Sxx:` 接頭辞）単位に管理する。各 Issue は 概要 / 完了条件 / 優先度 / 依存関係 / サブタスク / 成果 を持つ。
-
-- **セッション開始時**: `scripts/story.sh board` で In Progress / Blocked を確認し、`scripts/story.sh next` で着手可能なストーリー（依存が全て Done）を優先度順に見る。
-- **着手時**: `scripts/story.sh start <issue>` → Status=In Progress。着手コメントに計画の要点を書く（`gh issue comment`）。
-- **完了時**: `scripts/story.sh done <issue> -r <成果ファイル>` → 本文「## 成果」に追記、Status=Done、クローズ。成果には 実装内容 / 確認方法と結果 / コミット・PR / 判断の記録 / 残課題 を書く。
-- **停止時**: `scripts/story.sh block <issue> "<理由>"`。解消したら `start` で戻す。
-- **選択**: 優先度（P0 → P1 → P2）と依存関係から動的に選ぶ。独立したストーリーは並列に進めてよい（サブエージェントは worktree で分離、1 ストーリー 1 エージェント）。
-- **サブタスク**: Issue 内のチェックリストで管理。並列委譲や別担当が必要なものだけ sub-issue に切り出し、親の「依存関係」に列挙する。
-- コミットメッセージに `(#issue)` を付ける。
-
 ## コマンド
 
 - `make setup` / `make lint`（ruff）/ `make typecheck`（mypy）/ `make test` / `make selfcheck` / `make eval` / `make check`（lint+typecheck+test+selfcheck）/ `make format`
