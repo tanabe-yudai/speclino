@@ -172,7 +172,7 @@ export function RepositoriesTab({
 
 function StepNumber({ n }: { n: number }) {
   return (
-    <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-brand/10 text-xs font-semibold text-brand">
+    <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
       {n}
     </span>
   );
