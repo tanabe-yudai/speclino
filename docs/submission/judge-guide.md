@@ -134,13 +134,12 @@ AI（Vertex AI の Gemini と ADK）は、執筆の相談相手です。変換�
 ## 6. GitHub: デモ PR のゲート（ログイン不要、4 分）
 
 デモ PR は 3 本です。どれも「単体テストは通る」か「一見無害」な変更ですが、`SpecLino / gate` が失敗します。
-番号は PR の題（デモ1・3・4）に合わせています。デモ2・5 はありません。
 
 | PR | 題 | 変更 | ゲートを止めた必須ルール |
 | --- | --- | --- | --- |
 | [#1](https://github.com/tanabe-yudai/speclino/pull/1) | デモ1: テストが全部緑でも、仕様違反は反例つきで指摘される | `gate.py` の 1 か所で、必須ルールが無い結果を「通過」にした | `gate-decision#gate.decide_gate` が**違反**（反例つき） |
-| [#2](https://github.com/tanabe-yudai/speclino/pull/2) | デモ3: 仕様を消して検査をすり抜けることはできない | リポジトリにある仕様の写し（`.speclino/specs/spec-ai-001.md`）から、必須の要求 `R-AI-07` の行を消した | `KNOWLEDGE-LOCK-001` が**未検証**（写しの改変を署名で検出） |
-| [#3](https://github.com/tanabe-yudai/speclino/pull/3) | デモ4: 確認できなかったものは通さない | 振る舞いの変わらない `for` ループを入れた（解析できない形） | `gate-decision#gate.decide_gate` が**未検証** |
+| [#2](https://github.com/tanabe-yudai/speclino/pull/2) | デモ2: 仕様を消して検査をすり抜けることはできない | リポジトリにある仕様の写し（`.speclino/specs/spec-ai-001.md`）から、必須の要求 `R-AI-07` の行を消した | `KNOWLEDGE-LOCK-001` が**未検証**（写しの改変を署名で検出） |
+| [#3](https://github.com/tanabe-yudai/speclino/pull/3) | デモ3: 確認できなかったものは通さない | 振る舞いの変わらない `for` ループを入れた（解析できない形） | `gate-decision#gate.decide_gate` が**未検証** |
 
 ### 6-1. PR #1（デモ1）
 
@@ -162,7 +161,7 @@ AI（Vertex AI の Gemini と ADK）は、執筆の相談相手です。変換�
 - 同じ PR の CI では、`test (backend)` は成功（緑）です。`self-check` は失敗しますが、これは「今のコードが自分の仕様に適合しているか」を
   確かめる別の検査が、デモの違反を正しく検出しているためです。単体テストは緑なのに、SpecLino だけが仕様違反を名指しします
 
-### 6-2. PR #2（デモ3）
+### 6-2. PR #2（デモ2）
 
 1. https://github.com/tanabe-yudai/speclino/pull/2 を開き、「**Files changed**」で 1 行の削除（`R-AI-07`）だけであることを確かめます
 2. 「**Checks**」→「**SpecLino / gate**」を開きます
@@ -173,7 +172,7 @@ AI（Vertex AI の Gemini と ADK）は、執筆の相談相手です。変換�
 - 検査は、リポジトリの写しではなく、SpecLino で承認済みの bundle で行います。写しの改変は、署名つきの `.speclino/lock.json` との照合で見つかります
 - 要求を外せるのは、SpecLino の画面での改訂と、人の承認だけです
 
-### 6-3. PR #3（デモ4）
+### 6-3. PR #3（デモ3）
 
 1. https://github.com/tanabe-yudai/speclino/pull/3 を開き、「**Files changed**」で `for` ループが入っただけであることを確かめます
 2. 「**Checks**」→「**SpecLino / gate**」を開きます
@@ -338,8 +337,8 @@ gate: fail (advisory モード: 必須ルール 1 件が非成立（警告のみ
 
 - 件数は GitHub の結果と少し違います。CLI では、サーバーで検査する lock の照合（`KNOWLEDGE-LOCK-001`）が入らないためです
 - `build/review/review.md` を開くと、手順 7 と同じ反例が出ます（`before.triage.has_findings = True`、`before.triage.has_mandatory = False`）
-- `--head` を次のブランチに替えると、デモ4 が再現できます
-  - `origin/demo/loop-in-gate`: デモ4 で、同じ要求が UNKNOWN（未検証）になります
+- `--head` を次のブランチに替えると、デモ3 が再現できます
+  - `origin/demo/loop-in-gate`: デモ3 で、同じ要求が UNKNOWN（未検証）になります
 - 成果物は `build/review/` に出ます。`speclino replay build/review` で、凍結した入力から再評価して同じ結果になることを確かめられます
 
 ## 付録 B. うまくいかないとき
