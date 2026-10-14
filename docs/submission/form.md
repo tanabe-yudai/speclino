@@ -51,7 +51,7 @@ Vertex AI（Gemini）＋ Agent Development Kit、Identity Platform、Artifact Re
 | デモ | TODO（本番の web の URL） |
 | リポジトリ | https://github.com/tanabe-yudai/speclino |
 | デモ PR | [#1](https://github.com/tanabe-yudai/speclino/pull/1)・[#2](https://github.com/tanabe-yudai/speclino/pull/2)・[#3](https://github.com/tanabe-yudai/speclino/pull/3)（12/1 まで open） |
-| 動画 | TODO |
+| 動画 | https://youtu.be/Ng_zdjhMiyg |
 | Zenn 記事 | TODO |
 
 ## テストアカウント
