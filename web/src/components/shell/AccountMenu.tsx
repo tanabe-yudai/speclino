@@ -15,6 +15,7 @@ import { useAuth } from '@/auth/useAuth'
 import { useTheme } from '@/components/theme/useTheme'
 import { useMe } from '@/hooks/useMe'
 import { PROFILE_LABELS, WORKSPACE_ROLE_LABELS } from '@/services/labels'
+import { paths } from '@/services/paths'
 import type { ThemeChoice } from '@/types/theme'
 import { ProfileDialog } from './ProfileDialog'
 
@@ -56,9 +57,10 @@ export function AccountMenu() {
             ))
           ) : (
             <DropdownMenuLabel className="text-xs font-normal text-ink-3">
-              所属しているワークスペースがありません。管理者に招待してもらってください
+              所属しているワークスペースがありません
             </DropdownMenuLabel>
           )}
+          <DropdownMenuItem onSelect={() => navigate(paths.workspaces())}>ワークスペースの一覧・作成</DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuLabel className="text-xs text-ink-3">テーマ</DropdownMenuLabel>
           <DropdownMenuRadioGroup value={choice} onValueChange={(v) => setChoice(v as ThemeChoice)}>

@@ -1,13 +1,11 @@
 import { Navigate } from 'react-router-dom'
 import { LoadingState } from '@/components/LoadingState'
 import { useMe } from '@/hooks/useMe'
-import { paths } from '@/services/paths'
-import { Home } from './Home'
+import { landingPath } from '@/services/workspaces'
 
-/** `/app`: 所属の先頭のワークスペースのホームへ。所属が無ければその場で uid を出す（Home が出す）。 */
+/** `/app`: 所属が 1 つならそのホームへ、0 か 2 つ以上なら自分のワークスペースの画面へ。 */
 export function HomeRedirect() {
   const { me } = useMe()
   if (!me) return <LoadingState />
-  const first = me.workspaces[0]
-  return first ? <Navigate to={paths.workspace(first.slug)} replace /> : <Home />
+  return <Navigate to={landingPath(me.workspaces)} replace />
 }

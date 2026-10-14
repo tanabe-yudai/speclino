@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { pickWorkspace } from './workspaces'
+import { landingPath, pickWorkspace, workspaceSlugError } from './workspaces'
 import type { WorkspaceMembership } from '@/types/me'
 
 const ws: WorkspaceMembership[] = [
@@ -18,4 +18,26 @@ describe('pickWorkspace', () => {
     expect(pickWorkspace(ws, undefined)?.slug).toBe('a')
     expect(pickWorkspace([], undefined)).toBeNull()
   })
+})
+
+describe('landingPath', () => {
+  it('所属が 1 つならそのホームへ直接入る', () => {
+    expect(landingPath([ws[0]])).toBe('/w/a')
+  })
+  it('所属が 0 か 2 つ以上なら自分のワークスペースの画面で選ぶ', () => {
+    expect(landingPath([])).toBe('/workspaces')
+    expect(landingPath(ws)).toBe('/workspaces')
+  })
+})
+
+describe('workspaceSlugError', () => {
+  it.each(['ab', 'judge-sandbox', 'a1', 'x'.repeat(40)])('%s は通す', (slug) => {
+    expect(workspaceSlugError(slug)).toBeNull()
+  })
+  it.each(['', 'a', 'Upper', '-lead', 'trail-', 'two--hyphens', 'with_underscore', 'x'.repeat(41), '日本'])(
+    '%s は誤り',
+    (slug) => {
+      expect(workspaceSlugError(slug)).not.toBeNull()
+    },
+  )
 })

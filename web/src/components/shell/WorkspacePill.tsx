@@ -5,6 +5,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useCurrentWorkspace } from '@/hooks/useCurrentWorkspace'
@@ -25,7 +26,7 @@ export function WorkspacePill() {
         <span className="truncate font-semibold">{current.name ?? current.slug}</span>
         <ChevronDown className="size-3.5 shrink-0 text-ink-3" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start">
+      <DropdownMenuContent align="start" className="w-64">
         <DropdownMenuLabel>ワークスペース</DropdownMenuLabel>
         {me.workspaces.map((w) => (
           <DropdownMenuItem key={w.slug} onSelect={() => navigate(paths.workspace(w.slug))}>
@@ -33,6 +34,8 @@ export function WorkspacePill() {
             <span className="ml-auto text-xs text-ink-3">{WORKSPACE_ROLE_LABELS[w.role]}</span>
           </DropdownMenuItem>
         ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => navigate(paths.workspaces())}>ワークスペースの一覧・作成</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   )
