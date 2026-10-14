@@ -36,7 +36,7 @@ from __future__ import annotations
 import asyncio
 import re
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from pathlib import Path
@@ -717,18 +717,18 @@ class BearerAuth:
             return Principal(identity.team, identity.token_id) if identity else None
 
 
-def allowed_hosts(public_url: str) -> list[str]:
-    """DNS rebinding 対策の Host 許可リスト（公開 URL のホストとローカル）。"""
-    host = urlparse(public_url).hostname or "localhost"
-    return sorted({host, f"{host}:*", "localhost", "localhost:*", "127.0.0.1", "127.0.0.1:*"})
+def allowed_hosts(public_url: str, extra_hosts: Sequence[str] = ()) -> list[str]:
+    """DNS rebinding 対策の Host 許可リスト（公開 URL のホスト・追加のホスト・ローカル）。"""
+    hosts = [urlparse(public_url).hostname or "localhost", *extra_hosts, "localhost", "127.0.0.1"]
+    return sorted({h for host in hosts for h in (host, f"{host}:*")})
 
 
 def mount_mcp(
-    get_state: StateGetter, public_url: str
+    get_state: StateGetter, public_url: str, extra_hosts: Sequence[str] = ()
 ) -> tuple[ASGIApp, Callable[[], AbstractAsyncContextManager[None]]]:
     """`/mcp` にマウントする ASGI アプリと、lifespan で入る session manager を返す。"""
     mcp = build_mcp(get_state)
-    security = TransportSecuritySettings(allowed_hosts=allowed_hosts(public_url))
+    security = TransportSecuritySettings(allowed_hosts=allowed_hosts(public_url, extra_hosts))
     # Mount ではなく `/mcp` の完全一致ルートとして登録するため、内部パスも `/mcp` にする
     # （Mount だと `/mcp/` にしか応答せず、`/` の静的配信に `/mcp` を取られる）
     app = mcp.streamable_http_app(

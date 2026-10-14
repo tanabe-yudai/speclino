@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://speclino:speclino@localhost:5432/speclino"
     artifact_dir: Path = Path(".speclino-artifacts")
     public_url: str = "http://localhost:8080"
+    # public_url 以外に MCP が受け付けるホスト（以前の公開 URL など。DNS rebinding 対策）
+    extra_hosts: list[str] = []
 
     # GitHub App（worker が鍵を持つ。web は Webhook 秘密だけ）
     github_app_id: int | None = None

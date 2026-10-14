@@ -110,7 +110,10 @@ locals {
     sandbox = local.common_env
   }
 
-  public_url_env = var.public_url == "" ? {} : { SPECLINO_PUBLIC_URL = var.public_url }
+  public_url_env = merge(
+    var.public_url == "" ? {} : { SPECLINO_PUBLIC_URL = var.public_url },
+    length(var.extra_hosts) == 0 ? {} : { SPECLINO_EXTRA_HOSTS = jsonencode(var.extra_hosts) },
+  )
 }
 
 resource "google_cloud_run_v2_service" "services" {
