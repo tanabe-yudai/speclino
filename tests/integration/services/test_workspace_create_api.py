@@ -23,6 +23,8 @@ from speclino.adapters.queue.inprocess import InProcessQueue
 from speclino.adapters.storage.fs import FileSystemBlobStore
 from speclino.api.app import create_app
 from speclino.api.deps import AppState
+from speclino.services import knowledge_registry
+from speclino.services.knowledge_presets import PRESET_ACTOR, preset_skills
 from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
 from speclino.services.workspace_create import MAX_OWNED_WORKSPACES
 from speclino.settings import Settings
@@ -144,3 +146,30 @@ async def test_concurrent_creation_does_not_exceed_the_limit(client: httpx.Async
     codes = sorted(r.status_code for r in results)
     assert codes.count(201) == MAX_OWNED_WORKSPACES, codes
     assert codes.count(409) == 3, codes
+
+
+async def test_new_workspace_starts_with_preset_skills(
+    client: httpx.AsyncClient, engine: AsyncEngine
+) -> None:
+    slug = _slug()
+    res = await client.post("/api/workspaces", json={"slug": slug}, headers=_user(_uid("preset")))
+    assert res.status_code == 201, res.text
+
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        bundle = await knowledge_registry.current_bundle(session, slug)
+    assert bundle is not None and bundle.generation == 1
+    assert knowledge_registry.verify_bundle(bundle)
+    presets = preset_skills()
+    assert {(m.kind, m.name) for m in bundle.members} == {("skill", n) for n in presets}
+    async with engine.connect() as conn:
+        rows = (
+            await conn.execute(
+                sql_text("SELECT actor, action FROM audit_events WHERE target LIKE :t"),
+                {"t": f"{slug}/%"},
+            )
+        ).all()
+    assert {(r.actor, r.action) for r in rows} == {
+        (PRESET_ACTOR, "knowledge.draft"),
+        (PRESET_ACTOR, "knowledge.approve"),
+    }

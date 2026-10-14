@@ -420,6 +420,39 @@ async def approve(
     return bundle
 
 
+async def install_preset(
+    session: AsyncSession, *, workspace: str, name: str, content: SkillContent, actor: str
+) -> ArtifactRevision:
+    """製品に同梱した skill を、作ったばかりのワークスペースに承認済みとして入れる。
+
+    人の承認ではなく製品の初期値なので、作者・承認者は `actor` にして承認者の確認を通さない
+    （規約の `seed_from_package` と同じ扱い）。監査には下書きと承認の両方を残す。
+    bundle は作らない（呼び出し側がすべて入れてから `build_bundle` を 1 回呼ぶ）。
+    """
+    draft = await create_draft(
+        session, workspace=workspace, kind="skill", name=name, content=content, author=actor
+    )
+    repo = ArtifactRepository(session)
+    approved = await repo.approve(
+        artifact_id=_parse_id(draft.artifact_id),
+        revision=draft.revision,
+        approver=actor,
+        self_approved=True,
+        content=content.model_dump(mode="json"),
+        content_hash=draft.content_hash,
+    )
+    if approved is None:
+        raise DraftConflict(f"{workspace} の {name} は並行する操作で状態が変わった")
+    await AuditRepository(session).record(
+        actor,
+        _APPROVE,
+        _target(workspace, draft.artifact_id, draft.revision),
+        "approved",
+        {"author": actor, "self_approved": True, "content_hash": draft.content_hash},
+    )
+    return approved
+
+
 async def retire(
     session: AsyncSession,
     *,
@@ -741,6 +774,7 @@ __all__ = [
     "uml_compiler",
     "unavailable_compiler",
     "approve",
+    "install_preset",
     "build_bundle",
     "bundle_payload",
     "canonical_json",
