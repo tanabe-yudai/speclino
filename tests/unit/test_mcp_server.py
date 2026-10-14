@@ -87,6 +87,7 @@ async def test_tools_are_exposed_in_process() -> None:
         "spec_get",
         "skill_get",
         "spec_suggest",
+        "spec_draft_save",
     }
 
 

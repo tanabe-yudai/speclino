@@ -26,8 +26,10 @@ lock の意味は「この checkout が宣言している bundle」で、**利�
 ## MCP / A2A / Claude Code プラグイン
 
 - **MCP**（`/mcp`）: `context_get`（規約）、`spec_get` / `skill_get`、`sync_status`（lock が最新か）、`spec_suggest`
-  （仕様の書き換えの提案）、`knowledge_pull`（取り込みの計画）、`verification_start` / `verification_get`。読み取り系は
-  リポジトリ同期トークンでも呼べ、検査の開始はエージェント接続トークン（`slmcp_…`、設定 →「エージェント接続」で owner が発行）に限る
+  （仕様の書き換えの提案）、`spec_draft_save`（仕様の下書きの保存。作者はトークンを発行した人、承認は画面で人が行う）、
+  `knowledge_pull`（取り込みの計画）、`verification_start` / `verification_get`。読み取り系は
+  リポジトリ同期トークンでも呼べ、検査の開始・提案・下書きの保存はエージェント接続トークン（`slmcp_…`、設定 →
+  「エージェント接続」で owner が発行）に限る
 - **エージェントの取り込み**: 人は承認するだけで、手元への書き出しはエージェントが行う。`sync_status` で lock の鮮度を
   確かめ、`pull_needed` なら `knowledge_pull` が返す署名つきの計画（`plan_url`、1 回だけ・10 分で失効）を、サーバが配る
   実行スクリプト（`apply_script` の URL と sha256）に渡して当て、lock ごと作業の PR にコミットする（スキル

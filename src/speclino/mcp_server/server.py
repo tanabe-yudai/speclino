@@ -23,6 +23,9 @@
 - S67: `spec_suggest`（AI の書き換え提案）。ワークスペースの MCP トークンだけが呼べる
   （sync トークンは読み取り専用なので拒否。LLM の費用を使うため）。
   返すのは本文の置換の提案と検証の要約だけで、IR は返さない
+- `spec_draft_save`（仕様の下書きの保存、`services/spec_drafts.py`）。ワークスペースの MCP トークン
+  だけが呼べ、作者はトークンを発行した人。承認は人が画面で行う（MCP に承認のツールは無い）。
+  保存した本文の parser の診断と、承認する画面の URL を返す
 - `instructions`（2KB 以内）と `speclino_guide` prompt（Claude Code 以外のクライアント向けに
   SKILL.md 本文を返す）は、どちらも `plugins/speclino/skills/speclino-spec-authoring/SKILL.md`
   （S57、Claude Code プラグインが配る Skill と同じファイル）から読む。二重に書かず正本を 1 つに保つ
@@ -30,6 +33,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 import uuid
 from collections.abc import Callable
@@ -43,6 +47,7 @@ from mcp.server import MCPServer
 from mcp.server.mcpserver import Context
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
+from pydantic import ValidationError
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -54,18 +59,28 @@ from speclino.db.repositories import ProjectRepository
 from speclino.db.repositories.review_runs import ReviewRunRepository
 from speclino.db.repositories.sync_tokens import KnowledgeFetchRepository
 from speclino.domain.knowledge import (
+    ARTIFACT_NAME_MAX_CHARS,
+    ARTIFACT_NAME_PATTERN,
     ArtifactRevision,
     KnowledgeLock,
     ResolvedKnowledge,
     SkillContent,
     SpecContent,
 )
+from speclino.domain.knowledge_chat import NOTE_MAX_CHARS
 from speclino.domain.knowledge_sync import InstructionsFile, SkillsRoot
 from speclino.domain.run import GitRef
-from speclino.services import knowledge_registry, knowledge_sync, mcp_tokens, sync_tokens
+from speclino.services import (
+    knowledge_registry,
+    knowledge_sync,
+    mcp_tokens,
+    spec_drafts,
+    sync_tokens,
+)
 from speclino.services.mcp_context import ContextUnavailable, InProcessContextSource
 from speclino.services.run_view import run_view
 from speclino.services.spec_suggest import SuggestRefused
+from speclino.spec.uml import compile_spec
 
 StateGetter = Callable[[], AppState]
 MCP_PATH = "/mcp"
@@ -365,6 +380,78 @@ def build_mcp(get_state: StateGetter) -> MCPServer:
         except SuggestRefused as e:
             raise ToolError(str(e)) from e
         return result.model_dump(mode="json")
+
+    @mcp.tool()
+    async def spec_draft_save(
+        repo_full_name: str,
+        name: str,
+        markdown: str,
+        ctx: Context,
+        note: str = "",
+        expected_revision: int | None = None,
+        expected_hash: str | None = None,
+    ) -> dict[str, Any]:
+        """仕様の本文（Markdown と Mermaid の図）を SpecLino に下書きとして保存する。承認はしない。
+
+        `name` の仕様が無ければ、このリポジトリに当たる新しい仕様の改訂 1 を作る。既にあれば
+        `expected_revision` / `expected_hash`（`spec_get` か前回の保存が返した `revision` /
+        `content_hash`）が必須で、今の下書き・最新の改訂と違えば保存しない（人の下書きを
+        上書きしない。違うと言われたら人に確かめる）。`note` は改訂の説明（承認者が読む）。
+        返り値の `diagnostics` は保存した本文の parser の診断で、`errors` が 0 でないと承認
+        できない。承認は人が `editor_url` の画面で行う。
+        """
+        state = get_state()
+        principal = _principal(ctx)
+        if principal.sync_project is not None:
+            raise ToolError("sync トークンは読み取り専用で、下書きを保存できない")
+        if not re.fullmatch(ARTIFACT_NAME_PATTERN, name) or len(name) > ARTIFACT_NAME_MAX_CHARS:
+            raise ToolError(f"name {name!r} は仕様の名前として使えない（{ARTIFACT_NAME_PATTERN}）")
+        if len(note) > NOTE_MAX_CHARS:
+            raise ToolError(f"note は {NOTE_MAX_CHARS} 文字まで")
+        project = await _workspace_project(state, principal, repo_full_name)
+        try:
+            async with state.session_factory() as session, session.begin():
+                rev = await spec_drafts.save(
+                    session,
+                    workspace=principal.workspace,
+                    project_id=project.id,
+                    name=name,
+                    markdown=markdown,
+                    token_id=principal.token_id,
+                    note=note,
+                    expected_revision=expected_revision,
+                    expected_hash=expected_hash,
+                )
+        except spec_drafts.WorkspaceNotFound as e:
+            raise ToolError("このトークン（または発行した人）では下書きを保存できない") from e
+        except knowledge_registry.ArtifactNotFound as e:
+            raise ToolError(f"{name} は {repo_full_name} に当たる仕様に無い") from e
+        except (
+            spec_drafts.BaseRequired,
+            spec_drafts.DraftConflict,
+            knowledge_registry.InvalidArtifact,
+        ) as e:
+            raise ToolError(str(e)) from e
+        except ValidationError as e:
+            raise ToolError(f"本文を保存できない: {e.errors()[0]['msg']}") from e
+        assert isinstance(rev.content, SpecContent)
+        parsed = await asyncio.to_thread(
+            compile_spec,
+            rev.content.markdown,
+            domain=rev.content.domain,
+            legacy_ir=list(rev.content.legacy_ir),
+        )
+        base = state.settings.public_url.rstrip("/")
+        return {
+            "artifact_id": rev.artifact_id,
+            "name": rev.name,
+            "revision": rev.revision,
+            "status": rev.status,
+            "content_hash": rev.content_hash,
+            "errors": sum(d.severity == "error" for d in parsed.diagnostics),
+            "diagnostics": [d.model_dump(mode="json") for d in parsed.diagnostics],
+            "editor_url": f"{base}/w/{principal.workspace}/knowledge/specs/{rev.artifact_id}",
+        }
 
     return mcp
 
