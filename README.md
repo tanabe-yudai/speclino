@@ -13,7 +13,7 @@
 
 **チームがコーディングエージェントに渡す知識を 1 か所で管理し、守られていることをゲートで保証する。**
 
-- ホスティング版（招待制）: https://speclino-web-6h5m3svkja-an.a.run.app
+- ホスティング版（招待制）: https://speclino.dev
 - ドキュメント: [docs/README.md](docs/README.md)
 
 ![SpecLino のアーキテクチャ](docs/diagrams/overview.png)
@@ -63,7 +63,7 @@ AI（Gemini + ADK）は仕様の**書き換えを提案**し、検査の後に**
 
 ### ホスティング版を使う
 
-[https://speclino-web-6h5m3svkja-an.a.run.app](https://speclino-web-6h5m3svkja-an.a.run.app)（招待制）。
+[https://speclino.dev](https://speclino.dev)（招待制）。
 ワークスペースに招待されたら、画面で知識を書いて承認し、GitHub App でリポジトリを接続する。
 
 ### CLI だけで 1 件検査する（DB なし）
