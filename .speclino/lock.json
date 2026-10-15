@@ -2,7 +2,7 @@
   "schema_version": "0.1",
   "workspace": "tanabe-yudai",
   "github_repo_id": 1417522006,
-  "bundle_generation": 40,
+  "bundle_generation": 44,
   "policy_revision": 2,
   "policy_hash": "sha256:a4eced43c42285e7bc020bef1548de6b03b05e27bb05b368993b9e5337fe778c",
   "members": [
@@ -93,8 +93,8 @@
   "skill_roots": [
     ".claude/skills"
   ],
-  "issued_at": "2026-10-14T03:15:55.925656Z",
-  "expires_at": "2026-11-13T03:15:55.925656Z",
+  "issued_at": "2026-10-15T00:18:42.748551Z",
+  "expires_at": "2026-11-14T00:18:42.748551Z",
   "key_id": "d2ca695a75fba22d",
-  "signature": "hmac-sha256:e1b0367156279973af09a4d827dff578ae83ad8d379efecbd2cede450a8dbd3f"
+  "signature": "hmac-sha256:c3fbd4a020ec5ead10201abe12785fca1d8fcfb61ca4fb101c0f542026d8b4af"
 }
