@@ -55,7 +55,7 @@ def create_app(settings: Settings, state: AppState | None = None) -> FastAPI:
 
     # MCP は web / all で常にマウントする。使えるのは DB に有効なトークンがあるときだけ（S54）
     mcp_app, mcp_session_manager = (
-        mount_mcp(lambda: app.state.speclino, settings.public_url)
+        mount_mcp(lambda: app.state.speclino, settings.public_url, settings.extra_hosts)
         if settings.role in ("web", "all")
         else (None, None)
     )

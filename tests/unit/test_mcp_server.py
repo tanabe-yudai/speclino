@@ -74,6 +74,13 @@ def test_allowed_hosts_include_public_host_and_localhost() -> None:
     assert "speclino-web-abc.a.run.app" in hosts and "localhost:*" in hosts
 
 
+def test_allowed_hosts_include_extra_hosts() -> None:
+    hosts = allowed_hosts("https://speclino.dev", ["speclino-web-abc.a.run.app"])
+    assert {"speclino.dev", "speclino-web-abc.a.run.app", "speclino-web-abc.a.run.app:*"} <= set(
+        hosts
+    )
+
+
 @pytest.mark.asyncio
 async def test_tools_are_exposed_in_process() -> None:
     async with Client(build_mcp(lambda: None)) as client:  # type: ignore[arg-type, return-value]

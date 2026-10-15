@@ -57,13 +57,23 @@ variable "enable_sandbox" {
 
 variable "public_url" {
   description = <<-EOT
-    web サービスの公開 URL（`https://speclino-web-....run.app`）。
+    web サービスの公開 URL（独自ドメインなら `https://speclino.dev`、無ければ `https://speclino-web-....run.app`）。
+    GitHub App のユーザー認可のコールバック、Check の詳細リンク、MCP・A2A の URL になる。
     Cloud Run の URL は作成後に決まるため、初回 apply では空のままにし、
     `terraform output web_url` で得た値を tfvars に書いて 2 回目の apply で反映する。
     空のときは Check の詳細リンクとフロントの絶対 URL が使えない。
   EOT
   type        = string
   default     = ""
+}
+
+variable "extra_hosts" {
+  description = <<-EOT
+    public_url のほかに MCP が受け付けるホスト名（独自ドメインに切り替える前の run.app など）。
+    以前の URL を設定した MCP クライアントを切らないために残す。
+  EOT
+  type        = list(string)
+  default     = []
 }
 
 variable "worker_url" {
