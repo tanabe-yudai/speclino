@@ -81,7 +81,11 @@ locals {
     SPECLINO_CLOUD_TASKS_OIDC_SERVICE_ACCOUNT_EMAIL = google_service_account.this["tasks"].email
   }
 
-  web_env = merge(local.web_queue_env, local.web_github_oauth_env, {
+  web_workspace_limit_env = var.workspace_limit_raised_uids == "" ? {} : {
+    SPECLINO_WORKSPACE_LIMIT_RAISED_UIDS = var.workspace_limit_raised_uids
+  }
+
+  web_env = merge(local.web_queue_env, local.web_github_oauth_env, local.web_workspace_limit_env, {
     SPECLINO_AUTH_KIND           = "identity_platform"
     SPECLINO_FIREBASE_PROJECT_ID = var.project_id
     SPECLINO_A2A_ENABLED         = "true"

@@ -23,6 +23,7 @@ from speclino.services.knowledge_presets import install_presets
 # 英小文字・数字・ハイフンで 2〜40 文字、端はハイフン以外
 SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$")
 MAX_OWNED_WORKSPACES = 5
+RAISED_MAX_OWNED_WORKSPACES = 100
 MAX_NAME_LENGTH = 80
 
 
@@ -52,8 +53,19 @@ def normalize_name(name: str | None) -> str | None:
     return stripped
 
 
+def owned_limit(uid: str, raised_uids: str) -> int:
+    """`uid` が owner になれるワークスペースの数。`raised_uids` はカンマ区切りの uid。"""
+    raised = {u.strip() for u in raised_uids.split(",") if u.strip()}
+    return RAISED_MAX_OWNED_WORKSPACES if uid in raised else MAX_OWNED_WORKSPACES
+
+
 async def create_own_workspace(
-    session: AsyncSession, *, uid: str, slug: str, name: str | None
+    session: AsyncSession,
+    *,
+    uid: str,
+    slug: str,
+    name: str | None,
+    max_owned: int = MAX_OWNED_WORKSPACES,
 ) -> str | None:
     """`uid` を owner とするワークスペースを作り、正規化した表示名を返す。"""
     if not SLUG_PATTERN.fullmatch(slug) or "--" in slug:
@@ -71,7 +83,7 @@ async def create_own_workspace(
         .select_from(WorkspaceMember)
         .where(WorkspaceMember.uid == uid, WorkspaceMember.role == "owner")
     )
-    if owned.scalar_one() >= MAX_OWNED_WORKSPACES:
+    if owned.scalar_one() >= max_owned:
         raise WorkspaceLimitReached(slug)
     inserted = await session.execute(
         pg_insert(TeamRecord)

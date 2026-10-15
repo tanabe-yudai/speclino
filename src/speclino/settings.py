@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     spec_bot_enabled: bool = True
     spec_bot_model: str | None = None
     demo_rerun_limit_per_day: int = 20
+    # 自分で作れるワークスペースの上限を引き上げる利用者（uid をカンマ区切り）。
+    # 複数の審査員が共有するアカウント向け。ほかの利用者は MAX_OWNED_WORKSPACES のまま
+    workspace_limit_raised_uids: str = ""
     # LLM 支援の規約（S70）。tier=llm_assisted のルールを worker が評価する（verdict は REVIEW、
     # 確定は人）。無効なら LLM 支援のルールは UNKNOWN。費用は daily_cost_limit_usd の枠を共有する
     llm_policies_enabled: bool = True

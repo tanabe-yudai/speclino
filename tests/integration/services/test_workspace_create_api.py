@@ -26,7 +26,7 @@ from speclino.api.deps import AppState
 from speclino.services import knowledge_registry
 from speclino.services.knowledge_presets import PRESET_ACTOR, preset_skills
 from speclino.services.review_run_service import ReviewRunConfig, ReviewRunService
-from speclino.services.workspace_create import MAX_OWNED_WORKSPACES
+from speclino.services.workspace_create import MAX_OWNED_WORKSPACES, owned_limit
 from speclino.settings import Settings
 
 _DATABASE_URL = os.environ.get("SPECLINO_DATABASE_URL")
@@ -48,12 +48,15 @@ def _user(uid: str) -> dict[str, str]:
     return {"X-Dev-User": uid}
 
 
+RAISED_UID = _uid("raised")
+
+
 @pytest_asyncio.fixture
 async def client(engine: AsyncEngine, tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
     factory = async_sessionmaker(engine, expire_on_commit=False)
     holder: dict[str, ReviewRunService] = {}
     queue = InProcessQueue(lambda rid: holder["svc"].execute(rid), immediate=True)
-    settings = Settings(env="local", role="all")
+    settings = Settings(env="local", role="all", workspace_limit_raised_uids=f"other,{RAISED_UID}")
     blobs = FileSystemBlobStore(tmp_path / "blobs")
     host = LocalCodeHost(repos={})
     service = ReviewRunService(factory, host, queue, blobs, ReviewRunConfig(agent_enabled=False))
@@ -146,6 +149,20 @@ async def test_concurrent_creation_does_not_exceed_the_limit(client: httpx.Async
     codes = sorted(r.status_code for r in results)
     assert codes.count(201) == MAX_OWNED_WORKSPACES, codes
     assert codes.count(409) == 3, codes
+
+
+async def test_raised_uid_can_own_more_than_the_limit(client: httpx.AsyncClient) -> None:
+    for _ in range(MAX_OWNED_WORKSPACES + 1):
+        res = await client.post(
+            "/api/workspaces", json={"slug": _slug()}, headers=_user(RAISED_UID)
+        )
+        assert res.status_code == 201, res.text
+
+
+def test_owned_limit_reads_comma_separated_uids() -> None:
+    assert owned_limit("a", " a , b ") > MAX_OWNED_WORKSPACES
+    assert owned_limit("c", " a , b ") == MAX_OWNED_WORKSPACES
+    assert owned_limit("a", "") == MAX_OWNED_WORKSPACES
 
 
 async def test_new_workspace_starts_with_preset_skills(

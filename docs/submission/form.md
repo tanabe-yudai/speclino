@@ -64,7 +64,7 @@ Vertex AI（Gemini）＋ Agent Development Kit、Identity Platform、Artifact Re
 | ログイン方法 | メール / パスワード（ソーシャルログイン不要） |
 | メールアドレス | フォームにだけ記入する（このファイルには書かない） |
 | パスワード | フォームにだけ記入する（このファイルには書かない） |
-| 権限 | デモ用のワークスペースのメンバー（member）。画面はすべて閲覧できる。知識の承認・規約の変更・PR の要確認の確定は owner / approver だけなので、審査員はできない |
+| 権限 | デモ用のワークスペース `tanabe-yudai` ではメンバー（member）で、画面はすべて閲覧できるが、承認はできない。自分で作ったワークスペースではオーナーになり、知識の作成から承認まで試せる（手順書の第 2 部） |
 | 有効期限 | 2026-12-01 まで |
 
 - アカウントは `scripts/create_test_user.sh` で作り、デモ用のワークスペースに登録する（`docs/guides/deploy-runbook.md` 9-4）
@@ -72,9 +72,10 @@ Vertex AI（Gemini）＋ Agent Development Kit、Identity Platform、Artifact Re
 
 ## 審査員に見てほしい順番
 
-ログインするとワークスペースのホームが開く。上部のナビ（スマホでは画面下のタブ）を左から順にたどれば、全体を見られる。
-審査員のアカウントは閲覧の権限なので、承認・確定の操作（画面での知識の承認、PR の `/speclino attest`・Approve）は
-デモ動画で見せる。
+手順は [judge-guide.md](judge-guide.md) にある。第 1 部（約 20 分）は、デモ用のワークスペースに参加して全体を理解する。
+第 2 部（約 25 分）は、自分のワークスペースを作り、指示書・スキル・仕様・規約を作って承認する。任意の手順として、
+自分の GitHub リポジトリでの PR ゲート（見本 [tanabe-yudai/speclino-sample](https://github.com/tanabe-yudai/speclino-sample)）と、
+手元の Claude Code から MCP で仕様を書く手順もある。第 1 部で見る順番は次のとおり。
 
 1. **ホーム**: 「やること」に、承認待ちの知識・ゲートが失敗の PR・知識が古いリポジトリが並ぶ。チームが今何をすべきかがここで分かる
 2. **仕様**: 「ワークスペース全体の仕様」（SPEC-SYS-001）と「リポジトリ別の仕様」（spec-lino の 6 本）。開くと Markdown と UML
