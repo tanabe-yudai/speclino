@@ -30,7 +30,6 @@ A2A の議論役（`speclino.a2a_server`）。全体の要求 R-SYS-01、R-SYS-1
 | R-AI-04 | mandatory | 仕様の書き換え提案は本文の置換（最大 10 件、重なり・範囲外・32KB 超・空の理由を捨てる）だけを返し、各提案を当てた写しを compile_spec で通した結果を添える。MCP ではワークスペースの MCP トークンだけが呼べる | - |
 | R-AI-05 | mandatory | AI 支援の操作を監査に残す: 会話の作成・発言・削除・消去（件数と成否だけ、本文は残さない）、エージェントのツール呼び出しの許可と拒否（引数はハッシュ）、A2A のツール呼び出し | ai-vocab#AuditSink |
 | R-AI-06 | mandatory | LLM 支援の規約の verdict は常に REVIEW で、区分（issue・no_issue・split）を assessment_outcome に持つ。新しいキーは temperature 0 で 3 回評価し 2 回以上で issue、1 回で split とし、記録があるキーは呼ばない。replay は記録だけで再評価する。失敗・上限超過・記録の破損は UNKNOWN にし、必須の規約は no_issue でも人の確定まで阻止する | ai-vocab#AssessmentRepository |
-| R-AI-07 | mandatory | 調査エージェントのツール呼び出しは実行の前に権限・予算を検査し（許可されないツールとハニーポットは実行せず拒否を記録）、上限はツール 20 回・600 秒・LLM 40 回。エージェントの失敗は run を落とさず、指摘は未解決のまま残る | ai-vocab#ToolGateway, ai-vocab#AgentPermissions, ai-vocab#BudgetState, ai-vocab#ToolRegistry |
 | R-AI-08 | mandatory | LLM の費用は日次の上限（既定 3.0 USD）と 1 run の余裕（0.50 USD）の中に収め、呼ぶ前に最悪の額で可否を判断（チャット・提案・議論役は予約）し、呼んだ後に実費で精算する。費用ガードの無い構成では LLM を呼ばない | ai-vocab#CostGuard, ai-vocab#ChatBudget, ai-vocab#ConsultBudget |
 | R-AI-09 | mandatory | 知識のチャットは、利用者ごとに 1 日 50 発言・日次の枠の 50%、ワークスペースごとに枠の 50% を原子的に数え（全体では検査 1 回分の余裕を残す）、入力は 64KB（会話は直近 48KB）・出力は 16,384 トークンに固定する。出力の上限で切れた返答は提案を省いた説明だけで確定する。同じ冪等キーの再送は LLM を呼ばずに前の結果を返す | ai-vocab#GeminiJsonLlm |
 | R-AI-10 | mandatory | 秘密らしい値を含むコードの単位は LLM に送らず UNKNOWN にし、モデルの引用の秘密は伏せる。チャットの API のエラーは固定のコードだけを返し、入力・LLM の応答・プロンプト・例外の文をログと応答に出さない | - |
