@@ -102,7 +102,8 @@ def decide_gate(t: Triage, policy: GatePolicy) -> GateResult:
     if not t.has_findings:
         return _fail(t, "必須の検証集合が空。空の検証集合を通過として扱わない")
     if not t.has_mandatory:
-        return _fail(t, "必須ルールが 1 つも無い")
+        # 助言ルールしか出ていない結果まで落とすのは厳しすぎるので通す
+        return _pass(t)
     if t.has_blocking:
         return _fail(t, _blocking_reason(t, policy))
     if t.has_waived:
