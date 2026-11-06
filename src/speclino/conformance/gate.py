@@ -104,7 +104,9 @@ def decide_gate(t: Triage, policy: GatePolicy) -> GateResult:
     if not t.has_mandatory:
         return _fail(t, "必須ルールが 1 つも無い")
     if t.has_blocking:
-        return _fail(t, _blocking_reason(t, policy))
+        # 失敗の理由は最初の非成立ルールだけにする
+        for finding in t.blocking:
+            return _fail(t, f"必須ルールが非成立: {finding.requirement_id}")
     if t.has_waived:
         return _pass_with_exceptions(t)
     return _pass(t)
